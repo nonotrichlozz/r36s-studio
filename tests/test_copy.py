@@ -66,3 +66,68 @@ def test_no_progress_callback_by_default():
     # Ne doit pas planter si on_progress n'est pas fourni.
     copied = copy_range(source, destination, total_bytes=len(data), block_size=512)
     assert copied == len(data)
+
+
+# --- mode non borné (total_bytes=None, utilisé pour le flash) -------------
+
+
+def test_unbounded_copy_stops_at_source_eof():
+    data = b"w" * 5000
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+
+    copied = copy_range(source, destination, total_bytes=None, block_size=1024)
+
+    assert copied == len(data)
+    assert destination.getvalue() == data
+
+
+def test_unbounded_copy_reports_done_as_total():
+    data = b"v" * 3000
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+    events = []
+
+    copy_range(source, destination, total_bytes=None, on_progress=events.append, block_size=1024)
+
+    assert events
+    last = events[-1]
+    assert last.done == len(data)
+    assert last.total == len(data)  # jamais une estimation trompeuse (§2 n°5)
+
+
+def test_total_bytes_defaults_to_none_meaning_unbounded():
+    data = b"u" * 2000
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+
+    copied = copy_range(source, destination, block_size=512)  # total_bytes omis
+
+    assert copied == len(data)
+
+
+# --- alignement secteur (écriture Windows, §4.3) ---------------------------
+
+
+def test_sector_padding_rounds_final_block_up_but_done_counts_real_bytes():
+    data = b"p" * 1500  # ni multiple de 512, ni de block_size
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+
+    copied = copy_range(source, destination, total_bytes=None, block_size=1024, sector_size=512)
+
+    assert copied == len(data)  # "done" ne compte jamais le remplissage
+    written = destination.getvalue()
+    assert written[: len(data)] == data
+    assert len(written) % 512 == 0  # chaque écriture reste alignée sur le secteur
+    assert all(b == 0 for b in written[len(data) :])  # le remplissage est bien à zéro
+
+
+def test_no_padding_when_sector_size_not_given():
+    data = b"q" * 1500
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+
+    copy_range(source, destination, total_bytes=None, block_size=1024)
+
+    assert len(destination.getvalue()) == len(data)  # aucun octet ajouté

@@ -44,6 +44,34 @@ def _is_macos_tcc_blocked(detail: str) -> bool:
     return "operation not permitted" in lowered and "rdisk" in lowered
 
 
+# Cas confirmé sur du vrai matériel, distinct du blocage /dev/rdiskN
+# ci-dessus : `[Errno 1] Operation not permitted` survient aussi sur des
+# fichiers ordinaires (l'image à flasher, typiquement) quand ils se trouvent
+# dans un des trois dossiers que macOS protège par TCC (Téléchargements,
+# Bureau, Documents) — le worker élevé par `osascript` n'a pas la même
+# autorisation que Terminal/Finder pour ces emplacements, même si l'un
+# d'eux l'a. Ex. réels : '/Users/x/Downloads/ArkOS...img.xz',
+# '/Users/x/Desktop/r36s/ArkOS...img.xz'.
+MACOS_TCC_PROTECTED_FOLDER = "MACOS_TCC_PROTECTED_FOLDER"
+_MACOS_PROTECTED_FOLDER_NAMES = ("downloads", "desktop", "documents")
+_MACOS_PROTECTED_FOLDER_HINT = (
+    "macOS bloque l'accès à ce fichier parce qu'il se trouve dans un dossier "
+    "protégé (Téléchargements, Bureau ou Documents) : le worker élevé n'a pas "
+    "la même autorisation que Terminal ou le Finder pour ces emplacements, "
+    "même si l'un d'eux l'a. Déplace le fichier ailleurs — par exemple "
+    "directement dans ton dossier personnel — puis réessaie."
+)
+
+
+def _is_macos_tcc_protected_folder(detail: str) -> bool:
+    if platform.system() != "Darwin" or not detail:
+        return False
+    lowered = detail.lower()
+    if "operation not permitted" not in lowered:
+        return False
+    return any(f"/{name}/" in lowered for name in _MACOS_PROTECTED_FOLDER_NAMES)
+
+
 class WorkerRunner(QObject):
     progress = Signal(int, int, float)  # done, total, speed
     log = Signal(str, str)  # level, msg
@@ -120,6 +148,8 @@ class WorkerRunner(QObject):
                 detail = self._read_elevation_log()
                 if _is_macos_tcc_blocked(detail):
                     self.error.emit(MACOS_TCC_BLOCKED, _MACOS_TCC_HINT)
+                elif _is_macos_tcc_protected_folder(detail):
+                    self.error.emit(MACOS_TCC_PROTECTED_FOLDER, _MACOS_PROTECTED_FOLDER_HINT)
                 else:
                     msg = "L'opération a été annulée ou l'élévation a échoué."
                     if detail:

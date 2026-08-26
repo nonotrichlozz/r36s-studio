@@ -16,6 +16,18 @@
   montée par le système (BOOT et EASYROMS sont FAT/NTFS, pas un accès
   disque brut) : elles ne passent jamais par le worker élevé (§3), donc pas
   de `--worker` ni `--progress-file` sur ces sous-commandes.
+- `python -m r36s_studio extract-boot --device X [--output-dir DIR]` et
+  `python -m r36s_studio extract-easyroms --device X [--output-dir DIR]`
+  (phase 6, workflow à deux cartes §4.4/§4.5) — l'inverse d'`inject-boot`/
+  `copy-games` : copient la partition BOOT/EASYROMS de la carte *source*
+  (l'ancienne) vers un dossier horodaté de l'ordinateur
+  (`~/R36S Studio/BOOT_2026-07-06_00-21` par défaut, voir
+  `partitions/archives.py`), pour réinjection ultérieure sur la carte
+  neuve. Ni élévation ni écriture sur la carte : mêmes conditions
+  qu'`inject-boot`/`copy-games`.
+- `python -m r36s_studio eject --device X` — démonte toutes les partitions
+  de la carte et l'éjecte (étape F du workflow à deux cartes, §4.5) ; émet
+  une confirmation explicite que la carte peut être retirée physiquement.
 
 `--worker`, `--progress-file` et `--cancel-file` sur `backup`/`flash` sont
 un détail d'implémentation réservé à la GUI (§3 : le worker, même binaire,
@@ -38,18 +50,25 @@ import argparse
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import List, Optional, TextIO
 
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.imaging import OperationCancelled, ProgressEvent, backup_device, flash_device
 from r36s_studio.partitions import (
+    BOOT_LABEL,
+    EASYROMS_LABEL,
     MacosNtfsWriteUnsupported,
     MountpointNotWritable,
     PartitionNotFound,
     PartitionNotMounted,
+    archives,
     copy_games,
+    extract_boot,
+    extract_easyroms,
     inject_boot,
 )
+from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.protocol import configure as configure_protocol
 from r36s_studio.protocol import emit_done, emit_error, emit_log, emit_progress
 from r36s_studio.safety import DEFAULT_MAX_SIZE_BYTES, SafetyConfig, filter_devices
@@ -408,6 +427,105 @@ def cmd_copy_games(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_extract_boot(args: argparse.Namespace) -> int:
+    device = _resolve_device_or_report(args)
+    if device is None:
+        return 1
+
+    base_dir = Path(args.output_dir) if args.output_dir else None
+    dest_dir = archives.new_archive_path(BOOT_LABEL, base_dir=base_dir)
+
+    emit_log(f"Extraction du BOOT de {device.display} vers {dest_dir}")
+
+    def on_progress(event: ProgressEvent) -> None:
+        emit_progress(event.done, event.total, event.speed)
+
+    try:
+        copied = extract_boot(
+            device, str(dest_dir), on_progress=on_progress, should_cancel=_make_should_cancel(args)
+        )
+    except OperationCancelled as exc:
+        emit_error("CANCELLED", f"Extraction annulée après {exc.done} octets")
+        emit_done(False)
+        return 1
+    except PartitionNotFound as exc:
+        emit_error("PARTITION_NOT_FOUND", str(exc))
+        return 1
+    except PartitionNotMounted as exc:
+        emit_error("PARTITION_NOT_MOUNTED", str(exc))
+        return 1
+    except MountpointNotWritable as exc:
+        emit_error("MOUNTPOINT_NOT_WRITABLE", str(exc))
+        return 1
+    except (OSError, subprocess.CalledProcessError) as exc:
+        emit_error("IO_ERROR", str(exc))
+        return 1
+
+    emit_log(f"{copied} octets copiés dans {dest_dir}")
+    emit_done(True)
+    return 0
+
+
+def cmd_extract_easyroms(args: argparse.Namespace) -> int:
+    device = _resolve_device_or_report(args)
+    if device is None:
+        return 1
+
+    base_dir = Path(args.output_dir) if args.output_dir else None
+    dest_dir = archives.new_archive_path(EASYROMS_LABEL, base_dir=base_dir)
+
+    emit_log(f"Extraction d'EASYROMS de {device.display} vers {dest_dir}")
+
+    def on_progress(event: ProgressEvent) -> None:
+        emit_progress(event.done, event.total, event.speed)
+
+    try:
+        copied = extract_easyroms(
+            device, str(dest_dir), on_progress=on_progress, should_cancel=_make_should_cancel(args)
+        )
+    except OperationCancelled as exc:
+        emit_error("CANCELLED", f"Extraction annulée après {exc.done} octets")
+        emit_done(False)
+        return 1
+    except PartitionNotFound as exc:
+        emit_error("PARTITION_NOT_FOUND", str(exc))
+        return 1
+    except PartitionNotMounted as exc:
+        emit_error("PARTITION_NOT_MOUNTED", str(exc))
+        return 1
+    except MountpointNotWritable as exc:
+        emit_error("MOUNTPOINT_NOT_WRITABLE", str(exc))
+        return 1
+    except (OSError, subprocess.CalledProcessError) as exc:
+        emit_error("IO_ERROR", str(exc))
+        return 1
+
+    emit_log(f"{copied} octets copiés dans {dest_dir}")
+    emit_done(True)
+    return 0
+
+
+def cmd_eject(args: argparse.Namespace) -> int:
+    device = _resolve_device_or_report(args)
+    if device is None:
+        return 1
+
+    emit_log(f"Éjection de {device.display}")
+
+    try:
+        eject_device(device.path)
+    except NotImplementedError as exc:
+        emit_error("UNSUPPORTED_OS", str(exc))
+        return 1
+    except (OSError, subprocess.CalledProcessError) as exc:
+        emit_error("IO_ERROR", str(exc))
+        return 1
+
+    emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
+    emit_done(True)
+    return 0
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     from r36s_studio.gui.app import run
 
@@ -509,6 +627,61 @@ def build_parser() -> argparse.ArgumentParser:
     copy_games_parser.add_argument("--cancel-file", help=argparse.SUPPRESS)
     _add_dev_args(copy_games_parser)
     copy_games_parser.set_defaults(func=cmd_copy_games)
+
+    extract_boot_parser = subparsers.add_parser(
+        "extract-boot",
+        help="Copie la partition BOOT de la carte source vers un dossier horodaté de l'ordinateur",
+    )
+    extract_boot_parser.add_argument(
+        "--device", required=True, help="Chemin du périphérique source (voir `list`)"
+    )
+    extract_boot_parser.add_argument(
+        "--output-dir",
+        help="Dossier où créer l'archive horodatée (défaut : ~/R36S Studio)",
+    )
+    extract_boot_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    extract_boot_parser.add_argument("--cancel-file", help=argparse.SUPPRESS)
+    _add_dev_args(extract_boot_parser)
+    extract_boot_parser.set_defaults(func=cmd_extract_boot)
+
+    extract_easyroms_parser = subparsers.add_parser(
+        "extract-easyroms",
+        help="Copie la partition EASYROMS de la carte source vers un dossier horodaté de l'ordinateur",
+    )
+    extract_easyroms_parser.add_argument(
+        "--device", required=True, help="Chemin du périphérique source (voir `list`)"
+    )
+    extract_easyroms_parser.add_argument(
+        "--output-dir",
+        help="Dossier où créer l'archive horodatée (défaut : ~/R36S Studio)",
+    )
+    extract_easyroms_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    extract_easyroms_parser.add_argument("--cancel-file", help=argparse.SUPPRESS)
+    _add_dev_args(extract_easyroms_parser)
+    extract_easyroms_parser.set_defaults(func=cmd_extract_easyroms)
+
+    eject_parser = subparsers.add_parser(
+        "eject", help="Démonte toutes les partitions de la carte et l'éjecte"
+    )
+    eject_parser.add_argument("--device", required=True, help="Chemin du périphérique à éjecter (voir `list`)")
+    eject_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    _add_dev_args(eject_parser)
+    eject_parser.set_defaults(func=cmd_eject)
 
     gui_parser = subparsers.add_parser("gui", help="Lance l'assistant graphique (PySide6)")
     gui_parser.set_defaults(func=cmd_gui)

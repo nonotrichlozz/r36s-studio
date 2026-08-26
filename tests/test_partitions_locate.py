@@ -34,6 +34,7 @@ from r36s_studio.partitions.locate import (
     _select_easyroms,
     find_partition,
     locate_mounted,
+    looks_like_arkos,
 )
 
 
@@ -153,6 +154,29 @@ def test_select_easyroms_raises_when_fewer_than_three_partitions_and_no_label():
 
     with pytest.raises(PartitionNotFound):
         _select_easyroms(partitions, "/dev/fake-disk-test-4")
+
+
+# --- looks_like_arkos (utilisé par detect.detect_workflow_status, §4.5) ---
+
+
+def test_looks_like_arkos_true_for_unlabeled_boot_and_labeled_easyroms():
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-4s1", "", "fat16", "/Volumes/NO NAME"),
+        PartitionInfo("/dev/fake-disk-test-4s2", "", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-4s3", "EASYROMS", "ntfs", "/Volumes/EASYROMS"),
+    ]
+
+    assert looks_like_arkos(partitions) is True
+
+
+def test_looks_like_arkos_false_when_easyroms_missing():
+    partitions = [PartitionInfo("/dev/fake-disk-test-4s1", "", "fat16", None)]
+
+    assert looks_like_arkos(partitions) is False
+
+
+def test_looks_like_arkos_false_for_empty_partition_list():
+    assert looks_like_arkos([]) is False
 
 
 # --- find_partition : identification complète d'une carte réelle sans BOOT

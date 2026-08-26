@@ -113,6 +113,35 @@ def _select_easyroms(partitions: list[PartitionInfo], device_path: str) -> Parti
     raise PartitionNotFound(EASYROMS_LABEL, device_path)
 
 
+def has_boot_partition(partitions: list[PartitionInfo]) -> bool:
+    """Vrai si `partitions` contient une partition BOOT identifiable
+    (position + système de fichiers, voir `_select_boot`) — utilisé par
+    `detect` pour savoir si l'extraction du BOOT (§4.4, workflow à deux
+    cartes) a un sens sur la carte branchée, sans repasser par
+    `find_partition` (qui referait l'appel `list_partitions`)."""
+    try:
+        _select_boot(partitions, "")
+    except PartitionNotFound:
+        return False
+    return True
+
+
+def has_easyroms_partition(partitions: list[PartitionInfo]) -> bool:
+    """Symétrique de `has_boot_partition`, pour EASYROMS."""
+    try:
+        _select_easyroms(partitions, "")
+    except PartitionNotFound:
+        return False
+    return True
+
+
+def looks_like_arkos(partitions: list[PartitionInfo]) -> bool:
+    """Vrai si `partitions` contient à la fois une partition BOOT et une
+    partition EASYROMS identifiables — utilisé par `detect` pour
+    reconnaître une carte déjà flashée."""
+    return has_boot_partition(partitions) and has_easyroms_partition(partitions)
+
+
 def find_partition(device_path: str, label: str) -> PartitionInfo:
     """Retourne la partition `label` de `device_path` telle qu'elle est
     actuellement — montée ou non. `BOOT_LABEL`/`EASYROMS_LABEL` déclenchent

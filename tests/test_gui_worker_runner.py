@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-from r36s_studio.gui.worker_runner import MACOS_TCC_BLOCKED, WorkerRunner
+from r36s_studio.gui.worker_runner import MACOS_TCC_BLOCKED, MACOS_TCC_PROTECTED_FOLDER, WorkerRunner
 
 
 def _fake_process(poll_sequence):
@@ -265,6 +265,139 @@ def test_permission_denied_on_other_os_keeps_generic_elevation_failed(
     assert error_events
     code, _ = error_events[0]
     assert code == "ELEVATION_FAILED"
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_macos_tcc_protected_downloads_folder_produces_distinct_move_file_hint(
+    mock_launch, mock_log_path, mock_platform, tmp_path, qapp
+):
+    """Cas réel rapporté : `[Errno 1] Operation not permitted` survient
+    aussi sur un fichier ordinaire (l'image à flasher) situé dans
+    Téléchargements -- distinct du blocage /dev/rdiskN, et devant produire
+    un message différent invitant à déplacer le fichier."""
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text(
+        "[IO_ERROR] [Errno 1] Operation not permitted: "
+        "'/Users/proprio/Downloads/ArkOS_r36s_20250523.img.xz'\n",
+        encoding="utf-8",
+    )
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["flash", "--image", "x.img.xz", "--device", "/dev/disk9904"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events
+    code, msg = error_events[0]
+    assert code == MACOS_TCC_PROTECTED_FOLDER
+    assert "déplace" in msg.lower()
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_macos_tcc_protected_desktop_subfolder_is_detected(
+    mock_launch, mock_log_path, mock_platform, tmp_path, qapp
+):
+    """Deuxième cas réel rapporté : le fichier n'est pas directement à la
+    racine de Bureau, mais dans un sous-dossier -- doit être détecté
+    quand même."""
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text(
+        "[IO_ERROR] [Errno 1] Operation not permitted: "
+        "'/Users/proprio/Desktop/r36s/ArkOS_r36s_20250523.img.xz'\n",
+        encoding="utf-8",
+    )
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["flash", "--image", "x.img.xz", "--device", "/dev/disk9904"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events[0][0] == MACOS_TCC_PROTECTED_FOLDER
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_macos_tcc_protected_documents_folder_is_detected(
+    mock_launch, mock_log_path, mock_platform, tmp_path, qapp
+):
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text(
+        "[Errno 1] Operation not permitted: '/Users/proprio/Documents/ArkOS.img.xz'\n",
+        encoding="utf-8",
+    )
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["flash", "--image", "x.img.xz", "--device", "/dev/disk9904"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events[0][0] == MACOS_TCC_PROTECTED_FOLDER
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Linux")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_macos_tcc_protected_folder_is_macos_only(mock_launch, mock_log_path, mock_platform, tmp_path, qapp):
+    """Même texte, même chemin, mais pas macOS : ce blocage TCC n'existe
+    pas ailleurs -- doit rester un ELEVATION_FAILED générique."""
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text(
+        "[Errno 1] Operation not permitted: '/home/x/Downloads/ArkOS.img.xz'\n",
+        encoding="utf-8",
+    )
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["flash", "--image", "x.img.xz", "--device", "/dev/sdb"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events[0][0] == "ELEVATION_FAILED"
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_macos_rdisk_block_takes_priority_over_protected_folder_check(
+    mock_launch, mock_log_path, mock_platform, tmp_path, qapp
+):
+    """Un chemin /dev/rdiskN ne contient aucun des trois noms de dossier
+    protégés -- les deux détections restent mutuellement exclusives en
+    pratique, mais on vérifie explicitement que le cas historique n'a pas
+    régressé."""
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text("Operation not permitted: '/dev/rdisk9904'\n", encoding="utf-8")
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["backup", "--device", "/dev/disk9904", "--output", "x.img"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events[0][0] == MACOS_TCC_BLOCKED
 
 
 def _write_events(path, events):

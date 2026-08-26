@@ -101,6 +101,21 @@ testable en isolation, sans interface.
 > `sudo` (depuis un Terminal autorisé en Accès complet au disque) plutôt qu'un
 > message d'erreur générique. Linux (`pkexec`) et Windows (UAC) ne sont pas
 > concernés par cette limitation.
+>
+> ⚠️ **Deuxième cas confirmé sur du vrai matériel, distinct du précédent** :
+> `[Errno 1] Operation not permitted` survient aussi sur des **fichiers
+> ordinaires** (l'image `.img.xz` à flasher, typiquement), pas seulement sur
+> `/dev/rdiskN`, quand ce fichier se trouve dans l'un des trois dossiers que
+> macOS protège par TCC : Téléchargements, Bureau, Documents — même quand le
+> Terminal a l'Accès complet au disque, cette autorisation ne s'étend pas au
+> worker élevé par `osascript`. Exemples réels :
+> `/Users/x/Downloads/ArkOS...img.xz`, `/Users/x/Desktop/r36s/ArkOS...img.xz`
+> (dans un sous-dossier — la détection doit chercher le nom de dossier
+> n'importe où dans le chemin, pas seulement en tête). `worker_runner.py`
+> détecte ce cas séparément (`MACOS_TCC_PROTECTED_FOLDER`, distinct de
+> `MACOS_TCC_BLOCKED`) et invite à déplacer le fichier ailleurs — plutôt qu'à
+> utiliser `sudo`, qui ne changerait rien ici puisque le problème n'est pas le
+> périphérique brut mais l'un de ces trois dossiers précis.
 
 ---
 
@@ -221,46 +236,112 @@ besoin des droits root pour cette étape.
 Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, puis
 `fsync` et démontage propre à la fin.
 
-### 4.5 `detect/` — reconnaissance de l'état de la carte
+> ⚠️ **Correction de conception** : la première version de ce brief ne décrivait que
+> l'*injection* (BOOT/EASYROMS sauvegardés → carte neuve), en supposant à tort que
+> l'utilisateur disposait déjà de ces fichiers. Le vrai parcours enchaîne **deux
+> cartes** (l'ancienne, déjà en usage, puis la neuve) et nécessite donc aussi
+> l'**extraction** : copier le BOOT et l'EASYROMS de l'ancienne carte vers
+> l'ordinateur, avant de pouvoir les réinjecter sur la neuve. `partitions/jobs.py`
+> fournit donc `extract_boot`/`extract_easyroms`, symétriques d'`inject_boot`/
+> `copy_games` (même montage de la partition source, mais copie dans le sens
+> partition → dossier de l'ordinateur plutôt que l'inverse). L'extraction
+> d'EASYROMS ne lève jamais `MacosNtfsWriteUnsupported` : elle ne fait que lire la
+> partition, et macOS monte nativement le NTFS en lecture seule — la limitation
+> d'écriture ne concerne que l'injection (étape E, sur la carte neuve).
+>
+> **Dossiers d'archive horodatés** (`partitions/archives.py`) : chaque extraction
+> crée un dossier nommé `{BOOT,EASYROMS}_{AAAA-MM-JJ}_{HH-MM}` (ex.
+> `BOOT_2026-07-06_00-21`) dans `~/Documents/R36S Studio/` par défaut — jamais
+> dans `~/.config` (§6). L'injection sur la carte neuve propose de choisir parmi
+> les archives existantes plutôt que de redemander un dossier à chaque fois,
+> avec un repli « Parcourir… » pour une source manuelle.
+>
+> ⚠️ **Régression corrigée** : une version intermédiaire a généré le chemin de
+> destination des étapes A/B entièrement automatiquement, sans écran de choix —
+> ce qui empêchait l'utilisateur de décider où son archive est enregistrée.
+> Rétabli : l'écran Choix du fichier reste toujours affiché pour A/B, avec
+> `~/Documents/R36S Studio/` pré-rempli comme *proposition*, acceptable tel
+> quel ou remplaçable par n'importe quel autre emplacement (y compris un
+> disque externe) — seul le nom horodaté à l'intérieur du dossier choisi reste
+> généré automatiquement, jamais laissé au clavier de l'utilisateur.
+>
+> **Écran Résultat après une extraction (A/B)** : affiche le chemin complet de
+> l'archive créée, sa taille (comptée depuis le dernier événement de
+> progression — `copy_range`/`copy_tree` en émettent toujours un avec le
+> compte final exact, §2 n°5), et un bouton pour la révéler dans le
+> gestionnaire de fichiers de l'OS (`gui/reveal.py` : `open -R` sur macOS,
+> `xdg-open` sur Linux, `explorer /select,` sous Windows — GUI uniquement, le
+> CLI n'en a pas besoin). Après une injection (D/E), la même zone indique
+> plutôt quelle archive a servi de source, avec le même bouton de révélation.
+>
+> **Éjection** (`partitions/eject.py`, déplacé depuis la GUI) : démonte toutes
+> les partitions de la carte puis l'éjecte (`diskutil eject` / `udisksctl
+> power-off -b`, qui font déjà les deux à la fois). La confirmation explicite
+> que la carte peut être retirée physiquement est à la charge de l'appelant
+> (CLI : message `emit_log` ; GUI : écran Résultat ou boîte de dialogue) —
+> jamais un succès silencieux.
 
-C'est le module qui rend l'application utilisable par un néophyte. Il lit la table de
-partitions de la carte insérée et en déduit un **état**, qui pilote ensuite ce que
-l'interface propose.
+### 4.5 `detect/` — statut des étapes du parcours
+
+> ⚠️ **Correction de conception.** Ce module a d'abord été pensé autour d'un état
+> unique de la carte branchée (`CardState` : `NO_CARD`/`BLANK`/`ORIGINAL`/`ARKOS`/
+> `UNKNOWN`) qui décidait d'*une* action à mettre en avant. C'était incompatible
+> avec le vrai parcours : celui-ci enchaîne **deux cartes différentes** (l'ancienne,
+> puis la neuve) sur **six étapes chronologiques fixes** — un état unique de « la »
+> carte branchée n'a jamais de sens, puisque ce n'est jamais la même carte d'une
+> étape à l'autre. `CardState`/`detect_card_state` ont été retirés.
+
+Le module `detect` ne décide donc plus *quoi* mettre en avant — il indique
+seulement, pour chacune des six étapes ci-dessous, un statut informatif :
 
 ```python
-class CardState(Enum):
-    NO_CARD        # aucune carte détectée
-    BLANK          # vierge ou non partitionnée
-    ORIGINAL       # une seule partition FAT remplie — carte d'origine
-    ARKOS          # partitions BOOT + root + EASYROMS présentes
-    UNKNOWN        # partitions non reconnues
+class StepStatus(Enum):
+    AVAILABLE      # faisable
+    DONE           # déjà faite
+    NOT_RELEVANT   # non pertinente pour la carte actuellement branchée
 ```
 
-| État | Action mise en avant | Actions en retrait |
-|------|---------------------|--------------------|
-| `NO_CARD` | Invite à brancher une carte | — |
-| `BLANK` | Flasher ArkOS | — |
-| `ORIGINAL` | Sauvegarder | Flasher |
-| `ARKOS` | Copier des jeux | Injecter BOOT, sauvegarder, reflasher |
-| `UNKNOWN` | Sauvegarder (par prudence) | Flasher, avec avertissement renforcé |
+Les six étapes (§4.6) restent **toujours toutes visibles et cliquables** — le statut
+guide le débutant, il ne masque et ne verrouille jamais rien : un utilisateur averti
+garde toujours la main, y compris pour refaire une étape déjà marquée « faite » ou
+en tenter une marquée « non pertinente ».
 
-La détection se fait en **lecture seule** : lire les premiers secteurs pour la table
-de partitions, et lister les étiquettes de volume. Aucune écriture, aucun montage en
-écriture. Ce module doit pouvoir tourner sans privilèges élevés autant que possible.
+`detect_workflow_status(device)` réutilise `partitions.locate.list_partitions()`
+(déjà en lecture seule) et `has_boot_partition`/`has_easyroms_partition`/
+`looks_like_arkos` pour déterminer, à partir de la carte *actuellement* branchée,
+quelles étapes ont un sens maintenant (ex. : injecter le BOOT ne veut rien dire sur
+une carte pas encore flashée) et lesquelles sont déjà accomplies (une archive
+existe déjà pour l'extraction ; la carte est déjà ArkOS pour le flash). Aucune
+écriture, aucun montage en écriture — ce module doit pouvoir tourner sans
+privilèges élevés autant que possible. Toute erreur de lecture (OS non supporté,
+carte débranchée entre-temps) retombe sur un statut prudent plutôt que de lever —
+l'appli ne doit jamais planter sur une détection ratée.
 
-Les actions « en retrait » restent toujours accessibles via un lien « Autres
-opérations » — on guide le débutant sans enfermer l'utilisateur averti.
+**Cas non couvert** : plusieurs cartes candidates branchées à la fois — on ne peut
+pas savoir laquelle des six étapes concerne. Décision : `detect_workflow_status`
+reçoit alors `None` (comme pour aucune carte), tout est marqué « non pertinent »,
+mais les six étapes restent affichées normalement — l'écran Choix du périphérique
+les liste toutes.
 
-### 4.6 `jobs/` — les quatre opérations
+### 4.6 `jobs/` — les opérations du parcours
 
-### 4.6 `jobs/` — les quatre opérations
+> ⚠️ **Correction de conception** : cette table ne listait à l'origine que quatre
+> opérations, en supposant que l'utilisateur disposait déjà des fichiers BOOT et
+> EASYROMS à injecter. Le vrai parcours à deux cartes (§4.4/§4.5) en compte six,
+> dans cet ordre chronologique fixe (A→F) :
 
-| Job | Entrée | Sortie |
-|-----|--------|--------|
-| `backup` | périphérique source | fichier `.img` / `.img.xz` |
-| `flash` | fichier image + périphérique cible | carte écrite + vérifiée |
-| `inject_boot` | dossier BOOT sauvegardé + carte | fichiers copiés sur `BOOT` |
-| `copy_games` | dossier choisi par l'utilisateur + carte | fichiers copiés sur `EASYROMS` |
+| Étape | Job | Entrée | Sortie |
+|-------|-----|--------|--------|
+| A | `extract_boot` | carte source | dossier horodaté `BOOT_AAAA-MM-JJ_HH-MM` sur l'ordinateur |
+| B | `extract_easyroms` | carte source | dossier horodaté `EASYROMS_AAAA-MM-JJ_HH-MM` sur l'ordinateur |
+| C | `flash` | fichier image + carte neuve | carte écrite + vérifiée (SHA-256) |
+| D | `inject_boot` | archive BOOT (étape A) + carte neuve | fichiers copiés sur `BOOT` |
+| E | `copy_games` | archive EASYROMS (étape B) + carte neuve | fichiers copiés sur `EASYROMS` |
+| F | `eject` | carte (neuve, en général) | partitions démontées, carte éjectée |
+
+En dehors de ce parcours, `backup` (périphérique source → fichier `.img`/`.img.xz`)
+reste disponible comme opération de sécurité indépendante (§5) : une sauvegarde
+complète de l'image disque, pas une étape du parcours.
 
 Après un flash, proposer une **vérification** : relire la carte et comparer le hash
 SHA-256 avec celui de l'image source. Facultatif mais c'est ce qui distingue un outil
@@ -272,25 +353,39 @@ sérieux d'un script.
 
 Un assistant linéaire, une étape par écran.
 
-1. **Accueil** — quatre grandes tuiles, une par opération
+1. **Accueil** — les six étapes du parcours à deux cartes (§4.5/§4.6), **toujours
+   toutes visibles et cliquables**, dans leur ordre chronologique fixe A→F. Chaque
+   tuile porte un statut informatif (faisable / déjà faite / non pertinente pour la
+   carte branchée) qui guide sans jamais rien masquer ni verrouiller. La sauvegarde
+   complète de l'image disque est une tuile séparée, en dehors de cette liste — une
+   opération de sécurité, pas une étape du parcours. Bouton « Rafraîchir » pour
+   relancer la détection sans changer d'écran.
 2. **Choix du périphérique** — liste des cartes détectées : modèle, taille, bus.
-   Bouton « Rafraîchir ». Aucune sélection par défaut.
-3. **Choix du fichier** — image source, ou dossier source selon l'opération
+   Bouton « Rafraîchir ». Aucune sélection par défaut — même quand une seule
+   carte est branchée, et même pour l'étape F qui n'ouvre pas d'écran Fichier
+   ensuite.
+3. **Choix du fichier** — image source pour le flash, fichier de sortie pour la
+   sauvegarde ; pour les étapes A/B (extraction), un dossier de destination
+   avec `~/Documents/R36S Studio/` proposé par défaut mais toujours
+   remplaçable (y compris par un disque externe) — le nom horodaté à
+   l'intérieur reste automatique ; pour les étapes D/E (injection sur la carte
+   neuve), une sauvegarde à choisir parmi les archives déjà extraites (§4.4),
+   avec un repli « Parcourir… » pour une source manuelle. Seule l'étape F
+   (éjection) saute cet écran : elle ne demande rien d'autre que la carte.
 4. **Confirmation** — écran rouge récapitulant : *« Toutes les données de
-   SanDisk Ultra 128 Go seront effacées. »* + case à cocher obligatoire
+   SanDisk Ultra 128 Go seront effacées. »* + case à cocher obligatoire. Seul le
+   flash (étape C) écrit sur le périphérique brut et déclenche cet écran.
 5. **Exécution** — barre de progression réelle, débit en Mo/s, temps restant estimé,
-   bouton Annuler actif
-6. **Résultat** — succès ou erreur lisible, bouton « Éjecter la carte »
-
-**Mode assisté** — une cinquième tuile, la plus visible : « Préparer ma carte de A à Z ».
-Elle enchaîne automatiquement sauvegarde → flash → injection BOOT → copie des jeux, en
-s'appuyant sur l'état détecté pour sauter les étapes inutiles. C'est le chemin par défaut
-du débutant ; les quatre tuiles individuelles servent à celui qui sait ce qu'il veut.
+   bouton Annuler actif. Absente pour l'éjection (étape F), immédiate.
+6. **Résultat** — succès ou erreur lisible (jamais de jargon — voir Vocabulaire),
+   bouton « Éjecter la carte ». Pour l'étape F elle-même, confirme explicitement que
+   la carte peut être retirée physiquement — jamais un succès silencieux.
 
 **Vocabulaire :** aucun terme technique dans l'interface. Pas de « périphérique bloc »,
 pas de `/dev/sdb`, pas de « partition ». On dit « ta carte SD », « les jeux », « le
-système de la console ». Le chemin technique reste consultable dans un panneau
-« Détails » replié.
+système de la console ». Le chemin technique — ou tout message brut du backend
+(chemin, nom de système de fichiers...) — reste consultable dans un panneau
+« Détails » replié sur l'écran Résultat, jamais affiché dans le message principal.
 
 Interface en français, avec les chaînes isolées dans un fichier de traduction dès le
 départ (l'anglais viendra vite si tu diffuses la vidéo hors France).
@@ -332,8 +427,8 @@ récemment utilisés, langue, seuil de taille maximale. Jamais de secret.
 | **2** | Module `imaging` — lecture (backup) avec progression réelle | Une image de la SD est produite et remontable en boucle |
 | **3** | Module `imaging` — écriture (flash) + vérification SHA-256 | Une carte flashée démarre réellement sur la R36S |
 | **4** | Squelette GUI PySide6 branché sur les phases 1–3 | Backup et flash utilisables sans terminal |
-| **5** | Modules `partitions` — injection BOOT et copie de jeux | Les 4 opérations sont complètes |
-| **6** | Module `detect` branché sur l'interface + mode assisté | L'appli reconnaît l'état de la carte et propose l'action pertinente sans que l'utilisateur choisisse |
+| **5** | Modules `partitions` — injection BOOT et copie de jeux | Les opérations d'injection sont complètes |
+| **6** | Extraction BOOT/EASYROMS + éjection (`partitions`/CLI), module `detect` branché sur l'interface | Les six étapes du parcours à deux cartes (§4.5/§4.6) sont toutes visibles, cliquables, et annotées d'un statut faisable/déjà faite/non pertinente |
 | **7** | CI GitHub Actions, packaging, documentation, traduction | Trois binaires téléchargeables depuis une Release |
 
 **La phase 1 est la plus importante du projet.** Tant que la détection et le filtrage

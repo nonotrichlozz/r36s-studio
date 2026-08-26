@@ -1,6 +1,6 @@
-"""Tests de l'orchestration inject_boot/copy_games (partitions/jobs.py).
-`locate_mounted` et `copy_tree` sont mockés — aucune partition réelle n'est
-localisée ni montée."""
+"""Tests de l'orchestration extract_boot/extract_easyroms/inject_boot/
+copy_games (partitions/jobs.py). `locate_mounted` et `copy_tree` sont
+mockés — aucune partition réelle n'est localisée ni montée."""
 
 from __future__ import annotations
 
@@ -10,7 +10,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from r36s_studio.devices import Device
-from r36s_studio.partitions.jobs import MacosNtfsWriteUnsupported, copy_games, inject_boot
+from r36s_studio.partitions.jobs import (
+    MacosNtfsWriteUnsupported,
+    copy_games,
+    extract_boot,
+    extract_easyroms,
+    inject_boot,
+)
 from r36s_studio.partitions.locate import BOOT_LABEL, EASYROMS_LABEL, PartitionInfo
 
 
@@ -24,6 +30,47 @@ def _make_device(path="/dev/fake-disk-test-4") -> Device:
         is_system=False,
         mountpoints=[],
     )
+
+
+# --- extract_boot / extract_easyroms : ancienne carte -> ordinateur -------
+
+
+@patch("r36s_studio.partitions.jobs.copy_tree", return_value=321)
+@patch("r36s_studio.partitions.jobs.locate_mounted")
+def test_extract_boot_copies_from_boot_partition_mountpoint_to_dest_dir(mock_locate, mock_copy):
+    mock_locate.return_value = PartitionInfo("/dev/fake-disk-test-4s1", "BOOT", "msdos", "/Volumes/BOOT")
+    device = _make_device()
+
+    copied = extract_boot(device, "/tmp/R36S Studio/BOOT_2026-07-06_00-21")
+
+    mock_locate.assert_called_once_with(device.path, BOOT_LABEL)
+    assert mock_copy.call_args.args[:2] == ("/Volumes/BOOT", "/tmp/R36S Studio/BOOT_2026-07-06_00-21")
+    assert copied == 321
+
+
+@patch("r36s_studio.partitions.jobs.platform.system", return_value="Darwin")
+@patch("r36s_studio.partitions.jobs.copy_tree", return_value=654)
+@patch("r36s_studio.partitions.jobs.locate_mounted")
+def test_extract_easyroms_copies_from_easyroms_partition_even_when_ntfs_on_macos(
+    mock_locate, mock_copy, mock_platform
+):
+    """L'extraction ne fait que lire EASYROMS : contrairement à
+    `copy_games`, elle ne doit jamais lever `MacosNtfsWriteUnsupported` --
+    macOS monte nativement le NTFS en lecture seule, ce qui suffit pour
+    extraire."""
+    mock_locate.return_value = PartitionInfo(
+        "/dev/fake-disk-test-4s3", "EASYROMS", "ntfs", "/Volumes/EASYROMS"
+    )
+    device = _make_device()
+
+    copied = extract_easyroms(device, "/tmp/R36S Studio/EASYROMS_2026-07-06_00-21")
+
+    mock_locate.assert_called_once_with(device.path, EASYROMS_LABEL)
+    assert mock_copy.call_args.args[:2] == (
+        "/Volumes/EASYROMS",
+        "/tmp/R36S Studio/EASYROMS_2026-07-06_00-21",
+    )
+    assert copied == 654
 
 
 @patch("r36s_studio.partitions.jobs.copy_tree", return_value=123)

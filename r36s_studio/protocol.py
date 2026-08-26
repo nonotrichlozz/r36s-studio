@@ -7,10 +7,24 @@ from __future__ import annotations
 import json
 import sys
 
+_stream = None  # None -> sys.stdout, résolu dynamiquement à chaque emit()
+
+
+def configure(stream) -> None:
+    """Redirige les événements vers `stream` au lieu de stdout. Utilisé par
+    le worker élevé (`--progress-file`, voir `gui/elevate.py`) : une fois
+    la frontière de privilège franchie (UAC, osascript, pkexec), le
+    processus appelant ne peut plus lire le stdout du worker en flux sans
+    mécanisme supplémentaire — un fichier partagé est la solution la plus
+    simple et portable sur les trois OS."""
+    global _stream
+    _stream = stream
+
 
 def emit(event: dict) -> None:
-    sys.stdout.write(json.dumps(event, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    stream = _stream if _stream is not None else sys.stdout
+    stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+    stream.flush()
 
 
 def emit_progress(done: int, total: int, speed: float) -> None:

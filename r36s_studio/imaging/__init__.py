@@ -8,7 +8,7 @@ périphérique."""
 from __future__ import annotations
 
 from .backup import backup_device, compute_backup_size
-from .copy import BLOCK_SIZE, ProgressCallback, ProgressEvent, copy_range
+from .copy import BLOCK_SIZE, CancelCheck, OperationCancelled, ProgressCallback, ProgressEvent, copy_range
 from .flash import FlashResult, flash_device
 from .image_source import estimate_total_bytes, open_image_source
 from .mbr import MbrPartition, is_gpt_protective, last_used_byte, parse_mbr
@@ -19,6 +19,8 @@ __all__ = [
     "backup_device",
     "compute_backup_size",
     "BLOCK_SIZE",
+    "CancelCheck",
+    "OperationCancelled",
     "ProgressCallback",
     "ProgressEvent",
     "copy_range",

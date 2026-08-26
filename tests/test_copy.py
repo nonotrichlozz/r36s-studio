@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import io
 
-from r36s_studio.imaging.copy import BLOCK_SIZE, copy_range
+import pytest
+
+from r36s_studio.imaging.copy import BLOCK_SIZE, OperationCancelled, copy_range
 
 
 def test_default_block_size_is_4_mib():
@@ -131,3 +133,70 @@ def test_no_padding_when_sector_size_not_given():
     copy_range(source, destination, total_bytes=None, block_size=1024)
 
     assert len(destination.getvalue()) == len(data)  # aucun octet ajouté
+
+
+# --- annulation (bouton Annuler de l'écran Exécution, §5) ------------------
+
+
+def test_should_cancel_stops_copy_and_raises():
+    data = b"c" * 10_000
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+    calls = {"n": 0}
+
+    def should_cancel():
+        calls["n"] += 1
+        return calls["n"] > 2  # annule après 2 blocs
+
+    with pytest.raises(OperationCancelled) as excinfo:
+        copy_range(source, destination, total_bytes=None, block_size=1024, should_cancel=should_cancel)
+
+    assert excinfo.value.done == 2048  # 2 blocs de 1024 déjà écrits
+    assert destination.getvalue() == data[:2048]
+
+
+def test_should_cancel_preserves_data_already_written():
+    """Ce qui a déjà été écrit au moment de l'annulation doit être flush
+    (et fsync si possible) -- pas de données perdues en mémoire tampon."""
+    data = b"d" * 4096
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+    calls = {"n": 0}
+
+    def should_cancel():
+        calls["n"] += 1
+        return calls["n"] > 1  # annule après le premier bloc
+
+    with pytest.raises(OperationCancelled) as excinfo:
+        copy_range(
+            source, destination, total_bytes=None, block_size=1024, should_cancel=should_cancel
+        )
+
+    assert excinfo.value.done == 1024
+    assert destination.getvalue() == data[:1024]
+
+
+def test_should_cancel_before_any_read_writes_nothing():
+    data = b"d" * 4096
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+
+    with pytest.raises(OperationCancelled) as excinfo:
+        copy_range(
+            source, destination, total_bytes=None, block_size=1024, should_cancel=lambda: True
+        )
+
+    assert excinfo.value.done == 0
+    assert destination.getvalue() == b""
+
+
+def test_no_cancellation_when_should_cancel_always_false():
+    data = b"e" * 4096
+    source = io.BytesIO(data)
+    destination = io.BytesIO()
+
+    copied = copy_range(
+        source, destination, total_bytes=None, block_size=1024, should_cancel=lambda: False
+    )
+
+    assert copied == len(data)

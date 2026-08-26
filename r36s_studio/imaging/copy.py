@@ -13,6 +13,16 @@ BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB
 PROGRESS_INTERVAL = 0.25  # secondes -> au plus ~4 événements/seconde
 
 
+class OperationCancelled(Exception):
+    """Levée par `copy_range` quand `should_cancel` répond True — l'écran
+    Exécution (§5 point 5) exige un bouton Annuler actif pendant la
+    copie."""
+
+    def __init__(self, done: int):
+        super().__init__(f"opération annulée après {done} octets")
+        self.done = done
+
+
 @dataclass
 class ProgressEvent:
     done: int
@@ -21,6 +31,7 @@ class ProgressEvent:
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
+CancelCheck = Callable[[], bool]
 
 
 def copy_range(
@@ -30,6 +41,7 @@ def copy_range(
     on_progress: Optional[ProgressCallback] = None,
     block_size: int = BLOCK_SIZE,
     sector_size: Optional[int] = None,
+    should_cancel: Optional[CancelCheck] = None,
 ) -> int:
     """Copie `source` vers `destination`, par blocs de `block_size`.
 
@@ -47,6 +59,11 @@ def copy_range(
     secteur. `done` ne compte que les octets réels de la source, jamais le
     remplissage.
 
+    Si `should_cancel` est fourni, il est consulté avant chaque bloc ; s'il
+    répond True, lève `OperationCancelled` (avec `done` déjà écrit et
+    fsync-é) plutôt que de s'arrêter silencieusement — l'appelant doit
+    pouvoir distinguer une annulation d'une copie terminée normalement.
+
     Termine par `flush` + `fsync`. Retourne le nombre d'octets réellement
     copiés (lus depuis `source`)."""
     done = 0
@@ -61,7 +78,12 @@ def copy_range(
         speed = done / elapsed if elapsed > 0 else 0.0
         on_progress(ProgressEvent(done=done, total=(total_bytes if bounded else done), speed=speed))
 
+    cancelled = False
     while not bounded or done < total_bytes:
+        if should_cancel is not None and should_cancel():
+            cancelled = True
+            break
+
         read_size = min(block_size, total_bytes - done) if bounded else block_size
         chunk = source.read(read_size)
         if not chunk:
@@ -86,4 +108,8 @@ def copy_range(
         pass  # flux sans descripteur de fichier réel (ex. BytesIO en test)
 
     emit()  # garantit un dernier événement avec le compte final exact
+
+    if cancelled:
+        raise OperationCancelled(done)
+
     return done

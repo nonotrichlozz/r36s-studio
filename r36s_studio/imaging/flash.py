@@ -13,7 +13,7 @@ from typing import Optional
 
 from r36s_studio.devices import Device
 
-from .copy import BLOCK_SIZE, ProgressCallback, copy_range
+from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
 from .image_source import estimate_total_bytes, open_image_source
 from .write_target import WINDOWS_SECTOR_SIZE, prepared_write_target
 
@@ -63,12 +63,16 @@ def flash_device(
     image_path: str,
     on_progress: Optional[ProgressCallback] = None,
     block_size: int = BLOCK_SIZE,
+    should_cancel: Optional[CancelCheck] = None,
 ) -> FlashResult:
     """Écrit `image_path` (`.img`, `.img.gz` ou `.img.xz`) sur `device`,
     puis relit ce qui a été écrit et compare son SHA-256 à celui de la
     source. Lève `ValueError`/`OSError` en cas d'échec ; ne lève jamais en
     cas de désaccord de hash — c'est `FlashResult.verified` qui le porte,
-    pour laisser l'appelant décider quoi en faire."""
+    pour laisser l'appelant décider quoi en faire. Lève `OperationCancelled`
+    si `should_cancel` répond True en cours d'écriture — dans ce cas,
+    aucune vérification SHA-256 n'est faite sur une carte partiellement
+    écrite."""
     total_hint = estimate_total_bytes(image_path)
     sector_size = WINDOWS_SECTOR_SIZE if platform.system() == "Windows" else None
 
@@ -82,6 +86,7 @@ def flash_device(
                 on_progress=on_progress,
                 block_size=block_size,
                 sector_size=sector_size,
+                should_cancel=should_cancel,
             )
         source_sha256 = hashing_source.hexdigest()
         written_sha256 = _hash_file_range(raw_path, written)

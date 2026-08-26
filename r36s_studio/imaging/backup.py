@@ -8,7 +8,7 @@ from typing import Optional
 
 from r36s_studio.devices import Device
 
-from .copy import BLOCK_SIZE, ProgressCallback, copy_range
+from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
 from .mbr import SECTOR_SIZE, last_used_byte
 from .source import prepared_source
 
@@ -31,12 +31,19 @@ def backup_device(
     output_path: str,
     on_progress: Optional[ProgressCallback] = None,
     block_size: int = BLOCK_SIZE,
+    should_cancel: Optional[CancelCheck] = None,
 ) -> int:
     """Sauvegarde `device` (lecture seule) dans le fichier `output_path`.
-    Retourne le nombre d'octets copiés."""
+    Retourne le nombre d'octets copiés. Lève `OperationCancelled` si
+    `should_cancel` répond True en cours de copie (écran Exécution, §5)."""
     with prepared_source(device.path) as raw_path:
         total = compute_backup_size(raw_path, device.size_bytes)
         with open(raw_path, "rb") as source, open(output_path, "wb") as destination:
             return copy_range(
-                source, destination, total, on_progress=on_progress, block_size=block_size
+                source,
+                destination,
+                total,
+                on_progress=on_progress,
+                block_size=block_size,
+                should_cancel=should_cancel,
             )

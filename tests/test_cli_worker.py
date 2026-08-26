@@ -19,7 +19,7 @@ def teardown_function() -> None:
     protocol.configure(None)
 
 
-def _make_device(path="/dev/disk3", size_bytes=32_000_000_000) -> Device:
+def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000) -> Device:
     return Device(
         path=path,
         display="Carte SD factice",
@@ -54,7 +54,7 @@ def test_flash_worker_mode_skips_interactive_confirmation(mock_list, mock_confir
     image = tmp_path / "sd.img"
     image.write_bytes(b"x" * 10)
 
-    args = _parse(["flash", "--image", str(image), "--device", "/dev/disk3", "--worker"])
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--worker"])
     code = args.func(args)
 
     assert code == 0
@@ -75,7 +75,7 @@ def test_backup_worker_mode_writes_events_to_progress_file(mock_list, mock_backu
         [
             "backup",
             "--device",
-            "/dev/disk3",
+            "/dev/fake-disk-test-3",
             "--output",
             str(output),
             "--worker",
@@ -108,7 +108,7 @@ def test_flash_worker_mode_writes_events_to_progress_file(mock_list, mock_flash,
             "--image",
             str(image),
             "--device",
-            "/dev/disk3",
+            "/dev/fake-disk-test-3",
             "--worker",
             "--progress-file",
             str(progress_file),
@@ -134,7 +134,7 @@ def test_backup_reports_cancellation(mock_list, mock_backup, tmp_path):
         [
             "backup",
             "--device",
-            "/dev/disk3",
+            "/dev/fake-disk-test-3",
             "--output",
             str(tmp_path / "out.img"),
             "--worker",
@@ -166,7 +166,7 @@ def test_flash_reports_cancellation(mock_list, mock_flash, tmp_path):
             "--image",
             str(image),
             "--device",
-            "/dev/disk3",
+            "/dev/fake-disk-test-3",
             "--worker",
             "--progress-file",
             str(progress_file),
@@ -186,7 +186,7 @@ def test_make_should_cancel_reflects_file_presence(tmp_path):
         [
             "backup",
             "--device",
-            "/dev/disk3",
+            "/dev/fake-disk-test-3",
             "--output",
             str(tmp_path / "out.img"),
             "--cancel-file",
@@ -203,6 +203,6 @@ def test_make_should_cancel_reflects_file_presence(tmp_path):
 
 def test_make_should_cancel_is_none_without_cancel_file(tmp_path):
     args = _parse(
-        ["backup", "--device", "/dev/disk3", "--output", str(tmp_path / "out.img")]
+        ["backup", "--device", "/dev/fake-disk-test-3", "--output", str(tmp_path / "out.img")]
     )
     assert cli._make_should_cancel(args) is None

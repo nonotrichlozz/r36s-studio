@@ -27,12 +27,12 @@ def _fake_process(poll_sequence):
 def test_start_builds_argv_with_worker_progress_and_cancel_files(mock_launch, mock_log_path, tmp_path, qapp):
     mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([None])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
 
     runner.start()
 
     full_argv = mock_launch.call_args.args[0]
-    assert full_argv[:5] == ["backup", "--device", "/dev/disk3", "--output", "x.img"]
+    assert full_argv[:5] == ["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"]
     assert "--worker" in full_argv
     assert "--progress-file" in full_argv
     assert "--cancel-file" in full_argv
@@ -45,7 +45,7 @@ def test_start_passes_elevation_log_path_to_launch(mock_launch, mock_log_path, t
     log_path = tmp_path / "elevation.log"
     mock_log_path.return_value = log_path
     mock_launch.return_value = _fake_process([None])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
 
     runner.start()
 
@@ -58,7 +58,7 @@ def test_start_passes_elevation_log_path_to_launch(mock_launch, mock_log_path, t
 def test_dispatches_progress_log_error_done_events(mock_launch, mock_log_path, tmp_path, qapp):
     mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([None] * 10)
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
     runner.start()
 
     progress_events = []
@@ -97,7 +97,7 @@ def test_cancel_file_does_not_exist_until_cancel_is_called(mock_launch, mock_log
     immédiatement."""
     mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([None])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
     runner.start()
 
     assert not runner._cancel_file.exists()
@@ -115,7 +115,7 @@ def test_process_exit_without_done_reports_elevation_failed(mock_launch, mock_lo
     # événement "done" n'ait été écrit -- élévation refusée par exemple.
     mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([1])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
     runner.start()
 
     error_events = []
@@ -140,7 +140,7 @@ def test_process_exit_without_done_surfaces_elevation_log_content(mock_launch, m
     log_path.write_text("python3: No module named r36s_studio\n", encoding="utf-8")
     mock_log_path.return_value = log_path
     mock_launch.return_value = _fake_process([1])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
     runner.start()
 
     error_events = []
@@ -159,7 +159,7 @@ def test_process_exit_without_done_surfaces_elevation_log_content(mock_launch, m
 def test_process_exit_without_done_and_empty_log_keeps_generic_message(mock_launch, mock_log_path, tmp_path, qapp):
     mock_log_path.return_value = tmp_path / "elevation.log"  # n'existe pas
     mock_launch.return_value = _fake_process([1])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
     runner.start()
 
     error_events = []
@@ -178,7 +178,7 @@ def test_process_exit_without_done_and_empty_log_keeps_generic_message(mock_laun
 def test_process_exit_with_done_already_emitted_does_not_double_report(mock_launch, mock_log_path, tmp_path, qapp):
     mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([1])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
     runner.start()
 
     finished_events = []
@@ -201,7 +201,7 @@ def test_stop_removes_progress_and_cancel_files_but_keeps_log(mock_launch, mock_
     log_path.write_text("une erreur quelconque", encoding="utf-8")
     mock_log_path.return_value = log_path
     mock_launch.return_value = _fake_process([None])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
     runner.start()
     progress_file, cancel_file = runner._progress_file, runner._cancel_file
 
@@ -223,12 +223,12 @@ def test_macos_tcc_block_produces_explicit_sudo_hint(mock_launch, mock_log_path,
     et inviter à utiliser la ligne de commande avec `sudo`."""
     log_path = tmp_path / "elevation.log"
     log_path.write_text(
-        "Operation not permitted: '/dev/rdisk4'\n",
+        "Operation not permitted: '/dev/rdisk9904'\n",
         encoding="utf-8",
     )
     mock_log_path.return_value = log_path
     mock_launch.return_value = _fake_process([1])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk4", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/disk9904", "--output", "x.img"])
     runner.start()
 
     error_events = []
@@ -251,10 +251,10 @@ def test_permission_denied_on_other_os_keeps_generic_elevation_failed(
     """La limitation TCC est spécifique à macOS (§3 de CLAUDE.md) : le même
     texte sur Linux/Windows ne doit pas déclencher le message dédié."""
     log_path = tmp_path / "elevation.log"
-    log_path.write_text("Operation not permitted: '/dev/rdisk4'\n", encoding="utf-8")
+    log_path.write_text("Operation not permitted: '/dev/rdisk9904'\n", encoding="utf-8")
     mock_log_path.return_value = log_path
     mock_launch.return_value = _fake_process([1])
-    runner = WorkerRunner(["backup", "--device", "/dev/disk4", "--output", "x.img"])
+    runner = WorkerRunner(["backup", "--device", "/dev/disk9904", "--output", "x.img"])
     runner.start()
 
     error_events = []

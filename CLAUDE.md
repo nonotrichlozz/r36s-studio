@@ -177,13 +177,42 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 ### 4.4 `partitions/` — accès aux fichiers de la SD
 
 Après flash, la carte R36S expose trois partitions : `BOOT`, `root`, `EASYROMS`.
-`BOOT` et `EASYROMS` sont en FAT — donc montables nativement par les trois OS.
+`BOOT` est en FAT — montable et inscriptible nativement par les trois OS.
 `root` est en ext4 et n'est pas nécessaire aux fonctions prévues.
 
-> ⚠️ À vérifier sur une carte réelle avant de coder cette partie : confirmer que
-> `EASYROMS` est bien FAT32 et non ext4 sur la version d'ArkOS ciblée. Si c'est ext4,
-> Windows et macOS ne pourront pas y écrire sans pilote tiers, et il faudra replier
-> la copie de jeux sur une écriture au niveau image.
+> ⚠️ **Confirmé sur du vrai matériel** : `EASYROMS` est en **NTFS**, pas en FAT32
+> comme le supposait le brief initial. Windows et Linux y écrivent nativement.
+> **macOS ne peut pas y écrire** : son pilote NTFS intégré ne monte les volumes
+> NTFS qu'en lecture seule (pas de rapport avec la limitation TCC du §3 — un
+> pilote NTFS en écriture tiers, ex. Tuxera/Paragon, contournerait celle-ci). Le
+> module `partitions/` doit détecter ce cas précis (OS macOS + partition NTFS
+> détectée) *avant* toute tentative d'écriture, et afficher un message explicite
+> plutôt que de laisser la copie échouer avec une erreur obscure (règle §1 :
+> jamais de terminal, jamais de jargon pour l'utilisateur final).
+>
+> ⚠️ **Bug corrigé sur du vrai matériel** : cette détection ne se déclenchait
+> pas — `copy-games` échouait avec `[Errno 30] Read-only file system` au lieu
+> du refus explicite. Cause : `diskutil info -plist` ne renvoie pas
+> systématiquement la chaîne exacte `ntfs` pour `FilesystemType` (variante de
+> casse, ou nom de type de partition `Windows_NTFS`), et la comparaison
+> stricte `== "ntfs"` échouait silencieusement. `_macos_filesystem` normalise
+> désormais toute variante contenant `ntfs` (`FilesystemType` et `Content`,
+> insensible à la casse) vers la valeur canonique `"ntfs"`. En complément,
+> `partitions/copy.py` vérifie maintenant l'inscriptibilité réelle du point
+> de montage (écriture d'un fichier sonde) *avant* toute copie, quel que
+> soit l'OS ou le système de fichiers — filet de sécurité générique pour
+> tout futur cas de détection erronée, pas seulement celui-ci.
+
+> ⚠️ **Confirmé sur du vrai matériel** : sur une vraie carte ArkOS R36S, la
+> partition `BOOT` (la première du disque) **n'a aucune étiquette** — `diskutil`
+> l'affiche « NO NAME », type DOS_FAT_16, ~117,4 Mo. L'identifier par étiquette
+> seule est fragile (variable selon les versions d'ArkOS et les vendeurs) et
+> ratait systématiquement cette partition. `BOOT` est donc identifiée par sa
+> **position** (première partition du disque) et son **système de fichiers**
+> (FAT16 ou FAT32) ; l'étiquette « BOOT », quand elle existe, ne sert que de
+> repli. `EASYROMS` étant bien nommée en pratique, elle reste identifiée par
+> étiquette en priorité, avec un repli sur la position (troisième partition,
+> NTFS ou FAT32) si l'étiquette est absente.
 
 Montage : attendre l'apparition automatique du volume (Windows/macOS le font seuls),
 avec une temporisation et un contrôle. Sur Linux, `udisksctl mount` évite d'avoir
@@ -315,11 +344,48 @@ d'écriture ne doit être écrite.
 
 ## 8. Tests
 
-- Le worker doit pouvoir cibler un **fichier** plutôt qu'un périphérique
-  (`--target ./fake_sd.img`). Tout le développement se fait ainsi, sans risque.
 - Jeu de données de test : tables de partitions MBR et GPT factices.
 - Test manuel obligatoire avant chaque release : brancher un disque dur externe et
   vérifier qu'il **n'apparaît pas** comme carte SD si les critères l'excluent.
+- **Mode développement** (`--allow-disk-image` sur les sous-commandes CLI, ou
+  `R36S_STUDIO_DEV=1`) : les providers `devices/` excluent par défaut les disk
+  images/périphériques loop (une `.dmg` montée sur macOS, un `losetup` sur
+  Linux) — sans ce mode, `inject-boot`, `copy-games` et le futur `detect` ne
+  sont testables qu'avec une vraie carte SD. Ce mode lève *uniquement* cette
+  exclusion : les règles de `safety` (§4.2 — disque système, taille, bus...)
+  n'en ont aucune connaissance et restent pleinement appliquées. Toujours
+  désactivé en mode worker (`--worker`), donc **jamais accessible depuis la
+  GUI** — y compris si la variable d'environnement traîne dans le shell qui
+  l'a lancée — et toujours accompagné d'un avertissement affiché (stderr +
+  `emit_log`), jamais silencieux.
+  > ⚠️ **Bug corrigé sur macOS** : `allow_disk_image` levait bien l'exclusion
+  > en aval (`_is_disk_image`) mais une image montée via `hdiutil attach
+  > -imagekey diskimage-class=CRawDiskImage -nomount` restait invisible quand
+  > même — l'avertissement de mode développement s'affichait, mais
+  > `diskutil list -plist physical` exclut les disk images de l'énumération
+  > elle-même, avant même qu'`_is_disk_image` ait son mot à dire. Corrigé en
+  > retirant aussi le filtre `physical` (→ `diskutil list -plist`) quand
+  > `allow_disk_image` est actif. Vérifier ce genre de bug demande de
+  > distinguer, dans les fixtures de test, la commande d'énumération filtrée
+  > de la non filtrée — un mock qui renvoie la même liste dans les deux cas
+  > masque exactement ce défaut (voir `tests/test_devices_macos.py`).
+- **Incident corrigé — sous-processus réel exécuté par un test** : un test
+  utilisant `/dev/disk3`/`/dev/disk4` comme chemin factice coïncidait avec un
+  vrai disque externe branché sur la machine de dev ; une version
+  temporairement mal mockée a exécuté un vrai `diskutil mount` dessus. Deux
+  mesures structurelles en réponse :
+  - Les chemins de périphérique dans les tests utilisent des identifiants
+    impossibles à confondre avec du matériel réel (`/dev/fake-disk-test-*`,
+    `/dev/fake-loop-test-*`) — sauf quand le code testé dépend du format
+    `/dev/diskN`/`/dev/rdiskN` propre à macOS (conversion accès brut, §4.3) ou
+    `PhysicalDriveN` propre à Windows : dans ce cas, le préfixe est conservé
+    et seul le numéro est rendu implausible (`disk9903`, `PhysicalDrive9902`).
+  - `tests/conftest.py` patche `subprocess.run`/`subprocess.Popen` en
+    fixture `autouse` sur toute la suite : un appel non mocké lève
+    `UnmockedSubprocessError` au lieu d'exécuter quoi que ce soit pour de
+    vrai. Les rares tests qui doivent réellement lancer un sous-processus
+    (voir `tests/test_gui_elevate.py`) le déclarent avec
+    `@pytest.mark.real_subprocess` (marker enregistré dans `pytest.ini`).
 
 ---
 

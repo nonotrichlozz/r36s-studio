@@ -12,9 +12,9 @@ SYSTEM_MOUNTPOINTS = {"/", "/boot", "/boot/efi"}
 
 
 class LinuxDeviceProvider(DeviceProvider):
-    def list_devices(self) -> list[Device]:
+    def list_devices(self, allow_disk_image: bool = False) -> list[Device]:
         raw = self._run_lsblk()
-        return self._parse(raw)
+        return self._parse(raw, allow_disk_image=allow_disk_image)
 
     @staticmethod
     def _run_lsblk() -> str:
@@ -27,11 +27,15 @@ class LinuxDeviceProvider(DeviceProvider):
         return result.stdout
 
     @classmethod
-    def _parse(cls, raw_json: str) -> list[Device]:
+    def _parse(cls, raw_json: str, allow_disk_image: bool = False) -> list[Device]:
+        # Un `losetup` (image montée en loop, utilisé pour tester sans carte
+        # SD réelle) apparaît avec type "loop", pas "disk" -- exclu par
+        # défaut comme les disk images macOS, autorisé en mode développement.
+        allowed_types = {"disk", "loop"} if allow_disk_image else {"disk"}
         data = json.loads(raw_json)
         devices = []
         for entry in data.get("blockdevices", []):
-            if entry.get("type") != "disk":
+            if entry.get("type") not in allowed_types:
                 continue
             devices.append(cls._to_device(entry))
         return devices

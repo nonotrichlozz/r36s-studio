@@ -12,7 +12,7 @@ from r36s_studio.devices import Device
 from r36s_studio.imaging.flash import FlashResult
 
 
-def _make_device(path="/dev/disk3", size_bytes=32_000_000_000) -> Device:
+def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000) -> Device:
     return Device(
         path=path,
         display="Carte SD factice",
@@ -65,7 +65,7 @@ def test_cmd_flash_refuses_without_confirmation(mock_list, mock_confirm, mock_fl
     image = tmp_path / "sd.img"
     image.write_bytes(b"x" * 100)
 
-    args = _parse(["flash", "--image", str(image), "--device", "/dev/disk3"])
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 1
@@ -78,11 +78,11 @@ def test_cmd_flash_refuses_without_confirmation(mock_list, mock_confirm, mock_fl
 @patch("r36s_studio.__main__._confirm_flash", return_value=True)
 @patch("r36s_studio.__main__.list_devices")
 def test_cmd_flash_rejects_device_not_in_safe_list(mock_list, mock_confirm, mock_flash, tmp_path, capsys):
-    mock_list.return_value = [_make_device(path="/dev/disk9")]  # un autre chemin que --device
+    mock_list.return_value = [_make_device(path="/dev/fake-disk-test-9")]  # un autre chemin que --device
     image = tmp_path / "sd.img"
     image.write_bytes(b"x" * 100)
 
-    args = _parse(["flash", "--image", str(image), "--device", "/dev/disk3"])
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 1
@@ -94,7 +94,7 @@ def test_cmd_flash_rejects_device_not_in_safe_list(mock_list, mock_confirm, mock
 
 @patch("r36s_studio.__main__.list_devices")
 def test_cmd_flash_rejects_missing_image_file(mock_list, capsys):
-    args = _parse(["flash", "--image", "/nonexistent/sd.img", "--device", "/dev/disk3"])
+    args = _parse(["flash", "--image", "/nonexistent/sd.img", "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 1
@@ -114,7 +114,7 @@ def test_cmd_flash_success_emits_done_true(mock_list, mock_confirm, mock_flash, 
     image = tmp_path / "sd.img"
     image.write_bytes(b"x" * 100)
 
-    args = _parse(["flash", "--image", str(image), "--device", "/dev/disk3"])
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 0
@@ -134,7 +134,7 @@ def test_cmd_flash_verification_failure_returns_error(mock_list, mock_confirm, m
     image = tmp_path / "sd.img"
     image.write_bytes(b"x" * 100)
 
-    args = _parse(["flash", "--image", str(image), "--device", "/dev/disk3"])
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 1

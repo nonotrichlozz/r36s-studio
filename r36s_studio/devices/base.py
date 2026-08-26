@@ -26,6 +26,15 @@ class DeviceProvider(ABC):
     """Détecte les périphériques de stockage présents sur la machine."""
 
     @abstractmethod
-    def list_devices(self) -> list[Device]:
-        """Retourne tous les disques physiques détectés, sans filtrage."""
+    def list_devices(self, allow_disk_image: bool = False) -> list[Device]:
+        """Retourne tous les disques physiques détectés, sans filtrage de
+        sécurité (`safety`, appliqué séparément par l'appelant).
+
+        `allow_disk_image` lève, sur les OS qui l'implémentent, la seule
+        exclusion des disk images / périphériques loop (une .dmg montée sur
+        macOS, un `losetup` sur Linux) — jamais les autres critères de
+        sécurité, qui vivent exclusivement dans `safety` et n'ont aucune
+        connaissance de ce paramètre. Réservé au mode développement CLI
+        (`--allow-disk-image` / `R36S_STUDIO_DEV`, voir `__main__.py`) : la
+        GUI ne le passe jamais."""
         raise NotImplementedError

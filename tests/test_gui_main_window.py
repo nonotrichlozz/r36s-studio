@@ -11,7 +11,7 @@ from r36s_studio.devices import Device
 from r36s_studio.gui.main_window import MainWindow
 
 
-def _make_device(path="/dev/disk3", size_bytes=32_000_000_000, display="Carte SD factice") -> Device:
+def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000, display="Carte SD factice") -> Device:
     return Device(
         path=path,
         display=display,
@@ -69,7 +69,7 @@ def test_backup_flow_reaches_execute_with_correct_argv(mock_list, mock_filter, q
 
     runner_class.assert_called_once()
     argv = runner_class.instances[0].argv
-    assert argv == ["backup", "--device", "/dev/disk3", "--output", "/tmp/out.img"]
+    assert argv == ["backup", "--device", "/dev/fake-disk-test-3", "--output", "/tmp/out.img"]
     runner_class.instances[0].start.assert_called_once()
 
 
@@ -103,7 +103,7 @@ def test_flash_flow_requires_confirmation_before_execute(mock_list, mock_filter,
         assert window._stack.currentWidget() is window._execute_screen
 
     argv = runner_class.instances[0].argv
-    assert argv == ["flash", "--image", "/tmp/sd.img", "--device", "/dev/disk3"]
+    assert argv == ["flash", "--image", "/tmp/sd.img", "--device", "/dev/fake-disk-test-3"]
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
@@ -165,11 +165,11 @@ def test_worker_error_shows_message_and_cancelled_flag(mock_list, mock_filter, q
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_eject_requested_calls_eject_module_with_device_path(mock_list, mock_filter, mock_eject, qapp):
     window = MainWindow()
-    window._device = _make_device(path="/dev/disk3")
+    window._device = _make_device(path="/dev/fake-disk-test-3")
 
     window._on_eject_requested()
 
-    mock_eject.eject.assert_called_once_with("/dev/disk3")
+    mock_eject.eject.assert_called_once_with("/dev/fake-disk-test-3")
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")

@@ -25,8 +25,8 @@ def get_provider() -> DeviceProvider:
     raise NotImplementedError(f"OS non supporté : {system}")
 
 
-def list_devices() -> list[Device]:
-    return get_provider().list_devices()
+def list_devices(allow_disk_image: bool = False) -> list[Device]:
+    return get_provider().list_devices(allow_disk_image=allow_disk_image)
 
 
 __all__ = ["Device", "DeviceProvider", "get_provider", "list_devices"]

@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
+import pytest
+
 from r36s_studio.gui import elevate
 
 
@@ -40,17 +42,21 @@ def test_worker_command_embeds_absolute_project_root_in_dev_mode():
 
 def test_worker_command_is_independent_of_current_working_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # aucun rapport avec le projet
-    command = elevate._worker_command(["backup", "--device", "/dev/disk3"])
+    command = elevate._worker_command(["backup", "--device", "/dev/fake-disk-test-3"])
     root = str(elevate._project_root())
     assert repr(root) in command[2]
     assert root != str(tmp_path)
 
 
+@pytest.mark.real_subprocess
 def test_worker_command_actually_resolves_module_from_unrelated_cwd(tmp_path):
     """Reproduit le bug tel quel : execute la commande construite depuis un
     répertoire de travail qui ne contient pas le projet, en vrai
     sous-processus (pas de mock) — la régression `No module named
-    r36s_studio` ne peut être qu'ici, à ce niveau."""
+    r36s_studio` ne peut être qu'ici, à ce niveau. Sous-processus réel mais
+    sans risque : lance uniquement `python3 -m r36s_studio list`, une
+    commande strictement en lecture seule (§4.5 : la détection ne monte ni
+    n'écrit jamais rien)."""
     command = elevate._worker_command(["list"])
 
     result = subprocess.run(command, cwd=str(tmp_path), capture_output=True, text=True, timeout=30)
@@ -64,9 +70,9 @@ def test_worker_command_when_frozen_skips_module_bootstrap(monkeypatch):
     un interpréteur `python3` générique sur lequel `-c`/`-m` a un sens."""
     monkeypatch.setattr(sys, "frozen", True, raising=False)
 
-    command = elevate._worker_command(["backup", "--device", "/dev/disk3", "--worker"])
+    command = elevate._worker_command(["backup", "--device", "/dev/fake-disk-test-3", "--worker"])
 
-    assert command == [sys.executable, "backup", "--device", "/dev/disk3", "--worker"]
+    assert command == [sys.executable, "backup", "--device", "/dev/fake-disk-test-3", "--worker"]
     assert "-c" not in command
     assert "-m" not in command
 
@@ -77,7 +83,7 @@ def test_worker_command_when_frozen_skips_module_bootstrap(monkeypatch):
 @patch("r36s_studio.gui.elevate.subprocess.Popen")
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
 def test_macos_uses_osascript_with_administrator_privileges(mock_system, mock_popen):
-    argv = ["backup", "--device", "/dev/disk3", "--worker", "--progress-file", "/tmp/p.jsonl"]
+    argv = ["backup", "--device", "/dev/fake-disk-test-3", "--worker", "--progress-file", "/tmp/p.jsonl"]
 
     elevate.launch_elevated_worker(argv)
 
@@ -140,7 +146,7 @@ def test_macos_stderr_log_is_opened_and_passed_to_popen(mock_system, mock_popen,
 @patch("r36s_studio.gui.elevate.subprocess.Popen")
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Linux")
 def test_linux_uses_pkexec_when_available(mock_system, mock_popen, mock_which):
-    argv = ["flash", "--image", "x.img", "--device", "/dev/sdb", "--worker"]
+    argv = ["flash", "--image", "x.img", "--device", "/dev/fake-disk-test-sdb", "--worker"]
 
     elevate.launch_elevated_worker(argv)
 
@@ -149,14 +155,14 @@ def test_linux_uses_pkexec_when_available(mock_system, mock_popen, mock_which):
     assert call_args[1] == sys.executable
     assert call_args[2] == "-c"
     assert "r36s_studio" in call_args[3]
-    assert call_args[4:] == ["flash", "--image", "x.img", "--device", "/dev/sdb", "--worker"]
+    assert call_args[4:] == ["flash", "--image", "x.img", "--device", "/dev/fake-disk-test-sdb", "--worker"]
 
 
 @patch("r36s_studio.gui.elevate.shutil.which", return_value=None)
 @patch("r36s_studio.gui.elevate.subprocess.Popen")
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Linux")
 def test_linux_falls_back_to_sudo_without_pkexec(mock_system, mock_popen, mock_which):
-    elevate.launch_elevated_worker(["backup", "--device", "/dev/sdb"])
+    elevate.launch_elevated_worker(["backup", "--device", "/dev/fake-disk-test-sdb"])
 
     call_args = mock_popen.call_args.args[0]
     assert call_args[0] == "sudo"
@@ -178,6 +184,7 @@ def test_linux_stderr_log_is_opened_and_passed_to_popen(mock_system, mock_popen,
 # --- propagation du code de retour : pas de maillon intermédiaire ---------
 
 
+@pytest.mark.real_subprocess
 def test_linux_exit_code_propagates_through_pkexec_unaltered(tmp_path):
     """`pkexec` (et `sudo`) doivent se contenter de relayer tel quel le
     code de sortie du worker — jamais un maillon intermédiaire qui le
@@ -204,6 +211,7 @@ def test_linux_exit_code_propagates_through_pkexec_unaltered(tmp_path):
     assert process.returncode == 42
 
 
+@pytest.mark.real_subprocess
 def test_macos_do_shell_script_reports_real_stderr_not_incidental_stdout(tmp_path):
     """Reproduit le bug tel quel via `osascript` réel (mais SANS `with
     administrator privileges` : aucun mot de passe demandé, `do shell
@@ -218,8 +226,8 @@ def test_macos_do_shell_script_reports_real_stderr_not_incidental_stdout(tmp_pat
     fake_worker = tmp_path / "fake_worker.py"
     fake_worker.write_text(
         "import sys\n"
-        "print('Unmount of all volumes on disk3 was successful')\n"
-        "print('[IO_ERROR] Permission denied: /dev/rdisk3', file=sys.stderr)\n"
+        "print('Unmount of all volumes on fake-disk-test-3 was successful')\n"
+        "print('[IO_ERROR] Permission denied: /dev/rfake-disk-test-3', file=sys.stderr)\n"
         "sys.exit(1)\n"
     )
     command = [sys.executable, str(fake_worker)]
@@ -230,7 +238,7 @@ def test_macos_do_shell_script_reports_real_stderr_not_incidental_stdout(tmp_pat
     )
 
     assert result.returncode != 0
-    assert "Permission denied: /dev/rdisk3" in result.stderr
+    assert "Permission denied: /dev/rfake-disk-test-3" in result.stderr
     assert "was successful" not in result.stderr
 
 

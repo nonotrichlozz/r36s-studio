@@ -17,7 +17,7 @@ from r36s_studio.gui.screens import (
 )
 
 
-def _make_device(path="/dev/disk3", size_bytes=32_000_000_000, display="Carte SD factice") -> Device:
+def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000, display="Carte SD factice") -> Device:
     return Device(
         path=path,
         display=display,
@@ -65,8 +65,8 @@ def test_device_screen_no_default_selection(qapp):
 
 def test_device_screen_selecting_enables_next_and_emits_correct_device(qapp):
     screen = DeviceScreen()
-    device_a = _make_device(path="/dev/disk3", display="A")
-    device_b = _make_device(path="/dev/disk4", display="B")
+    device_a = _make_device(path="/dev/fake-disk-test-3", display="A")
+    device_b = _make_device(path="/dev/fake-disk-test-4", display="B")
     screen.set_devices([device_a, device_b])
 
     screen._list.setCurrentRow(1)

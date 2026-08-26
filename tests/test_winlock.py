@@ -116,7 +116,7 @@ def test_refresh_disk_properties_sends_update_ioctl(mock_kernel32_factory):
     kernel32 = _fake_kernel32()
     mock_kernel32_factory.return_value = kernel32
 
-    winlock.refresh_disk_properties(r"\\.\PhysicalDrive2")
+    winlock.refresh_disk_properties(r"\\.\PhysicalDrive9902")
 
     codes = [c.args[1] for c in kernel32.DeviceIoControl.call_args_list]
     assert codes == [winlock.IOCTL_DISK_UPDATE_PROPERTIES]
@@ -129,6 +129,6 @@ def test_refresh_disk_properties_is_best_effort_on_invalid_handle(mock_kernel32_
     kernel32.CreateFileW.return_value = winlock.INVALID_HANDLE_VALUE
     mock_kernel32_factory.return_value = kernel32
 
-    winlock.refresh_disk_properties(r"\\.\PhysicalDrive2")  # ne doit pas lever
+    winlock.refresh_disk_properties(r"\\.\PhysicalDrive9902")  # ne doit pas lever
 
     kernel32.DeviceIoControl.assert_not_called()

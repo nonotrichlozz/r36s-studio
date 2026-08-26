@@ -12,26 +12,26 @@ from r36s_studio.imaging.source import prepared_source, raw_read_path
 
 @patch("r36s_studio.imaging.source.platform.system", return_value="Darwin")
 def test_raw_read_path_uses_rdisk_on_macos(mock_system):
-    assert raw_read_path("/dev/disk3") == "/dev/rdisk3"
+    assert raw_read_path("/dev/disk9903") == "/dev/rdisk9903"
 
 
 @patch("r36s_studio.imaging.source.platform.system", return_value="Linux")
 def test_raw_read_path_unchanged_on_linux(mock_system):
-    assert raw_read_path("/dev/sdb") == "/dev/sdb"
+    assert raw_read_path("/dev/fake-disk-test-sdb") == "/dev/fake-disk-test-sdb"
 
 
 @patch("r36s_studio.imaging.source.platform.system", return_value="Windows")
 def test_raw_read_path_unchanged_on_windows(mock_system):
-    assert raw_read_path(r"\\.\PhysicalDrive2") == r"\\.\PhysicalDrive2"
+    assert raw_read_path(r"\\.\PhysicalDrive9902") == r"\\.\PhysicalDrive9902"
 
 
 @patch("r36s_studio.imaging.source.subprocess.run")
 @patch("r36s_studio.imaging.source.platform.system", return_value="Darwin")
 def test_prepared_source_unmounts_disk_and_yields_rdisk_on_macos(mock_system, mock_run):
-    with prepared_source("/dev/disk3") as path:
-        assert path == "/dev/rdisk3"
+    with prepared_source("/dev/disk9903") as path:
+        assert path == "/dev/rdisk9903"
     mock_run.assert_called_once_with(
-        ["diskutil", "unmountDisk", "/dev/disk3"], check=True, capture_output=True
+        ["diskutil", "unmountDisk", "/dev/disk9903"], check=True, capture_output=True
     )
 
 
@@ -42,19 +42,19 @@ def test_prepared_source_succeeds_when_diskutil_writes_success_message_to_stderr
     de succès sur stderr avec un code de retour 0 -- ça reste un succès,
     jamais une erreur, quel que soit le flux où le texte atterrit."""
     mock_run.return_value = subprocess.CompletedProcess(
-        args=["diskutil", "unmountDisk", "/dev/disk3"],
+        args=["diskutil", "unmountDisk", "/dev/disk9903"],
         returncode=0,
         stdout=b"",
-        stderr=b"Unmount of all volumes on disk3 was successful\n",
+        stderr=b"Unmount of all volumes on disk9903 was successful\n",
     )
 
-    with prepared_source("/dev/disk3") as path:
-        assert path == "/dev/rdisk3"  # aucune exception levée
+    with prepared_source("/dev/disk9903") as path:
+        assert path == "/dev/rdisk9903"  # aucune exception levée
 
 
 @patch("r36s_studio.imaging.source.subprocess.run")
 @patch("r36s_studio.imaging.source.platform.system", return_value="Linux")
 def test_prepared_source_does_not_unmount_on_linux(mock_system, mock_run):
-    with prepared_source("/dev/sdb") as path:
-        assert path == "/dev/sdb"
+    with prepared_source("/dev/fake-disk-test-sdb") as path:
+        assert path == "/dev/fake-disk-test-sdb"
     mock_run.assert_not_called()

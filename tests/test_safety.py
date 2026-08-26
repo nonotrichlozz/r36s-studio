@@ -11,7 +11,7 @@ from r36s_studio.safety import SafetyConfig, filter_devices, is_allowed
 
 def make_device(**overrides) -> Device:
     base = dict(
-        path="/dev/sdb",
+        path="/dev/fake-disk-test-sdb",
         display="Carte SD factice 32 Go",
         size_bytes=32_000_000_000,
         removable=True,
@@ -114,20 +114,20 @@ def test_custom_threshold_is_respected():
 
 def test_filter_devices_keeps_only_safe_ones(config):
     devices = [
-        make_device(path="/dev/sdb"),
-        make_device(path="/dev/sda", is_system=True, mountpoints=["/"]),
-        make_device(path="/dev/sdc", size_bytes=0),
-        make_device(path="/dev/sdd", removable=False, bus="SATA"),
-        make_device(path="/dev/sde", size_bytes=2_000_000_000_000),
+        make_device(path="/dev/fake-disk-test-sdb"),
+        make_device(path="/dev/fake-disk-test-sda", is_system=True, mountpoints=["/"]),
+        make_device(path="/dev/fake-disk-test-sdc", size_bytes=0),
+        make_device(path="/dev/fake-disk-test-sdd", removable=False, bus="SATA"),
+        make_device(path="/dev/fake-disk-test-sde", size_bytes=2_000_000_000_000),
     ]
     result = filter_devices(devices, config)
-    assert [d.path for d in result] == ["/dev/sdb"]
+    assert [d.path for d in result] == ["/dev/fake-disk-test-sdb"]
 
 
 def test_filter_devices_preserves_order(config):
-    devices = [make_device(path="/dev/sdb"), make_device(path="/dev/sdc")]
+    devices = [make_device(path="/dev/fake-disk-test-sdb"), make_device(path="/dev/fake-disk-test-sdc")]
     result = filter_devices(devices, config)
-    assert [d.path for d in result] == ["/dev/sdb", "/dev/sdc"]
+    assert [d.path for d in result] == ["/dev/fake-disk-test-sdb", "/dev/fake-disk-test-sdc"]
 
 
 def test_filter_devices_empty_input_returns_empty_list(config):

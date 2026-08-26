@@ -5,7 +5,18 @@ Un lecteur de carte SD intégré (MacBook) est classé "internal" par diskutil :
 interroge tous les disques physiques (`physical`, sans le filtre `external`),
 puis on détermine l'amovibilité réelle via les champs dédiés de
 `diskutil info` plutôt que via `Internal`. On exclut au passage les disk
-images (montage d'un `.dmg`), qui ne sont pas de vrais disques."""
+images (montage d'un `.dmg`), qui ne sont pas de vrais disques.
+
+**Bug corrigé (mode développement, `allow_disk_image`)** : le filtre
+`physical` de `diskutil list` exclut les disk images *avant même* qu'elles
+soient énumérées — une image montée via `hdiutil attach -imagekey
+diskimage-class=CRawDiskImage` n'apparaît jamais dans
+`diskutil list -plist physical`, quel que soit `_is_disk_image()` plus loin.
+`allow_disk_image=True` levait bien l'exclusion en aval (`_is_disk_image`)
+mais l'image n'atteignait jamais ce point : elle restait invisible, avec
+l'avertissement de mode développement affiché pour rien. `_list_disk_ids`
+doit donc aussi élargir l'énumération elle-même (retirer le filtre
+`physical`) quand `allow_disk_image` est actif."""
 
 from __future__ import annotations
 
@@ -16,19 +27,26 @@ from .base import Device, DeviceProvider
 
 
 class MacDeviceProvider(DeviceProvider):
-    def list_devices(self) -> list[Device]:
+    def list_devices(self, allow_disk_image: bool = False) -> list[Device]:
         devices = []
-        for disk_id in self._list_disk_ids():
+        for disk_id in self._list_disk_ids(allow_disk_image=allow_disk_image):
             info = self._disk_info(disk_id)
-            if info is None or self._is_disk_image(info):
+            if info is None:
+                continue
+            if not allow_disk_image and self._is_disk_image(info):
                 continue
             devices.append(self._to_device(disk_id, info))
         return devices
 
     @staticmethod
-    def _list_disk_ids() -> list[str]:
+    def _list_disk_ids(allow_disk_image: bool = False) -> list[str]:
+        # Le filtre "physical" exclut les disk images de l'énumération
+        # elle-même (voir note de module) : sans ce paramètre, une image
+        # virtuelle n'atteint jamais `_is_disk_image()` pour que
+        # `allow_disk_image` puisse lever son exclusion.
+        filter_args = [] if allow_disk_image else ["physical"]
         result = subprocess.run(
-            ["diskutil", "list", "-plist", "physical"],
+            ["diskutil", "list", "-plist", *filter_args],
             capture_output=True,
             check=True,
         )

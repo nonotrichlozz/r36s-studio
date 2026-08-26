@@ -8,10 +8,29 @@
   explicite (règle §2 n°6) et vérification SHA-256.
 - `python -m r36s_studio gui` (phase 4) — assistant graphique PySide6,
   branché sur `backup`/`flash` via un worker élevé (§3).
+- `python -m r36s_studio inject-boot --device X --boot-source Y` et
+  `python -m r36s_studio copy-games --device X --games-source Y` (phase 5,
+  §4.4/§4.6) — copient respectivement le dossier BOOT sauvegardé et un
+  dossier de jeux vers la carte déjà flashée. Contrairement à
+  `backup`/`flash`, ces deux commandes écrivent sur une partition déjà
+  montée par le système (BOOT et EASYROMS sont FAT/NTFS, pas un accès
+  disque brut) : elles ne passent jamais par le worker élevé (§3), donc pas
+  de `--worker` ni `--progress-file` sur ces sous-commandes.
 
 `--worker`, `--progress-file` et `--cancel-file` sur `backup`/`flash` sont
 un détail d'implémentation réservé à la GUI (§3 : le worker, même binaire,
-lancé avec les privilèges admin) — volontairement absents de `--help`."""
+lancé avec les privilèges admin) — volontairement absents de `--help`.
+
+**Mode développement** (`--allow-disk-image` / `R36S_STUDIO_DEV=1`) — les
+disk images/périphériques loop (`.dmg` montée sur macOS, `losetup` sur
+Linux) sont exclus de la liste des cartes SD par les providers `devices/`,
+ce qui rend `inject-boot`/`copy-games`/le futur `detect` impossibles à
+tester sans carte réelle. Ce mode lève *uniquement* cette exclusion — les
+règles de `safety` (disque système, taille, bus...) restent inchangées,
+et il est toujours désactivé en mode worker (`--worker`), donc jamais
+accessible depuis la GUI même si la variable d'environnement est présente
+dans le shell qui l'a lancée. Toujours accompagné d'un avertissement visible
+(voir `_warn_dev_mode_if_enabled`)."""
 
 from __future__ import annotations
 
@@ -23,22 +42,90 @@ from typing import List, Optional, TextIO
 
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.imaging import OperationCancelled, ProgressEvent, backup_device, flash_device
+from r36s_studio.partitions import (
+    MacosNtfsWriteUnsupported,
+    MountpointNotWritable,
+    PartitionNotFound,
+    PartitionNotMounted,
+    copy_games,
+    inject_boot,
+)
 from r36s_studio.protocol import configure as configure_protocol
 from r36s_studio.protocol import emit_done, emit_error, emit_log, emit_progress
 from r36s_studio.safety import DEFAULT_MAX_SIZE_BYTES, SafetyConfig, filter_devices
 
+DEV_MODE_ENV_VAR = "R36S_STUDIO_DEV"
+_DEV_MODE_FALSY = {"", "0", "false", "False"}
 
-def _resolve_device(device_path: str, max_size_bytes: int) -> Optional[Device]:
+
+def _resolve_device(
+    device_path: str, max_size_bytes: int, allow_disk_image: bool = False
+) -> Optional[Device]:
     """Retourne le `Device` correspondant à `device_path` s'il fait partie
     de la liste filtrée par `safety`, sinon None. Un périphérique refusé
     par le filtre est traité exactement comme un périphérique inexistant —
     jamais grisé, jamais accessible par son chemin. Laisse remonter
     `NotImplementedError` si l'OS courant n'a pas de provider (à charge de
-    l'appelant de la distinguer d'un simple périphérique introuvable)."""
-    devices = list_devices()
+    l'appelant de la distinguer d'un simple périphérique introuvable).
+
+    `allow_disk_image` (mode développement, voir `_dev_mode_enabled`) ne
+    fait que lever l'exclusion des disk images/loop côté `devices/` — il
+    est transmis tel quel à `list_devices`, jamais à `SafetyConfig` : les
+    règles de sécurité elles-mêmes restent strictement inchangées."""
+    devices = list_devices(allow_disk_image=allow_disk_image)
     config = SafetyConfig(max_size_bytes=max_size_bytes)
     safe_devices = {d.path: d for d in filter_devices(devices, config)}
     return safe_devices.get(device_path)
+
+
+def _add_dev_args(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument(
+        "--allow-disk-image",
+        action="store_true",
+        help=(
+            "Mode développement : autorise les disk images/périphériques loop "
+            "(.dmg montée, losetup...) dans la liste des cartes SD, pour tester "
+            "sans carte réelle. Ne relâche aucune autre règle de sécurité. "
+            "Jamais utilisé par la GUI."
+        ),
+    )
+
+
+def _dev_mode_enabled(args: argparse.Namespace) -> bool:
+    """Mode développement : `--allow-disk-image` ou la variable
+    d'environnement `R36S_STUDIO_DEV` lèvent l'exclusion des disk
+    images/loop (voir `devices/macos.py`, `devices/linux.py`) — jamais les
+    autres règles de sécurité, qui vivent dans `safety` et n'ont aucune
+    connaissance de ce mode.
+
+    Toujours désactivé en mode worker (`--worker`), quoi qu'il arrive :
+    c'est cette seule vérification, et non l'absence du flag dans l'argv de
+    la GUI, qui garantit que le mode développement n'est jamais accessible
+    depuis la GUI — même si `R36S_STUDIO_DEV` traîne dans l'environnement du
+    shell qui l'a lancée."""
+    if getattr(args, "worker", False):
+        return False
+    if getattr(args, "allow_disk_image", False):
+        return True
+    return os.environ.get(DEV_MODE_ENV_VAR, "") not in _DEV_MODE_FALSY
+
+
+def _warn_dev_mode_if_enabled(args: argparse.Namespace) -> bool:
+    """Affiche un avertissement impossible à manquer avant toute opération
+    quand le mode développement est actif (règle §2 : la sécurité ne doit
+    jamais être discrète) — à la fois sur le vrai stderr (visible même en
+    mode worker, où stdout est redirigé vers le fichier de progression) et
+    via `emit_log` (visible dans le protocole JSON Lines lui-même)."""
+    enabled = _dev_mode_enabled(args)
+    if enabled:
+        message = (
+            "MODE DÉVELOPPEMENT ACTIF : les disk images/périphériques loop sont "
+            "autorisés comme cartes SD (--allow-disk-image / R36S_STUDIO_DEV). "
+            "Ne jamais activer ce mode en usage normal."
+        )
+        print(f"⚠️  {message}", file=sys.stderr)
+        emit_log(message, level="warning")
+    return enabled
 
 
 def _open_progress_file(args: argparse.Namespace) -> Optional[TextIO]:
@@ -65,8 +152,9 @@ def _make_should_cancel(args: argparse.Namespace):
 
 
 def cmd_list(args: argparse.Namespace) -> int:
+    dev_mode = _warn_dev_mode_if_enabled(args)
     try:
-        devices = list_devices()
+        devices = list_devices(allow_disk_image=dev_mode)
     except NotImplementedError as exc:
         print(f"Erreur : {exc}", file=sys.stderr)
         return 1
@@ -89,8 +177,9 @@ def cmd_list(args: argparse.Namespace) -> int:
 def cmd_backup(args: argparse.Namespace) -> int:
     progress_file = _open_progress_file(args)
     try:
+        dev_mode = _warn_dev_mode_if_enabled(args)
         try:
-            device = _resolve_device(args.device, args.max_size)
+            device = _resolve_device(args.device, args.max_size, allow_disk_image=dev_mode)
         except NotImplementedError as exc:
             emit_error("UNSUPPORTED_OS", str(exc))
             return 1
@@ -158,8 +247,9 @@ def cmd_flash(args: argparse.Namespace) -> int:
             emit_error("IMAGE_NOT_FOUND", f"Fichier image introuvable : {args.image}")
             return 1
 
+        dev_mode = _warn_dev_mode_if_enabled(args)
         try:
-            device = _resolve_device(args.device, args.max_size)
+            device = _resolve_device(args.device, args.max_size, allow_disk_image=dev_mode)
         except NotImplementedError as exc:
             emit_error("UNSUPPORTED_OS", str(exc))
             return 1
@@ -215,6 +305,109 @@ def cmd_flash(args: argparse.Namespace) -> int:
             progress_file.close()
 
 
+def _resolve_device_or_report(args: argparse.Namespace) -> Optional[Device]:
+    """Commun à `inject-boot`/`copy-games` : résout `--device` et émet
+    l'erreur adaptée (jamais d'accès par un chemin refusé par `safety`)."""
+    dev_mode = _warn_dev_mode_if_enabled(args)
+    try:
+        device = _resolve_device(args.device, args.max_size, allow_disk_image=dev_mode)
+    except NotImplementedError as exc:
+        emit_error("UNSUPPORTED_OS", str(exc))
+        return None
+
+    if device is None:
+        emit_error(
+            "DEVICE_NOT_ALLOWED",
+            f"Périphérique introuvable ou refusé par la sécurité : {args.device} "
+            "(voir `python -m r36s_studio list`)",
+        )
+        return None
+    return device
+
+
+def cmd_inject_boot(args: argparse.Namespace) -> int:
+    device = _resolve_device_or_report(args)
+    if device is None:
+        return 1
+
+    if not os.path.isdir(args.boot_source):
+        emit_error("SOURCE_NOT_FOUND", f"Dossier BOOT introuvable : {args.boot_source}")
+        return 1
+
+    emit_log(f"Injection de {args.boot_source} sur la partition BOOT de {device.display}")
+
+    def on_progress(event: ProgressEvent) -> None:
+        emit_progress(event.done, event.total, event.speed)
+
+    try:
+        copied = inject_boot(
+            device, args.boot_source, on_progress=on_progress, should_cancel=_make_should_cancel(args)
+        )
+    except OperationCancelled as exc:
+        emit_error("CANCELLED", f"Injection annulée après {exc.done} octets")
+        emit_done(False)
+        return 1
+    except PartitionNotFound as exc:
+        emit_error("PARTITION_NOT_FOUND", str(exc))
+        return 1
+    except PartitionNotMounted as exc:
+        emit_error("PARTITION_NOT_MOUNTED", str(exc))
+        return 1
+    except MountpointNotWritable as exc:
+        emit_error("MOUNTPOINT_NOT_WRITABLE", str(exc))
+        return 1
+    except (OSError, subprocess.CalledProcessError) as exc:
+        emit_error("IO_ERROR", str(exc))
+        return 1
+
+    emit_log(f"{copied} octets copiés")
+    emit_done(True)
+    return 0
+
+
+def cmd_copy_games(args: argparse.Namespace) -> int:
+    device = _resolve_device_or_report(args)
+    if device is None:
+        return 1
+
+    if not os.path.isdir(args.games_source):
+        emit_error("SOURCE_NOT_FOUND", f"Dossier de jeux introuvable : {args.games_source}")
+        return 1
+
+    emit_log(f"Copie de {args.games_source} sur la partition EASYROMS de {device.display}")
+
+    def on_progress(event: ProgressEvent) -> None:
+        emit_progress(event.done, event.total, event.speed)
+
+    try:
+        copied = copy_games(
+            device, args.games_source, on_progress=on_progress, should_cancel=_make_should_cancel(args)
+        )
+    except OperationCancelled as exc:
+        emit_error("CANCELLED", f"Copie annulée après {exc.done} octets")
+        emit_done(False)
+        return 1
+    except MacosNtfsWriteUnsupported as exc:
+        emit_error("EASYROMS_NTFS_MACOS", str(exc))
+        return 1
+    except PartitionNotFound as exc:
+        emit_error("PARTITION_NOT_FOUND", str(exc))
+        return 1
+    except PartitionNotMounted as exc:
+        emit_error("PARTITION_NOT_MOUNTED", str(exc))
+        return 1
+    except MountpointNotWritable as exc:
+        emit_error("MOUNTPOINT_NOT_WRITABLE", str(exc))
+        return 1
+    except (OSError, subprocess.CalledProcessError) as exc:
+        emit_error("IO_ERROR", str(exc))
+        return 1
+
+    emit_log(f"{copied} octets copiés")
+    emit_done(True)
+    return 0
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     from r36s_studio.gui.app import run
 
@@ -238,6 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_SIZE_BYTES,
         help="Taille maximale acceptée en octets (défaut : 1 To)",
     )
+    _add_dev_args(list_parser)
     list_parser.set_defaults(func=cmd_list)
 
     backup_parser = subparsers.add_parser(
@@ -254,6 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Taille maximale acceptée en octets (défaut : 1 To)",
     )
     _add_worker_args(backup_parser)
+    _add_dev_args(backup_parser)
     backup_parser.set_defaults(func=cmd_backup)
 
     flash_parser = subparsers.add_parser(
@@ -273,7 +468,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Taille maximale acceptée en octets (défaut : 1 To)",
     )
     _add_worker_args(flash_parser)
+    _add_dev_args(flash_parser)
     flash_parser.set_defaults(func=cmd_flash)
+
+    inject_boot_parser = subparsers.add_parser(
+        "inject-boot",
+        help="Copie un dossier BOOT sauvegardé sur la partition BOOT de la carte déjà flashée",
+    )
+    inject_boot_parser.add_argument(
+        "--device", required=True, help="Chemin du périphérique cible (voir `list`)"
+    )
+    inject_boot_parser.add_argument(
+        "--boot-source", required=True, help="Dossier contenant les fichiers BOOT sauvegardés"
+    )
+    inject_boot_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    inject_boot_parser.add_argument("--cancel-file", help=argparse.SUPPRESS)
+    _add_dev_args(inject_boot_parser)
+    inject_boot_parser.set_defaults(func=cmd_inject_boot)
+
+    copy_games_parser = subparsers.add_parser(
+        "copy-games", help="Copie un dossier de jeux vers la partition EASYROMS de la carte"
+    )
+    copy_games_parser.add_argument(
+        "--device", required=True, help="Chemin du périphérique cible (voir `list`)"
+    )
+    copy_games_parser.add_argument(
+        "--games-source", required=True, help="Dossier de jeux à copier"
+    )
+    copy_games_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    copy_games_parser.add_argument("--cancel-file", help=argparse.SUPPRESS)
+    _add_dev_args(copy_games_parser)
+    copy_games_parser.set_defaults(func=cmd_copy_games)
 
     gui_parser = subparsers.add_parser("gui", help="Lance l'assistant graphique (PySide6)")
     gui_parser.set_defaults(func=cmd_gui)

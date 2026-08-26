@@ -26,13 +26,13 @@ def _make_device(path: str, mountpoints=None) -> Device:
 @patch("r36s_studio.imaging.write_target.subprocess.run")
 @patch("r36s_studio.imaging.write_target.platform.system", return_value="Darwin")
 def test_macos_unmounts_disk_and_yields_rdisk(mock_system, mock_run):
-    device = _make_device("/dev/disk3")
+    device = _make_device("/dev/disk9903")
 
     with prepared_write_target(device) as path:
-        assert path == "/dev/rdisk3"
+        assert path == "/dev/rdisk9903"
 
     mock_run.assert_called_once_with(
-        ["diskutil", "unmountDisk", "/dev/disk3"], check=True, capture_output=True
+        ["diskutil", "unmountDisk", "/dev/disk9903"], check=True, capture_output=True
     )
 
 
@@ -43,24 +43,24 @@ def test_macos_succeeds_when_diskutil_writes_success_message_to_stderr(mock_syst
     de succès sur stderr avec un code de retour 0 -- ça reste un succès,
     jamais une erreur, quel que soit le flux où le texte atterrit."""
     mock_run.return_value = subprocess.CompletedProcess(
-        args=["diskutil", "unmountDisk", "/dev/disk3"],
+        args=["diskutil", "unmountDisk", "/dev/disk9903"],
         returncode=0,
         stdout=b"",
-        stderr=b"Unmount of all volumes on disk3 was successful\n",
+        stderr=b"Unmount of all volumes on disk9903 was successful\n",
     )
-    device = _make_device("/dev/disk3")
+    device = _make_device("/dev/disk9903")
 
     with prepared_write_target(device) as path:
-        assert path == "/dev/rdisk3"  # aucune exception levée
+        assert path == "/dev/rdisk9903"  # aucune exception levée
 
 
 @patch("r36s_studio.imaging.write_target.subprocess.run")
 @patch("r36s_studio.imaging.write_target.platform.system", return_value="Linux")
 def test_linux_unmounts_each_mountpoint_and_yields_device_path(mock_system, mock_run):
-    device = _make_device("/dev/sdb", mountpoints=["/media/BOOT", "/media/EASYROMS"])
+    device = _make_device("/dev/fake-disk-test-sdb", mountpoints=["/media/BOOT", "/media/EASYROMS"])
 
     with prepared_write_target(device) as path:
-        assert path == "/dev/sdb"
+        assert path == "/dev/fake-disk-test-sdb"
 
     calls = [c.args[0] for c in mock_run.call_args_list]
     assert calls == [["umount", "/media/BOOT"], ["umount", "/media/EASYROMS"]]
@@ -69,10 +69,10 @@ def test_linux_unmounts_each_mountpoint_and_yields_device_path(mock_system, mock
 @patch("r36s_studio.imaging.write_target.subprocess.run")
 @patch("r36s_studio.imaging.write_target.platform.system", return_value="Linux")
 def test_linux_with_no_mountpoints_does_not_call_umount(mock_system, mock_run):
-    device = _make_device("/dev/sdb", mountpoints=[])
+    device = _make_device("/dev/fake-disk-test-sdb", mountpoints=[])
 
     with prepared_write_target(device) as path:
-        assert path == "/dev/sdb"
+        assert path == "/dev/fake-disk-test-sdb"
 
     mock_run.assert_not_called()
 
@@ -90,14 +90,14 @@ def test_windows_locks_dismounts_then_unlocks_and_refreshes(
     # importé, `r36s_studio.imaging.winlock` est mis en cache comme
     # attribut du package, ce qui rendrait un remplacement via
     # `sys.modules` peu fiable.
-    device = _make_device(r"\\.\PhysicalDrive2", mountpoints=["D:\\"])
+    device = _make_device(r"\\.\PhysicalDrive9902", mountpoints=["D:\\"])
 
     with prepared_write_target(device) as path:
-        assert path == r"\\.\PhysicalDrive2"
+        assert path == r"\\.\PhysicalDrive9902"
 
     mock_lock.assert_called_once_with(["D:\\"])
     mock_unlock.assert_called_once_with([111])
-    mock_refresh.assert_called_once_with(r"\\.\PhysicalDrive2")
+    mock_refresh.assert_called_once_with(r"\\.\PhysicalDrive9902")
 
 
 @patch("r36s_studio.imaging.winlock.refresh_disk_properties")
@@ -105,7 +105,7 @@ def test_windows_locks_dismounts_then_unlocks_and_refreshes(
 @patch("r36s_studio.imaging.winlock.lock_and_dismount_volumes", return_value=[111])
 @patch("r36s_studio.imaging.write_target.platform.system", return_value="Windows")
 def test_windows_unlocks_even_if_write_raises(mock_system, mock_lock, mock_unlock, mock_refresh):
-    device = _make_device(r"\\.\PhysicalDrive2", mountpoints=["D:\\"])
+    device = _make_device(r"\\.\PhysicalDrive9902", mountpoints=["D:\\"])
 
     try:
         with prepared_write_target(device):

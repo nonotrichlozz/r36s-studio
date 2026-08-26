@@ -1,0 +1,8 @@
+script_fonctionnel_save.txt
+*.img
+*.img.*
+config.json
+.env
+__pycache__/
+build/
+dist/

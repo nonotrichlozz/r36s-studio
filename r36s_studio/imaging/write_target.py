@@ -24,14 +24,18 @@ def prepared_write_target(device: Device) -> Iterator[str]:
 
     if system == "Darwin":
         # Sans démontage préalable, macOS verrouille l'accès brut à
-        # /dev/rdiskN tant qu'une partition est montée.
-        subprocess.run(["diskutil", "unmountDisk", device.path], check=True)
+        # /dev/rdiskN tant qu'une partition est montée. Succès jugé
+        # uniquement sur le code de retour (`check=True`) : `diskutil`
+        # écrit parfois son message de succès sur stderr, jamais un signe
+        # d'échec en soi. `capture_output=True` empêche ce message de se
+        # mélanger à la sortie du worker (voir `source.py`, même correctif).
+        subprocess.run(["diskutil", "unmountDisk", device.path], check=True, capture_output=True)
         yield raw_read_path(device.path)
         return
 
     if system == "Linux":
         for mountpoint in device.mountpoints:
-            subprocess.run(["umount", mountpoint], check=False)
+            subprocess.run(["umount", mountpoint], check=False, capture_output=True)
         yield device.path
         return
 

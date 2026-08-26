@@ -1,12 +1,77 @@
 """Tests du dispatch par OS de l'élévation (gui/elevate.py). `subprocess`
 et les appels `ctypes.WinDLL` sont mockés — aucune élévation réelle n'est
-demandée à l'utilisateur, sur aucun OS."""
+demandée à l'utilisateur, sur aucun OS.
+
+Couvre aussi le bug corrigé : `osascript: No module named r36s_studio`,
+causé par `-m r36s_studio` dépendant du répertoire de travail dans lequel
+`osascript`/`pkexec`/`sudo` lancent la commande (pas forcément celui du
+projet)."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, mock_open, patch
 
 from r36s_studio.gui import elevate
+
+
+# --- _worker_command : indépendance du répertoire de travail ---------------
+
+
+def test_worker_command_uses_absolute_interpreter_path():
+    command = elevate._worker_command(["list"])
+    assert os.path.isabs(command[0])
+    assert command[0] == sys.executable
+
+
+def test_worker_command_embeds_absolute_project_root_in_dev_mode():
+    command = elevate._worker_command(["list"])
+    assert command[1] == "-c"
+    bootstrap = command[2]
+    root = str(elevate._project_root())
+    assert os.path.isabs(root)
+    assert repr(root) in bootstrap  # sys.path.insert(0, '<root absolu>')
+    assert command[3:] == ["list"]
+
+
+def test_worker_command_is_independent_of_current_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)  # aucun rapport avec le projet
+    command = elevate._worker_command(["backup", "--device", "/dev/disk3"])
+    root = str(elevate._project_root())
+    assert repr(root) in command[2]
+    assert root != str(tmp_path)
+
+
+def test_worker_command_actually_resolves_module_from_unrelated_cwd(tmp_path):
+    """Reproduit le bug tel quel : execute la commande construite depuis un
+    répertoire de travail qui ne contient pas le projet, en vrai
+    sous-processus (pas de mock) — la régression `No module named
+    r36s_studio` ne peut être qu'ici, à ce niveau."""
+    command = elevate._worker_command(["list"])
+
+    result = subprocess.run(command, cwd=str(tmp_path), capture_output=True, text=True, timeout=30)
+
+    assert "No module named" not in result.stderr
+    assert result.returncode == 0
+
+
+def test_worker_command_when_frozen_skips_module_bootstrap(monkeypatch):
+    """Une fois packagé PyInstaller, `sys.executable` EST le binaire — pas
+    un interpréteur `python3` générique sur lequel `-c`/`-m` a un sens."""
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    command = elevate._worker_command(["backup", "--device", "/dev/disk3", "--worker"])
+
+    assert command == [sys.executable, "backup", "--device", "/dev/disk3", "--worker"]
+    assert "-c" not in command
+    assert "-m" not in command
+
+
+# --- macOS -------------------------------------------------------------
 
 
 @patch("r36s_studio.gui.elevate.subprocess.Popen")
@@ -21,10 +86,54 @@ def test_macos_uses_osascript_with_administrator_privileges(mock_system, mock_po
     assert call_args[1] == "-e"
     assert "with administrator privileges" in call_args[2]
     assert "do shell script" in call_args[2]
-    # La commande complète (python -m r36s_studio ...) doit être encodée
-    # dans le script, correctement échappée.
+    # La commande complète (interpréteur, bootstrap, arguments) doit être
+    # encodée dans le script, correctement échappée.
     assert "r36s_studio" in call_args[2]
     assert "--progress-file" in call_args[2]
+    assert sys.executable in call_args[2]
+
+
+@patch("r36s_studio.gui.elevate.subprocess.Popen")
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+def test_macos_escapes_double_quotes_for_applescript(mock_system, mock_popen):
+    """Un argument contenant un guillemet double (chemin de projet
+    localisé avec apostrophe, ex. "Bureau de l'utilisateur" une fois passé
+    par shlex.quote) ne doit jamais refermer prématurément la chaîne
+    AppleScript `do shell script "..."`."""
+    elevate.launch_elevated_worker(['--output', 'a"b.img'])
+
+    applescript = mock_popen.call_args.args[0][2]
+    # La partie entre "do shell script \"" et "\" with administrator..."
+    # doit être exempte de guillemet double non échappé.
+    quoted_region = applescript.split('do shell script "', 1)[1].rsplit(
+        '" with administrator privileges', 1
+    )[0]
+    assert '\\"' in quoted_region  # le guillemet a bien été échappé
+    # Aucun guillemet non précédé d'un antislash ne subsiste.
+    assert re.search(r'(?<!\\)"', quoted_region) is None
+
+
+@patch("r36s_studio.gui.elevate.subprocess.Popen")
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+def test_macos_without_stderr_log_does_not_redirect(mock_system, mock_popen):
+    elevate.launch_elevated_worker(["backup"])
+    assert mock_popen.call_args.kwargs.get("stderr") is None
+
+
+@patch("r36s_studio.gui.elevate.open", new_callable=mock_open)
+@patch("r36s_studio.gui.elevate.subprocess.Popen")
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+def test_macos_stderr_log_is_opened_and_passed_to_popen(mock_system, mock_popen, mock_file_open):
+    log_path = Path("/tmp/r36s_studio_elevation.log")
+
+    elevate.launch_elevated_worker(["backup"], stderr_log=log_path)
+
+    mock_file_open.assert_called_once_with(log_path, "wb")
+    assert mock_popen.call_args.kwargs["stderr"] is mock_file_open.return_value
+    mock_file_open.return_value.close.assert_called_once()  # copie du parent refermée
+
+
+# --- Linux ---------------------------------------------------------------
 
 
 @patch("r36s_studio.gui.elevate.shutil.which", return_value="/usr/bin/pkexec")
@@ -37,8 +146,10 @@ def test_linux_uses_pkexec_when_available(mock_system, mock_popen, mock_which):
 
     call_args = mock_popen.call_args.args[0]
     assert call_args[0] == "/usr/bin/pkexec"
-    assert "r36s_studio" in call_args
-    assert "flash" in call_args
+    assert call_args[1] == sys.executable
+    assert call_args[2] == "-c"
+    assert "r36s_studio" in call_args[3]
+    assert call_args[4:] == ["flash", "--image", "x.img", "--device", "/dev/sdb", "--worker"]
 
 
 @patch("r36s_studio.gui.elevate.shutil.which", return_value=None)
@@ -49,6 +160,81 @@ def test_linux_falls_back_to_sudo_without_pkexec(mock_system, mock_popen, mock_w
 
     call_args = mock_popen.call_args.args[0]
     assert call_args[0] == "sudo"
+
+
+@patch("r36s_studio.gui.elevate.open", new_callable=mock_open)
+@patch("r36s_studio.gui.elevate.shutil.which", return_value="/usr/bin/pkexec")
+@patch("r36s_studio.gui.elevate.subprocess.Popen")
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Linux")
+def test_linux_stderr_log_is_opened_and_passed_to_popen(mock_system, mock_popen, mock_which, mock_file_open):
+    log_path = Path("/tmp/r36s_studio_elevation.log")
+
+    elevate.launch_elevated_worker(["backup"], stderr_log=log_path)
+
+    mock_file_open.assert_called_once_with(log_path, "wb")
+    assert mock_popen.call_args.kwargs["stderr"] is mock_file_open.return_value
+
+
+# --- propagation du code de retour : pas de maillon intermédiaire ---------
+
+
+def test_linux_exit_code_propagates_through_pkexec_unaltered(tmp_path):
+    """`pkexec` (et `sudo`) doivent se contenter de relayer tel quel le
+    code de sortie du worker — jamais un maillon intermédiaire qui le
+    réécrirait ou l'avalerait. Vérifié ici en sous-processus réel (aucun
+    mock de `subprocess.Popen`), avec un faux `pkexec` qui se contente
+    d'`exec`er ce qu'on lui donne, comme le vrai pkexec le fait pour la
+    commande qu'il élève."""
+    fake_pkexec = tmp_path / "pkexec"
+    fake_pkexec.write_text('#!/bin/sh\nexec "$@"\n')
+    fake_pkexec.chmod(0o755)
+
+    # Code de sortie distinctif : ni 0 (succès), ni 1 (le générique que
+    # cmd_backup/cmd_flash renvoient sur erreur) -- pour être sûr qu'il ne
+    # s'agit pas d'une coïncidence si le test passe.
+    marker_command = [sys.executable, "-c", "import sys; sys.exit(42)"]
+
+    with patch("r36s_studio.gui.elevate.shutil.which", return_value=str(fake_pkexec)), patch(
+        "r36s_studio.gui.elevate.platform.system", return_value="Linux"
+    ), patch("r36s_studio.gui.elevate._worker_command", return_value=marker_command):
+        process = elevate.launch_elevated_worker(["backup"])
+
+    process.wait(timeout=10)
+
+    assert process.returncode == 42
+
+
+def test_macos_do_shell_script_reports_real_stderr_not_incidental_stdout(tmp_path):
+    """Reproduit le bug tel quel via `osascript` réel (mais SANS `with
+    administrator privileges` : aucun mot de passe demandé, `do shell
+    script` a le même comportement de choix du texte d'erreur avec ou sans
+    élévation).
+
+    Simule le worker : imprime un message anodin de succès sur stdout
+    (comme `diskutil unmountDisk`, non capturé avant le correctif),
+    imprime la vraie erreur sur stderr (comme `protocol.emit_error` depuis
+    le correctif), puis sort en échec. Le message d'erreur qu'AppleScript
+    construit doit refléter la vraie erreur, jamais le message anodin."""
+    fake_worker = tmp_path / "fake_worker.py"
+    fake_worker.write_text(
+        "import sys\n"
+        "print('Unmount of all volumes on disk3 was successful')\n"
+        "print('[IO_ERROR] Permission denied: /dev/rdisk3', file=sys.stderr)\n"
+        "sys.exit(1)\n"
+    )
+    command = [sys.executable, str(fake_worker)]
+    applescript = elevate._build_applescript(command, with_admin_privileges=False)
+
+    result = subprocess.run(
+        ["osascript", "-e", applescript], capture_output=True, text=True, timeout=10
+    )
+
+    assert result.returncode != 0
+    assert "Permission denied: /dev/rdisk3" in result.stderr
+    assert "was successful" not in result.stderr
+
+
+# --- OS non supporté ---------------------------------------------------
 
 
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Plan9")

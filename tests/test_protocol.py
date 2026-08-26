@@ -64,3 +64,23 @@ def test_emit_error_and_emit_done_shapes():
         {"type": "error", "code": "IO_ERROR", "msg": "boom"},
         {"type": "done", "ok": False},
     ]
+
+
+def test_emit_error_also_writes_to_real_stderr_even_when_redirected(capsys):
+    """Même quand `configure()` redirige les événements JSON vers le
+    fichier de progression (mode worker élevé), l'erreur réelle doit aussi
+    atteindre le vrai stderr du processus : c'est ce texte qu'`osascript`
+    (do shell script) et `pkexec`/`sudo` remontent en cas d'échec -- sans
+    ça, seul un message accessoire resté sur un flux surveillé (ex.
+    diskutil) risque d'être pris pour l'erreur."""
+    buffer = io.StringIO()
+    protocol.configure(buffer)  # simule --progress-file actif
+
+    protocol.emit_error("IO_ERROR", "Permission denied: /dev/rdisk3")
+
+    err = capsys.readouterr().err
+    assert "IO_ERROR" in err
+    assert "Permission denied: /dev/rdisk3" in err
+    # Le JSON, lui, va bien dans le fichier de progression, pas sur stderr.
+    assert "IO_ERROR" in buffer.getvalue()
+    assert '"IO_ERROR"' not in err

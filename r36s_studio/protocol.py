@@ -37,6 +37,15 @@ def emit_log(msg: str, level: str = "info") -> None:
 
 def emit_error(code: str, msg: str) -> None:
     emit({"type": "error", "code": code, "msg": msg})
+    # Toujours aussi sur le vrai stderr du processus, même quand `emit()`
+    # est redirigé vers le fichier de progression (`--progress-file`) : si
+    # le worker termine en erreur, c'est ce texte que `do shell script`
+    # (macOS) construit comme message d'erreur, et ce que `pkexec`/`sudo`
+    # (Linux) laissent passer tels quels. Sans ça, une commande annexe
+    # (`diskutil unmountDisk`, par exemple) ayant écrit un message anodin
+    # sur un flux resté inspecté peut se retrouver prise pour l'erreur —
+    # c'est bien l'erreur réelle du worker qui doit apparaître.
+    print(f"[{code}] {msg}", file=sys.stderr)
 
 
 def emit_done(ok: bool) -> None:

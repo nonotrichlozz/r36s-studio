@@ -85,6 +85,23 @@ testable en isolation, sans interface.
 | macOS | `osascript -e 'do shell script "…" with administrator privileges'` |
 | Linux | `pkexec` (fallback `sudo` en terminal si absent) |
 
+> ⚠️ **Limitation macOS confirmée par test.** `osascript … with administrator
+> privileges` obtient bien les droits root pour le worker, mais **ne peut pas
+> accéder à `/dev/rdiskN`** — même avec le Terminal autorisé en Accès complet au
+> disque (Réglages Système → Confidentialité et sécurité). TCC (Transparency,
+> Consent and Control) filtre au-dessus des droits Unix classiques, et le
+> processus lancé par `osascript` n'hérite d'aucune identité TCC propre : il n'y
+> a rien à autoriser tant qu'il n'est pas packagé comme application.
+>
+> **Décision :** cette limitation ne sera résolue qu'en phase 7, quand l'appli
+> sera empaquetée (PyInstaller) — un binaire packagé a sa propre identité TCC et
+> pourra être ajouté à la liste Accès complet au disque. Elle ne bloque pas les
+> phases 5 et 6. En attendant, la GUI doit détecter cet échec spécifique et
+> afficher un message explicite invitant à utiliser la ligne de commande avec
+> `sudo` (depuis un Terminal autorisé en Accès complet au disque) plutôt qu'un
+> message d'erreur générique. Linux (`pkexec`) et Windows (UAC) ne sont pas
+> concernés par cette limitation.
+
 ---
 
 ## 4. Modules

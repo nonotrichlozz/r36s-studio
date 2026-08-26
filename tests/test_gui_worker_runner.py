@@ -1,14 +1,17 @@
 """Tests de WorkerRunner (gui/worker_runner.py) : traduction du fichier de
 progression JSON Lines en signaux Qt, annulation coopérative, détection
-d'un worker qui s'arrête sans émettre "done". `elevate.launch_elevated_worker`
-est mocké — aucune élévation réelle n'est demandée."""
+d'un worker qui s'arrête sans émettre "done" (avec remontée du contenu du
+journal d'élévation). `elevate.launch_elevated_worker` est mocké — aucune
+élévation réelle n'est demandée. `logs.elevation_log_path` est aussi mocké
+sur un chemin `tmp_path` : sans ça, chaque test créerait pour de vrai
+`~/.config/r36s-studio/logs/` sur la machine qui exécute la suite."""
 
 from __future__ import annotations
 
 import json
 from unittest.mock import MagicMock, patch
 
-from r36s_studio.gui.worker_runner import WorkerRunner
+from r36s_studio.gui.worker_runner import MACOS_TCC_BLOCKED, WorkerRunner
 
 
 def _fake_process(poll_sequence):
@@ -19,8 +22,10 @@ def _fake_process(poll_sequence):
     return process
 
 
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-def test_start_builds_argv_with_worker_progress_and_cancel_files(mock_launch, qapp):
+def test_start_builds_argv_with_worker_progress_and_cancel_files(mock_launch, mock_log_path, tmp_path, qapp):
+    mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([None])
     runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
 
@@ -34,8 +39,24 @@ def test_start_builds_argv_with_worker_progress_and_cancel_files(mock_launch, qa
     runner._stop()
 
 
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-def test_dispatches_progress_log_error_done_events(mock_launch, qapp):
+def test_start_passes_elevation_log_path_to_launch(mock_launch, mock_log_path, tmp_path, qapp):
+    log_path = tmp_path / "elevation.log"
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([None])
+    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+
+    runner.start()
+
+    assert mock_launch.call_args.kwargs["stderr_log"] == log_path
+    runner._stop()
+
+
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_dispatches_progress_log_error_done_events(mock_launch, mock_log_path, tmp_path, qapp):
+    mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([None] * 10)
     runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
     runner.start()
@@ -67,12 +88,14 @@ def test_dispatches_progress_log_error_done_events(mock_launch, qapp):
     assert finished_events == [False]
 
 
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-def test_cancel_file_does_not_exist_until_cancel_is_called(mock_launch, qapp):
+def test_cancel_file_does_not_exist_until_cancel_is_called(mock_launch, mock_log_path, tmp_path, qapp):
     """Le fichier d'annulation ne doit PAS exister dès `start()` : le
     worker le détecte via `os.path.exists()` (voir `_make_should_cancel`
     dans `__main__.py`) -- s'il existait déjà, l'opération s'annulerait
     immédiatement."""
+    mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([None])
     runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
     runner.start()
@@ -85,10 +108,12 @@ def test_cancel_file_does_not_exist_until_cancel_is_called(mock_launch, qapp):
     runner._stop()
 
 
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-def test_process_exit_without_done_reports_elevation_failed(mock_launch, qapp):
+def test_process_exit_without_done_reports_elevation_failed(mock_launch, mock_log_path, tmp_path, qapp):
     # Le process (osascript/pkexec) se termine (poll() != None) sans qu'un
     # événement "done" n'ait été écrit -- élévation refusée par exemple.
+    mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([1])
     runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
     runner.start()
@@ -104,8 +129,54 @@ def test_process_exit_without_done_reports_elevation_failed(mock_launch, qapp):
     assert finished_events == [False]
 
 
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-def test_process_exit_with_done_already_emitted_does_not_double_report(mock_launch, qapp):
+def test_process_exit_without_done_surfaces_elevation_log_content(mock_launch, mock_log_path, tmp_path, qapp):
+    """Le bug corrigé : `osascript: No module named r36s_studio` restait
+    invisible derrière un message générique. Le contenu du journal
+    d'élévation (stderr d'osascript/pkexec, écrit par elevate.py) doit
+    maintenant apparaître dans le message d'erreur."""
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text("python3: No module named r36s_studio\n", encoding="utf-8")
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events
+    code, msg = error_events[0]
+    assert code == "ELEVATION_FAILED"
+    assert "No module named r36s_studio" in msg
+
+
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_process_exit_without_done_and_empty_log_keeps_generic_message(mock_launch, mock_log_path, tmp_path, qapp):
+    mock_log_path.return_value = tmp_path / "elevation.log"  # n'existe pas
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events
+    code, msg = error_events[0]
+    assert code == "ELEVATION_FAILED"
+    assert "annulée" in msg or "échoué" in msg
+
+
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_process_exit_with_done_already_emitted_does_not_double_report(mock_launch, mock_log_path, tmp_path, qapp):
+    mock_log_path.return_value = tmp_path / "elevation.log"
     mock_launch.return_value = _fake_process([1])
     runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
     runner.start()
@@ -123,8 +194,12 @@ def test_process_exit_with_done_already_emitted_does_not_double_report(mock_laun
     assert error_events == []  # pas de faux "ELEVATION_FAILED" en plus
 
 
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-def test_stop_removes_progress_and_cancel_files(mock_launch, qapp):
+def test_stop_removes_progress_and_cancel_files_but_keeps_log(mock_launch, mock_log_path, tmp_path, qapp):
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text("une erreur quelconque", encoding="utf-8")
+    mock_log_path.return_value = log_path
     mock_launch.return_value = _fake_process([None])
     runner = WorkerRunner(["backup", "--device", "/dev/disk3", "--output", "x.img"])
     runner.start()
@@ -134,6 +209,62 @@ def test_stop_removes_progress_and_cancel_files(mock_launch, qapp):
 
     assert not progress_file.exists()
     assert not cancel_file.exists()
+    assert log_path.exists()  # conservé pour inspection post-mortem
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_macos_tcc_block_produces_explicit_sudo_hint(mock_launch, mock_log_path, mock_platform, tmp_path, qapp):
+    """Cas documenté dans CLAUDE.md §3 : `osascript … with administrator
+    privileges` obtient les droits root mais TCC bloque quand même l'accès à
+    /dev/rdiskN (aucune identité TCC pour ce processus). Ce message précis, sur
+    macOS, doit produire un code dédié plutôt que l'ELEVATION_FAILED générique,
+    et inviter à utiliser la ligne de commande avec `sudo`."""
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text(
+        "Operation not permitted: '/dev/rdisk4'\n",
+        encoding="utf-8",
+    )
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["backup", "--device", "/dev/disk4", "--output", "x.img"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events
+    code, msg = error_events[0]
+    assert code == MACOS_TCC_BLOCKED
+    assert "sudo" in msg
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Linux")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_permission_denied_on_other_os_keeps_generic_elevation_failed(
+    mock_launch, mock_log_path, mock_platform, tmp_path, qapp
+):
+    """La limitation TCC est spécifique à macOS (§3 de CLAUDE.md) : le même
+    texte sur Linux/Windows ne doit pas déclencher le message dédié."""
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text("Operation not permitted: '/dev/rdisk4'\n", encoding="utf-8")
+    mock_log_path.return_value = log_path
+    mock_launch.return_value = _fake_process([1])
+    runner = WorkerRunner(["backup", "--device", "/dev/disk4", "--output", "x.img"])
+    runner.start()
+
+    error_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+
+    runner._poll()
+
+    assert error_events
+    code, _ = error_events[0]
+    assert code == "ELEVATION_FAILED"
 
 
 def _write_events(path, events):

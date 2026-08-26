@@ -4,6 +4,7 @@ aucun périphérique réel n'est démonté, verrouillé ni ouvert."""
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import patch
 
 from r36s_studio.devices import Device
@@ -30,7 +31,27 @@ def test_macos_unmounts_disk_and_yields_rdisk(mock_system, mock_run):
     with prepared_write_target(device) as path:
         assert path == "/dev/rdisk3"
 
-    mock_run.assert_called_once_with(["diskutil", "unmountDisk", "/dev/disk3"], check=True)
+    mock_run.assert_called_once_with(
+        ["diskutil", "unmountDisk", "/dev/disk3"], check=True, capture_output=True
+    )
+
+
+@patch("r36s_studio.imaging.write_target.subprocess.run")
+@patch("r36s_studio.imaging.write_target.platform.system", return_value="Darwin")
+def test_macos_succeeds_when_diskutil_writes_success_message_to_stderr(mock_system, mock_run):
+    """Reproduit le bug : `diskutil unmountDisk` écrit parfois son message
+    de succès sur stderr avec un code de retour 0 -- ça reste un succès,
+    jamais une erreur, quel que soit le flux où le texte atterrit."""
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=["diskutil", "unmountDisk", "/dev/disk3"],
+        returncode=0,
+        stdout=b"",
+        stderr=b"Unmount of all volumes on disk3 was successful\n",
+    )
+    device = _make_device("/dev/disk3")
+
+    with prepared_write_target(device) as path:
+        assert path == "/dev/rdisk3"  # aucune exception levée
 
 
 @patch("r36s_studio.imaging.write_target.subprocess.run")

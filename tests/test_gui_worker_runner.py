@@ -215,12 +215,14 @@ def test_stop_removes_progress_and_cancel_files_but_keeps_log(mock_launch, mock_
 @patch("r36s_studio.gui.worker_runner.platform.system", return_value="Darwin")
 @patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-def test_macos_tcc_block_produces_explicit_sudo_hint(mock_launch, mock_log_path, mock_platform, tmp_path, qapp):
-    """Cas documenté dans CLAUDE.md §3 : `osascript … with administrator
-    privileges` obtient les droits root mais TCC bloque quand même l'accès à
-    /dev/rdiskN (aucune identité TCC pour ce processus). Ce message précis, sur
-    macOS, doit produire un code dédié plutôt que l'ELEVATION_FAILED générique,
-    et inviter à utiliser la ligne de commande avec `sudo`."""
+def test_macos_tcc_block_produces_explicit_full_disk_access_hint(mock_launch, mock_log_path, mock_platform, tmp_path, qapp):
+    """Cas documenté dans CLAUDE.md §3 : ce message précis, sur macOS, doit
+    produire un code dédié plutôt que l'ELEVATION_FAILED générique. Depuis la
+    résolution phase 7 (élévation directe depuis le binaire du bundle, sans
+    passer par `osascript`), ce cas signifie que l'app n'a pas -- ou plus,
+    après une reconstruction qui change sa signature -- la permission Accès
+    complet au disque : le message doit inviter à l'accorder, pas à utiliser
+    `sudo` en ligne de commande (qui ne résout plus rien pour ce cas précis)."""
     log_path = tmp_path / "elevation.log"
     log_path.write_text(
         "Operation not permitted: '/dev/rdisk9904'\n",
@@ -239,7 +241,8 @@ def test_macos_tcc_block_produces_explicit_sudo_hint(mock_launch, mock_log_path,
     assert error_events
     code, msg = error_events[0]
     assert code == MACOS_TCC_BLOCKED
-    assert "sudo" in msg
+    assert "Accès complet au disque" in msg
+    assert "sudo" not in msg
 
 
 @patch("r36s_studio.gui.worker_runner.platform.system", return_value="Linux")

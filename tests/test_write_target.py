@@ -8,7 +8,7 @@ import subprocess
 from unittest.mock import patch
 
 from r36s_studio.devices import Device
-from r36s_studio.imaging.write_target import prepared_write_target
+from r36s_studio.imaging.write_target import prepared_write_target, reunmount_before_verify
 
 
 def _make_device(path: str, mountpoints=None) -> Device:
@@ -125,3 +125,47 @@ def test_unsupported_os_raises(mock_system):
         assert False, "aurait dû lever NotImplementedError"
     except NotImplementedError:
         pass
+
+
+# --- reunmount_before_verify : bug corrigé (vérification faussée par un ---
+# remontage automatique macOS entre l'écriture et la relecture) -----------
+
+
+@patch("r36s_studio.imaging.write_target.subprocess.run")
+@patch("r36s_studio.imaging.write_target.platform.system", return_value="Darwin")
+def test_reunmount_before_verify_unmounts_again_on_macos(mock_system, mock_run):
+    device = _make_device("/dev/disk9903")
+
+    reunmount_before_verify(device)
+
+    mock_run.assert_called_once_with(
+        ["diskutil", "unmountDisk", "/dev/disk9903"], check=False, capture_output=True
+    )
+
+
+@patch("r36s_studio.imaging.write_target.subprocess.run")
+@patch("r36s_studio.imaging.write_target.platform.system", return_value="Darwin")
+def test_reunmount_before_verify_does_not_raise_when_nothing_to_unmount(mock_system, mock_run):
+    """`check=False` : contrairement à l'unmount initial (où un échec
+    signale un vrai problème), rien à démonter ici -- le remontage
+    automatique n'a peut-être pas encore eu lieu -- est un résultat normal,
+    pas une erreur."""
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=["diskutil", "unmountDisk", "/dev/disk9903"],
+        returncode=1,
+        stdout=b"",
+        stderr=b"No such disk could be unmounted\n",
+    )
+    device = _make_device("/dev/disk9903")
+
+    reunmount_before_verify(device)  # ne doit lever aucune exception
+
+
+@patch("r36s_studio.imaging.write_target.subprocess.run")
+@patch("r36s_studio.imaging.write_target.platform.system", return_value="Linux")
+def test_reunmount_before_verify_is_a_noop_outside_macos(mock_system, mock_run):
+    device = _make_device("/dev/fake-disk-test-sdb")
+
+    reunmount_before_verify(device)
+
+    mock_run.assert_not_called()

@@ -690,8 +690,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """`argv` à `None` retombe sur `sys.argv[1:]`, comme d'habitude. Dans
+    les deux cas, une liste vide (aucune sous-commande) lance la GUI plutôt
+    que de laisser `argparse` exiger une sous-commande. Nécessaire pour le
+    binaire empaqueté (§6/§7, `packaging/entry.py`) : un double-clic depuis
+    le Finder invoque l'exécutable sans le moindre argument, et une erreur
+    argparse sur stderr ne serait jamais vue (aucune console visible) —
+    l'appli semblerait juste ne rien faire. N'affecte aucun usage CLI
+    existant, qui passe toujours une sous-commande explicite."""
+    effective_argv = sys.argv[1:] if argv is None else argv
+    if not effective_argv:
+        effective_argv = ["gui"]
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
     return args.func(args)
 
 

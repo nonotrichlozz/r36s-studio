@@ -15,7 +15,7 @@ from r36s_studio.devices import Device
 
 from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
 from .image_source import estimate_total_bytes, open_image_source
-from .write_target import WINDOWS_SECTOR_SIZE, prepared_write_target
+from .write_target import WINDOWS_SECTOR_SIZE, prepared_write_target, reunmount_before_verify
 
 HASH_CHUNK_SIZE = 4 * 1024 * 1024
 
@@ -45,16 +45,30 @@ class _HashingReader:
         return self._digest.hexdigest()
 
 
-def _hash_file_range(path: str, num_bytes: int, chunk_size: int = HASH_CHUNK_SIZE) -> str:
+def _hash_stream_range(stream, num_bytes: int, chunk_size: int = HASH_CHUNK_SIZE) -> str:
+    """Relit `num_bytes` depuis `stream` pour la vérification, en le
+    repositionnant au début (`seek(0)`) plutôt que de rouvrir le chemin par
+    lequel il a été ouvert. Bug corrigé, constaté sur du vrai matériel :
+    refermer le descripteur d'écriture puis rouvrir le même chemin pour
+    relire laisse une fenêtre, même brève, pendant laquelle macOS peut
+    remonter automatiquement le disque fraîchement écrit et y écrire des
+    fichiers d'index (Spotlight, fseventsd) — invalidant les octets qu'on
+    s'apprête à relire (comparaison octet par octet confirmée : les
+    divergences tombent exactement dans la zone FAT de la première
+    partition). Garder le même descripteur ouvert entre l'écriture et
+    cette relecture (`flash_device`) referme cette fenêtre ;
+    `write_target.reunmount_before_verify` reste un filet de sécurité en
+    plus, pour le cas où une partition individuelle se monterait
+    indépendamment du périphérique brut."""
+    stream.seek(0)
     digest = hashlib.sha256()
     remaining = num_bytes
-    with open(path, "rb") as f:
-        while remaining > 0:
-            chunk = f.read(min(chunk_size, remaining))
-            if not chunk:
-                break
-            digest.update(chunk)
-            remaining -= len(chunk)
+    while remaining > 0:
+        chunk = stream.read(min(chunk_size, remaining))
+        if not chunk:
+            break
+        digest.update(chunk)
+        remaining -= len(chunk)
     return digest.hexdigest()
 
 
@@ -74,22 +88,48 @@ def flash_device(
     aucune vérification SHA-256 n'est faite sur une carte partiellement
     écrite."""
     total_hint = estimate_total_bytes(image_path)
+    if total_hint is None:
+        # Pied d'archive illisible (fichier tronqué, format non standard) :
+        # repli sur la taille du périphérique cible plutôt que de traiter la
+        # copie comme non bornée (bug corrigé : sans ce repli, la barre de
+        # progression affichait 100 % dès le premier octet écrit — voir
+        # `copy_range`, qui rapporte `done` comme `total` quand aucune borne
+        # n'est connue).
+        total_hint = device.size_bytes or None
     sector_size = WINDOWS_SECTOR_SIZE if platform.system() == "Windows" else None
 
     with prepared_write_target(device) as raw_path:
-        with open_image_source(image_path) as raw_source, open(raw_path, "r+b") as destination:
-            hashing_source = _HashingReader(raw_source)
-            written = copy_range(
-                hashing_source,
-                destination,
-                total_bytes=total_hint,
-                on_progress=on_progress,
-                block_size=block_size,
-                sector_size=sector_size,
-                should_cancel=should_cancel,
-            )
-        source_sha256 = hashing_source.hexdigest()
-        written_sha256 = _hash_file_range(raw_path, written)
+        # `destination` reste ouvert jusqu'à la fin de la vérification --
+        # voir la note sur `_hash_stream_range` : un descripteur d'écriture
+        # tenu ouvert sur le périphérique brut referme la fenêtre pendant
+        # laquelle macOS pourrait remonter automatiquement le disque entre
+        # la fin de l'écriture et la relecture. `raw_source` (l'image
+        # source), lui, n'est plus utile une fois la copie terminée.
+        with open(raw_path, "r+b") as destination:
+            with open_image_source(image_path) as raw_source:
+                hashing_source = _HashingReader(raw_source)
+                written = copy_range(
+                    hashing_source,
+                    destination,
+                    total_bytes=total_hint,
+                    on_progress=on_progress,
+                    block_size=block_size,
+                    sector_size=sector_size,
+                    should_cancel=should_cancel,
+                )
+            source_sha256 = hashing_source.hexdigest()
+            # Bug corrigé, constaté sur du vrai matériel : macOS peut
+            # remonter automatiquement les partitions fraîchement écrites
+            # (table de partitions désormais valide) et y écrire aussitôt
+            # des fichiers d'index (Spotlight, fseventsd) qui invalident la
+            # vérification -- voir `write_target.reunmount_before_verify`.
+            # Démonter une seule fois avant l'écriture
+            # (`prepared_write_target`) ne suffit pas ; garder `destination`
+            # ouvert (ci-dessus) non plus à lui seul, une partition pouvant
+            # se monter indépendamment du périphérique brut -- les deux
+            # mesures se complètent.
+            reunmount_before_verify(device)
+            written_sha256 = _hash_stream_range(destination, written)
 
     return FlashResult(
         bytes_written=written,

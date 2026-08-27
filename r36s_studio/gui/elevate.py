@@ -29,19 +29,35 @@ les trois OS, sans dépendre d'un `cd` (impossible à faire traverser
 `sys.executable` pointe alors vers CE binaire (`sys.frozen` vaut True), pas
 vers un interpréteur `python3` générique. `-m r36s_studio` ni `-c` n'ont
 alors de sens : le binaire est rappelé directement avec les arguments CLI,
-exactement comme le fait la GUI elle-même au premier lancement."""
+exactement comme le fait la GUI elle-même au premier lancement.
+
+**macOS, phase 7 : `osascript` abandonné comme méthode principale.**
+Confirmé sur du vrai matériel (voir CLAUDE.md §3) : une fois l'app
+empaquetée ajoutée à Accès complet au disque, un worker relancé
+directement depuis CE binaire (`AuthorizationExecuteWithPrivileges`,
+`MacosAuthorizedProcess` ci-dessous) hérite de cette autorisation et
+accède à `/dev/rdiskN` sans blocage TCC -- contrairement à un worker
+relancé via `osascript … with administrator privileges`, un processus
+système sans rapport avec le bundle de l'app, qui n'hérite d'aucune
+identité TCC propre. `osascript` reste le chemin utilisé en développement
+(pas de bundle, donc rien à hériter) et un repli si l'API historique
+`AuthorizationExecuteWithPrivileges` (non documentée depuis macOS 10.7)
+venait à disparaître d'une future version de macOS."""
 
 from __future__ import annotations
 
 import ctypes
+import ctypes.util
+import os
 import platform
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 from ctypes import wintypes
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 # Ces déclarations ne font qu'annoncer la forme de la structure Win32 aux
 # ctypes ; elles ne touchent aucune DLL et restent donc importables sur
@@ -177,7 +193,23 @@ def _build_applescript(command: List[str], with_admin_privileges: bool = True) -
     return f'do shell script "{escaped}"{suffix}'
 
 
-def _launch_macos(command: List[str], stderr_log: Optional[Path]) -> subprocess.Popen:
+def _launch_macos(command: List[str], stderr_log: Optional[Path]) -> object:
+    """En développement, `command[0]` est un interpréteur `python3` nu, sans
+    bundle : rien à hériter, `osascript` reste la seule option. Une fois
+    empaquetée (`sys.frozen`), `command[0]` est CE binaire -- un enfant
+    direct de celui-ci (`MacosAuthorizedProcess`) hérite de l'autorisation
+    Accès complet au disque accordée au bundle (confirmé sur du vrai
+    matériel, CLAUDE.md §3), ce qu'un enfant d'`osascript` ne peut pas.
+    `_macos_native_supported()` ne fait qu'une vérification statique (aucune
+    invite) ; si elle échoue -- API disparue d'une future version de macOS --
+    on retombe sur `osascript` plutôt que de risquer un appel qui bloquerait
+    sur une invite avant d'échouer."""
+    if getattr(sys, "frozen", False) and _macos_native_supported():
+        return MacosAuthorizedProcess(command, stderr_log)
+    return _launch_macos_osascript(command, stderr_log)
+
+
+def _launch_macos_osascript(command: List[str], stderr_log: Optional[Path]) -> subprocess.Popen:
     applescript = _build_applescript(command)
     stderr_file = _open_stderr_target(stderr_log)
     try:
@@ -185,6 +217,158 @@ def _launch_macos(command: List[str], stderr_log: Optional[Path]) -> subprocess.
     finally:
         if stderr_file is not None:
             stderr_file.close()  # dupliqué dans l'enfant par Popen ; notre copie est inutile ensuite
+
+
+_SECURITY_FRAMEWORK_PATH = "/System/Library/Frameworks/Security.framework/Security"
+_AUTHORIZATION_FLAG_DEFAULTS = 0
+AuthorizationRef = ctypes.c_void_p
+
+
+def _macos_native_supported() -> bool:
+    """Vérification statique, sans jamais déclencher d'invite mot de passe :
+    `AuthorizationExecuteWithPrivileges` existe-t-elle encore dans
+    Security.framework ? Non documentée par Apple depuis macOS 10.7 mais
+    toujours présente au moment du test qui a validé cette approche
+    (macOS 12, CLAUDE.md §3). Si elle disparaît un jour, cette vérification
+    échoue proprement ici -- jamais au milieu d'un appel réel, qui
+    bloquerait sur une invite avant de découvrir l'échec."""
+    try:
+        security = ctypes.CDLL(_SECURITY_FRAMEWORK_PATH)
+        security.AuthorizationCreate
+        security.AuthorizationExecuteWithPrivileges
+        security.AuthorizationFree
+    except (OSError, AttributeError):
+        return False
+    return True
+
+
+def _comm_pipe_fd(comm_pipe: ctypes.c_void_p) -> int:
+    """Récupère le descripteur de fichier du `FILE*` que retourne
+    `AuthorizationExecuteWithPrivileges` -- isolé dans sa propre fonction
+    pour rester substituable en test par un vrai descripteur (`os.pipe`)
+    sans avoir à simuler un `FILE*` C."""
+    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+    libc.fileno.restype = ctypes.c_int
+    libc.fileno.argtypes = [ctypes.c_void_p]
+    return libc.fileno(comm_pipe)
+
+
+def _run_authorized(tool_path: str, args: List[str], on_output: Callable[[bytes], None]) -> None:
+    """Lance `tool_path` élevé via `AuthorizationExecuteWithPrivileges`
+    (Security.framework), en repassant tout ce qu'écrit l'enfant sur sa
+    sortie combinée à `on_output` au fur et à mesure. Bloque jusqu'à la fin
+    de l'enfant (fermeture de son tube de sortie) -- à appeler depuis un
+    thread, jamais depuis le thread d'interface (voir
+    `MacosAuthorizedProcess`). Lève `OSError` si `AuthorizationCreate` ou
+    `AuthorizationExecuteWithPrivileges` échoue (mot de passe refusé ou
+    invite annulée, la plupart du temps)."""
+    security = ctypes.CDLL(_SECURITY_FRAMEWORK_PATH)
+
+    security.AuthorizationCreate.restype = ctypes.c_int
+    security.AuthorizationCreate.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.POINTER(AuthorizationRef),
+    ]
+    security.AuthorizationExecuteWithPrivileges.restype = ctypes.c_int
+    security.AuthorizationExecuteWithPrivileges.argtypes = [
+        AuthorizationRef,
+        ctypes.c_char_p,
+        ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_char_p),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    security.AuthorizationFree.restype = ctypes.c_int
+    security.AuthorizationFree.argtypes = [AuthorizationRef, ctypes.c_uint32]
+
+    auth_ref = AuthorizationRef()
+    status = security.AuthorizationCreate(None, None, _AUTHORIZATION_FLAG_DEFAULTS, ctypes.byref(auth_ref))
+    if status != 0:
+        raise OSError(f"AuthorizationCreate a échoué (OSStatus {status})")
+
+    try:
+        c_args = (ctypes.c_char_p * (len(args) + 1))()
+        for i, arg in enumerate(args):
+            c_args[i] = arg.encode()
+        c_args[len(args)] = None
+
+        comm_pipe = ctypes.c_void_p()
+        status = security.AuthorizationExecuteWithPrivileges(
+            auth_ref,
+            tool_path.encode(),
+            _AUTHORIZATION_FLAG_DEFAULTS,
+            c_args,
+            ctypes.byref(comm_pipe),
+        )
+        if status != 0:
+            raise OSError(
+                f"AuthorizationExecuteWithPrivileges a échoué (OSStatus {status}) : "
+                "invite mot de passe refusée ou annulée"
+            )
+
+        fd = _comm_pipe_fd(comm_pipe)
+        with os.fdopen(fd, "rb", closefd=True) as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                on_output(chunk)
+    finally:
+        security.AuthorizationFree(auth_ref, _AUTHORIZATION_FLAG_DEFAULTS)
+
+
+class MacosAuthorizedProcess:
+    """Worker élevé lancé directement depuis CE binaire (`command[0]` ==
+    `sys.executable`, donc `R36S Studio.app/Contents/MacOS/R36S Studio` une
+    fois empaqueté) via `AuthorizationExecuteWithPrivileges`, plutôt que via
+    `osascript`. Confirmé sur du vrai matériel (CLAUDE.md §3) : un enfant
+    direct du binaire signé du bundle hérite de son autorisation Accès
+    complet au disque -- ce qu'un enfant d'`osascript` (processus système
+    sans rapport avec le bundle) ne peut pas.
+
+    `AuthorizationExecuteWithPrivileges` est synchrone et bloque tant que
+    l'utilisateur n'a pas répondu à l'invite mot de passe -- lancé ici dans
+    un thread pour ne jamais geler la boucle d'événements Qt (contrairement
+    à `osascript` : `subprocess.Popen` y rend la main immédiatement, c'est
+    le processus `osascript` séparé qui attend l'invite).
+
+    Cette API historique n'expose aucun PID : `.poll()` détecte la fin du
+    worker par la fermeture de son tube de sortie plutôt que par un vrai
+    code de sortie -- suffisant ici, `worker_runner.py` ne teste jamais que
+    None/non-None (voir sa docstring `force_kill`). `.kill()` est donc un
+    no-op documenté, comme la limite déjà connue de `force_kill()` sur
+    macOS/Linux : sans PID, rien à tuer côté worker élevé -- `cancel()`
+    coopératif via le fichier d'annulation reste la seule voie d'arrêt
+    fiable pour ce chemin."""
+
+    def __init__(self, command: List[str], stderr_log: Optional[Path]):
+        self._stderr_log = stderr_log
+        self._exited = threading.Event()
+        self._thread = threading.Thread(target=self._run, args=(command,), daemon=True)
+        self._thread.start()
+
+    def _run(self, command: List[str]) -> None:
+        try:
+            _run_authorized(command[0], command[1:], self._on_output)
+        except Exception as exc:
+            self._on_output(f"{exc}\n".encode())
+        finally:
+            self._exited.set()
+
+    def _on_output(self, chunk: bytes) -> None:
+        if not chunk or self._stderr_log is None:
+            return
+        with open(self._stderr_log, "ab") as f:
+            f.write(chunk)
+
+    def poll(self) -> Optional[int]:
+        return 0 if self._exited.is_set() else None
+
+    def wait(self, timeout: Optional[float] = None) -> Optional[int]:
+        self._thread.join(timeout)
+        return self.poll()
+
+    def kill(self) -> None:
+        """No-op documenté : voir la docstring de la classe -- cette API ne
+        donne accès à aucun PID pour le worker élevé qu'elle a lancé."""
 
 
 def _launch_linux(command: List[str], stderr_log: Optional[Path]) -> subprocess.Popen:

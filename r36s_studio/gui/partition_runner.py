@@ -35,7 +35,10 @@ class PartitionJobRunner(QThread):
     au CLI `backup`/`flash`), pour que `main_window.py` puisse réutiliser
     `ExecuteScreen`/`ResultScreen` sans distinction."""
 
-    progress = Signal(int, int, float)  # done, total, speed
+    # "qint64", pas "int" -- voir la note équivalente dans worker_runner.py :
+    # un `int` C++ (32 bits, ~2,1 milliards max) déborde silencieusement dès
+    # qu'une carte dépasse ~2 Go.
+    progress = Signal("qint64", "qint64", float)  # done, total, speed
     error = Signal(str, str)  # code, msg
     finished_job = Signal(bool)  # ok -- nom distinct de QThread.finished
 

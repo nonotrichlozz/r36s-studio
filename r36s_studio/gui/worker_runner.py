@@ -17,23 +17,25 @@ from . import elevate, logs
 
 POLL_INTERVAL_MS = 200
 
-# Limitation confirmée par test (voir CLAUDE.md §3) : `osascript … with
-# administrator privileges` obtient les droits root pour le worker, mais TCC
-# bloque quand même l'accès à /dev/rdiskN, le processus élevé n'ayant aucune
-# identité TCC propre à autoriser en Accès complet au disque. Résolu en
-# phase 7 seulement (appli packagée = identité TCC). En attendant, ce cas
-# précis doit produire un message explicite plutôt que l'ELEVATION_FAILED
-# générique.
+# Confirmé sur du vrai matériel (CLAUDE.md §3) : une fois l'app empaquetée
+# relancée directement depuis son propre binaire (`elevate.py`,
+# `MacosAuthorizedProcess`, plutôt que via `osascript`), un enfant du binaire
+# signé du bundle hérite bien de son autorisation Accès complet au disque --
+# la limitation TCC documentée depuis la phase 4 est donc résolue, mais
+# seulement une fois cette autorisation accordée à l'app. Ce code reste donc
+# nécessaire : c'est exactement le message qu'on veut tant que l'utilisateur
+# ne l'a pas encore fait (ou après une reconstruction de l'app, qui change sa
+# signature ad hoc et invalide l'autorisation précédente -- voir l'écran
+# Aide, `screens.HelpScreen`).
 MACOS_TCC_BLOCKED = "MACOS_TCC_BLOCKED"
 _MACOS_TCC_HINT = (
     "macOS empêche l'accès à la carte SD même avec les droits administrateur : "
-    "la protection TCC (Accès complet au disque) ne peut pas être accordée à un "
-    "processus lancé de cette façon. Cette limitation sera levée quand "
-    "l'application sera empaquetée. En attendant, utilise la ligne de commande "
-    "depuis un Terminal auquel tu as accordé l'Accès complet au disque "
-    "(Réglages Système → Confidentialité et sécurité) :\n"
-    "    sudo python3 -m r36s_studio backup --device ... --output ...\n"
-    "    sudo python3 -m r36s_studio flash --image ... --device ..."
+    "R36S Studio n'a pas (ou plus) la permission Accès complet au disque. Va "
+    "dans Réglages Système → Confidentialité et sécurité → Accès complet au "
+    "disque, ajoute R36S Studio (ou retire-le puis rajoute-le s'il y figure "
+    "déjà : la signature de l'app change à chaque reconstruction, ce qui "
+    "invalide l'autorisation précédente), puis relance l'opération. Voir "
+    "l'écran Aide depuis l'accueil pour le détail de la procédure."
 )
 
 
@@ -73,7 +75,17 @@ def _is_macos_tcc_protected_folder(detail: str) -> bool:
 
 
 class WorkerRunner(QObject):
-    progress = Signal(int, int, float)  # done, total, speed
+    # Bug corrigé, constaté en conditions réelles (flash d'une carte de
+    # 32 Go) : `Signal(int, int, float)` mappe `int` sur un `int` C++ 32
+    # bits (~2,1 milliards max), largement dépassé par un compte d'octets
+    # au-delà de 2 Go. PySide6 échoue alors silencieusement à livrer le
+    # signal (`libshiboken: Overflow`, `OverflowError`), ce qui se
+    # manifestait côté GUI par un message trompeur, `AttributeError: Slot
+    # '...(int,int,double)' not found` -- comme si le slot n'existait pas,
+    # alors que le vrai problème est la conversion de l'argument avant même
+    # d'atteindre le slot. `"qint64"` (entier 64 bits, jusqu'à ~9,2 * 10^18)
+    # couvre toute taille de carte SD réaliste.
+    progress = Signal("qint64", "qint64", float)  # done, total, speed
     log = Signal(str, str)  # level, msg
     error = Signal(str, str)  # code, msg
     finished = Signal(bool)  # ok

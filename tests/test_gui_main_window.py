@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.gui.main_window import MainWindow
+from r36s_studio.gui.worker_runner import WorkerRunner
+from r36s_studio.imaging.copy import ProgressEvent
 
 
 def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000, display="Carte SD factice") -> Device:
@@ -138,6 +140,171 @@ def test_flash_flow_requires_confirmation_before_execute(mock_list, mock_filter,
 
     argv = runner_class.instances[0].argv
     assert argv == ["flash", "--image", "/tmp/sd.img", "--device", "/dev/fake-disk-test-3"]
+
+
+# --- câblage réel signal/slot, pas un WorkerRunner mocké --------------------
+#
+# Toutes les autres traversées du flash/backup passent par `_mock_runner_class`
+# (un `MagicMock`) : `.progress` y est lui-même un `MagicMock`, donc
+# `.connect(...)` ne fait qu'enregistrer un appel -- aucun signal Qt réel
+# n'est jamais émis. Une régression du câblage (mauvais nom de méthode,
+# signature de slot qui ne correspond plus au signal, connexion oubliée)
+# passerait entièrement inaperçue dans ces tests. Celui-ci utilise un vrai
+# `WorkerRunner` (vrai `QObject`, vrai `Signal("qint64", "qint64", float)`)
+# et vérifie que l'écran Exécution de `MainWindow` se met à jour quand ce
+# signal est réellement émis -- seule `elevate.launch_elevated_worker` est
+# mockée, pour ne lancer aucune élévation ni sous-processus réel.
+
+
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_flash_progress_reaches_execute_screen_through_real_worker_runner(
+    mock_list, mock_filter, mock_detect, mock_launch, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    mock_launch.return_value = MagicMock(poll=MagicMock(return_value=None))
+
+    window = MainWindow()
+    window._home.flash_selected.emit()
+    window._device_screen._list.setCurrentRow(0)
+    window._device_screen._emit_chosen()
+
+    with patch("r36s_studio.gui.screens.QFileDialog.getOpenFileName", return_value=("/tmp/sd.img", "")):
+        window._file_screen._browse()
+    window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+
+    window._confirm_screen._checkbox.setChecked(True)
+    window._confirm_screen.confirmed.emit()
+
+    assert window._stack.currentWidget() is window._execute_screen
+    assert isinstance(window._runner, WorkerRunner)  # pas un mock : le vrai câblage Qt est en jeu
+
+    window._runner.progress.emit(50, 200, 12_000_000.0)
+
+    assert window._execute_screen._bar.value() == 25  # 50/200 = 25 %
+    assert "12.0" in window._execute_screen._speed_label.text()
+
+
+# --- bug corrigé : débordement d'entier 32 bits sur les tailles en octets --
+#
+# Constaté en conditions réelles (flash d'une carte de 32 Go) : `Signal(int,
+# int, float)` mappe `int` sur un entier C++ 32 bits (~2,1 milliards max),
+# dépassé par n'importe quel compte d'octets au-delà de 2 Go. PySide6 ne
+# lève alors aucune exception Python -- il échoue silencieusement à livrer
+# le signal (`libshiboken: Overflow`, `OverflowError` côté C++), ce qui se
+# manifestait côté GUI par le message trompeur `AttributeError: Slot
+# '...(int,int,double)' not found`, comme si le slot n'existait pas. Les
+# tests précédents (50, 200 octets) ne pouvaient pas l'attraper : trop
+# petits pour dépasser 2^31. Corrigé en déclarant `Signal("qint64",
+# "qint64", float)` (`worker_runner.py`/`partition_runner.py`) et le
+# `@Slot` assorti sur `MainWindow._on_progress`.
+
+
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_flash_progress_survives_byte_counts_beyond_32_bit_int(
+    mock_list, mock_filter, mock_detect, mock_launch, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    mock_launch.return_value = MagicMock(poll=MagicMock(return_value=None))
+
+    window = MainWindow()
+    window._home.flash_selected.emit()
+    window._device_screen._list.setCurrentRow(0)
+    window._device_screen._emit_chosen()
+
+    with patch("r36s_studio.gui.screens.QFileDialog.getOpenFileName", return_value=("/tmp/sd.img", "")):
+        window._file_screen._browse()
+    window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+
+    window._confirm_screen._checkbox.setChecked(True)
+    window._confirm_screen.confirmed.emit()
+
+    total_32gb = 34_359_738_368  # 32 Go, très au-delà de 2**31 - 1 (~2,1 milliards)
+    assert total_32gb > 2**31
+
+    window._runner.progress.emit(total_32gb // 2, total_32gb, 12_000_000.0)
+
+    assert window._execute_screen._bar.value() == 50
+    assert window._last_progress_bytes == total_32gb // 2
+
+
+@patch("r36s_studio.gui.partition_runner.copy_games")
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_copy_games_progress_reaches_execute_screen_through_real_cross_thread_signal(
+    mock_list, mock_filter, mock_detect, mock_copy_games, qapp
+):
+    """`PartitionJobRunner` est un vrai `QThread` (contrairement à
+    `WorkerRunner`, qui reste sur le thread Qt principal via `QTimer`) :
+    son signal `progress` traverse donc réellement une frontière de
+    thread jusqu'à `MainWindow._on_progress` -- la connexion devient une
+    file d'attente Qt (`Qt.QueuedConnection` automatique), le seul endroit
+    de ce projet où une régression de câblage se manifesterait
+    différemment qu'en même thread. À couvrir spécifiquement."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    mock_copy_games.side_effect = lambda device, source_path, on_progress=None, should_cancel=None: on_progress(
+        ProgressEvent(done=30, total=100, speed=2_000_000.0)
+    )
+
+    window = MainWindow()
+    window._mode = "copy_games"
+    window._device = device
+    window._file_path = "/tmp/games"
+    window._start_worker()
+
+    assert window._runner.wait(2000)  # laisse le vrai QThread se terminer
+    for _ in range(20):
+        qapp.processEvents()  # livre les signaux mis en file d'attente entre threads
+
+    assert window._execute_screen._bar.value() == 30
+
+
+@patch("r36s_studio.gui.partition_runner.extract_easyroms")
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_extract_easyroms_progress_survives_byte_counts_beyond_32_bit_int_cross_thread(
+    mock_list, mock_filter, mock_detect, mock_extract_easyroms, qapp
+):
+    """Même bug que `test_flash_progress_survives_byte_counts_beyond_32_bit_int`,
+    mais sur le seul chemin réellement inter-thread du projet
+    (`PartitionJobRunner`, un vrai `QThread`) -- une EASYROMS de plusieurs
+    dizaines de Go dépasse tout aussi facilement 2**31 octets."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    total_32gb = 34_359_738_368  # 32 Go, très au-delà de 2**31 - 1 (~2,1 milliards)
+    assert total_32gb > 2**31
+    mock_extract_easyroms.side_effect = (
+        lambda device, source_path, on_progress=None, should_cancel=None: on_progress(
+            ProgressEvent(done=total_32gb // 2, total=total_32gb, speed=2_000_000.0)
+        )
+    )
+
+    window = MainWindow()
+    window._mode = "extract_easyroms"
+    window._device = device
+    window._file_path = "/tmp/EASYROMS_archive"
+    window._start_worker()
+
+    assert window._runner.wait(2000)
+    for _ in range(20):
+        qapp.processEvents()
+
+    assert window._execute_screen._bar.value() == 50
+    assert window._last_progress_bytes == total_32gb // 2
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
@@ -293,6 +460,56 @@ def test_home_refresh_requested_re_runs_detection(mock_list, mock_filter, mock_d
     window._home.refresh_requested.emit()
 
     mock_detect.assert_called_once_with(device)
+
+
+# --- Écran Aide (macOS uniquement, §3) -------------------------------------
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+@patch("r36s_studio.gui.screens.platform.system", return_value="Darwin")
+def test_home_help_requested_shows_help_screen(mock_platform, mock_list, mock_filter, mock_detect, qapp):
+    mock_list.return_value = []
+    mock_filter.return_value = []
+    mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
+    window = MainWindow()
+
+    window._home.help_requested.emit()
+
+    assert window._stack.currentWidget() is window._help_screen
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_help_screen_back_returns_home(mock_list, mock_filter, mock_detect, qapp):
+    mock_list.return_value = []
+    mock_filter.return_value = []
+    mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
+    window = MainWindow()
+    window._show(window._help_screen)
+
+    window._help_screen.back_requested.emit()
+
+    assert window._stack.currentWidget() is window._home
+
+
+@patch("r36s_studio.gui.main_window.subprocess.run")
+@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_help_screen_open_settings_opens_full_disk_access_pane(mock_list, mock_filter, mock_detect, mock_run, qapp):
+    mock_list.return_value = []
+    mock_filter.return_value = []
+    mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
+    window = MainWindow()
+
+    window._help_screen.open_settings_requested.emit()
+
+    mock_run.assert_called_once_with(
+        ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"], check=True
+    )
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status")

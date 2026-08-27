@@ -12,6 +12,7 @@ from r36s_studio.gui.screens import (
     DeviceScreen,
     ExecuteScreen,
     FileScreen,
+    HelpScreen,
     HomeScreen,
     ResultScreen,
     _format_duration,
@@ -42,6 +43,18 @@ def test_home_screen_backup_tile_emits_signal(qapp):
     screen.backup_selected.emit()
 
     assert received == [True]
+
+
+def test_home_screen_shows_version_label(qapp):
+    """À la demande explicite d'un utilisateur ayant perdu le fil entre
+    plusieurs reconstructions locales de l'app -- sans repère visible,
+    impossible de savoir si l'app en cours d'exécution contient les
+    derniers correctifs."""
+    from r36s_studio import __version__
+
+    screen = HomeScreen()
+
+    assert f"v{__version__}" in screen._version_label.text()
 
 
 def test_home_screen_all_six_steps_emit_their_signal(qapp):
@@ -134,6 +147,51 @@ def test_home_screen_refresh_button_emits_signal(qapp):
     screen.refresh_requested.connect(lambda: received.append(True))
 
     screen._refresh_button.click()
+
+
+@patch("r36s_studio.gui.screens.platform.system", return_value="Darwin")
+def test_home_screen_shows_help_button_on_macos(mock_system, qapp):
+    """Seul macOS a besoin de l'autorisation Accès complet au disque (§3) --
+    le bouton Aide ne doit exister que là, pas ailleurs (§5 : ne pas dérouter
+    les utilisateurs Windows/Linux avec une procédure qui ne les concerne
+    pas)."""
+    screen = HomeScreen()
+    received = []
+    screen.help_requested.connect(lambda: received.append(True))
+
+    screen._help_button.click()
+
+    assert received == [True]
+
+
+@patch("r36s_studio.gui.screens.platform.system", return_value="Windows")
+def test_home_screen_hides_help_button_outside_macos(mock_system, qapp):
+    screen = HomeScreen()
+
+    assert not hasattr(screen, "_help_button")
+
+
+# --- HelpScreen ----------------------------------------------------------
+
+
+def test_help_screen_back_button_emits_signal(qapp):
+    screen = HelpScreen()
+    received = []
+    screen.back_requested.connect(lambda: received.append(True))
+
+    screen._back_button.click()
+
+    assert received == [True]
+
+
+def test_help_screen_open_settings_button_emits_signal(qapp):
+    screen = HelpScreen()
+    received = []
+    screen.open_settings_requested.connect(lambda: received.append(True))
+
+    screen._open_settings_button.click()
+
+    assert received == [True]
 
     assert received == [True]
 

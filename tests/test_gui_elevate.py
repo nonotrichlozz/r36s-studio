@@ -139,6 +139,162 @@ def test_macos_stderr_log_is_opened_and_passed_to_popen(mock_system, mock_popen,
     mock_file_open.return_value.close.assert_called_once()  # copie du parent refermée
 
 
+# --- macOS empaquetée : AuthorizationExecuteWithPrivileges, pas osascript ---
+#
+# Confirmé sur du vrai matériel (CLAUDE.md §3) : une fois l'app empaquetée
+# autorisée en Accès complet au disque, un enfant direct du binaire du
+# bundle (lancé via AuthorizationExecuteWithPrivileges) hérite de cette
+# autorisation, contrairement à un enfant d'osascript. `sys.frozen` bascule
+# donc `_launch_macos` sur `MacosAuthorizedProcess` plutôt qu'osascript.
+
+
+@patch("r36s_studio.gui.elevate.subprocess.Popen")
+@patch("r36s_studio.gui.elevate._macos_native_supported", return_value=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+def test_macos_frozen_and_native_supported_skips_osascript(mock_system, mock_supported, mock_popen, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    process = elevate.launch_elevated_worker(["backup"])
+
+    assert isinstance(process, elevate.MacosAuthorizedProcess)
+    mock_popen.assert_not_called()
+    process._thread.join(timeout=5)  # laisse le thread d'arrière-plan se terminer avant la fin du test
+
+
+@patch("r36s_studio.gui.elevate.subprocess.Popen")
+@patch("r36s_studio.gui.elevate._macos_native_supported", return_value=False)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+def test_macos_frozen_but_native_unsupported_falls_back_to_osascript(mock_system, mock_supported, mock_popen, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    elevate.launch_elevated_worker(["backup"])
+
+    call_args = mock_popen.call_args.args[0]
+    assert call_args[0] == "osascript"
+
+
+@patch("r36s_studio.gui.elevate.subprocess.Popen")
+@patch("r36s_studio.gui.elevate._macos_native_supported", return_value=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+def test_macos_dev_mode_never_uses_direct_launch(mock_system, mock_supported, mock_popen, monkeypatch):
+    """En développement (`sys.frozen` absent), `command[0]` est un
+    interpréteur `python3` nu sans identité de bundle -- rien à hériter, la
+    branche `MacosAuthorizedProcess` ne doit jamais être prise même si
+    l'API est disponible."""
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    elevate.launch_elevated_worker(["backup"])
+
+    call_args = mock_popen.call_args.args[0]
+    assert call_args[0] == "osascript"
+
+
+def test_macos_native_supported_true_when_symbols_resolve():
+    with patch("r36s_studio.gui.elevate.ctypes.CDLL", return_value=MagicMock()):
+        assert elevate._macos_native_supported() is True
+
+
+def test_macos_native_supported_false_when_framework_missing():
+    with patch("r36s_studio.gui.elevate.ctypes.CDLL", side_effect=OSError("introuvable")):
+        assert elevate._macos_native_supported() is False
+
+
+def _fake_security_cdll(*, create_status=0, execute_status=0, comm_pipe_value=1):
+    """Mock de `ctypes.CDLL(Security.framework)` : `AuthorizationCreate` et
+    `AuthorizationExecuteWithPrivileges` renvoient les OSStatus donnés ;
+    `comm_pipe` (le `ctypes.byref(...)` reçu) est rempli avec
+    `comm_pipe_value`, une valeur arbitraire non nulle -- seul son
+    identité de pointeur compte, `_comm_pipe_fd` (mocké séparément dans ces
+    tests) est ce qui en extrait un vrai descripteur."""
+    security = MagicMock()
+
+    def _create(rights, environment, flags, auth_ref_ptr):
+        auth_ref_ptr._obj.value = 99  # AuthorizationRef factice non nul
+        return create_status
+
+    def _execute(auth_ref, tool_path, flags, args, comm_pipe_ptr):
+        comm_pipe_ptr._obj.value = comm_pipe_value
+        return execute_status
+
+    security.AuthorizationCreate.side_effect = _create
+    security.AuthorizationExecuteWithPrivileges.side_effect = _execute
+    return security
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_run_authorized_streams_child_output_via_real_pipe(mock_cdll):
+    mock_cdll.return_value = _fake_security_cdll()
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"hello from child\n")
+    os.close(write_fd)  # simule la fin de l'enfant (EOF sur le tube)
+
+    with patch("r36s_studio.gui.elevate._comm_pipe_fd", return_value=read_fd):
+        chunks = []
+        elevate._run_authorized("/path/to/tool", ["--worker"], chunks.append)
+
+    assert b"".join(chunks) == b"hello from child\n"
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_run_authorized_raises_on_create_failure(mock_cdll):
+    mock_cdll.return_value = _fake_security_cdll(create_status=-60001)
+
+    with pytest.raises(OSError):
+        elevate._run_authorized("/path/to/tool", [], lambda chunk: None)
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_run_authorized_raises_when_user_cancels_prompt(mock_cdll):
+    """OSStatus -60006 (`errAuthorizationCanceled`) : l'utilisateur a annulé
+    l'invite mot de passe. `AuthorizationFree` doit quand même être appelé
+    (pas de fuite de l'`AuthorizationRef`)."""
+    security = _fake_security_cdll(execute_status=-60006)
+    mock_cdll.return_value = security
+
+    with pytest.raises(OSError):
+        elevate._run_authorized("/path/to/tool", [], lambda chunk: None)
+
+    security.AuthorizationFree.assert_called_once()
+
+
+def test_macos_authorized_process_poll_transitions_to_exited():
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"output\n")
+    os.close(write_fd)
+
+    with patch("r36s_studio.gui.elevate.ctypes.CDLL", return_value=_fake_security_cdll()), patch(
+        "r36s_studio.gui.elevate._comm_pipe_fd", return_value=read_fd
+    ):
+        process = elevate.MacosAuthorizedProcess(["/path/to/tool", "--worker"], stderr_log=None)
+        assert process.wait(timeout=5) is not None
+        assert process.poll() is not None
+
+
+def test_macos_authorized_process_writes_child_output_to_stderr_log(tmp_path):
+    log_path = tmp_path / "elevation.log"
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"[IO_ERROR] Operation not permitted: /dev/rdisk9903\n")
+    os.close(write_fd)
+
+    with patch("r36s_studio.gui.elevate.ctypes.CDLL", return_value=_fake_security_cdll()), patch(
+        "r36s_studio.gui.elevate._comm_pipe_fd", return_value=read_fd
+    ):
+        process = elevate.MacosAuthorizedProcess(["/path/to/tool"], stderr_log=log_path)
+        process.wait(timeout=5)
+
+    assert "Operation not permitted" in log_path.read_text()
+
+
+def test_macos_authorized_process_kill_is_a_documented_noop():
+    """Aucun PID n'est exposé par cette API -- `.kill()` ne doit jamais
+    lever, mais ne peut rien arrêter côté worker élevé (voir sa
+    docstring)."""
+    with patch("r36s_studio.gui.elevate.threading.Thread") as mock_thread:
+        mock_thread.return_value.start.return_value = None
+        process = elevate.MacosAuthorizedProcess(["/path/to/tool"], stderr_log=None)
+    process.kill()  # ne doit pas lever
+
+
 # --- Linux ---------------------------------------------------------------
 
 

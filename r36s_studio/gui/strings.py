@@ -29,6 +29,9 @@ STRINGS = {
     "home_backup_separator": "Par sécurité",
     "home_tile_backup": "Sauvegarder l'image complète de ma carte",
     "home_tile_backup_desc": "Enregistre le contenu actuel de ta carte SD dans un fichier, au cas où.",
+    # Aide macOS uniquement (§3/§5 -- HomeScreen n'ajoute ce bouton que sur
+    # macOS, seul OS concerné par cette autorisation).
+    "home_help": "Aide : autoriser l'accès à la carte (Mac)",
     "status_available": "Faisable",
     "status_done": "Déjà faite",
     "status_not_relevant": "Non pertinente pour cette carte",
@@ -75,6 +78,32 @@ STRINGS = {
     "result_home": "Retour à l'accueil",
     "result_archive_created": "Enregistrée dans : {path}\nTaille : {size}",
     "result_archive_source": "À partir de : {path}",
+    # Aide (macOS uniquement -- autorisation Accès complet au disque, §3)
+    "help_title": "Autoriser l'accès à ta carte SD",
+    "help_body": (
+        "Sur Mac, R36S Studio a besoin d'une autorisation spéciale pour accéder "
+        "directement à ta carte SD, même après avoir entré ton mot de passe "
+        "administrateur : l'Accès complet au disque.\n\n"
+        "1. Ouvre Réglages Système → Confidentialité et sécurité.\n"
+        "2. Descends jusqu'à « Accès complet au disque ».\n"
+        "3. Utilise le bouton ci-dessous pour y aller directement, ou vas-y "
+        "toi-même.\n"
+        "4. Clique sur « + », choisis R36S Studio dans la liste, puis active "
+        "le bouton à côté de son nom.\n"
+        "5. Reviens dans R36S Studio et relance l'opération.\n\n"
+        "Cette autorisation ne se fait qu'une fois par version de "
+        "l'application. Si l'accès est de nouveau bloqué après une mise à "
+        "jour, reviens simplement sur cet écran et recommence : reconstruire "
+        "l'application change sa signature, ce qui invalide l'autorisation "
+        "précédente."
+    ),
+    "help_back": "Retour",
+    "help_open_settings": "Ouvrir les réglages",
+    # Version + horodatage de construction (footer de l'accueil) -- sans ça,
+    # impossible de savoir si l'app testée contient les derniers correctifs.
+    "about_version": "R36S Studio v{version} ({suffix})",
+    "about_build": "build du {timestamp}",
+    "about_dev": "version de développement",
     # Divers
     "details_toggle": "Détails",
     # Messages d'erreur (vocabulaire §5 : jamais de jargon technique dans le
@@ -103,8 +132,9 @@ STRINGS = {
         "ou retire-la manuellement."
     ),
     "error_macos_tcc_blocked": (
-        "Ton Mac empêche l'accès direct à la carte, même avec les droits administrateur "
-        "(voir Détails pour la solution)."
+        "Ton Mac empêche l'accès à la carte SD tant que R36S Studio n'a pas la permission "
+        "Accès complet au disque. Ouvre l'Aide depuis l'écran d'accueil pour l'activer "
+        "(voir aussi Détails)."
     ),
     "error_macos_tcc_protected_folder": (
         "Ton Mac bloque l'accès à ce fichier car il se trouve dans un dossier protégé "

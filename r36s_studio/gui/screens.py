@@ -8,6 +8,7 @@ replié."""
 
 from __future__ import annotations
 
+import platform
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -28,6 +29,7 @@ from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.partitions.archives import parse_archive_timestamp
 
+from . import build_info
 from .reveal import reveal_label
 from .strings import tr
 
@@ -67,6 +69,7 @@ class HomeScreen(QWidget):
     eject_selected = Signal()
     backup_selected = Signal()
     refresh_requested = Signal()
+    help_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -79,6 +82,15 @@ class HomeScreen(QWidget):
         self._refresh_button = QPushButton(tr("home_refresh"))
         self._refresh_button.clicked.connect(self.refresh_requested.emit)
         layout.addWidget(self._refresh_button)
+
+        # Autorisation Accès complet au disque (§3) : seul macOS en a
+        # besoin -- ne pas afficher ce bouton ailleurs éviterait de dérouter
+        # les utilisateurs Windows/Linux avec une procédure qui ne les
+        # concerne pas.
+        if platform.system() == "Darwin":
+            self._help_button = QPushButton(tr("home_help"))
+            self._help_button.clicked.connect(self.help_requested.emit)
+            layout.addWidget(self._help_button)
 
         step_signals = {
             "extract_boot": self.extract_boot_selected,
@@ -106,6 +118,16 @@ class HomeScreen(QWidget):
         layout.addWidget(backup_tile)
 
         layout.addStretch()
+
+        # Numéro de version + horodatage de construction (§5, à la demande
+        # explicite d'un utilisateur ayant perdu le fil entre plusieurs
+        # reconstructions locales) : sans repère visible, impossible de
+        # savoir si l'app en cours d'exécution contient les derniers
+        # correctifs -- vrai en développement, vrai aussi pour un
+        # utilisateur qui signale un bug plus tard.
+        self._version_label = QLabel(build_info.version_label())
+        self._version_label.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(self._version_label)
 
         self.set_status({})
 
@@ -580,3 +602,42 @@ class ResultScreen(QWidget):
         self._eject_button.setVisible(False)
         self._set_details(details if details != message else "")
         self._set_archive_info("", None)
+
+
+class HelpScreen(QWidget):
+    """Aide (macOS uniquement, §3) : explique l'autorisation Accès complet
+    au disque, que chaque utilisateur doit accorder une fois pour que
+    R36S Studio accède à la carte SD. Accessible depuis l'accueil
+    (`HomeScreen.help_requested`) et depuis l'écran Résultat quand
+    `MACOS_TCC_BLOCKED` survient (le message d'erreur y renvoie).
+
+    Contrairement au reste de l'interface (§5 : jamais de jargon), le texte
+    ici nomme volontairement les vrais réglages système (« Réglages
+    Système », « Accès complet au disque ») -- c'est une procédure système
+    réelle à suivre, pas la description d'une action de l'app."""
+
+    back_requested = Signal()
+    open_settings_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+
+        title = QLabel(tr("help_title"))
+        title.setStyleSheet("font-size: 20px; font-weight: bold;")
+        layout.addWidget(title)
+
+        body = QLabel(tr("help_body"))
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        self._back_button = QPushButton(tr("help_back"))
+        self._back_button.clicked.connect(self.back_requested.emit)
+        self._open_settings_button = QPushButton(tr("help_open_settings"))
+        self._open_settings_button.clicked.connect(self.open_settings_requested.emit)
+        buttons.addWidget(self._back_button)
+        buttons.addStretch()
+        buttons.addWidget(self._open_settings_button)
+        layout.addLayout(buttons)

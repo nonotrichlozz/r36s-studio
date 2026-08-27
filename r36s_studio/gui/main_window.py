@@ -7,9 +7,11 @@ affiche toujours les six étapes du workflow à deux cartes (§4.4/§4.5),
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import List, Optional
 
+from PySide6.QtCore import Slot
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QWidget
 
 from r36s_studio.detect import detect_workflow_status
@@ -20,9 +22,23 @@ from r36s_studio.safety import SafetyConfig, filter_devices
 
 from .partition_runner import PartitionJobRunner
 from .reveal import reveal
-from .screens import ConfirmScreen, DeviceScreen, ExecuteScreen, FileScreen, HomeScreen, ResultScreen, _format_size
+from .screens import (
+    ConfirmScreen,
+    DeviceScreen,
+    ExecuteScreen,
+    FileScreen,
+    HelpScreen,
+    HomeScreen,
+    ResultScreen,
+    _format_size,
+)
 from .strings import friendly_error_message, tr
 from .worker_runner import WorkerRunner
+
+# Pane "Accès complet au disque" de Réglages Système -- lien profond ouvert
+# par l'écran Aide (§3, `HelpScreen`) pour éviter à l'utilisateur de
+# naviguer les Réglages Système à la main.
+_MACOS_FULL_DISK_ACCESS_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
 
 _EXTRACTION_MODES = {"extract_boot", "extract_easyroms"}
 _INJECTION_MODES = {"inject_boot", "copy_games"}
@@ -68,6 +84,7 @@ class MainWindow(QMainWindow):
         self._confirm_screen = ConfirmScreen()
         self._execute_screen = ExecuteScreen()
         self._result_screen = ResultScreen()
+        self._help_screen = HelpScreen()
 
         for screen in (
             self._home,
@@ -76,6 +93,7 @@ class MainWindow(QMainWindow):
             self._confirm_screen,
             self._execute_screen,
             self._result_screen,
+            self._help_screen,
         ):
             self._stack.addWidget(screen)
 
@@ -97,6 +115,10 @@ class MainWindow(QMainWindow):
         self._home.eject_selected.connect(lambda: self._start_flow("eject"))
         self._home.backup_selected.connect(lambda: self._start_flow("backup"))
         self._home.refresh_requested.connect(self._refresh_home_state)
+        self._home.help_requested.connect(lambda: self._show(self._help_screen))
+
+        self._help_screen.back_requested.connect(lambda: self._show(self._home))
+        self._help_screen.open_settings_requested.connect(self._on_open_settings_requested)
 
         self._device_screen.back_requested.connect(lambda: self._show(self._home))
         self._device_screen.refresh_requested.connect(self._refresh_devices)
@@ -234,6 +256,24 @@ class MainWindow(QMainWindow):
         self._runner.finished.connect(self._on_worker_finished)
         self._runner.start()
 
+    # `@Slot` explicite sur ces trois méthodes : ce sont les seules qui
+    # reçoivent un signal pouvant traverser une frontière de thread réelle
+    # (`PartitionJobRunner`, un vrai `QThread`, §4.4) -- contrairement à
+    # `WorkerRunner`, dont les signaux sont toujours émis sur le thread Qt
+    # principal (`_poll()` via `QTimer`, jamais un thread séparé). Sans
+    # cette annotation, PySide6 doit retomber sur une résolution plus
+    # générique du slot Python pour une connexion mise en file d'attente ;
+    # la déclarer explicitement lève toute ambiguïté sur la signature côté
+    # méta-objet C++, quel que soit l'émetteur.
+    #
+    # "qint64", pas "int" : doit correspondre exactement à `Signal("qint64",
+    # "qint64", float)` (`worker_runner.py`/`partition_runner.py`) -- un
+    # `int` C++ (32 bits) déborde silencieusement au-delà de ~2 Go, ce qui
+    # produisait `AttributeError: Slot '...(int,int,double)' not found`
+    # (trompeur : le vrai problème était la conversion de l'argument, pas
+    # l'absence du slot), constaté en conditions réelles au-delà de 2^31
+    # octets (flash d'une carte de 32 Go).
+    @Slot("qint64", "qint64", float)
     def _on_progress(self, done: int, total: int, speed: float) -> None:
         # `done` du tout dernier événement = le compte final exact (§2 n°5,
         # `copy_range`/`copy_tree`) -- utilisé comme taille de l'archive
@@ -246,6 +286,7 @@ class MainWindow(QMainWindow):
             self._execute_screen.set_cancel_enabled(False)
             self._runner.cancel()
 
+    @Slot(str, str)
     def _on_worker_error(self, code: str, msg: str) -> None:
         self._last_error_code = code
         self._last_error_msg = msg
@@ -275,6 +316,7 @@ class MainWindow(QMainWindow):
             return info, self._file_path
         return "", None
 
+    @Slot(bool)
     def _on_worker_finished(self, ok: bool) -> None:
         if ok:
             allow_eject = self._mode in _ALLOW_EJECT_AFTER_MODES
@@ -294,6 +336,18 @@ class MainWindow(QMainWindow):
     def _on_reveal_requested(self, path: str) -> None:
         try:
             reveal(path)
+        except Exception as exc:
+            QMessageBox.warning(self, tr("app_title"), str(exc))
+
+    # --- écran Aide (macOS uniquement, §3) ----------------------------------
+
+    def _on_open_settings_requested(self) -> None:
+        """Bouton "Ouvrir les réglages" de `HelpScreen` -- lien profond vers
+        le panneau Accès complet au disque. Ce bouton n'existe que sur
+        macOS (`HelpScreen` n'y est accessible que via `HomeScreen`, qui ne
+        propose ce chemin que sur macOS, §5)."""
+        try:
+            subprocess.run(["open", _MACOS_FULL_DISK_ACCESS_SETTINGS_URL], check=True)
         except Exception as exc:
             QMessageBox.warning(self, tr("app_title"), str(exc))
 

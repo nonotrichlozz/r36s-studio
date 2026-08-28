@@ -799,24 +799,42 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > (`WizardIdentifyRunner`, `gui/partition_runner.py`) plutôt que sur le
 > thread Qt principal, car `locate_mounted` peut bloquer jusqu'à
 > `MOUNT_WAIT_SECONDS` (10 s, §4.4) si le système n'a pas encore monté la
-> partition. **Non résolu, connu** : `_on_wizard_poll` (étapes 1/4),
-> lui, appelle `compute_boot_fingerprint` directement sur le thread
-> principal — le même risque de blocage bref existe donc là, pas encore
-> déplacé sur un thread séparé (à faire sur le même principe que
-> `WizardIdentifyRunner` si ça se révèle gênant en usage réel). De même,
-> annuler pendant l'étape 2 arrête l'affichage mais ne peut pas
+> partition. Annuler pendant l'étape 2 arrête l'affichage mais ne peut pas
 > interrompre le thread d'identification déjà lancé (pas de point
 > d'annulation coopératif dans `locate_mounted`) — sans risque de
 > plantage, le résultat arrive simplement après coup sur un panneau déjà
 > quitté.
 >
-> **Étape 5 (flash)** : ouvre le sélecteur de fichier classique
-> (`FileDialog`, identique au mode expert) plutôt que le téléchargement
-> guidé prévu (rappel de la console identifiée + bouton vers la page des
-> releases) — ce dernier dépend d'un module `identify/releases.py` non
-> encore écrit, lui-même en attente d'une URL de dépôt GitHub officiel
-> (ArkOS/dArkOS) qu'il n'est pas question de deviner (jamais d'URL
-> générée sans confiance).
+> ⚠️ **Corrigé, constaté en conditions réelles : geler l'interface pendant
+> le montage se lit comme un plantage.** `_on_wizard_poll` (étapes 1/4)
+> appelait `compute_boot_fingerprint` directement sur le thread Qt
+> principal — même blocage possible jusqu'à `MOUNT_WAIT_SECONDS` que pour
+> l'identification, mais pas encore déplacé sur un thread séparé à
+> l'écriture de la note ci-dessus. **Corrigé** : `WizardFingerprintRunner`
+> (`gui/partition_runner.py`, même principe que `WizardIdentifyRunner`)
+> calcule l'empreinte sur un thread séparé ; `_on_wizard_poll` se contente
+> désormais de le démarrer et d'arrêter le sondage le temps du calcul,
+> `_on_wizard_fingerprint_ready` reçoit le résultat de façon asynchrone et
+> décide ensuite (redémarre le sondage si la carte détectée à l'étape 4
+> s'avère être la même qu'à l'étape 1). Vérifié avec un vrai `QThread` non
+> mocké (`compute_boot_fingerprint` patché pour répondre vite, boucle
+> d'événements Qt réelle) en plus des tests unitaires : le bouton
+> Continuer reste désactivé pendant le calcul et se réactive correctement
+> une fois le signal cross-thread livré.
+>
+> **Étape 5 (flash)** : `FileDialog` (identique au mode expert) porte
+> désormais un bouton « Voir les versions disponibles en ligne », visible
+> uniquement en mode flash, qui ouvre
+> `identify/releases.py::DARKOS_R36S_RELEASES_URL`
+> (`https://github.com/southoz/dArkOSRE-R36/releases`) dans le navigateur
+> par défaut (`webbrowser.open`, `MainWindow._on_releases_requested`).
+> Les images n'y sont pas hébergées — la page renvoie vers Mega, Google
+> Drive, OneDrive et un torrent, jamais un lien téléchargeable
+> directement — donc rien d'autre à automatiser que l'ouverture de cette
+> page ; l'utilisateur télécharge lui-même puis choisit le fichier obtenu
+> via le sélecteur classique, déjà en place. Un seul dépôt géré (l'app ne
+> vise que le R36S) : pas de table de correspondance carte→version à
+> construire pour ce bouton.
 >
 > **Erreur, à n'importe quelle étape** : le parcours s'arrête,
 > `LogPanel.finish_error` affiche le message clair (§5, vocabulaire),

@@ -1312,3 +1312,55 @@ class MainView(Screen):
         super().resizeEvent(event)
         if self._backdrop is not None:
             self._backdrop.setGeometry(self.rect())
+
+
+class AssistedLandingScreen(Screen):
+    """Écran d'accueil du mode assisté (§5 mode assisté) -- par défaut au
+    lancement (`ui_mode` en configuration, §6). Sa propre `ConsoleStage`
+    (instance séparée de celle de `MainView`, plus grande, mêmes effets
+    lumineux) plutôt qu'une réutilisation : les deux écrans ne sont jamais
+    affichés en même temps (`MainWindow` bascule entre eux), donc pas de
+    conflit de parent, et chacun reste autonome/testable isolément."""
+
+    prepare_requested = Signal()
+    expert_mode_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self._backdrop = build_window_backdrop(self)
+        if self._backdrop is not None:
+            self._backdrop.lower()
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 16, 24, 24)
+
+        top_row = QHBoxLayout()
+        top_row.addStretch()
+        self._expert_button = QPushButton(tr("assisted_expert_mode_button"))
+        self._expert_button.setProperty("role", "flat")
+        self._expert_button.clicked.connect(self.expert_mode_requested.emit)
+        top_row.addWidget(self._expert_button)
+        root.addLayout(top_row)
+
+        root.addStretch(2)
+
+        self.console_stage = build_console_stage(self)
+        if self.console_stage is not None:
+            root.addWidget(self.console_stage, 5)
+
+        self._prepare_button = QPushButton(tr("assisted_prepare_button"))
+        self._prepare_button.setProperty("role", "cta")
+        self._prepare_button.clicked.connect(self.prepare_requested.emit)
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        button_row.addWidget(self._prepare_button)
+        button_row.addStretch()
+        root.addLayout(button_row)
+
+        root.addStretch(3)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
+        super().resizeEvent(event)
+        if self._backdrop is not None:
+            self._backdrop.setGeometry(self.rect())

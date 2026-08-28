@@ -9,6 +9,7 @@ from unittest.mock import patch
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.gui.screens import (
+    AssistedLandingScreen,
     ConfirmDialog,
     ConsoleArt,
     ConsoleBasePlate,
@@ -624,6 +625,57 @@ def test_main_view_without_backdrop_asset_has_no_backdrop(qapp):
         view = MainView(home, None, log_panel)
 
     assert view._backdrop is None
+
+
+# --- AssistedLandingScreen : accueil du mode assisté (§5 mode assisté) -----
+
+
+def test_assisted_landing_screen_prepare_button_emits_signal(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    received = []
+    screen.prepare_requested.connect(lambda: received.append(True))
+
+    screen._prepare_button.click()
+
+    assert received == [True]
+
+
+def test_assisted_landing_screen_expert_mode_button_emits_signal(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    received = []
+    screen.expert_mode_requested.connect(lambda: received.append(True))
+
+    screen._expert_button.click()
+
+    assert received == [True]
+
+
+def test_assisted_landing_screen_works_without_console_stage(qapp):
+    """Asset absent (§5) : ne doit jamais empêcher la construction de
+    l'écran, même principe que MainView."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+
+    assert screen.console_stage is None
+
+
+def test_assisted_landing_screen_shows_console_stage_when_asset_present(tmp_path, qapp):
+    fake_path = tmp_path / "console.png"
+    _fake_pixmap().save(str(fake_path))
+
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=fake_path):
+        screen = AssistedLandingScreen()
+
+    assert isinstance(screen.console_stage, ConsoleStage)
+
+
+def test_assisted_landing_screen_prepare_button_has_cta_role(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+
+    assert screen._prepare_button.property("role") == "cta"
 
 
 # --- HelpDialog --------------------------------------------------------------

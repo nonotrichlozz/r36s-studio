@@ -132,6 +132,20 @@ QPushButton[role="flat"] {{
 QPushButton[role="flat"]:hover {{
     color: {ACCENT_CYAN};
 }}
+QPushButton[role="cta"] {{
+    background-color: {ACCENT_CYAN};
+    color: {BG_DARK};
+    border: none;
+    border-radius: 10px;
+    padding: 14px 32px;
+    font-weight: bold;
+}}
+QPushButton[role="cta"]:hover {{
+    background-color: {TEXT_PRIMARY};
+}}
+QPushButton[role="cta"]:pressed {{
+    background-color: {BORDER_CYAN};
+}}
 
 /* Cadre du bandeau carte (accueil) et des lignes d'étape -- même surface,
    coins arrondis, bordure neutre au repos, cyan pour le bandeau (toujours

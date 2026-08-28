@@ -44,6 +44,10 @@ STRINGS = {
     "home_banner_state_unprepared": "Carte non préparée",
     "home_banner_state_none": "Aucune carte détectée pour l'instant",
     "console_animation_toggle": "Animations de la console",
+    # Accueil du mode assisté (§5 mode assisté) -- écran par défaut au
+    # lancement, remplacé par le mode expert (six étapes) sur demande.
+    "assisted_prepare_button": "Préparer ma carte automatiquement",
+    "assisted_expert_mode_button": "Mode expert",
     # Choix du périphérique
     "device_title": "Choisis ta carte SD",
     "device_refresh": "Rafraîchir",

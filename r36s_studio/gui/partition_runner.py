@@ -11,11 +11,15 @@ privilège à franchir : on les appelle directement, dans ce process, sur un
 
 from __future__ import annotations
 
+import subprocess
+
 from PySide6.QtCore import QThread, Signal
 
 from r36s_studio.devices import Device
+from r36s_studio.identify import identify_from_boot_directory
 from r36s_studio.imaging.copy import OperationCancelled, ProgressEvent
 from r36s_studio.partitions import (
+    BOOT_LABEL,
     MacosNtfsWriteUnsupported,
     MountpointNotWritable,
     PartitionNotFound,
@@ -24,6 +28,7 @@ from r36s_studio.partitions import (
     extract_boot,
     extract_easyroms,
     inject_boot,
+    locate_mounted,
 )
 
 
@@ -101,3 +106,30 @@ class PartitionJobRunner(QThread):
             return
 
         self.finished_job.emit(True)
+
+
+class WizardIdentifyRunner(QThread):
+    """Identification de la console (étape 2 du mode assisté, §5) : monte
+    la partition BOOT de la carte source et y cherche un `.dtb`
+    exploitable (`identify.identify_from_boot_directory`), sur un thread
+    séparé comme `PartitionJobRunner` -- `locate_mounted` peut bloquer
+    jusqu'à `MOUNT_WAIT_SECONDS` (§4.4) si le système n'a pas encore monté
+    la partition automatiquement. Émet toujours `finished_identify`, avec
+    `None` si rien d'exploitable n'a été trouvé -- ne lève jamais (§4.5 :
+    une détection ratée ne doit jamais planter l'interface, et l'absence
+    d'identification a un repli prévu, MultiPanel)."""
+
+    finished_identify = Signal(object)  # Optional[DtbInfo]
+
+    def __init__(self, device_path: str, parent=None):
+        super().__init__(parent)
+        self._device_path = device_path
+
+    def run(self) -> None:
+        try:
+            boot = locate_mounted(self._device_path, BOOT_LABEL)
+        except (PartitionNotFound, PartitionNotMounted, OSError, subprocess.CalledProcessError):
+            self.finished_identify.emit(None)
+            return
+        info = identify_from_boot_directory(boot.mountpoint) if boot.mountpoint else None
+        self.finished_identify.emit(info)

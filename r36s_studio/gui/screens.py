@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -1257,12 +1258,14 @@ class HelpDialog(Dialog):
 
 class MainView(Screen):
     """Vue principale, permanente (§5, refonte navigation) : deux colonnes
-    -- `home` (gauche, largeur fixe autour de 480 px) et une colonne
-    droite avec l'image de la console en haut et le journal de bord en
-    bas -- devant un motif de fond en mosaïque sur toute la fenêtre
-    (`WindowBackdrop`, absent sans lever si `assets/circuit.png` n'existe
-    pas). Construite une fois par `MainWindow` (`setCentralWidget`) ; la
-    structure ne change plus jamais ensuite -- les choix ponctuels
+    -- une colonne gauche, largeur fixe autour de 480 px (`HomeScreen` en
+    mode expert, ou `WizardStepPanel` en mode assisté -- un petit
+    `QStackedWidget` interne bascule entre les deux, §5 mode assisté) et
+    une colonne droite avec l'image de la console en haut et le journal
+    de bord en bas -- devant un motif de fond en mosaïque sur toute la
+    fenêtre (`WindowBackdrop`, absent sans lever si `assets/circuit.png`
+    n'existe pas). Construite une fois par `MainWindow` (`setCentralWidget`) ;
+    la structure ne change plus jamais ensuite -- les choix ponctuels
     (carte, fichier, confirmation, aide) s'ouvrent en fenêtres modales
     par-dessus, jamais en remplacement de cette vue."""
 
@@ -1273,6 +1276,7 @@ class MainView(Screen):
         home: HomeScreen,
         console_stage: Optional[ConsoleStage],
         log_panel: LogPanel,
+        wizard_panel: Optional["WizardStepPanel"] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -1289,8 +1293,18 @@ class MainView(Screen):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # `setFixedWidth` sur chaque widget individuellement (pas sur le
+        # `QStackedWidget` qui les contient) : un test peut ainsi vérifier
+        # la largeur d'un widget donné indépendamment de son conteneur.
+        self._left_stack = QStackedWidget()
+        self._home = home
+        self._wizard_panel = wizard_panel
         home.setFixedWidth(self._LEFT_COLUMN_WIDTH)
-        root.addWidget(home)
+        self._left_stack.addWidget(home)
+        if wizard_panel is not None:
+            wizard_panel.setFixedWidth(self._LEFT_COLUMN_WIDTH)
+            self._left_stack.addWidget(wizard_panel)
+        root.addWidget(self._left_stack)
 
         right_column = QVBoxLayout()
         right_column.setContentsMargins(12, 12, 12, 12)
@@ -1307,6 +1321,15 @@ class MainView(Screen):
             right_column.addWidget(self.animation_toggle)
         right_column.addWidget(log_panel, 2)
         root.addLayout(right_column, 1)
+
+    def show_home(self) -> None:
+        self._left_stack.setCurrentWidget(self._home)
+
+    def show_wizard_panel(self) -> None:
+        """Pas d'effet si aucun `wizard_panel` n'a été fourni (mode expert
+        seul) -- reste sur `home`."""
+        if self._wizard_panel is not None:
+            self._left_stack.setCurrentWidget(self._wizard_panel)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)
@@ -1364,3 +1387,88 @@ class AssistedLandingScreen(Screen):
         super().resizeEvent(event)
         if self._backdrop is not None:
             self._backdrop.setGeometry(self.rect())
+
+
+class WizardStepPanel(Screen):
+    """Colonne gauche du mode assisté en cours (§5 mode assisté), une
+    étape à la fois -- remplace `HomeScreen` dans `MainView` pendant le
+    parcours guidé. Deux jeux de boutons mutuellement exclusifs :
+    Continuer (normal, activé seulement quand l'étape est prête) et
+    Reprendre/Mode expert (uniquement après une erreur, §5 : « le parcours
+    s'arrête... et propose de reprendre ou de passer en mode expert »).
+    Annuler reste toujours visible -- `main_window.py` décide de ce
+    qu'annuler signifie concrètement (annuler le job en cours, revenir à
+    l'accueil assisté)."""
+
+    continue_requested = Signal()
+    cancel_requested = Signal()
+    resume_requested = Signal()
+    expert_mode_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+
+        self._title_label = QLabel()
+        self._title_label.setProperty("role", "title")
+        self._title_label.setWordWrap(True)
+        layout.addWidget(self._title_label)
+
+        self._instruction_label = QLabel()
+        self._instruction_label.setWordWrap(True)
+        layout.addWidget(self._instruction_label)
+
+        self._status_label = QLabel()
+        self._status_label.setProperty("role", "secondary")
+        self._status_label.setWordWrap(True)
+        layout.addWidget(self._status_label)
+
+        layout.addStretch()
+
+        self._continue_button = QPushButton(tr("wizard_continue"))
+        self._continue_button.setProperty("role", "primary")
+        self._continue_button.clicked.connect(self.continue_requested.emit)
+        layout.addWidget(self._continue_button)
+
+        self._resume_button = QPushButton(tr("wizard_resume"))
+        self._resume_button.setProperty("role", "primary")
+        self._resume_button.setVisible(False)
+        self._resume_button.clicked.connect(self.resume_requested.emit)
+        layout.addWidget(self._resume_button)
+
+        self._expert_button = QPushButton(tr("assisted_expert_mode_button"))
+        self._expert_button.setVisible(False)
+        self._expert_button.clicked.connect(self.expert_mode_requested.emit)
+        layout.addWidget(self._expert_button)
+
+        self._cancel_button = QPushButton(tr("wizard_cancel"))
+        self._cancel_button.setProperty("role", "flat")
+        self._cancel_button.clicked.connect(self.cancel_requested.emit)
+        layout.addWidget(self._cancel_button)
+
+    def show_step(self, title: str, instruction: str, status: str = "", *, can_continue: bool = False) -> None:
+        """Affiche une nouvelle étape -- revient toujours à l'état normal
+        (Continuer), même si l'étape précédente était en erreur."""
+        self._title_label.setText(title)
+        self._instruction_label.setText(instruction)
+        self._status_label.setText(status)
+        self._status_label.setVisible(bool(status))
+        self._continue_button.setVisible(True)
+        self._continue_button.setEnabled(can_continue)
+        self._resume_button.setVisible(False)
+        self._expert_button.setVisible(False)
+
+    def set_status(self, status: str) -> None:
+        self._status_label.setText(status)
+        self._status_label.setVisible(bool(status))
+
+    def set_can_continue(self, enabled: bool) -> None:
+        self._continue_button.setEnabled(enabled)
+
+    def show_error(self) -> None:
+        """Le message d'erreur lui-même vit dans le journal de bord
+        (`LogPanel.finish_error`, §5) -- ce panneau ne montre que les deux
+        actions possibles ensuite."""
+        self._continue_button.setVisible(False)
+        self._resume_button.setVisible(True)
+        self._expert_button.setVisible(True)

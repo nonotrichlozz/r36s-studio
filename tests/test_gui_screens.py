@@ -22,6 +22,7 @@ from r36s_studio.gui.screens import (
     LogPanel,
     MainView,
     WindowBackdrop,
+    WizardStepPanel,
     _format_duration,
     _format_size,
     build_console_stage,
@@ -627,6 +628,43 @@ def test_main_view_without_backdrop_asset_has_no_backdrop(qapp):
     assert view._backdrop is None
 
 
+def test_main_view_without_wizard_panel_shows_home_only(qapp):
+    """Sans `wizard_panel` (mode expert seul, appels existants) : le
+    comportement d'avant l'ajout du mode assisté ne doit pas changer."""
+    home = HomeScreen()
+    log_panel = LogPanel()
+
+    view = MainView(home, None, log_panel)
+
+    assert view._left_stack.currentWidget() is home
+
+
+def test_main_view_accepts_a_wizard_panel_and_gives_it_the_same_fixed_width(qapp):
+    home = HomeScreen()
+    log_panel = LogPanel()
+    wizard_panel = WizardStepPanel()
+
+    view = MainView(home, None, log_panel, wizard_panel=wizard_panel)
+
+    assert wizard_panel.minimumWidth() == view._LEFT_COLUMN_WIDTH
+    assert wizard_panel.maximumWidth() == view._LEFT_COLUMN_WIDTH
+
+
+def test_main_view_show_home_and_show_wizard_panel_switch_the_left_column(qapp):
+    home = HomeScreen()
+    log_panel = LogPanel()
+    wizard_panel = WizardStepPanel()
+
+    view = MainView(home, None, log_panel, wizard_panel=wizard_panel)
+    assert view._left_stack.currentWidget() is home  # home par défaut
+
+    view.show_wizard_panel()
+    assert view._left_stack.currentWidget() is wizard_panel
+
+    view.show_home()
+    assert view._left_stack.currentWidget() is home
+
+
 # --- AssistedLandingScreen : accueil du mode assisté (§5 mode assisté) -----
 
 
@@ -676,6 +714,121 @@ def test_assisted_landing_screen_prepare_button_has_cta_role(qapp):
         screen = AssistedLandingScreen()
 
     assert screen._prepare_button.property("role") == "cta"
+
+
+# --- WizardStepPanel : une étape à la fois, mode assisté (§5) --------------
+
+
+def test_wizard_step_panel_show_step_sets_title_instruction_and_status(qapp):
+    panel = WizardStepPanel()
+
+    panel.show_step("Titre", "Consigne", "Statut", can_continue=False)
+
+    assert panel._title_label.text() == "Titre"
+    assert panel._instruction_label.text() == "Consigne"
+    assert panel._status_label.text() == "Statut"
+
+
+def test_wizard_step_panel_show_step_defaults_continue_to_disabled(qapp):
+    panel = WizardStepPanel()
+
+    panel.show_step("Titre", "Consigne")
+
+    assert panel._continue_button.isEnabled() is False
+
+
+def test_wizard_step_panel_show_step_can_enable_continue(qapp):
+    panel = WizardStepPanel()
+
+    panel.show_step("Titre", "Consigne", can_continue=True)
+
+    assert panel._continue_button.isEnabled() is True
+
+
+def test_wizard_step_panel_set_can_continue_toggles_the_button(qapp):
+    panel = WizardStepPanel()
+    panel.show_step("Titre", "Consigne", can_continue=False)
+
+    panel.set_can_continue(True)
+    assert panel._continue_button.isEnabled() is True
+
+    panel.set_can_continue(False)
+    assert panel._continue_button.isEnabled() is False
+
+
+def test_wizard_step_panel_set_status_updates_the_status_label(qapp):
+    panel = WizardStepPanel()
+
+    panel.set_status("Carte reconnue")
+
+    assert panel._status_label.text() == "Carte reconnue"
+
+
+def test_wizard_step_panel_continue_button_emits_signal(qapp):
+    panel = WizardStepPanel()
+    panel.show_step("Titre", "Consigne", can_continue=True)
+    received = []
+    panel.continue_requested.connect(lambda: received.append(True))
+
+    panel._continue_button.click()
+
+    assert received == [True]
+
+
+def test_wizard_step_panel_cancel_button_emits_signal(qapp):
+    panel = WizardStepPanel()
+    received = []
+    panel.cancel_requested.connect(lambda: received.append(True))
+
+    panel._cancel_button.click()
+
+    assert received == [True]
+
+
+def test_wizard_step_panel_show_step_hides_error_buttons(qapp):
+    panel = WizardStepPanel()
+    panel.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    panel.show_error()
+
+    panel.show_step("Titre", "Consigne")
+
+    assert panel._resume_button.isVisible() is False
+    assert panel._expert_button.isVisible() is False
+    assert panel._continue_button.isVisible() is True
+
+
+def test_wizard_step_panel_show_error_reveals_resume_and_expert_buttons(qapp):
+    panel = WizardStepPanel()
+    panel.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    panel.show_step("Titre", "Consigne", can_continue=True)
+
+    panel.show_error()
+
+    assert panel._continue_button.isVisible() is False
+    assert panel._resume_button.isVisible() is True
+    assert panel._expert_button.isVisible() is True
+
+
+def test_wizard_step_panel_resume_button_emits_signal(qapp):
+    panel = WizardStepPanel()
+    panel.show_error()
+    received = []
+    panel.resume_requested.connect(lambda: received.append(True))
+
+    panel._resume_button.click()
+
+    assert received == [True]
+
+
+def test_wizard_step_panel_expert_button_emits_signal(qapp):
+    panel = WizardStepPanel()
+    panel.show_error()
+    received = []
+    panel.expert_mode_requested.connect(lambda: received.append(True))
+
+    panel._expert_button.click()
+
+    assert received == [True]
 
 
 # --- HelpDialog --------------------------------------------------------------

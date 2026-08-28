@@ -11,11 +11,20 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from r36s_studio.config import AppConfig
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.gui.main_window import MainWindow
 from r36s_studio.gui.worker_runner import WorkerRunner
 from r36s_studio.imaging.copy import ProgressEvent
+
+# La plupart des tests de ce fichier portent sur le parcours à six étapes
+# (mode expert) -- `_EXPERT_MODE_CONFIG` démarre `MainWindow` directement
+# sur `HomeScreen` plutôt que sur l'accueil du mode assisté (§5 mode
+# assisté, par défaut sinon), pour ne pas changer le sens de tests déjà
+# en place. Les tests du mode assisté lui-même (plus bas) repatchent
+# `app_config.load_config` explicitement selon leurs besoins.
+_EXPERT_MODE_CONFIG = AppConfig(ui_mode="expert")
 
 
 def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000, display="Carte SD factice") -> Device:
@@ -400,9 +409,10 @@ def test_cancel_requested_calls_runner_cancel(mock_list, mock_filter, qapp):
 # --- résultats dans le journal de bord, pas un écran séparé (§5) -----------
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_worker_success_logs_message_and_shows_eject_for_flash(mock_list, mock_filter, qapp):
+def test_worker_success_logs_message_and_shows_eject_for_flash(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché (MainWindow, pas un descendant)
     window._mode = "flash"
@@ -445,10 +455,11 @@ def test_eject_requested_calls_eject_module_with_device_path(mock_list, mock_fil
 # (§4.5) ----------------------------------------------------------------
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.detect_workflow_status")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_startup_detects_single_card_and_annotates_home(mock_list, mock_filter, mock_detect, qapp):
+def test_startup_detects_single_card_and_annotates_home(mock_list, mock_filter, mock_detect, mock_load, qapp):
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
@@ -463,10 +474,11 @@ def test_startup_detects_single_card_and_annotates_home(mock_list, mock_filter, 
         assert tile.isVisible() is True
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.detect_workflow_status")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_startup_with_no_card_still_shows_all_six_tiles(mock_list, mock_filter, mock_detect, qapp):
+def test_startup_with_no_card_still_shows_all_six_tiles(mock_list, mock_filter, mock_detect, mock_load, qapp):
     mock_list.return_value = []
     mock_filter.return_value = []
     mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
@@ -478,10 +490,11 @@ def test_startup_with_no_card_still_shows_all_six_tiles(mock_list, mock_filter, 
         assert tile.isVisible() is True
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.detect_workflow_status")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_startup_with_multiple_cards_passes_none_to_detection(mock_list, mock_filter, mock_detect, qapp):
+def test_startup_with_multiple_cards_passes_none_to_detection(mock_list, mock_filter, mock_detect, mock_load, qapp):
     """Cas non couvert par une carte unique : plusieurs cartes candidates
     -- `detect_workflow_status` reçoit `None` (aucune mise en avant
     possible), mais les six lignes restent affichées normalement."""
@@ -631,9 +644,10 @@ def test_copy_games_flow_falls_back_to_manual_browse_when_no_archives(
     runner_class.assert_called_once_with("copy_games", device, "/tmp/games", parent=window)
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_copy_games_success_message_and_allows_eject(mock_list, mock_filter, qapp):
+def test_copy_games_success_message_and_allows_eject(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
     window.show()
     window._mode = "copy_games"
@@ -782,9 +796,10 @@ def test_extract_easyroms_uses_easyroms_label(
     mock_new_path.assert_called_once_with("EASYROMS", base_dir=Path("/home/x/Documents/R36S Studio"))
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_extract_boot_success_logs_archive_path_size_and_shows_reveal(mock_list, mock_filter, qapp):
+def test_extract_boot_success_logs_archive_path_size_and_shows_reveal(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
     window.show()
     window._mode = "extract_boot"
@@ -817,9 +832,10 @@ def test_reveal_requested_calls_reveal_with_archive_path(mock_list, mock_filter,
     mock_reveal.assert_called_once_with("/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21")
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_inject_boot_success_logs_source_archive_path(mock_list, mock_filter, qapp):
+def test_inject_boot_success_logs_source_archive_path(mock_list, mock_filter, mock_load, qapp):
     """Étapes D/E : la même ligne indique quelle archive a servi de
     source, plutôt que « archive créée »."""
     window = MainWindow()
@@ -950,3 +966,285 @@ def test_macos_tcc_protected_folder_error_shows_dedicated_friendly_message(mock_
     log_text = window._log_panel._log_view.toPlainText()
     assert "dossier protégé" in log_text
     assert "/Users/x/Downloads" in log_text  # détail brut, en ligne suivante -- pas masqué (§5)
+
+
+# --- mode assisté (§5 mode assisté) -----------------------------------------
+#
+# ui_mode (config.py) pilote l'écran affiché au lancement ; le mode assisté
+# enchaîne 7 étapes (gui/wizard_flow.py) sur la même MainView que le mode
+# expert (colonne gauche remplacée par WizardStepPanel).
+
+from r36s_studio.gui.wizard_flow import WizardJob
+
+
+def _mock_identify_runner_class():
+    instances = []
+
+    def _factory(device_path, parent=None):
+        instance = MagicMock()
+        instance.device_path = device_path
+        instances.append(instance)
+        return instance
+
+    factory = MagicMock(side_effect=_factory)
+    factory.instances = instances
+    return factory
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_default_startup_shows_assisted_landing_screen(mock_list, mock_filter, mock_detect, mock_load, qapp):
+    window = MainWindow()
+
+    assert window._root_stack.currentWidget() is window._assisted_landing
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_expert_ui_mode_startup_shows_main_view_with_home(mock_list, mock_filter, mock_detect, mock_load, qapp):
+    window = MainWindow()
+
+    assert window._root_stack.currentWidget() is window._main_view
+    assert window._main_view._left_stack.currentWidget() is window._home
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_expert_mode_button_from_landing_persists_config_and_shows_home(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+
+    window._assisted_landing.expert_mode_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._main_view
+    assert window._main_view._left_stack.currentWidget() is window._home
+    mock_save.assert_called_once()
+    assert mock_save.call_args[0][0].ui_mode == "expert"
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_prepare_button_starts_wizard_on_step_one(mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp):
+    window = MainWindow()
+
+    window._assisted_landing.prepare_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._main_view
+    assert window._main_view._left_stack.currentWidget() is window._wizard_panel
+    assert window._wizard_flow.current_job() == WizardJob.DETECT_SOURCE
+    assert window._wizard_poll_timer.isActive() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_step_one_poll_enables_continue_once_a_card_is_found(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    assert window._wizard_panel._continue_button.isEnabled() is False
+
+    with patch("r36s_studio.gui.main_window.compute_boot_fingerprint", return_value="fp-source"):
+        window._on_wizard_poll()
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    assert window._wizard_source_device is device
+    assert window._wizard_source_fingerprint == "fp-source"
+    assert window._wizard_poll_timer.isActive() is False  # trouvé -> plus besoin de reinterroger
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_continue_on_step_one_advances_to_identify_and_starts_identify_runner(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    identify_runner_class = _mock_identify_runner_class()
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    with patch("r36s_studio.gui.main_window.compute_boot_fingerprint", return_value="fp-source"):
+        window._on_wizard_poll()
+
+    with patch("r36s_studio.gui.main_window.WizardIdentifyRunner", identify_runner_class):
+        window._wizard_panel.continue_requested.emit()
+
+    assert window._wizard_flow.is_done(WizardJob.DETECT_SOURCE) is True
+    assert window._wizard_flow.current_job() == WizardJob.IDENTIFY
+    identify_runner_class.assert_called_once_with(device.path, parent=window)
+    identify_runner_class.instances[0].start.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_success_enables_continue_and_logs_result(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify.dtb import DtbInfo
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+    window._wizard_panel._continue_button.setEnabled(False)
+
+    info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
+    window._on_wizard_identify_finished(info)
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "rk3326-evb-lp3-v12" in log_text
+
+
+# --- étape 4 : garde-fou par empreinte de contenu, pas path/size_bytes -----
+
+
+def _target_setup(window, device):
+    window._wizard_flow.reset()
+    for job in (WizardJob.DETECT_SOURCE, WizardJob.IDENTIFY, WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
+        window._wizard_flow.mark_done(job)
+    window._wizard_source_fingerprint = "fp-source"
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_step_four_refuses_to_continue_when_fingerprint_matches_source(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    same_card = _make_device(path="/dev/fake-disk-test-9")
+    mock_list.return_value = [same_card]
+    mock_filter.return_value = [same_card]
+
+    window = MainWindow()
+    _target_setup(window, same_card)
+    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+
+    with patch("r36s_studio.gui.main_window.compute_boot_fingerprint", return_value="fp-source"):
+        window._on_wizard_poll()
+
+    assert window._wizard_panel._continue_button.isEnabled() is False
+    assert window._wizard_target_device is None
+    assert window._wizard_poll_timer.isActive() is True  # continue d'attendre une vraie carte différente
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_step_four_allows_continue_when_fingerprint_differs(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    new_card = _make_device(path="/dev/fake-disk-test-9")
+    mock_list.return_value = [new_card]
+    mock_filter.return_value = [new_card]
+
+    window = MainWindow()
+    _target_setup(window, new_card)
+    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+
+    with patch("r36s_studio.gui.main_window.compute_boot_fingerprint", return_value="fp-blank-or-different"):
+        window._on_wizard_poll()
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    assert window._wizard_target_device is new_card
+    assert window._wizard_poll_timer.isActive() is False
+
+
+# --- reprise après erreur : ne rejoue jamais un job déjà réussi -------------
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_resume_after_easyroms_failure_only_reruns_easyroms_not_boot(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window = MainWindow()
+        window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+        window._main_view.show_wizard_panel()
+        window._root_stack.setCurrentWidget(window._main_view)
+        window._wizard_flow.reset()
+        window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+        window._wizard_flow.mark_done(WizardJob.IDENTIFY)
+        window._wizard_source_device = device
+        window._wizard_active = True
+
+        # Étape 3a (BOOT) réussie.
+        window._enter_wizard_job(WizardJob.EXTRACT_BOOT)
+        window._on_worker_finished(True)
+        assert window._wizard_flow.is_done(WizardJob.EXTRACT_BOOT) is True
+
+        # Étape 3b (EASYROMS) échoue.
+        assert window._wizard_flow.current_job() == WizardJob.EXTRACT_EASYROMS
+        window._on_worker_error("IO_ERROR", "disque plein")
+        window._on_worker_finished(False)
+
+        assert window._wizard_flow.is_done(WizardJob.EXTRACT_EASYROMS) is False
+        assert window._wizard_panel._resume_button.isVisible() is True
+
+        # Reprendre : ne relance qu'EASYROMS, jamais le BOOT une deuxième fois.
+        runner_class.reset_mock()
+        runner_class.instances.clear()
+        window._wizard_panel.resume_requested.emit()
+
+    runner_class.assert_called_once()
+    resume_call_args = runner_class.instances[0]
+    assert resume_call_args.mode == "extract_easyroms"
+    assert resume_call_args.device is device
+    assert "EASYROMS" in resume_call_args.source_path
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_cancel_returns_to_landing_and_stops_polling(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    assert window._wizard_poll_timer.isActive() is True
+
+    window._wizard_panel.cancel_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._assisted_landing
+    assert window._wizard_poll_timer.isActive() is False
+    assert window._wizard_active is False

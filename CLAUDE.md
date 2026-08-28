@@ -756,6 +756,18 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > automatiquement » (nouveau rôle `QPushButton[role="cta"]`, `theme.py`)
 > et un bouton discret « Mode expert » en haut à droite.
 >
+> ⚠️ **Corrigé : le mode expert n'avait pas de chemin de retour.** Une
+> fois basculé via « Mode expert », rien ne permettait de revenir à
+> l'accueil assisté — et `ui_mode` étant persisté (`config.py`),
+> l'utilisateur restait bloqué en mode expert même après redémarrage.
+> `HomeScreen` porte désormais le bouton symétrique « Mode assisté », en
+> haut à droite du titre (même ligne, pas une ligne séparée qui aurait
+> repoussé les six étapes) — `MainWindow._switch_to_assisted_mode`
+> persiste `ui_mode="assisted"` et ramène directement à
+> `AssistedLandingScreen` (pas de notion de parcours à reprendre côté
+> mode expert). Vérifié par un test qui traverse la bascule dans les deux
+> sens et contrôle que la configuration suit à chaque fois.
+>
 > **Parcours guidé, une étape à la fois** (`WizardStepPanel`, remplace
 > `HomeScreen` dans la colonne gauche de `MainView` — généralisée avec un
 > `QStackedWidget` interne, `show_home()`/`show_wizard_panel()`) : sept

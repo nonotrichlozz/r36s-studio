@@ -596,14 +596,27 @@ class HomeScreen(Screen):
     backup_selected = Signal()
     refresh_requested = Signal()
     help_requested = Signal()
+    assisted_mode_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
 
+        # Titre à gauche, bouton « Mode assisté » en haut à droite (§5
+        # mode assisté) -- symétrique du bouton « Mode expert » de
+        # AssistedLandingScreen. Sans lui, basculer en mode expert était
+        # un aller simple : ui_mode étant persisté (config.py), rien ne
+        # permettait de revenir au mode assisté, même après redémarrage.
+        title_row = QHBoxLayout()
         title = QLabel(tr("home_title"))
         title.setProperty("role", "title")
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        self._assisted_mode_button = QPushButton(tr("home_assisted_mode_button"))
+        self._assisted_mode_button.setProperty("role", "flat")
+        self._assisted_mode_button.clicked.connect(self.assisted_mode_requested.emit)
+        title_row.addWidget(self._assisted_mode_button)
+        layout.addLayout(title_row)
 
         # Bandeau de détection, toujours en haut -- cadre à bordure cyan et
         # coins arrondis (theme.py, role="banner"), distinct des lignes

@@ -177,6 +177,7 @@ class MainWindow(QMainWindow):
         self._home.backup_selected.connect(lambda: self._start_flow("backup"))
         self._home.refresh_requested.connect(self._refresh_home_state)
         self._home.help_requested.connect(self._help_dialog.open)
+        self._home.assisted_mode_requested.connect(self._switch_to_assisted_mode)
 
         self._help_dialog.open_settings_requested.connect(self._on_open_settings_requested)
 
@@ -486,6 +487,17 @@ class MainWindow(QMainWindow):
         self._main_view.show_home()
         self._root_stack.setCurrentWidget(self._main_view)
         self._refresh_home_state()
+
+    def _switch_to_assisted_mode(self) -> None:
+        """Bouton « Mode assisté », symétrique de `_switch_to_expert_mode`
+        -- sans lui, basculer en mode expert était un aller simple :
+        `ui_mode` étant persisté (`config.py`), rien ne permettait de
+        revenir au mode assisté, même après redémarrage. Ramène à
+        l'accueil (pas à un parcours en cours : le mode expert n'a pas de
+        notion de parcours guidé à reprendre)."""
+        self._app_config.ui_mode = "assisted"
+        app_config.save_config(self._app_config)
+        self._root_stack.setCurrentWidget(self._assisted_landing)
 
     def _start_wizard(self) -> None:
         self._app_config.ui_mode = "assisted"

@@ -1035,6 +1035,33 @@ def test_expert_mode_button_from_landing_persists_config_and_shows_home(
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_ui_mode_switch_works_both_ways_and_config_follows(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    """Sans bouton de retour, basculer en mode expert était un aller
+    simple -- ui_mode étant persisté (config.py), l'utilisateur restait
+    bloqué en mode expert même après redémarrage."""
+    window = MainWindow()
+    assert window._root_stack.currentWidget() is window._assisted_landing
+
+    window._assisted_landing.expert_mode_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._main_view
+    assert window._main_view._left_stack.currentWidget() is window._home
+    assert mock_save.call_args[0][0].ui_mode == "expert"
+
+    window._home.assisted_mode_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._assisted_landing
+    assert mock_save.call_args[0][0].ui_mode == "assisted"
+    assert mock_save.call_count == 2
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_prepare_button_starts_wizard_on_step_one(mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp):
     window = MainWindow()
 

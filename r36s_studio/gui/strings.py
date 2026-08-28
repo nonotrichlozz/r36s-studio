@@ -16,6 +16,9 @@ STRINGS = {
     # complète (opération de sécurité, en dehors des six étapes).
     "home_title": "Que veux-tu faire ?",
     "home_refresh": "Rafraîchir",
+    # Symétrique de "assisted_expert_mode_button" -- bouton de retour au
+    # mode assisté, en haut à droite de l'écran expert (§5 mode assisté).
+    "home_assisted_mode_button": "Mode assisté",
     "home_step_a_title": "A. Copier le BOOT de la SD d'origine",
     "home_step_a_desc": "Enregistre l'écran et les réglages de ton ancienne carte sur ton ordinateur.",
     "home_step_b_title": "B. Copier l'EASYROMS de la SD d'origine",

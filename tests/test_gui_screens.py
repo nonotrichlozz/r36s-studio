@@ -183,6 +183,20 @@ def test_home_screen_refresh_button_emits_signal(qapp):
     screen._refresh_button.click()
 
 
+def test_home_screen_assisted_mode_button_emits_signal(qapp):
+    """Symétrique du bouton « Mode expert » de AssistedLandingScreen (§5
+    mode assisté) : sans lui, basculer en mode expert était un aller
+    simple -- ui_mode étant persisté, l'utilisateur restait bloqué en
+    mode expert même après redémarrage."""
+    screen = HomeScreen()
+    received = []
+    screen.assisted_mode_requested.connect(lambda: received.append(True))
+
+    screen._assisted_mode_button.click()
+
+    assert received == [True]
+
+
 @patch("r36s_studio.gui.screens.platform.system", return_value="Darwin")
 def test_home_screen_shows_help_button_on_macos(mock_system, qapp):
     """Seul macOS a besoin de l'autorisation Accès complet au disque (§3) --

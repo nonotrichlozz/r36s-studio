@@ -6,11 +6,13 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from . import theme
 from .main_window import MainWindow
 
 
 def run() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setStyleSheet(theme.STYLESHEET)
     window = MainWindow()
     window.show()
     return app.exec()

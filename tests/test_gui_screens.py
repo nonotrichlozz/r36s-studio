@@ -1,5 +1,6 @@
-"""Tests des écrans de l'assistant (gui/screens.py) — construction et
-logique des signaux, en mode Qt "offscreen" (fixture `qapp`)."""
+"""Tests de la vue principale et des fenêtres modales (gui/screens.py) —
+construction et logique des signaux, en mode Qt "offscreen" (fixture
+`qapp`)."""
 
 from __future__ import annotations
 
@@ -8,16 +9,26 @@ from unittest.mock import patch
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.gui.screens import (
-    ConfirmScreen,
-    DeviceScreen,
-    ExecuteScreen,
-    FileScreen,
-    HelpScreen,
+    ConfirmDialog,
+    ConsoleArt,
+    ConsoleBasePlate,
+    ConsoleHalo,
+    ConsoleStage,
+    DeviceDialog,
+    FileDialog,
+    HelpDialog,
     HomeScreen,
-    ResultScreen,
+    LogPanel,
+    MainView,
+    WindowBackdrop,
     _format_duration,
+    _format_size,
+    build_console_stage,
+    build_window_backdrop,
     format_archive_label,
 )
+from PySide6.QtCore import QParallelAnimationGroup, QPropertyAnimation
+from PySide6.QtWidgets import QWidget
 
 
 def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000, display="Carte SD factice") -> Device:
@@ -32,7 +43,15 @@ def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000, displa
     )
 
 
-# --- HomeScreen --------------------------------------------------------
+def _fake_pixmap():
+    from PySide6.QtGui import QPixmap
+
+    pixmap = QPixmap(40, 40)
+    pixmap.fill()
+    return pixmap
+
+
+# --- HomeScreen (colonne gauche, §5 refonte navigation) ---------------------
 
 
 def test_home_screen_backup_tile_emits_signal(qapp):
@@ -77,10 +96,12 @@ def test_home_screen_all_six_steps_emit_their_signal(qapp):
     assert received == list(signals)
 
 
-def test_home_screen_all_six_tiles_always_visible_and_enabled_regardless_of_status(qapp):
+def test_home_screen_all_six_tiles_always_visible_regardless_of_status(qapp):
     """Coeur de la correction de conception : plus de tuile unique mise en
     avant, plus de section « Autres opérations » -- les six étapes restent
-    toujours visibles et cliquables, quel que soit leur statut (§4.5)."""
+    toujours visibles, quel que soit leur statut (§4.5). Restent aussi
+    activées ici : `set_busy` (pas `set_status`) est le seul levier de
+    désactivation (§5, refonte navigation)."""
     screen = HomeScreen()
     screen.show()
 
@@ -99,17 +120,21 @@ def test_home_screen_all_six_tiles_always_visible_and_enabled_regardless_of_stat
         assert tile.isEnabled() is True
 
 
-def test_home_screen_empty_status_keeps_base_text_without_badge(qapp):
+def test_home_screen_empty_status_hides_all_badges(qapp):
+    """Statut absent (détection pas encore lancée) : aucun badge affiché,
+    mais la ligne elle-même (icône, titre, description) reste visible."""
     screen = HomeScreen()
 
     screen.set_status({})
 
-    for key, tile in screen._tiles.items():
-        assert tile.text() == screen._base_texts[key]
+    for badge in screen._badges.values():
+        assert badge.isVisible() is False
+        assert badge.text() == ""
 
 
-def test_home_screen_status_appends_badge_text_to_each_tile(qapp):
+def test_home_screen_status_sets_badge_text_and_kind(qapp):
     screen = HomeScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois le parent affiché
 
     screen.set_status(
         {
@@ -117,15 +142,22 @@ def test_home_screen_status_appends_badge_text_to_each_tile(qapp):
             "extract_easyroms": StepStatus.DONE,
             "flash": StepStatus.DONE,
             "inject_boot": StepStatus.AVAILABLE,
-            "copy_games": StepStatus.AVAILABLE,
+            "copy_games": StepStatus.PLATFORM_LIMITED,
             "eject": StepStatus.NOT_RELEVANT,
         }
     )
 
-    assert "Faisable" in screen._tiles["extract_boot"].text()
-    assert "Déjà faite" in screen._tiles["extract_easyroms"].text()
-    assert "Déjà faite" in screen._tiles["flash"].text()
-    assert "Non pertinente" in screen._tiles["eject"].text()
+    assert screen._badges["extract_boot"].text() == "Faisable"
+    assert screen._badges["extract_boot"].property("badgeKind") == "available"
+    assert screen._badges["extract_easyroms"].text() == "Déjà faite"
+    assert screen._badges["extract_easyroms"].property("badgeKind") == "done"
+    assert screen._badges["flash"].text() == "Déjà faite"
+    assert screen._badges["copy_games"].text() == "PC ou Linux"
+    assert screen._badges["copy_games"].property("badgeKind") == "platform_limited"
+    assert screen._badges["eject"].text() == "Non pertinente pour cette carte"
+    assert screen._badges["eject"].property("badgeKind") == "not_relevant"
+    for key in screen._badges:
+        assert screen._badges[key].isVisible() is True
 
 
 def test_home_screen_steps_appear_in_fixed_chronological_order(qapp):
@@ -171,183 +203,628 @@ def test_home_screen_hides_help_button_outside_macos(mock_system, qapp):
     assert not hasattr(screen, "_help_button")
 
 
-# --- HelpScreen ----------------------------------------------------------
+# --- désactivation pendant une opération (§5, refonte navigation) -----------
 
 
-def test_help_screen_back_button_emits_signal(qapp):
-    screen = HelpScreen()
+def test_home_screen_set_busy_disables_steps_and_backup_row(qapp):
+    """Les étapes restent cliquables sauf pendant une opération, où elles
+    sont désactivées visuellement (§5, refonte navigation) --
+    `setEnabled(False)` empêche aussi Qt de délivrer les clics, pas
+    seulement l'apparence."""
+    screen = HomeScreen()
+
+    screen.set_busy(True)
+
+    for row in screen._tiles.values():
+        assert row.isEnabled() is False
+    assert screen._backup_row.isEnabled() is False
+
+
+def test_home_screen_set_busy_false_reenables_steps_and_backup_row(qapp):
+    screen = HomeScreen()
+    screen.set_busy(True)
+
+    screen.set_busy(False)
+
+    for row in screen._tiles.values():
+        assert row.isEnabled() is True
+    assert screen._backup_row.isEnabled() is True
+
+
+def test_home_screen_disabled_row_does_not_emit_on_click(qapp):
+    screen = HomeScreen()
     received = []
-    screen.back_requested.connect(lambda: received.append(True))
+    screen.flash_selected.connect(lambda: received.append(True))
+    screen.set_busy(True)
 
-    screen._back_button.click()
+    # Qt ne délivre pas mousePressEvent à un widget désactivé : émuler
+    # l'appel direct serait trompeur (contournerait la désactivation) --
+    # on vérifie plutôt que l'état lui-même empêche la réception native.
+    assert screen._tiles["flash"].isEnabled() is False
 
-    assert received == [True]
+
+# --- bandeau carte détectée (§5) --------------------------------------------
 
 
-def test_help_screen_open_settings_button_emits_signal(qapp):
-    screen = HelpScreen()
+def test_home_screen_banner_shows_none_state_without_device(qapp):
+    screen = HomeScreen()
+
+    screen.set_status({}, device=None)
+
+    assert screen._banner_device_label.text() == "Aucune carte détectée pour l'instant"
+    assert screen._banner_state_label.text() == ""
+
+
+def test_home_screen_banner_shows_device_model_and_size(qapp):
+    screen = HomeScreen()
+    device = _make_device(display="SanDisk Ultra", size_bytes=32_000_000_000)
+
+    screen.set_status({"flash": StepStatus.AVAILABLE}, device=device)
+
+    assert "SanDisk Ultra" in screen._banner_device_label.text()
+    assert "32.0 Go" in screen._banner_device_label.text()
+
+
+def test_home_screen_banner_recognizes_arkos_card(qapp):
+    """Le flash marqué "déjà faite" (`detect_workflow_status`) est le seul
+    signal déjà calculé pour "cette carte est déjà ArkOS" -- le bandeau le
+    réutilise plutôt que de redemander l'information."""
+    screen = HomeScreen()
+    device = _make_device()
+
+    screen.set_status({"flash": StepStatus.DONE}, device=device)
+
+    assert screen._banner_state_label.text() == "Carte ArkOS reconnue"
+
+
+def test_home_screen_banner_shows_unprepared_for_non_arkos_card(qapp):
+    screen = HomeScreen()
+    device = _make_device()
+
+    screen.set_status({"flash": StepStatus.AVAILABLE}, device=device)
+
+    assert screen._banner_state_label.text() == "Carte non préparée"
+
+
+# --- illustrations décoratives (§5) -----------------------------------------
+#
+# Absentes sans lever d'exception si le fichier n'existe pas -- l'interface
+# doit s'afficher normalement sans elles. Pixmaps factices en mémoire plutôt
+# que de dépendre des vrais fichiers `gui/assets/*.png`.
+
+
+def test_build_console_stage_returns_none_when_asset_missing(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        assert build_console_stage() is None
+
+
+def test_build_console_stage_returns_widget_when_asset_present(tmp_path, qapp):
+    fake_path = tmp_path / "console.png"
+    _fake_pixmap().save(str(fake_path))
+
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=fake_path):
+        stage = build_console_stage()
+
+    assert isinstance(stage, ConsoleStage)
+
+
+def test_console_art_paints_at_70_percent_opacity_and_has_no_graphics_effect(qapp):
+    """§5 (correctif de performance) : l'ancien QGraphicsDropShadowEffect
+    a été retiré -- ConsoleArt ne porte plus aucun QGraphicsEffect, le
+    halo est désormais un widget peint séparément (ConsoleHalo)."""
+    art = ConsoleArt(_fake_pixmap())
+
+    assert art._OPACITY == 0.70
+    assert art.graphicsEffect() is None
+
+
+def test_console_art_float_offset_is_an_animatable_qt_property(qapp):
+    art = ConsoleArt(_fake_pixmap())
+
+    art.floatOffset = 4.5
+
+    assert art.floatOffset == 4.5
+    assert art._float_offset == 4.5
+
+
+def test_console_base_plate_glow_opacity_is_an_animatable_qt_property(qapp):
+    plate = ConsoleBasePlate()
+
+    plate.glowOpacity = 0.4
+
+    assert plate.glowOpacity == 0.4
+
+
+def test_console_base_plate_paints_without_raising_at_various_sizes(qapp):
+    """Pas d'assertion facile sur les pixels peints (dégradé radial
+    elliptique, technique du repère mis à l'échelle) -- au minimum, un
+    rendu ne doit jamais lever, y compris à taille nulle."""
+    plate = ConsoleBasePlate()
+    for w, h in [(0, 0), (1, 1), (140, 30)]:
+        plate.resize(w, h)
+        plate.grab()  # force un paintEvent réel
+
+
+def test_console_base_plate_caches_gradient_pixmap_and_only_rebuilds_on_resize(qapp):
+    """§5 (correctif de performance) : le QRadialGradient n'est reconstruit
+    que dans resizeEvent, jamais depuis le setter de glowOpacity."""
+    plate = ConsoleBasePlate()
+    plate.resize(140, 30)
+    cached = plate._pixmap
+
+    plate.glowOpacity = 0.4
+
+    assert plate._pixmap is cached
+
+
+def test_console_halo_glow_opacity_is_an_animatable_qt_property(qapp):
+    halo = ConsoleHalo()
+
+    halo.glowOpacity = 0.3
+
+    assert halo.glowOpacity == 0.3
+
+
+def test_console_halo_paints_without_raising_at_various_sizes(qapp):
+    halo = ConsoleHalo()
+    for w, h in [(0, 0), (1, 1), (200, 220)]:
+        halo.resize(w, h)
+        halo.grab()
+
+
+# --- ConsoleStage : les trois animations groupées (§5) ----------------------
+
+
+def test_console_stage_groups_three_animations_with_correct_periods(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    assert stage._group.animationCount() == 3
+    assert stage._plate_animation.duration() == 3000
+    assert stage._glow_animation.duration() == 4000
+    assert stage._float_animation.duration() == 6000
+    for animation in (stage._plate_animation, stage._glow_animation, stage._float_animation):
+        assert animation.loopCount() == -1
+        assert animation.easingCurve().type() == animation.easingCurve().type().InOutSine
+
+
+def test_console_stage_plate_animation_pulses_between_25_and_55_percent(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    assert stage._plate_animation.keyValueAt(0.0) == 0.25
+    assert stage._plate_animation.keyValueAt(0.5) == 0.55
+    assert stage._plate_animation.keyValueAt(1.0) == 0.25
+
+
+def test_console_stage_glow_animation_pulses_halo_opacity_between_15_and_38_percent(qapp):
+    """§5 (correctif de performance) : le halo n'anime plus un rayon de
+    flou (QGraphicsDropShadowEffect, coûteux) mais l'opacité d'une
+    ellipse peinte (ConsoleHalo), sur le même principe que le socle."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    assert stage._glow_animation.targetObject() is stage._halo
+    assert stage._glow_animation.keyValueAt(0.0) == 0.15
+    assert stage._glow_animation.keyValueAt(0.5) == 0.38
+    assert stage._glow_animation.keyValueAt(1.0) == 0.15
+
+
+def test_console_stage_float_animation_moves_6px_up_and_down(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    assert stage._float_animation.keyValueAt(0.0) == -6.0
+    assert stage._float_animation.keyValueAt(0.5) == 6.0
+    assert stage._float_animation.keyValueAt(1.0) == -6.0
+
+
+def test_console_stage_glow_animation_starts_out_of_phase_with_plate(qapp):
+    """§5 : "décalé par rapport au socle pour éviter que les deux
+    respirent à l'unisson" -- vérifie qu'un déphasage explicite est bien
+    appliqué au démarrage (au-delà de la simple différence de période)."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    assert stage._glow_animation.currentTime() == 2000  # moitié de son cycle de 4 s
+
+
+def test_console_stage_animations_start_running_by_default(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    assert stage._group.state() == QParallelAnimationGroup.Running
+
+
+def test_console_stage_pause_and_resume(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    stage.pause()
+    assert stage._group.state() == QParallelAnimationGroup.Paused
+
+    stage.resume()
+    assert stage._group.state() == QParallelAnimationGroup.Running
+
+
+# --- Correctif de performance (§5) : minuteur de repeint à 30 im/s, ---------
+# --- valeurs animées découplées du repeint --------------------------------
+
+
+def test_console_stage_caps_repaint_at_30fps_and_runs_by_default(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    assert stage._repaint_timer.interval() == 33
+    assert stage._repaint_timer.isActive() is True
+
+
+def test_console_stage_pause_stops_the_repaint_timer(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    stage.pause()
+
+    assert stage._repaint_timer.isActive() is False
+
+
+def test_console_stage_resume_restarts_the_repaint_timer(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.pause()
+
+    stage.resume()
+
+    assert stage._repaint_timer.isActive() is True
+
+
+def test_console_stage_set_animations_enabled_false_stops_the_repaint_timer(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    stage.set_animations_enabled(False)
+
+    assert stage._repaint_timer.isActive() is False
+
+
+def test_console_property_setters_do_not_trigger_their_own_repaint(qapp):
+    """Les valeurs animées (glowOpacity, floatOffset) ne doivent plus
+    déclencher leur propre update() -- seul le minuteur groupé de
+    ConsoleStage impose un repeint (§5, correctif de performance)."""
+    art = ConsoleArt(_fake_pixmap())
+    plate = ConsoleBasePlate()
+    halo = ConsoleHalo()
+
+    with patch.object(QWidget, "update") as mock_update:
+        art.floatOffset = 3.0
+        plate.glowOpacity = 0.4
+        halo.glowOpacity = 0.3
+
+    mock_update.assert_not_called()
+
+
+def test_console_stage_set_animations_enabled_false_stops_and_resets_to_rest_state(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage._base_plate.glowOpacity = 0.55
+    stage._halo.glowOpacity = 0.38
+    stage._console_art.floatOffset = 6.0
+
+    stage.set_animations_enabled(False)
+
+    assert stage._group.state() == QParallelAnimationGroup.Stopped
+    assert stage._base_plate.glowOpacity == ConsoleBasePlate._MIN_OPACITY
+    assert stage._halo.glowOpacity == ConsoleHalo._MIN_OPACITY
+    assert stage._console_art.floatOffset == 0.0
+
+
+def test_console_stage_set_animations_enabled_true_after_false_resumes(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.set_animations_enabled(False)
+
+    stage.set_animations_enabled(True)
+
+    assert stage._group.state() == QParallelAnimationGroup.Running
+
+
+def test_console_stage_resume_is_a_noop_while_disabled(qapp):
+    """`pause()` (appelé pendant une opération disque, §5) ne doit pas
+    relancer les animations si l'utilisateur les a désactivées entre
+    temps."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.set_animations_enabled(False)
+
+    stage.resume()
+
+    assert stage._group.state() == QParallelAnimationGroup.Stopped
+
+
+def test_console_stage_positions_base_plate_under_the_console(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.resize(400, 300)
+    stage.show()
+
+    plate_rect = stage._base_plate.geometry()
+    art_rect_bottom = stage.height() // 2 + stage._console_art.rendered_size().height() // 2
+
+    # Le socle est centré horizontalement et sa largeur avoisine 70 % de
+    # celle de la console rendue (§5).
+    assert plate_rect.width() > 0
+    assert abs(plate_rect.center().x() - stage.width() // 2) <= 1
+    assert abs(plate_rect.center().y() - art_rect_bottom) <= plate_rect.height()
+
+
+def test_build_window_backdrop_returns_none_when_asset_missing(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        assert build_window_backdrop() is None
+
+
+def test_build_window_backdrop_returns_widget_when_asset_present(tmp_path, qapp):
+    fake_path = tmp_path / "circuit.png"
+    _fake_pixmap().save(str(fake_path))
+
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=fake_path):
+        backdrop = build_window_backdrop()
+
+    assert isinstance(backdrop, WindowBackdrop)
+
+
+def test_window_backdrop_paints_at_15_percent_opacity_without_raising(qapp):
+    """Pas d'assertion facile sur les pixels peints (mosaïque via
+    `QPainter.drawTiledPixmap`) -- au minimum, un rendu ne doit jamais
+    lever, y compris à taille nulle ou très grande."""
+    backdrop = WindowBackdrop(_fake_pixmap())
+    backdrop.resize(500, 400)
+
+    backdrop.grab()  # force un paintEvent réel ; ne doit pas lever
+
+    assert backdrop._OPACITY == 0.15
+
+
+# --- MainView : assemblage des deux colonnes (§5, refonte navigation) ------
+
+
+def test_main_view_gives_home_a_fixed_width(qapp):
+    home = HomeScreen()
+    log_panel = LogPanel()
+
+    view = MainView(home, None, log_panel)
+
+    assert home.minimumWidth() == view._LEFT_COLUMN_WIDTH
+    assert home.maximumWidth() == view._LEFT_COLUMN_WIDTH
+
+
+def test_main_view_works_without_console_stage(qapp):
+    """`console_stage=None` (asset absent) ne doit jamais empêcher la
+    construction de la vue (§5)."""
+    home = HomeScreen()
+    log_panel = LogPanel()
+
+    view = MainView(home, None, log_panel)
+
+    assert view is not None
+
+
+def test_main_view_has_no_animation_toggle_without_console_stage(qapp):
+    home = HomeScreen()
+    log_panel = LogPanel()
+
+    view = MainView(home, None, log_panel)
+
+    assert not hasattr(view, "animation_toggle")
+
+
+def test_main_view_animation_toggle_is_checked_by_default_and_wired_to_console_stage(qapp):
+    home = HomeScreen()
+    log_panel = LogPanel()
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    view = MainView(home, stage, log_panel)
+
+    assert view.animation_toggle.isChecked() is True
+
+    view.animation_toggle.setChecked(False)
+
+    assert stage._group.state() == QParallelAnimationGroup.Stopped
+
+
+def test_main_view_without_backdrop_asset_has_no_backdrop(qapp):
+    home = HomeScreen()
+    log_panel = LogPanel()
+
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        view = MainView(home, None, log_panel)
+
+    assert view._backdrop is None
+
+
+# --- HelpDialog --------------------------------------------------------------
+
+
+def test_help_dialog_back_button_closes_dialog(qapp):
+    dialog = HelpDialog()
+    dialog.show()
+    assert dialog.isVisible() is True
+
+    dialog._back_button.click()
+
+    assert dialog.isVisible() is False
+
+
+def test_help_dialog_open_settings_button_emits_signal(qapp):
+    dialog = HelpDialog()
     received = []
-    screen.open_settings_requested.connect(lambda: received.append(True))
+    dialog.open_settings_requested.connect(lambda: received.append(True))
 
-    screen._open_settings_button.click()
-
-    assert received == [True]
+    dialog._open_settings_button.click()
 
     assert received == [True]
 
 
-# --- DeviceScreen --------------------------------------------------------
+# --- DeviceDialog ------------------------------------------------------------
 
 
-def test_device_screen_no_default_selection(qapp):
-    screen = DeviceScreen()
-    screen.set_devices([_make_device()])
+def test_device_dialog_no_default_selection(qapp):
+    dialog = DeviceDialog()
+    dialog.set_devices([_make_device()])
 
-    assert screen._list.selectedItems() == []
-    assert screen._next_button.isEnabled() is False
+    assert dialog._list.selectedItems() == []
+    assert dialog._next_button.isEnabled() is False
 
 
-def test_device_screen_selecting_enables_next_and_emits_correct_device(qapp):
-    screen = DeviceScreen()
+def test_device_dialog_selecting_enables_next_and_emits_correct_device(qapp):
+    dialog = DeviceDialog()
     device_a = _make_device(path="/dev/fake-disk-test-3", display="A")
     device_b = _make_device(path="/dev/fake-disk-test-4", display="B")
-    screen.set_devices([device_a, device_b])
+    dialog.set_devices([device_a, device_b])
 
-    screen._list.setCurrentRow(1)
-    assert screen._next_button.isEnabled() is True
+    dialog._list.setCurrentRow(1)
+    assert dialog._next_button.isEnabled() is True
 
     chosen = []
-    screen.device_chosen.connect(lambda d: chosen.append(d))
-    screen._emit_chosen()
+    dialog.device_chosen.connect(lambda d: chosen.append(d))
+    dialog._emit_chosen()
 
     assert chosen == [device_b]
 
 
-def test_device_screen_empty_list_shows_empty_message(qapp):
-    screen = DeviceScreen()
-    screen.show()  # isVisible() ne reflète setVisible() qu'une fois le parent affiché
-    screen.set_devices([])
+def test_device_dialog_empty_list_shows_empty_message(qapp):
+    dialog = DeviceDialog()
+    dialog.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    dialog.set_devices([])
 
-    assert screen._empty_label.isVisible() is True
-    assert screen._list.isVisible() is False
-
-
-# --- FileScreen ----------------------------------------------------------
+    assert dialog._empty_label.isVisible() is True
+    assert dialog._list.isVisible() is False
 
 
-def test_file_screen_set_mode_resets_state(qapp):
-    screen = FileScreen()
-    screen.set_mode("flash")
-    assert screen._next_button.isEnabled() is False
-    assert screen._path_label.text() == ""
+def test_device_dialog_back_button_closes_dialog(qapp):
+    dialog = DeviceDialog()
+    dialog.show()
+
+    dialog.findChild(type(dialog._next_button))  # sanity: widget tree exists
+    back_buttons = [w for w in dialog.findChildren(type(dialog._next_button)) if w.text() == "Retour"]
+    assert back_buttons
+    back_buttons[0].click()
+
+    assert dialog.isVisible() is False
+
+
+# --- FileDialog ----------------------------------------------------------
+
+
+def test_file_dialog_set_mode_resets_state(qapp):
+    dialog = FileDialog()
+    dialog.set_mode("flash")
+    assert dialog._next_button.isEnabled() is False
+    assert dialog._path_label.text() == ""
 
 
 @patch("r36s_studio.gui.screens.QFileDialog.getSaveFileName", return_value=("/tmp/out.img", ""))
-def test_file_screen_backup_browse_enables_next(mock_dialog, qapp):
-    screen = FileScreen()
-    screen.set_mode("backup")
+def test_file_dialog_backup_browse_enables_next(mock_dialog, qapp):
+    dialog = FileDialog()
+    dialog.set_mode("backup")
 
-    screen._browse()
+    dialog._browse()
 
-    assert screen._path_label.text() == "/tmp/out.img"
-    assert screen._next_button.isEnabled() is True
+    assert dialog._path_label.text() == "/tmp/out.img"
+    assert dialog._next_button.isEnabled() is True
 
 
 @patch("r36s_studio.gui.screens.QFileDialog.getOpenFileName", return_value=("", ""))
-def test_file_screen_cancelled_dialog_does_not_enable_next(mock_dialog, qapp):
-    screen = FileScreen()
-    screen.set_mode("flash")
+def test_file_dialog_cancelled_dialog_does_not_enable_next(mock_dialog, qapp):
+    dialog = FileDialog()
+    dialog.set_mode("flash")
 
-    screen._browse()
+    dialog._browse()
 
-    assert screen._next_button.isEnabled() is False
+    assert dialog._next_button.isEnabled() is False
 
 
 @patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/tmp/boot_backup")
-def test_file_screen_inject_boot_browse_picks_a_folder(mock_dialog, qapp):
+def test_file_dialog_inject_boot_browse_picks_a_folder(mock_dialog, qapp):
     """inject-boot/copy-games consomment un dossier (§4.4), pas un fichier
     unique -- le sélecteur doit être un choix de dossier."""
-    screen = FileScreen()
-    screen.set_mode("inject_boot")
+    dialog = FileDialog()
+    dialog.set_mode("inject_boot")
 
-    screen._browse()
+    dialog._browse()
 
     mock_dialog.assert_called_once()
-    assert screen._path_label.text() == "/tmp/boot_backup"
-    assert screen._next_button.isEnabled() is True
+    assert dialog._path_label.text() == "/tmp/boot_backup"
+    assert dialog._next_button.isEnabled() is True
 
 
 @patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/tmp/games")
-def test_file_screen_copy_games_browse_picks_a_folder(mock_dialog, qapp):
-    screen = FileScreen()
-    screen.set_mode("copy_games")
+def test_file_dialog_copy_games_browse_picks_a_folder(mock_dialog, qapp):
+    dialog = FileDialog()
+    dialog.set_mode("copy_games")
 
-    screen._browse()
+    dialog._browse()
 
-    assert screen._path_label.text() == "/tmp/games"
+    assert dialog._path_label.text() == "/tmp/games"
 
 
 @patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="")
-def test_file_screen_cancelled_folder_dialog_does_not_enable_next(mock_dialog, qapp):
-    screen = FileScreen()
-    screen.set_mode("copy_games")
+def test_file_dialog_cancelled_folder_dialog_does_not_enable_next(mock_dialog, qapp):
+    dialog = FileDialog()
+    dialog.set_mode("copy_games")
 
-    screen._browse()
+    dialog._browse()
 
-    assert screen._next_button.isEnabled() is False
-
-
-# --- FileScreen : liste des archives existantes (étapes D/E, §4.4) --------
+    assert dialog._next_button.isEnabled() is False
 
 
-def test_file_screen_archive_mode_lists_existing_archives(qapp):
-    screen = FileScreen()
-    screen.show()
-    screen.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
+def test_file_dialog_back_button_closes_dialog(qapp):
+    dialog = FileDialog()
+    dialog.set_mode("flash")
+    dialog.show()
 
-    assert screen._archive_list.isVisible() is True
-    assert screen._archive_list.count() == 1
-    assert screen._archive_empty_label.isVisible() is False
+    back_buttons = [w for w in dialog.findChildren(type(dialog._next_button)) if w.text() == "Retour"]
+    assert back_buttons
+    back_buttons[0].click()
 
-
-def test_file_screen_archive_mode_with_no_archives_shows_empty_message(qapp):
-    screen = FileScreen()
-    screen.show()
-    screen.set_mode("copy_games", archive_choices=[])
-
-    assert screen._archive_list.count() == 0
-    assert screen._archive_empty_label.isVisible() is True
+    assert dialog.isVisible() is False
 
 
-def test_file_screen_non_archive_mode_hides_archive_list(qapp):
-    screen = FileScreen()
-    screen.set_mode("flash")
-
-    assert screen._archive_list.isVisible() is False
-    assert screen._archive_empty_label.isVisible() is False
+# --- FileDialog : liste des archives existantes (étapes D/E, §4.4) --------
 
 
-def test_file_screen_selecting_an_archive_enables_next_and_sets_path(qapp):
-    screen = FileScreen()
-    screen.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
+def test_file_dialog_archive_mode_lists_existing_archives(qapp):
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
 
-    screen._archive_list.setCurrentRow(0)
+    assert dialog._archive_list.isVisible() is True
+    assert dialog._archive_list.count() == 1
+    assert dialog._archive_empty_label.isVisible() is False
 
-    assert screen._path_label.text() == "/tmp/R36S Studio/BOOT_2026-07-06_00-21"
-    assert screen._next_button.isEnabled() is True
+
+def test_file_dialog_archive_mode_with_no_archives_shows_empty_message(qapp):
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("copy_games", archive_choices=[])
+
+    assert dialog._archive_list.count() == 0
+    assert dialog._archive_empty_label.isVisible() is True
+
+
+def test_file_dialog_non_archive_mode_hides_archive_list(qapp):
+    dialog = FileDialog()
+    dialog.set_mode("flash")
+
+    assert dialog._archive_list.isVisible() is False
+    assert dialog._archive_empty_label.isVisible() is False
+
+
+def test_file_dialog_selecting_an_archive_enables_next_and_sets_path(qapp):
+    dialog = FileDialog()
+    dialog.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
+
+    dialog._archive_list.setCurrentRow(0)
+
+    assert dialog._path_label.text() == "/tmp/R36S Studio/BOOT_2026-07-06_00-21"
+    assert dialog._next_button.isEnabled() is True
 
 
 @patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/tmp/manual_folder")
-def test_file_screen_browse_still_works_as_fallback_in_archive_mode(mock_dialog, qapp):
+def test_file_dialog_browse_still_works_as_fallback_in_archive_mode(mock_dialog, qapp):
     """Repli manuel : même quand des archives existent, Parcourir… reste
     disponible pour désigner un dossier différent."""
-    screen = FileScreen()
-    screen.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
+    dialog = FileDialog()
+    dialog.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
 
-    screen._browse()
+    dialog._browse()
 
-    assert screen._path_label.text() == "/tmp/manual_folder"
-    assert screen._next_button.isEnabled() is True
+    assert dialog._path_label.text() == "/tmp/manual_folder"
+    assert dialog._next_button.isEnabled() is True
 
 
 def test_format_archive_label_formats_known_timestamp_in_french():
@@ -362,119 +839,320 @@ def test_format_archive_label_falls_back_to_folder_name_for_manual_folder():
     assert label == "mon_dossier_perso"
 
 
-# --- FileScreen : dossier de destination avec défaut (étapes A/B, §4.4) ----
+# --- FileDialog : dossier de destination avec défaut (étapes A/B, §4.4) ----
 
 
-def test_file_screen_destination_mode_preselects_default_path(qapp):
-    screen = FileScreen()
+def test_file_dialog_destination_mode_preselects_default_path(qapp):
+    dialog = FileDialog()
 
-    screen.set_mode("extract_boot", default_path="/home/x/Documents/R36S Studio")
+    dialog.set_mode("extract_boot", default_path="/home/x/Documents/R36S Studio")
 
-    assert screen._path_label.text() == "/home/x/Documents/R36S Studio"
-    assert screen._next_button.isEnabled() is True
-
-
-def test_file_screen_destination_mode_shows_hint_and_hides_archive_widgets(qapp):
-    screen = FileScreen()
-    screen.show()
-
-    screen.set_mode("extract_easyroms", default_path="/home/x/Documents/R36S Studio")
-
-    assert screen._destination_hint_label.isVisible() is True
-    assert screen._archive_list.isVisible() is False
-    assert screen._archive_empty_label.isVisible() is False
+    assert dialog._path_label.text() == "/home/x/Documents/R36S Studio"
+    assert dialog._next_button.isEnabled() is True
 
 
-def test_file_screen_other_modes_hide_destination_hint(qapp):
-    screen = FileScreen()
-    screen.show()
+def test_file_dialog_destination_mode_shows_hint_and_hides_archive_widgets(qapp):
+    dialog = FileDialog()
+    dialog.show()
 
-    screen.set_mode("flash")
+    dialog.set_mode("extract_easyroms", default_path="/home/x/Documents/R36S Studio")
 
-    assert screen._destination_hint_label.isVisible() is False
+    assert dialog._destination_hint_label.isVisible() is True
+    assert dialog._archive_list.isVisible() is False
+    assert dialog._archive_empty_label.isVisible() is False
+
+
+def test_file_dialog_other_modes_hide_destination_hint(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash")
+
+    assert dialog._destination_hint_label.isVisible() is False
 
 
 @patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/Volumes/DisqueExterne")
-def test_file_screen_destination_mode_can_replace_default_via_browse(mock_dialog, qapp):
-    screen = FileScreen()
-    screen.set_mode("extract_boot", default_path="/home/x/Documents/R36S Studio")
+def test_file_dialog_destination_mode_can_replace_default_via_browse(mock_dialog, qapp):
+    dialog = FileDialog()
+    dialog.set_mode("extract_boot", default_path="/home/x/Documents/R36S Studio")
 
-    screen._browse()
+    dialog._browse()
 
     mock_dialog.assert_called_once()
     assert mock_dialog.call_args.args[-1] == "/home/x/Documents/R36S Studio"  # démarre sur le défaut affiché
-    assert screen._path_label.text() == "/Volumes/DisqueExterne"
-    assert screen._next_button.isEnabled() is True
+    assert dialog._path_label.text() == "/Volumes/DisqueExterne"
+    assert dialog._next_button.isEnabled() is True
 
 
-def test_file_screen_without_default_path_disables_next_until_chosen(qapp):
+def test_file_dialog_without_default_path_disables_next_until_chosen(qapp):
     """Un mode destination sans défaut fourni (ne devrait pas arriver en
     pratique, mais ne doit pas planter) laisse Suivant désactivé."""
-    screen = FileScreen()
+    dialog = FileDialog()
 
-    screen.set_mode("extract_boot")
+    dialog.set_mode("extract_boot")
 
-    assert screen._path_label.text() == ""
-    assert screen._next_button.isEnabled() is False
-
-
-# --- ConfirmScreen ---------------------------------------------------------
+    assert dialog._path_label.text() == ""
+    assert dialog._next_button.isEnabled() is False
 
 
-def test_confirm_screen_go_disabled_until_checkbox_checked(qapp):
-    screen = ConfirmScreen()
-    screen.set_device(_make_device())
-    assert screen._go_button.isEnabled() is False
-
-    screen._checkbox.setChecked(True)
-    assert screen._go_button.isEnabled() is True
-
-    screen._checkbox.setChecked(False)
-    assert screen._go_button.isEnabled() is False
+# --- ConfirmDialog -----------------------------------------------------------
 
 
-def test_confirm_screen_shows_device_display_and_size(qapp):
-    screen = ConfirmScreen()
-    screen.set_device(_make_device(display="SanDisk Ultra", size_bytes=31_914_983_424))
+def test_confirm_dialog_go_disabled_until_checkbox_checked(qapp):
+    dialog = ConfirmDialog()
+    dialog.set_device(_make_device())
+    assert dialog._go_button.isEnabled() is False
 
-    text = screen._message.text()
+    dialog._checkbox.setChecked(True)
+    assert dialog._go_button.isEnabled() is True
+
+    dialog._checkbox.setChecked(False)
+    assert dialog._go_button.isEnabled() is False
+
+
+def test_confirm_dialog_shows_device_display_and_size(qapp):
+    dialog = ConfirmDialog()
+    dialog.set_device(_make_device(display="SanDisk Ultra", size_bytes=31_914_983_424))
+
+    text = dialog._message.text()
     assert "SanDisk Ultra" in text
     assert "31.9" in text
 
 
-def test_confirm_screen_cancel_resets_checkbox_and_emits(qapp):
-    screen = ConfirmScreen()
-    screen.set_device(_make_device())
-    screen._checkbox.setChecked(True)
+def test_confirm_dialog_cancel_button_closes_dialog(qapp):
+    dialog = ConfirmDialog()
+    dialog.set_device(_make_device())
+    dialog.show()
 
-    cancelled = []
-    screen.cancelled.connect(lambda: cancelled.append(True))
-    screen._cancel()
+    cancel_buttons = [w for w in dialog.findChildren(type(dialog._go_button)) if w.text() == "Annuler"]
+    assert cancel_buttons
+    cancel_buttons[0].click()
 
-    assert cancelled == [True]
-    assert screen._checkbox.isChecked() is False
-
-
-# --- ExecuteScreen ---------------------------------------------------------
+    assert dialog.isVisible() is False
 
 
-def test_execute_screen_update_progress_sets_percentage(qapp):
-    screen = ExecuteScreen()
-    screen.reset("flash")
+def test_confirm_dialog_confirmed_signal_on_go_click(qapp):
+    dialog = ConfirmDialog()
+    dialog.set_device(_make_device())
+    dialog._checkbox.setChecked(True)
+    received = []
+    dialog.confirmed.connect(lambda: received.append(True))
 
-    screen.update_progress(done=50, total=200, speed=1_000_000)
+    dialog._go_button.click()
 
-    assert screen._bar.value() == 25
-    assert screen._bar.minimum() == 0 and screen._bar.maximum() == 100
+    assert received == [True]
 
 
-def test_execute_screen_unknown_total_shows_indeterminate_bar(qapp):
-    screen = ExecuteScreen()
-    screen.reset("flash")
+# --- LogPanel (§5, refonte navigation -- remplace Exécution + Résultat) ----
 
-    screen.update_progress(done=50, total=0, speed=1_000_000)
 
-    assert screen._bar.minimum() == 0 and screen._bar.maximum() == 0
+def test_log_panel_starts_idle(qapp):
+    panel = LogPanel()
+
+    assert panel._header_label.text() == "En attente"
+    assert panel._bar.isVisible() is False
+    assert panel._cancel_button.isVisible() is False
+    assert panel._eject_button.isVisible() is False
+    assert panel._reveal_button.isVisible() is False
+
+
+def test_log_panel_start_operation_shows_header_progress_and_cancel(qapp):
+    panel = LogPanel()
+    panel.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    panel.start_operation("Écriture en cours…")
+
+    assert panel._header_label.text() == "OPÉRATION ACTIVE — Écriture en cours…"
+    assert panel._bar.isVisible() is True
+    assert panel._cancel_button.isVisible() is True
+    assert panel._cancel_button.isEnabled() is True
+    assert panel._eject_button.isVisible() is False
+    assert panel._reveal_button.isVisible() is False
+
+
+def test_log_panel_start_operation_clears_previous_log(qapp):
+    panel = LogPanel()
+    panel.start_operation("Sauvegarde en cours…")
+    panel.append_log("une ligne de la précédente opération")
+
+    panel.start_operation("Écriture en cours…")
+
+    assert panel._log_view.toPlainText() == ""
+
+
+def test_log_panel_update_progress_sets_percentage(qapp):
+    panel = LogPanel()
+    panel.start_operation("Écriture en cours…")
+
+    panel.update_progress(done=50, total=200, speed=1_000_000)
+
+    assert panel._bar.value() == 25
+    assert panel._bar.minimum() == 0 and panel._bar.maximum() == 100
+    assert "1.0" in panel._speed_label.text()
+
+
+def test_log_panel_unknown_total_shows_indeterminate_bar(qapp):
+    panel = LogPanel()
+    panel.start_operation("Écriture en cours…")
+
+    panel.update_progress(done=50, total=0, speed=1_000_000)
+
+    assert panel._bar.minimum() == 0 and panel._bar.maximum() == 0
+
+
+def test_log_panel_append_log_prefixes_a_timestamp(qapp):
+    panel = LogPanel()
+
+    with patch("r36s_studio.gui.screens.datetime") as mock_datetime:
+        mock_datetime.now.return_value.strftime.return_value = "21:44:02"
+        panel.append_log("Montage des partitions: OK")
+
+    assert panel._log_view.toPlainText() == "21:44:02 - Montage des partitions: OK"
+
+
+def test_log_panel_append_log_keeps_history_within_one_operation(qapp):
+    """Le journal conserve tout l'historique de l'opération en cours --
+    chaque ajout s'accumule, jamais un remplacement de la ligne
+    précédente."""
+    panel = LogPanel()
+
+    panel.append_log("Montage des partitions: OK")
+    panel.append_log("Écriture en cours")
+    panel.append_log("Vérification SHA-256: OK")
+
+    lines = panel._log_view.toPlainText().splitlines()
+    assert len(lines) == 3
+    assert lines[0].endswith("Montage des partitions: OK")
+    assert lines[1].endswith("Écriture en cours")
+    assert lines[2].endswith("Vérification SHA-256: OK")
+
+
+def test_log_panel_append_log_scrolls_to_bottom(qapp):
+    panel = LogPanel()
+
+    for i in range(50):
+        panel.append_log(f"ligne {i}")
+
+    scrollbar = panel._log_view.verticalScrollBar()
+    assert scrollbar.value() == scrollbar.maximum()
+
+
+def test_log_panel_is_read_only_and_monospace_role(qapp):
+    panel = LogPanel()
+
+    assert panel._log_view.isReadOnly() is True
+    assert panel._log_view.property("role") == "log"
+
+
+def test_log_panel_finish_success_logs_message_and_hides_progress(qapp):
+    panel = LogPanel()
+    panel.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    panel.start_operation("Écriture en cours…")
+
+    panel.finish_success("La carte est prête.", allow_eject=True, reveal_path=None)
+
+    assert "La carte est prête." in panel._log_view.toPlainText()
+    assert panel._bar.isVisible() is False
+    assert panel._cancel_button.isVisible() is False
+    assert panel._eject_button.isVisible() is True
+    assert panel._reveal_button.isVisible() is False
+    assert panel._header_label.text() == "En attente"
+
+
+def test_log_panel_finish_success_without_eject_hides_eject_button(qapp):
+    panel = LogPanel()
+    panel.start_operation("Sauvegarde en cours…")
+
+    panel.finish_success("Sauvegardée.", allow_eject=False, reveal_path=None)
+
+    assert panel._eject_button.isVisible() is False
+
+
+def test_log_panel_finish_success_with_reveal_path_shows_reveal_button(qapp):
+    panel = LogPanel()
+    panel.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    panel.start_operation("Copie en cours…")
+
+    panel.finish_success("Copié.", allow_eject=True, reveal_path="/tmp/BOOT_x")
+
+    assert panel._reveal_button.isVisible() is True
+
+
+def test_log_panel_reveal_button_emits_stored_path(qapp):
+    panel = LogPanel()
+    panel.finish_success("ok", allow_eject=False, reveal_path="/tmp/BOOT_x")
+    received = []
+    panel.reveal_requested.connect(lambda path: received.append(path))
+
+    panel._reveal_button.click()
+
+    assert received == ["/tmp/BOOT_x"]
+
+
+def test_log_panel_eject_button_emits_signal(qapp):
+    panel = LogPanel()
+    panel.finish_success("ok", allow_eject=True, reveal_path=None)
+    received = []
+    panel.eject_requested.connect(lambda: received.append(True))
+
+    panel._eject_button.click()
+
+    assert received == [True]
+
+
+def test_log_panel_cancel_button_emits_signal(qapp):
+    panel = LogPanel()
+    panel.start_operation("Écriture en cours…")
+    received = []
+    panel.cancel_requested.connect(lambda: received.append(True))
+
+    panel._cancel_button.click()
+
+    assert received == [True]
+
+
+def test_log_panel_set_cancel_enabled(qapp):
+    panel = LogPanel()
+    panel.start_operation("Écriture en cours…")
+
+    panel.set_cancel_enabled(False)
+
+    assert panel._cancel_button.isEnabled() is False
+
+
+def test_log_panel_finish_error_logs_message_and_details(qapp):
+    panel = LogPanel()
+    panel.start_operation("Écriture en cours…")
+
+    panel.finish_error("Un problème est survenu.", details="[Errno 2] /dev/disk4")
+
+    text = panel._log_view.toPlainText()
+    assert "Un problème est survenu." in text
+    assert "[Errno 2] /dev/disk4" in text
+    assert panel._bar.isVisible() is False
+    assert panel._cancel_button.isVisible() is False
+    assert panel._eject_button.isVisible() is False
+    assert panel._header_label.text() == "En attente"
+
+
+def test_log_panel_finish_error_identical_details_not_duplicated(qapp):
+    panel = LogPanel()
+    panel.start_operation("Écriture en cours…")
+
+    panel.finish_error("Opération annulée.", details="Opération annulée.")
+
+    lines = panel._log_view.toPlainText().splitlines()
+    assert len(lines) == 1
+
+
+def test_log_panel_finish_error_without_details_logs_only_message(qapp):
+    panel = LogPanel()
+    panel.start_operation("Écriture en cours…")
+
+    panel.finish_error("Un message déjà clair")
+
+    lines = panel._log_view.toPlainText().splitlines()
+    assert len(lines) == 1
 
 
 def test_format_duration():
@@ -483,130 +1161,7 @@ def test_format_duration():
     assert _format_duration(3725) == "1 h 02 min"
 
 
-# --- ResultScreen ---------------------------------------------------------
-
-
-def test_result_screen_success_shows_eject_only_for_flash(qapp):
-    screen = ResultScreen()
-    screen.show()  # isVisible() ne reflète setVisible() qu'une fois le parent affiché
-    screen.show_success("ok", allow_eject=True)
-    assert screen._eject_button.isVisible() is True
-
-    screen.show_success("ok", allow_eject=False)
-    assert screen._eject_button.isVisible() is False
-
-
-def test_result_screen_error_hides_eject(qapp):
-    screen = ResultScreen()
-    screen.show()
-    screen.show_error("boom")
-    assert screen._eject_button.isVisible() is False
-
-
-def test_result_screen_error_without_details_hides_details_toggle(qapp):
-    screen = ResultScreen()
-    screen.show()
-    screen.show_error("Un message déjà clair")
-    assert screen._details_toggle.isVisible() is False
-
-
-def test_result_screen_error_with_details_shows_toggle_collapsed_by_default(qapp):
-    """Vocabulaire §5 : le message technique brut (qui peut contenir un
-    chemin comme /dev/disk4) reste replié tant qu'on n'a pas cliqué sur
-    Détails."""
-    screen = ResultScreen()
-    screen.show()
-    screen.show_error("Impossible de trouver les fichiers de la console.", details="Partition « BOOT » introuvable sur /dev/disk4")
-
-    assert screen._details_toggle.isVisible() is True
-    assert screen._details_label.isVisible() is False
-    assert "/dev/disk4" not in screen._message.text()
-
-
-def test_result_screen_details_toggle_reveals_technical_message(qapp):
-    screen = ResultScreen()
-    screen.show()
-    screen.show_error("Un problème est survenu.", details="[Errno 2] /dev/disk4")
-
-    screen._details_toggle.click()
-
-    assert screen._details_label.isVisible() is True
-    assert screen._details_label.text() == "[Errno 2] /dev/disk4"
-
-
-def test_result_screen_identical_message_and_details_hides_toggle(qapp):
-    """Si le détail est identique au message principal, pas la peine de le
-    répéter sous un panneau Détails."""
-    screen = ResultScreen()
-    screen.show()
-    screen.show_error("Opération annulée.", details="Opération annulée.")
-
-    assert screen._details_toggle.isVisible() is False
-
-
-def test_result_screen_success_clears_previous_error_details(qapp):
-    screen = ResultScreen()
-    screen.show()
-    screen.show_error("boom", details="détail technique")
-    assert screen._details_toggle.isVisible() is True
-
-    screen.show_success("ok", allow_eject=False)
-
-    assert screen._details_toggle.isVisible() is False
-
-
-# --- ResultScreen : chemin d'archive + bouton révéler (§4.4, écran Résultat)
-
-
-def test_result_screen_success_without_archive_info_hides_it(qapp):
-    screen = ResultScreen()
-    screen.show()
-
-    screen.show_success("ok", allow_eject=False)
-
-    assert screen._archive_info_label.isVisible() is False
-    assert screen._reveal_button.isVisible() is False
-
-
-def test_result_screen_success_with_archive_info_shows_it_and_reveal_button(qapp):
-    screen = ResultScreen()
-    screen.show()
-
-    screen.show_success(
-        "ok", allow_eject=True, archive_info="Enregistrée dans : /tmp/BOOT_x", reveal_path="/tmp/BOOT_x"
-    )
-
-    assert screen._archive_info_label.isVisible() is True
-    assert "/tmp/BOOT_x" in screen._archive_info_label.text()
-    assert screen._reveal_button.isVisible() is True
-
-
-def test_result_screen_reveal_button_emits_stored_path(qapp):
-    screen = ResultScreen()
-    screen.show()
-    screen.show_success("ok", allow_eject=False, archive_info="x", reveal_path="/tmp/BOOT_x")
-    received = []
-    screen.reveal_requested.connect(lambda path: received.append(path))
-
-    screen._reveal_button.click()
-
-    assert received == ["/tmp/BOOT_x"]
-
-
-def test_result_screen_error_hides_archive_info_and_reveal_button(qapp):
-    screen = ResultScreen()
-    screen.show()
-    screen.show_success("ok", allow_eject=False, archive_info="x", reveal_path="/tmp/BOOT_x")
-
-    screen.show_error("boom")
-
-    assert screen._archive_info_label.isVisible() is False
-    assert screen._reveal_button.isVisible() is False
-
-
 def test_format_size_formats_megabytes_and_gigabytes():
-    from r36s_studio.gui.screens import _format_size
-
     assert _format_size(500) == "500 o"
     assert _format_size(12_582_912) == "12.0 Mo"
     assert _format_size(2 * 1024**3) == "2.0 Go"

@@ -1,9 +1,11 @@
-"""Tests de navigation de MainWindow (gui/main_window.py) : traverse
-l'assistant de bout en bout pour les six étapes du workflow à deux cartes
-(§4.4/§4.5) et la sauvegarde complète. `list_devices`,
-`detect_workflow_status`, `WorkerRunner`/`PartitionJobRunner`,
-`archives` et `eject_device` sont mockés — aucun périphérique réel, aucune
-élévation, aucune écriture disque."""
+"""Tests de navigation de MainWindow (gui/main_window.py, §5 refonte
+navigation) : une seule vue permanente (deux colonnes) devant laquelle les
+choix ponctuels s'ouvrent en fenêtres modales, plutôt qu'une succession
+d'écrans. Traverse le parcours de bout en bout pour les six étapes du
+workflow à deux cartes (§4.4/§4.5) et la sauvegarde complète. `list_devices`,
+`detect_workflow_status`, `WorkerRunner`/`PartitionJobRunner`, `archives` et
+`eject_device` sont mockés — aucun périphérique réel, aucune élévation,
+aucune écriture disque."""
 
 from __future__ import annotations
 
@@ -78,7 +80,7 @@ def _mock_partition_runner_class():
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_backup_flow_reaches_execute_with_correct_argv(mock_list, mock_filter, mock_detect, qapp):
+def test_backup_flow_reaches_worker_with_correct_argv(mock_list, mock_filter, mock_detect, qapp):
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
@@ -88,30 +90,33 @@ def test_backup_flow_reaches_execute_with_correct_argv(mock_list, mock_filter, m
         window = MainWindow()
         window._home.backup_selected.emit()
 
-        assert window._stack.currentWidget() is window._device_screen
-        window._device_screen._list.setCurrentRow(0)
-        window._device_screen._emit_chosen()
+        assert window._device_dialog.isVisible() is True
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
 
-        assert window._stack.currentWidget() is window._file_screen
+        assert window._device_dialog.isVisible() is False  # fermée par MainWindow après le choix
+        assert window._file_dialog.isVisible() is True
 
         with patch("r36s_studio.gui.screens.QFileDialog.getSaveFileName", return_value=("/tmp/out.img", "")):
-            window._file_screen._browse()
-        window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+            window._file_dialog._browse()
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
-        # Backup n'écrit jamais sur un périphérique : pas d'écran de
-        # confirmation, on va directement à l'exécution.
-        assert window._stack.currentWidget() is window._execute_screen
+        # Backup n'écrit jamais sur un périphérique : pas de fenêtre de
+        # confirmation, l'opération démarre directement.
+        assert window._file_dialog.isVisible() is False
+        assert window._confirm_dialog.isVisible() is False
 
     runner_class.assert_called_once()
     argv = runner_class.instances[0].argv
     assert argv == ["backup", "--device", "/dev/fake-disk-test-3", "--output", "/tmp/out.img"]
     runner_class.instances[0].start.assert_called_once()
+    assert window._home._backup_row.isEnabled() is False  # occupé pendant l'opération
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_flash_flow_requires_confirmation_before_execute(mock_list, mock_filter, mock_detect, qapp):
+def test_flash_flow_requires_confirmation_before_worker_starts(mock_list, mock_filter, mock_detect, qapp):
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
@@ -120,26 +125,52 @@ def test_flash_flow_requires_confirmation_before_execute(mock_list, mock_filter,
     with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
         window = MainWindow()
         window._home.flash_selected.emit()
-        window._device_screen._list.setCurrentRow(0)
-        window._device_screen._emit_chosen()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
 
         with patch(
             "r36s_studio.gui.screens.QFileDialog.getOpenFileName", return_value=("/tmp/sd.img", "")
         ):
-            window._file_screen._browse()
-        window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+            window._file_dialog._browse()
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
         # Le flash écrit sur le périphérique : confirmation obligatoire.
-        assert window._stack.currentWidget() is window._confirm_screen
+        assert window._confirm_dialog.isVisible() is True
         runner_class.assert_not_called()
 
-        window._confirm_screen._checkbox.setChecked(True)
-        window._confirm_screen.confirmed.emit()
+        window._confirm_dialog._checkbox.setChecked(True)
+        window._confirm_dialog.confirmed.emit()
 
-        assert window._stack.currentWidget() is window._execute_screen
+        assert window._confirm_dialog.isVisible() is False
 
     argv = runner_class.instances[0].argv
     assert argv == ["flash", "--image", "/tmp/sd.img", "--device", "/dev/fake-disk-test-3"]
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_confirm_dialog_cancel_never_starts_the_worker(mock_list, mock_filter, mock_detect, qapp):
+    """Annuler ferme simplement la fenêtre de confirmation (§5, refonte
+    navigation) -- plus de retour à une fenêtre Fichier chaînée, juste un
+    abandon qui laisse la vue principale inchangée derrière."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window = MainWindow()
+        window._home.flash_selected.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+        window._file_dialog.file_chosen.emit("/tmp/sd.img")
+        assert window._confirm_dialog.isVisible() is True
+
+        window._confirm_dialog.close()
+
+    assert window._confirm_dialog.isVisible() is False
+    runner_class.assert_not_called()
 
 
 # --- câblage réel signal/slot, pas un WorkerRunner mocké --------------------
@@ -151,7 +182,7 @@ def test_flash_flow_requires_confirmation_before_execute(mock_list, mock_filter,
 # signature de slot qui ne correspond plus au signal, connexion oubliée)
 # passerait entièrement inaperçue dans ces tests. Celui-ci utilise un vrai
 # `WorkerRunner` (vrai `QObject`, vrai `Signal("qint64", "qint64", float)`)
-# et vérifie que l'écran Exécution de `MainWindow` se met à jour quand ce
+# et vérifie que le journal de bord de `MainWindow` se met à jour quand ce
 # signal est réellement émis -- seule `elevate.launch_elevated_worker` est
 # mockée, pour ne lancer aucune élévation ni sous-processus réel.
 
@@ -160,7 +191,7 @@ def test_flash_flow_requires_confirmation_before_execute(mock_list, mock_filter,
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_flash_progress_reaches_execute_screen_through_real_worker_runner(
+def test_flash_progress_reaches_log_panel_through_real_worker_runner(
     mock_list, mock_filter, mock_detect, mock_launch, qapp
 ):
     device = _make_device()
@@ -170,23 +201,23 @@ def test_flash_progress_reaches_execute_screen_through_real_worker_runner(
 
     window = MainWindow()
     window._home.flash_selected.emit()
-    window._device_screen._list.setCurrentRow(0)
-    window._device_screen._emit_chosen()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
 
     with patch("r36s_studio.gui.screens.QFileDialog.getOpenFileName", return_value=("/tmp/sd.img", "")):
-        window._file_screen._browse()
-    window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+        window._file_dialog._browse()
+    window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
-    window._confirm_screen._checkbox.setChecked(True)
-    window._confirm_screen.confirmed.emit()
+    window._confirm_dialog._checkbox.setChecked(True)
+    window._confirm_dialog.confirmed.emit()
 
-    assert window._stack.currentWidget() is window._execute_screen
     assert isinstance(window._runner, WorkerRunner)  # pas un mock : le vrai câblage Qt est en jeu
+    assert window._home._tiles["flash"].isEnabled() is False  # occupé pendant l'opération
 
     window._runner.progress.emit(50, 200, 12_000_000.0)
 
-    assert window._execute_screen._bar.value() == 25  # 50/200 = 25 %
-    assert "12.0" in window._execute_screen._speed_label.text()
+    assert window._log_panel._bar.value() == 25  # 50/200 = 25 %
+    assert "12.0" in window._log_panel._speed_label.text()
 
 
 # --- bug corrigé : débordement d'entier 32 bits sur les tailles en octets --
@@ -218,22 +249,22 @@ def test_flash_progress_survives_byte_counts_beyond_32_bit_int(
 
     window = MainWindow()
     window._home.flash_selected.emit()
-    window._device_screen._list.setCurrentRow(0)
-    window._device_screen._emit_chosen()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
 
     with patch("r36s_studio.gui.screens.QFileDialog.getOpenFileName", return_value=("/tmp/sd.img", "")):
-        window._file_screen._browse()
-    window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+        window._file_dialog._browse()
+    window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
-    window._confirm_screen._checkbox.setChecked(True)
-    window._confirm_screen.confirmed.emit()
+    window._confirm_dialog._checkbox.setChecked(True)
+    window._confirm_dialog.confirmed.emit()
 
     total_32gb = 34_359_738_368  # 32 Go, très au-delà de 2**31 - 1 (~2,1 milliards)
     assert total_32gb > 2**31
 
     window._runner.progress.emit(total_32gb // 2, total_32gb, 12_000_000.0)
 
-    assert window._execute_screen._bar.value() == 50
+    assert window._log_panel._bar.value() == 50
     assert window._last_progress_bytes == total_32gb // 2
 
 
@@ -241,7 +272,7 @@ def test_flash_progress_survives_byte_counts_beyond_32_bit_int(
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_copy_games_progress_reaches_execute_screen_through_real_cross_thread_signal(
+def test_copy_games_progress_reaches_log_panel_through_real_cross_thread_signal(
     mock_list, mock_filter, mock_detect, mock_copy_games, qapp
 ):
     """`PartitionJobRunner` est un vrai `QThread` (contrairement à
@@ -268,7 +299,7 @@ def test_copy_games_progress_reaches_execute_screen_through_real_cross_thread_si
     for _ in range(20):
         qapp.processEvents()  # livre les signaux mis en file d'attente entre threads
 
-    assert window._execute_screen._bar.value() == 30
+    assert window._log_panel._bar.value() == 30
 
 
 @patch("r36s_studio.gui.partition_runner.extract_easyroms")
@@ -303,80 +334,55 @@ def test_extract_easyroms_progress_survives_byte_counts_beyond_32_bit_int_cross_
     for _ in range(20):
         qapp.processEvents()
 
-    assert window._execute_screen._bar.value() == 50
+    assert window._log_panel._bar.value() == 50
     assert window._last_progress_bytes == total_32gb // 2
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices")
-@patch("r36s_studio.gui.main_window.list_devices")
-def test_confirm_cancel_returns_to_file_screen(mock_list, mock_filter, mock_detect, qapp):
-    device = _make_device()
-    mock_list.return_value = [device]
-    mock_filter.return_value = [device]
-
-    window = MainWindow()
-    window._home.flash_selected.emit()
-    window._device_screen._list.setCurrentRow(0)
-    window._device_screen._emit_chosen()
-    window._file_screen.file_chosen.emit("/tmp/sd.img")
-    assert window._stack.currentWidget() is window._confirm_screen
-
-    window._confirm_screen.cancelled.emit()
-
-    assert window._stack.currentWidget() is window._file_screen
-
-
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices")
-@patch("r36s_studio.gui.main_window.list_devices")
-def test_worker_success_shows_result_with_eject_for_flash(mock_list, mock_filter, mock_detect, qapp):
-    device = _make_device()
-    mock_list.return_value = [device]
-    mock_filter.return_value = [device]
-
-    window = MainWindow()
-    window.show()  # isVisible() ne reflète setVisible() qu'une fois le parent affiché
-    window._mode = "flash"
-    window._device = device
-    window._file_path = "/tmp/sd.img"
-
-    window._on_worker_finished(True)
-
-    assert window._stack.currentWidget() is window._result_screen
-    assert window._result_screen._eject_button.isVisible() is True
-    assert "prête" in window._result_screen._message.text()
+# --- colonne gauche désactivée pendant une opération (§5, refonte nav.) ----
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_worker_error_shows_message_and_cancelled_flag(mock_list, mock_filter, qapp):
+def test_start_worker_disables_home_and_reenables_on_finish(mock_list, mock_filter, qapp):
     window = MainWindow()
     window._mode = "backup"
     window._device = _make_device()
     window._file_path = "/tmp/out.img"
+    runner_class = _mock_runner_class()
 
-    window._on_worker_error("CANCELLED", "Sauvegarde annulée après 1024 octets")
-    window._on_worker_finished(False)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+        for row in window._home._tiles.values():
+            assert row.isEnabled() is False
+        assert window._home._backup_row.isEnabled() is False
 
-    assert window._stack.currentWidget() is window._result_screen
-    assert "annulée" in window._result_screen._message.text()
+        window._on_worker_finished(True)
+
+    for row in window._home._tiles.values():
+        assert row.isEnabled() is True
+    assert window._home._backup_row.isEnabled() is True
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_eject_requested_calls_eject_module_with_device_path(mock_list, mock_filter, mock_eject, qapp):
+def test_start_worker_pauses_console_stage_and_resumes_on_finish(mock_list, mock_filter, qapp):
+    """§5 (animations console) : mises en pause pendant une opération
+    disque pour ne pas consommer de ressources, reprises à la fin."""
     window = MainWindow()
-    window._device = _make_device(path="/dev/fake-disk-test-3")
+    window._mode = "backup"
+    window._device = _make_device()
+    window._file_path = "/tmp/out.img"
+    window._console_stage = MagicMock()
+    runner_class = _mock_runner_class()
 
-    # Le succès affiche désormais une confirmation explicite (§4.5) via une
-    # boîte de dialogue modale -- bloquerait indéfiniment sous le mode Qt
-    # "offscreen" des tests si elle n'était pas mockée.
-    with patch("r36s_studio.gui.main_window.QMessageBox"):
-        window._on_eject_requested()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+        window._console_stage.pause.assert_called_once()
+        window._console_stage.resume.assert_not_called()
 
-    mock_eject.assert_called_once_with("/dev/fake-disk-test-3")
+        window._on_worker_finished(True)
+
+    window._console_stage.resume.assert_called_once()
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
@@ -391,7 +397,52 @@ def test_cancel_requested_calls_runner_cancel(mock_list, mock_filter, qapp):
     fake_runner.cancel.assert_called_once()
 
 
-# --- Accueil : six étapes toujours visibles, statut informatif (§4.5) ------
+# --- résultats dans le journal de bord, pas un écran séparé (§5) -----------
+
+
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_worker_success_logs_message_and_shows_eject_for_flash(mock_list, mock_filter, qapp):
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché (MainWindow, pas un descendant)
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/sd.img"
+
+    window._on_worker_finished(True)
+
+    assert window._log_panel._eject_button.isVisible() is True
+    assert "prête" in window._log_panel._log_view.toPlainText()
+
+
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_worker_error_logs_cancelled_message(mock_list, mock_filter, qapp):
+    window = MainWindow()
+    window._mode = "backup"
+    window._device = _make_device()
+    window._file_path = "/tmp/out.img"
+
+    window._on_worker_error("CANCELLED", "Sauvegarde annulée après 1024 octets")
+    window._on_worker_finished(False)
+
+    assert "annulée" in window._log_panel._log_view.toPlainText()
+
+
+@patch("r36s_studio.gui.main_window.eject_device")
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_eject_requested_calls_eject_module_with_device_path(mock_list, mock_filter, mock_eject, qapp):
+    window = MainWindow()
+    window._device = _make_device(path="/dev/fake-disk-test-3")
+
+    window._on_eject_requested()
+
+    mock_eject.assert_called_once_with("/dev/fake-disk-test-3")
+
+
+# --- colonne gauche : six étapes toujours visibles, statut informatif ------
+# (§4.5) ----------------------------------------------------------------
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status")
@@ -407,7 +458,7 @@ def test_startup_detects_single_card_and_annotates_home(mock_list, mock_filter, 
     window.show()
 
     mock_detect.assert_called_once_with(device)
-    # Les six tuiles restent visibles quel que soit le statut (§4.5).
+    # Les six lignes restent visibles quel que soit le statut (§4.5).
     for tile in window._home._tiles.values():
         assert tile.isVisible() is True
 
@@ -433,7 +484,7 @@ def test_startup_with_no_card_still_shows_all_six_tiles(mock_list, mock_filter, 
 def test_startup_with_multiple_cards_passes_none_to_detection(mock_list, mock_filter, mock_detect, qapp):
     """Cas non couvert par une carte unique : plusieurs cartes candidates
     -- `detect_workflow_status` reçoit `None` (aucune mise en avant
-    possible), mais les six tuiles restent affichées normalement."""
+    possible), mais les six lignes restent affichées normalement."""
     devices = [_make_device(path="/dev/fake-disk-test-3"), _make_device(path="/dev/fake-disk-test-4")]
     mock_list.return_value = devices
     mock_filter.return_value = devices
@@ -462,14 +513,38 @@ def test_home_refresh_requested_re_runs_detection(mock_list, mock_filter, mock_d
     mock_detect.assert_called_once_with(device)
 
 
-# --- Écran Aide (macOS uniquement, §3) -------------------------------------
+@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_worker_finished_re_runs_detection(mock_list, mock_filter, mock_detect, qapp):
+    """La carte a changé d'état après une opération (flash, injection...) --
+    la détection doit se relancer automatiquement, sans qu'il y ait de
+    bouton "retour à l'accueil" à cliquer (§5, refonte navigation : plus
+    d'écran Résultat séparé avec un tel bouton, la vue est déjà là)."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    mock_detect.return_value = _all_status(StepStatus.AVAILABLE)
+    window = MainWindow()
+    window._mode = "flash"
+    window._device = device
+    window._file_path = "/tmp/sd.img"
+    mock_detect.reset_mock()
+
+    mock_detect.return_value = _all_status(StepStatus.DONE)
+    window._on_worker_finished(True)
+
+    mock_detect.assert_called_once_with(device)
+
+
+# --- fenêtre Aide (macOS uniquement, §3) ------------------------------------
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 @patch("r36s_studio.gui.screens.platform.system", return_value="Darwin")
-def test_home_help_requested_shows_help_screen(mock_platform, mock_list, mock_filter, mock_detect, qapp):
+def test_home_help_requested_opens_help_dialog(mock_platform, mock_list, mock_filter, mock_detect, qapp):
     mock_list.return_value = []
     mock_filter.return_value = []
     mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
@@ -477,56 +552,24 @@ def test_home_help_requested_shows_help_screen(mock_platform, mock_list, mock_fi
 
     window._home.help_requested.emit()
 
-    assert window._stack.currentWidget() is window._help_screen
-
-
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
-@patch("r36s_studio.gui.main_window.filter_devices")
-@patch("r36s_studio.gui.main_window.list_devices")
-def test_help_screen_back_returns_home(mock_list, mock_filter, mock_detect, qapp):
-    mock_list.return_value = []
-    mock_filter.return_value = []
-    mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
-    window = MainWindow()
-    window._show(window._help_screen)
-
-    window._help_screen.back_requested.emit()
-
-    assert window._stack.currentWidget() is window._home
+    assert window._help_dialog.isVisible() is True
 
 
 @patch("r36s_studio.gui.main_window.subprocess.run")
 @patch("r36s_studio.gui.main_window.detect_workflow_status")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_help_screen_open_settings_opens_full_disk_access_pane(mock_list, mock_filter, mock_detect, mock_run, qapp):
+def test_help_dialog_open_settings_opens_full_disk_access_pane(mock_list, mock_filter, mock_detect, mock_run, qapp):
     mock_list.return_value = []
     mock_filter.return_value = []
     mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
     window = MainWindow()
 
-    window._help_screen.open_settings_requested.emit()
+    window._help_dialog.open_settings_requested.emit()
 
     mock_run.assert_called_once_with(
         ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"], check=True
     )
-
-
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
-@patch("r36s_studio.gui.main_window.filter_devices")
-@patch("r36s_studio.gui.main_window.list_devices")
-def test_returning_home_from_result_screen_re_runs_detection(mock_list, mock_filter, mock_detect, qapp):
-    device = _make_device()
-    mock_list.return_value = [device]
-    mock_filter.return_value = [device]
-    mock_detect.return_value = _all_status(StepStatus.AVAILABLE)
-    window = MainWindow()
-    mock_detect.reset_mock()
-
-    window._result_screen.home_requested.emit()
-
-    mock_detect.assert_called_once_with(device)
-    assert window._stack.currentWidget() is window._home
 
 
 # --- inject-boot / copy-games (étapes D/E) : PartitionJobRunner, archives --
@@ -547,19 +590,15 @@ def test_inject_boot_flow_offers_existing_archive_and_uses_partition_runner(
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
         window = MainWindow()
         window._home.inject_boot_selected.emit()
-        window._device_screen._list.setCurrentRow(0)
-        window._device_screen._emit_chosen()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
 
         mock_list_archives.assert_called_once_with("BOOT")
-        assert window._stack.currentWidget() is window._file_screen
-        assert window._file_screen._archive_list.count() == 1
+        assert window._file_dialog.isVisible() is True
+        assert window._file_dialog._archive_list.count() == 1
 
-        window._file_screen._archive_list.setCurrentRow(0)
-        window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
-
-        # Ni sauvegarde de fichier ni écrasement de carte : pas de
-        # confirmation, exécution directe.
-        assert window._stack.currentWidget() is window._execute_screen
+        window._file_dialog._archive_list.setCurrentRow(0)
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
     runner_class.assert_called_once_with("inject_boot", device, "/tmp/R36S Studio/BOOT_x", parent=window)
     runner_class.instances[0].start.assert_called_once()
@@ -580,14 +619,14 @@ def test_copy_games_flow_falls_back_to_manual_browse_when_no_archives(
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
         window = MainWindow()
         window._home.copy_games_selected.emit()
-        window._device_screen._list.setCurrentRow(0)
-        window._device_screen._emit_chosen()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
 
         mock_list_archives.assert_called_once_with("EASYROMS")
 
         with patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/tmp/games"):
-            window._file_screen._browse()
-        window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+            window._file_dialog._browse()
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
     runner_class.assert_called_once_with("copy_games", device, "/tmp/games", parent=window)
 
@@ -602,8 +641,8 @@ def test_copy_games_success_message_and_allows_eject(mock_list, mock_filter, qap
 
     window._on_worker_finished(True)
 
-    assert "Carte de Léo" in window._result_screen._message.text()
-    assert window._result_screen._eject_button.isVisible() is True
+    assert "Carte de Léo" in window._log_panel._log_view.toPlainText()
+    assert window._log_panel._eject_button.isVisible() is True
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
@@ -619,14 +658,14 @@ def test_backup_success_never_allows_eject(mock_list, mock_filter, qapp):
 
     window._on_worker_finished(True)
 
-    assert window._result_screen._eject_button.isVisible() is False
+    assert window._log_panel._eject_button.isVisible() is False
 
 
 # --- extract-boot / extract-easyroms (étapes A/B) : choix du dossier ------
 #
 # Régression corrigée : la destination était devenue un chemin généré
 # automatiquement, sans que l'utilisateur puisse décider où son archive est
-# enregistrée. L'écran Fichier est rétabli, avec un dossier par défaut
+# enregistrée. La fenêtre Fichier est rétablie, avec un dossier par défaut
 # (~/Documents/R36S Studio) que l'utilisateur peut accepter tel quel ou
 # remplacer par n'importe quel emplacement -- seul le nom horodaté à
 # l'intérieur reste automatique.
@@ -636,7 +675,7 @@ def test_backup_success_never_allows_eject(mock_list, mock_filter, qapp):
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_extract_boot_shows_file_screen_with_default_path_preselected(
+def test_extract_boot_shows_file_dialog_with_default_path_preselected(
     mock_list, mock_filter, mock_detect, mock_default_dir, qapp
 ):
     device = _make_device()
@@ -646,12 +685,12 @@ def test_extract_boot_shows_file_screen_with_default_path_preselected(
 
     window = MainWindow()
     window._home.extract_boot_selected.emit()
-    window._device_screen._list.setCurrentRow(0)
-    window._device_screen._emit_chosen()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
 
-    assert window._stack.currentWidget() is window._file_screen
-    assert window._file_screen._path_label.text() == "/home/x/Documents/R36S Studio"
-    assert window._file_screen._next_button.isEnabled() is True  # défaut déjà accepté
+    assert window._file_dialog.isVisible() is True
+    assert window._file_dialog._path_label.text() == "/home/x/Documents/R36S Studio"
+    assert window._file_dialog._next_button.isEnabled() is True  # défaut déjà accepté
 
 
 @patch("r36s_studio.gui.main_window.archives.new_archive_path")
@@ -671,13 +710,11 @@ def test_extract_boot_accepting_default_uses_it_as_base_dir(
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
         window = MainWindow()
         window._home.extract_boot_selected.emit()
-        window._device_screen._list.setCurrentRow(0)
-        window._device_screen._emit_chosen()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
 
         # L'utilisateur accepte simplement le défaut proposé.
-        window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
-
-        assert window._stack.currentWidget() is window._execute_screen
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
     from pathlib import Path
 
@@ -705,15 +742,15 @@ def test_extract_boot_can_replace_default_with_external_drive(
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
         window = MainWindow()
         window._home.extract_boot_selected.emit()
-        window._device_screen._list.setCurrentRow(0)
-        window._device_screen._emit_chosen()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
 
         with patch(
             "r36s_studio.gui.screens.QFileDialog.getExistingDirectory",
             return_value="/Volumes/DisqueExterne",
         ):
-            window._file_screen._browse()
-        window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+            window._file_dialog._browse()
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
     from pathlib import Path
 
@@ -736,9 +773,9 @@ def test_extract_easyroms_uses_easyroms_label(
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", _mock_partition_runner_class()):
         window = MainWindow()
         window._home.extract_easyroms_selected.emit()
-        window._device_screen._list.setCurrentRow(0)
-        window._device_screen._emit_chosen()
-        window._file_screen.file_chosen.emit(window._file_screen._path_label.text())
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
     from pathlib import Path
 
@@ -747,7 +784,7 @@ def test_extract_easyroms_uses_easyroms_label(
 
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_extract_boot_success_shows_archive_path_size_and_reveal_button(mock_list, mock_filter, qapp):
+def test_extract_boot_success_logs_archive_path_size_and_shows_reveal(mock_list, mock_filter, qapp):
     window = MainWindow()
     window.show()
     window._mode = "extract_boot"
@@ -757,12 +794,12 @@ def test_extract_boot_success_shows_archive_path_size_and_reveal_button(mock_lis
 
     window._on_worker_finished(True)
 
-    assert window._result_screen._eject_button.isVisible() is True
-    assert "ordinateur" in window._result_screen._message.text()
-    info = window._result_screen._archive_info_label.text()
-    assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in info
-    assert "12.0 Mo" in info
-    assert window._result_screen._reveal_button.isVisible() is True
+    assert window._log_panel._eject_button.isVisible() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "ordinateur" in log_text
+    assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
+    assert "12.0 Mo" in log_text
+    assert window._log_panel._reveal_button.isVisible() is True
 
 
 @patch("r36s_studio.gui.main_window.reveal")
@@ -770,22 +807,21 @@ def test_extract_boot_success_shows_archive_path_size_and_reveal_button(mock_lis
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_reveal_requested_calls_reveal_with_archive_path(mock_list, mock_filter, mock_reveal, qapp):
     window = MainWindow()
-    window.show()
     window._mode = "extract_boot"
     window._device = _make_device()
     window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
     window._on_worker_finished(True)
 
-    window._result_screen._reveal_button.click()
+    window._log_panel._reveal_button.click()
 
     mock_reveal.assert_called_once_with("/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21")
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_inject_boot_success_shows_source_archive_path(mock_list, mock_filter, qapp):
-    """Étapes D/E : la même zone indique quelle archive a servi de source,
-    plutôt que « archive créée »."""
+def test_inject_boot_success_logs_source_archive_path(mock_list, mock_filter, qapp):
+    """Étapes D/E : la même ligne indique quelle archive a servi de
+    source, plutôt que « archive créée »."""
     window = MainWindow()
     window.show()
     window._mode = "inject_boot"
@@ -794,16 +830,16 @@ def test_inject_boot_success_shows_source_archive_path(mock_list, mock_filter, q
 
     window._on_worker_finished(True)
 
-    info = window._result_screen._archive_info_label.text()
-    assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in info
-    assert window._result_screen._reveal_button.isVisible() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
+    assert window._log_panel._reveal_button.isVisible() is True
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_backup_success_shows_no_archive_info(mock_list, mock_filter, qapp):
+def test_backup_success_shows_no_reveal_button(mock_list, mock_filter, qapp):
     """backup/flash ne manipulent pas de dossier d'archive -- rien à
-    afficher, rien à révéler."""
+    révéler."""
     window = MainWindow()
     window.show()
     window._mode = "backup"
@@ -812,11 +848,10 @@ def test_backup_success_shows_no_archive_info(mock_list, mock_filter, qapp):
 
     window._on_worker_finished(True)
 
-    assert window._result_screen._archive_info_label.isVisible() is False
-    assert window._result_screen._reveal_button.isVisible() is False
+    assert window._log_panel._reveal_button.isVisible() is False
 
 
-# --- eject (étape F) : immédiat, sans écran Fichier ni Exécution -----------
+# --- eject (étape F) : immédiat, sans fenêtre Fichier ni opération ----------
 
 
 @patch("r36s_studio.gui.main_window.eject_device")
@@ -831,20 +866,19 @@ def test_eject_flow_is_immediate_and_confirms_success(mock_list, mock_filter, mo
     window = MainWindow()
     window.show()
     window._home.eject_selected.emit()
-    window._device_screen._list.setCurrentRow(0)
-    window._device_screen._emit_chosen()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
 
     mock_eject.assert_called_once_with(device.path)
-    assert window._stack.currentWidget() is window._result_screen
-    assert "retirée en toute sécurité" in window._result_screen._message.text()
-    assert window._result_screen._eject_button.isVisible() is False
+    assert "retirée en toute sécurité" in window._log_panel._log_view.toPlainText()
+    assert window._file_dialog.isVisible() is False  # étape F : aucune fenêtre Fichier
 
 
 @patch("r36s_studio.gui.main_window.eject_device", side_effect=OSError("carte occupée"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_eject_flow_shows_friendly_error_on_failure(mock_list, mock_filter, mock_detect, mock_eject, qapp):
+def test_eject_flow_logs_friendly_error_and_raw_detail_on_failure(mock_list, mock_filter, mock_detect, mock_eject, qapp):
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
@@ -852,21 +886,19 @@ def test_eject_flow_shows_friendly_error_on_failure(mock_list, mock_filter, mock
     window = MainWindow()
     window.show()
     window._home.eject_selected.emit()
-    window._device_screen._list.setCurrentRow(0)
-    window._device_screen._emit_chosen()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
 
-    assert window._stack.currentWidget() is window._result_screen
-    assert "carte occupée" not in window._result_screen._message.text()
-    window._result_screen._details_toggle.click()
-    assert "carte occupée" in window._result_screen._details_label.text()
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "carte occupée" in log_text  # journal de bord : tout y va, plus de panneau Détails séparé (§5)
 
 
-# --- messages d'erreur conviviaux + panneau Détails (§5, vocabulaire) ------
+# --- messages d'erreur conviviaux + détail brut dans le journal (§5) -------
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_partition_not_found_error_shows_friendly_message_with_raw_detail_hidden(
+def test_partition_not_found_error_logs_friendly_message_then_raw_detail(
     mock_list, mock_filter, qapp
 ):
     window = MainWindow()
@@ -877,13 +909,9 @@ def test_partition_not_found_error_shows_friendly_message_with_raw_detail_hidden
     window._on_worker_error("PARTITION_NOT_FOUND", "Partition « BOOT » introuvable sur /dev/fake-disk-test-3")
     window._on_worker_finished(False)
 
-    message = window._result_screen._message.text()
-    assert "/dev/fake-disk-test-3" not in message
-    assert "carte" in message.lower()
-    assert window._result_screen._details_toggle.isVisible() is True
-
-    window._result_screen._details_toggle.click()
-    assert "/dev/fake-disk-test-3" in window._result_screen._details_label.text()
+    lines = window._log_panel._log_view.toPlainText().splitlines()
+    assert any("carte" in line.lower() and "/dev/fake-disk-test-3" not in line for line in lines)
+    assert any("/dev/fake-disk-test-3" in line for line in lines)
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
@@ -897,8 +925,9 @@ def test_unrecognized_error_code_falls_back_to_generic_friendly_message(mock_lis
     window._on_worker_error("SOME_FUTURE_CODE", "détail technique quelconque")
     window._on_worker_finished(False)
 
-    assert "détail technique quelconque" not in window._result_screen._message.text()
-    assert window._result_screen._details_toggle.isVisible() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Une erreur est survenue" in log_text
+    assert "détail technique quelconque" in log_text  # journal de bord : le détail brut suit quand même
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
@@ -906,8 +935,7 @@ def test_unrecognized_error_code_falls_back_to_generic_friendly_message(mock_lis
 def test_macos_tcc_protected_folder_error_shows_dedicated_friendly_message(mock_list, mock_filter, qapp):
     """La détection élargie (worker_runner.py) ne sert à rien si le
     message dédié reste caché derrière le message générique -- vérifie
-    qu'il apparaît bien comme message principal, pas seulement dans les
-    Détails."""
+    qu'il apparaît bien dans le journal."""
     window = MainWindow()
     window.show()
     window._mode = "flash"
@@ -919,8 +947,6 @@ def test_macos_tcc_protected_folder_error_shows_dedicated_friendly_message(mock_
     )
     window._on_worker_finished(False)
 
-    message = window._result_screen._message.text()
-    assert "dossier protégé" in message
-    assert "/Users/x/Downloads" not in message
-    window._result_screen._details_toggle.click()
-    assert "/Users/x/Downloads" in window._result_screen._details_label.text()
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "dossier protégé" in log_text
+    assert "/Users/x/Downloads" in log_text  # détail brut, en ligne suivante -- pas masqué (§5)

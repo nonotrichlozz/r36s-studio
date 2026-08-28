@@ -2,8 +2,10 @@
 traduction future (§5 : « chaînes isolées dans un fichier de traduction »).
 
 Vocabulaire : aucun terme technique ('périphérique bloc', '/dev/sdb',
-'partition') ne doit apparaître ailleurs que dans le panneau Détails —
-on dit "ta carte SD", pas "le périphérique bloc"."""
+'partition') ne doit apparaître ailleurs que dans le journal de bord
+(le détail brut du backend y suit le message principal, en ligne
+supplémentaire, §5 refonte navigation) — on dit "ta carte SD", pas "le
+périphérique bloc"."""
 
 from __future__ import annotations
 
@@ -35,6 +37,13 @@ STRINGS = {
     "status_available": "Faisable",
     "status_done": "Déjà faite",
     "status_not_relevant": "Non pertinente pour cette carte",
+    "status_platform_limited": "PC ou Linux",
+    # Bandeau carte détectée, en haut de l'accueil.
+    "home_banner_line_device": "{display} — {size_go:.1f} Go",
+    "home_banner_state_arkos": "Carte ArkOS reconnue",
+    "home_banner_state_unprepared": "Carte non préparée",
+    "home_banner_state_none": "Aucune carte détectée pour l'instant",
+    "console_animation_toggle": "Animations de la console",
     # Choix du périphérique
     "device_title": "Choisis ta carte SD",
     "device_refresh": "Rafraîchir",
@@ -59,7 +68,10 @@ STRINGS = {
     "confirm_erase": "Toutes les données de « {display} » ({size_go:.1f} Go) seront définitivement effacées.",
     "confirm_go": "Effacer et écrire",
     "confirm_cancel": "Annuler",
-    # Exécution
+    # Journal de bord (colonne droite, §5 -- remplace les anciens écrans
+    # Exécution et Résultat) : en-tête au repos ou pendant une opération.
+    "log_header_idle": "En attente",
+    "log_header_active": "OPÉRATION ACTIVE — {title}",
     "execute_title_backup": "Sauvegarde en cours…",
     "execute_title_flash": "Écriture en cours…",
     "execute_title_extract_boot": "Copie de l'écran d'origine en cours…",
@@ -70,13 +82,10 @@ STRINGS = {
     "execute_speed": "{speed:.1f} Mo/s",
     "execute_eta": "Temps restant estimé : {eta}",
     "execute_eta_unknown": "Temps restant estimé : —",
-    # Résultat
-    "result_success": "Terminé !",
-    "result_error": "Un problème est survenu",
-    "result_cancelled": "Opération annulée",
+    # Résultats de fin d'opération -- affichés comme lignes du journal de
+    # bord, plus un écran séparé (§5, refonte navigation).
     "result_eject": "Éjecter la carte",
-    "result_home": "Retour à l'accueil",
-    "result_archive_created": "Enregistrée dans : {path}\nTaille : {size}",
+    "result_archive_created": "Enregistrée dans : {path} — Taille : {size}",
     "result_archive_source": "À partir de : {path}",
     # Aide (macOS uniquement -- autorisation Accès complet au disque, §3)
     "help_title": "Autoriser l'accès à ta carte SD",
@@ -104,10 +113,10 @@ STRINGS = {
     "about_version": "R36S Studio v{version} ({suffix})",
     "about_build": "build du {timestamp}",
     "about_dev": "version de développement",
-    # Divers
-    "details_toggle": "Détails",
     # Messages d'erreur (vocabulaire §5 : jamais de jargon technique dans le
-    # message principal -- le détail brut du backend va dans "Détails").
+    # message principal -- le détail brut du backend suit, en ligne
+    # supplémentaire, directement dans le journal de bord (§5, refonte
+    # navigation -- plus de panneau "Détails" séparé à déplier).
     "error_partition_not_found": (
         "Impossible de trouver les fichiers de la console sur cette carte. "
         "As-tu bien préparé cette carte avec R36S Studio ?"
@@ -117,7 +126,7 @@ STRINGS = {
     ),
     "error_easyroms_ntfs_macos": (
         "Ton Mac ne peut pas copier des jeux sur cette carte à cause d'une limitation du "
-        "système. Utilise un PC Windows ou Linux pour cette étape (voir Détails)."
+        "système. Utilise un PC Windows ou Linux pour cette étape."
     ),
     "error_mountpoint_not_writable": (
         "Impossible d'écrire sur ta carte. Vérifie qu'elle n'est pas protégée en écriture, "
@@ -133,14 +142,13 @@ STRINGS = {
     ),
     "error_macos_tcc_blocked": (
         "Ton Mac empêche l'accès à la carte SD tant que R36S Studio n'a pas la permission "
-        "Accès complet au disque. Ouvre l'Aide depuis l'écran d'accueil pour l'activer "
-        "(voir aussi Détails)."
+        "Accès complet au disque. Ouvre l'Aide pour l'activer."
     ),
     "error_macos_tcc_protected_folder": (
         "Ton Mac bloque l'accès à ce fichier car il se trouve dans un dossier protégé "
         "(Téléchargements, Bureau ou Documents). Déplace-le ailleurs, puis réessaie."
     ),
-    "error_generic": "Une erreur est survenue. Consulte les Détails pour plus d'informations.",
+    "error_generic": "Une erreur est survenue.",
 }
 
 
@@ -172,5 +180,6 @@ def friendly_error_message(code: str) -> str:
     """Message principal, sans jargon (§5), pour un code d'erreur du
     protocole. Le message brut du backend (qui peut contenir un chemin
     technique, un nom de système de fichiers...) n'est jamais affiché ici —
-    il va dans le panneau « Détails » replié."""
+    il suit comme ligne supplémentaire dans le journal de bord
+    (`LogPanel.finish_error`, §5 refonte navigation)."""
     return tr(_ERROR_MESSAGE_KEYS.get(code, "error_generic"))

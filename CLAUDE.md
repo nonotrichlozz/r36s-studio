@@ -404,8 +404,8 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > les partitions de la carte puis l'éjecte (`diskutil eject` / `udisksctl
 > power-off -b`, qui font déjà les deux à la fois). La confirmation explicite
 > que la carte peut être retirée physiquement est à la charge de l'appelant
-> (CLI : message `emit_log` ; GUI : écran Résultat ou boîte de dialogue) —
-> jamais un succès silencieux.
+> (CLI : message `emit_log` ; GUI : journal de bord permanent, §5, ou boîte de
+> dialogue) — jamais un succès silencieux.
 
 ### 4.5 `detect/` — statut des étapes du parcours
 
@@ -449,6 +449,16 @@ reçoit alors `None` (comme pour aucune carte), tout est marqué « non pertinen
 mais les six étapes restent affichées normalement — l'écran Choix du périphérique
 les liste toutes.
 
+> **Statut `PLATFORM_LIMITED` (habillage « poste de commande », phase 8)** :
+> `copy_games` (étape E) est en NTFS sur une vraie carte R36S (§4.4) — macOS ne
+> monte le NTFS qu'en écriture nulle part, donc cette étape échoue toujours sur
+> cet OS, quelle que soit la carte branchée (ou même sans carte du tout). Ce
+> n'est pas une question de pertinence pour la carte (`NOT_RELEVANT`), c'est une
+> limite de la plateforme : `detect_workflow_status` retourne
+> `StepStatus.PLATFORM_LIMITED` pour `copy_games` sur macOS, inconditionnellement,
+> prioritaire sur le calcul habituel. L'écran d'accueil l'affiche avec un badge
+> orange « PC ou Linux » plutôt que les badges vert/gris habituels.
+
 ### 4.6 `jobs/` — les opérations du parcours
 
 > ⚠️ **Correction de conception** : cette table ne listait à l'origine que quatre
@@ -477,44 +487,261 @@ sérieux d'un script.
 
 ## 5. Interface
 
-Un assistant linéaire, une étape par écran.
+> ⚠️ **Refonte de navigation (phase 8)** : l'interface n'était à l'origine
+> qu'une succession de six écrans dans un `QStackedWidget` (accueil → choix
+> du périphérique → choix du fichier → confirmation → exécution → résultat),
+> une étape remplaçant la précédente. Remplacé par une **vue permanente à
+> deux colonnes** (`gui/screens.py::MainView`), dont la structure ne change
+> jamais, quelle que soit l'opération en cours :
+>
+> - **Colonne gauche** (`HomeScreen`, largeur fixe ~480 px) : le bandeau de
+>   détection, les six étapes A à F, puis la sauvegarde complète sous
+>   « Par sécurité » — reste affichée à l'identique en permanence.
+> - **Colonne droite** : l'image de la console (`ConsoleArt`) en haut, le
+>   journal de bord permanent (`LogPanel`) en bas.
+>
+> Les choix ponctuels — choix de la carte, choix du fichier/de l'archive,
+> confirmation avant écriture, aide macOS — s'ouvrent désormais en
+> **fenêtres modales** (`gui/screens.py::Dialog` et ses sous-classes
+> `DeviceDialog`/`FileDialog`/`ConfirmDialog`/`HelpDialog`, `QDialog.open()`
+> non bloquant plutôt que `exec()`, pour garder le style signal/slot déjà
+> utilisé partout ailleurs) **par-dessus** cette vue, jamais en
+> remplacement — la structure à deux colonnes reste visible derrière.
+> `FileScreen`/`ExecuteScreen`/`ResultScreen` et le `QStackedWidget` qui les
+> enchaînait sont supprimés ; leurs rôles sont repris par `FileDialog` et
+> par `LogPanel` (progression + résultats, voir plus bas).
 
-1. **Accueil** — les six étapes du parcours à deux cartes (§4.5/§4.6), **toujours
-   toutes visibles et cliquables**, dans leur ordre chronologique fixe A→F. Chaque
-   tuile porte un statut informatif (faisable / déjà faite / non pertinente pour la
-   carte branchée) qui guide sans jamais rien masquer ni verrouiller. La sauvegarde
-   complète de l'image disque est une tuile séparée, en dehors de cette liste — une
-   opération de sécurité, pas une étape du parcours. Bouton « Rafraîchir » pour
-   relancer la détection sans changer d'écran.
-2. **Choix du périphérique** — liste des cartes détectées : modèle, taille, bus.
-   Bouton « Rafraîchir ». Aucune sélection par défaut — même quand une seule
-   carte est branchée, et même pour l'étape F qui n'ouvre pas d'écran Fichier
-   ensuite.
-3. **Choix du fichier** — image source pour le flash, fichier de sortie pour la
-   sauvegarde ; pour les étapes A/B (extraction), un dossier de destination
-   avec `~/Documents/R36S Studio/` proposé par défaut mais toujours
-   remplaçable (y compris par un disque externe) — le nom horodaté à
-   l'intérieur reste automatique ; pour les étapes D/E (injection sur la carte
-   neuve), une sauvegarde à choisir parmi les archives déjà extraites (§4.4),
-   avec un repli « Parcourir… » pour une source manuelle. Seule l'étape F
-   (éjection) saute cet écran : elle ne demande rien d'autre que la carte.
-4. **Confirmation** — écran rouge récapitulant : *« Toutes les données de
-   SanDisk Ultra 128 Go seront effacées. »* + case à cocher obligatoire. Seul le
-   flash (étape C) écrit sur le périphérique brut et déclenche cet écran.
-5. **Exécution** — barre de progression réelle, débit en Mo/s, temps restant estimé,
-   bouton Annuler actif. Absente pour l'éjection (étape F), immédiate.
-6. **Résultat** — succès ou erreur lisible (jamais de jargon — voir Vocabulaire),
-   bouton « Éjecter la carte ». Pour l'étape F elle-même, confirme explicitement que
-   la carte peut être retirée physiquement — jamais un succès silencieux.
+1. **Colonne gauche (bandeau + six étapes + sauvegarde)** — un bandeau en
+   haut (bordure cyan, coins arrondis) résume la carte détectée : icône de
+   console dessinée au `QPainter` (`_ConsoleIcon`, pas une image), modèle et
+   taille, bouton « Rafraîchir » aligné à droite, tous sur une seule ligne ;
+   une seconde ligne en dessous précise l'état reconnu (« Carte ArkOS
+   reconnue », « Carte non préparée », ou « Aucune carte détectée » sans
+   carte branchée). En dessous, les six étapes du parcours à deux cartes
+   (§4.5/§4.6), **toujours toutes visibles**, dans leur ordre chronologique
+   fixe A→F, une ligne par étape (icône lettrée à gauche, titre +
+   description au centre, badge de statut à droite, cadre arrondi). Statuts
+   (pastilles en forme de capsule) : faisable (vert), déjà faite (gris), non
+   pertinente pour la carte branchée (texte seulement, sans badge visible
+   dans les faits), ou limitée par la plateforme (orange, « PC ou Linux » —
+   §4.5, `StepStatus.PLATFORM_LIMITED`, ex. copier l'EASYROMS sur macOS). Ce
+   statut guide sans jamais rien masquer. La sauvegarde complète de l'image
+   disque est une ligne séparée sous un titre « Par sécurité », en dehors de
+   cette liste — une opération de sécurité, pas une étape du parcours.
+   **Cliquables sauf pendant une opération** : `HomeScreen.set_busy(True)`
+   désactive alors les six lignes et la sauvegarde (`setEnabled(False)`,
+   qui empêche Qt de délivrer les clics — pas seulement l'apparence) et les
+   assombrit visiblement (`QGraphicsOpacityEffect`, ~45 % — une simple
+   différence de fond QSS via `:disabled` s'est révélée trop proche de la
+   surface habituelle pour se voir clairement sur une palette déjà sombre,
+   vérifié en comparant des captures avant/après).
+2. **Fenêtre Choix de la carte** (`DeviceDialog`) — liste des cartes
+   détectées : modèle, taille, bus. Bouton « Rafraîchir ». Aucune sélection
+   par défaut — même quand une seule carte est branchée, et même pour
+   l'étape F qui n'ouvre pas de fenêtre Fichier ensuite. « Retour » ferme
+   simplement la fenêtre (`close()`), sans rien changer à la vue principale
+   derrière.
+3. **Fenêtre Choix du fichier** (`FileDialog`) — image source pour le
+   flash, fichier de sortie pour la sauvegarde ; pour les étapes A/B
+   (extraction), un dossier de destination avec `~/Documents/R36S Studio/`
+   proposé par défaut mais toujours remplaçable (y compris par un disque
+   externe) — le nom horodaté à l'intérieur reste automatique ; pour les
+   étapes D/E (injection sur la carte neuve), une sauvegarde à choisir
+   parmi les archives déjà extraites (§4.4), avec un repli « Parcourir… »
+   pour une source manuelle. Seule l'étape F (éjection) saute cette
+   fenêtre : elle ne demande rien d'autre que la carte.
+4. **Fenêtre Confirmation** (`ConfirmDialog`) — fond rouge, récapitulatif
+   explicite : *« Toutes les données de SanDisk Ultra 128 Go seront
+   effacées. »* + case à cocher obligatoire. Seul le flash (étape C) écrit
+   sur le périphérique brut et déclenche cette fenêtre. Annuler ferme la
+   fenêtre sans démarrer l'opération, sans rien changer derrière.
+5. **Journal de bord permanent** (`LogPanel`, bas de la colonne droite) —
+   remplace les anciens écrans Exécution et Résultat, tous deux supprimés :
+   tout se passe dans ce panneau, toujours visible, jamais un écran séparé.
+   Cadre à bordure cyan, fond très sombre, texte vert clair en police
+   monospace pour les lignes du journal (seul endroit de toute l'interface
+   en dehors des libellés généraux). En-tête « OPÉRATION ACTIVE » suivi du
+   nom de l'étape en cours pendant une opération, ou « En attente » au
+   repos. Barre de progression réelle (débit en Mo/s, temps restant estimé)
+   sous l'en-tête pendant une opération, bouton Annuler actif à côté du
+   titre. En dessous, les lignes horodatées défilent automatiquement au
+   format `21:44:02 - Montage des partitions: OK` et s'accumulent pour la
+   durée de l'opération en cours — vidées seulement au démarrage de la
+   suivante (`start_operation`), jamais entre-temps. Les résultats de fin
+   d'opération (succès ou erreur, jamais de jargon — voir Vocabulaire)
+   s'affichent comme une ligne de plus dans le journal, avec les actions
+   qui suivaient auparavant sur l'écran Résultat réapparaissant dans
+   l'en-tête : bouton Éjecter après une opération qui a écrit sur la carte,
+   bouton Afficher dans le Finder/l'Explorateur après une extraction ou une
+   injection. Pour l'étape F (éjection, immédiate — aucune progression),
+   confirme explicitement dans le journal que la carte peut être retirée
+   physiquement, jamais un succès silencieux.
 
 **Vocabulaire :** aucun terme technique dans l'interface. Pas de « périphérique bloc »,
 pas de `/dev/sdb`, pas de « partition ». On dit « ta carte SD », « les jeux », « le
 système de la console ». Le chemin technique — ou tout message brut du backend
-(chemin, nom de système de fichiers...) — reste consultable dans un panneau
-« Détails » replié sur l'écran Résultat, jamais affiché dans le message principal.
+(chemin, nom de système de fichiers...) — n'est jamais dans le message principal :
+il suit comme ligne supplémentaire dans le journal de bord (`LogPanel.finish_error`)
+— plus de panneau « Détails » séparé à déplier depuis la refonte de navigation
+ci-dessus, un journal étant par nature un endroit où tout finit par être visible.
 
 Interface en français, avec les chaînes isolées dans un fichier de traduction dès le
 départ (l'anglais viendra vite si tu diffuses la vidéo hors France).
+
+**Habillage visuel (phase 8) : `gui/theme.py`.** Palette « poste de commande »
+sombre et technique, inspirée des interfaces de console de jeu rétro — fond très
+sombre, surfaces légèrement plus claires, bordures cyan fines, une seule couleur
+d'accent (le cyan, réutilisée pour les bordures actives, les barres de
+progression et les icônes). Aucune lueur, ombre portée ni dégradé — Qt les rend
+mal (aliasing grossier) et ça nuit à la lisibilité sur une palette déjà sombre.
+Toute la palette vit dans ce seul fichier, sous forme de constantes nommées ;
+`gui/app.py` applique la feuille de style QSS qui en résulte une fois,
+globalement (`QApplication.setStyleSheet`). Les écrans (`gui/screens.py`) ne
+posent jamais de couleur en dur : ils fixent un rôle (`role`, ex. `"title"`,
+`"secondary"`, `"row"`, `"log"`, `"danger"`) ou un statut de badge
+(`badgeKind`) via `setProperty`, et la feuille de style décide de l'apparence à
+partir de là — `theme.repolish(widget)` doit être appelé après tout
+`setProperty` sur un widget déjà affiché (Qt ne réévalue les sélecteurs
+`[propriété="valeur"]` qu'au moment où le style est recalculé).
+
+> ⚠️ **Piège Qt rencontré en construisant cet habillage** : un `QWidget` nu
+> n'honore `background-color` en feuille de style que si l'attribut
+> `WA_StyledBackground` est posé — sans lui, le fond ne se peint que par
+> accident, quand l'écran a un parent qui le peint à sa place (vrai dans
+> `MainWindow`/`QStackedWidget`, faux dès qu'un écran est affiché seul, ex. un
+> rendu isolé pour vérification visuelle — confirmé en capturant chaque écran
+> en image hors écran, `QWidget.grab()`, avant de constater le fond gris clair
+> par défaut du système plutôt que le fond sombre voulu). `screens.Screen`,
+> classe de base commune à tous les écrans, pose cet attribut une fois pour
+> toutes plutôt que de compter sur le contexte d'affichage.
+
+**Second passage, sur maquette de référence.** Coins arrondis sur le bandeau de
+détection et les lignes d'étape (`border-radius: 10px`, contre 4px avant) et
+badges en forme de capsule plutôt que de simple rectangle arrondi. Le bandeau
+de détection regroupe désormais, sur une seule ligne : une icône de console
+dessinée au `QPainter` (`screens._ConsoleIcon` — pas une image, pour rester
+sans dépendance externe), le modèle et la taille de la carte, et le bouton
+Rafraîchir aligné à droite ; le bouton Aide (macOS uniquement, §3) est
+descendu sur sa propre ligne, en dessous.
+
+> ⚠️ **Illustration décorative, remplacée par la refonte de navigation
+> (phase 8).** La console R36S (`gui/assets/console.png`) pulsait
+> auparavant en fond discret de l'accueil (10 % à 16 % d'opacité,
+> `QPropertyAnimation`) ; elle est désormais affichée en grand, bien
+> visible, à une opacité fixe d'environ 70 % — en haut de la colonne
+> droite (`screens.ConsoleArt`), toujours à l'écran, sans animation.
+> `ConsoleArt.resizeEvent` la remet à l'échelle (`Qt.KeepAspectRatio`,
+> jamais déformée) à chaque redimensionnement de la fenêtre.
+
+**Deux illustrations décoratives, chacune avec son propre rôle
+(`gui/assets/`, `gui/asset_paths.py`) :**
+
+- **`console.png`** (`screens.ConsoleArt`, assemblée avec `screens.ConsoleBasePlate`
+  dans `screens.ConsoleStage`) : la console R36S détourée, en haut de la colonne
+  droite, à ~70 % d'opacité fixe peinte à la main dans `paintEvent`
+  (`painter.setOpacity`, pas un `QGraphicsOpacityEffect` — ce slot d'effet est
+  réservé au halo animé, voir ci-dessous).
+- **`circuit.png`** (`screens.WindowBackdrop`) : un motif de circuit
+  imprimé, sur **toute la fenêtre**, derrière les deux colonnes, à 15 %
+  d'opacité fixe — répété en mosaïque (`QPainter.drawTiledPixmap`, jamais
+  mis à l'échelle) pour rester net à n'importe quelle taille de fenêtre,
+  contrairement à une image étirée. Les panneaux des colonnes (bandeau,
+  lignes d'étape, journal de bord — tous à fond opaque, `theme.py`) restent
+  donc lisibles par-dessus, quelle que soit la zone qu'ils recouvrent.
+  Assemblé par `screens.MainView`, qui l'envoie derrière (`lower()`) avant
+  d'ajouter les deux colonnes.
+
+Toutes deux : jamais cliquables (`WA_TransparentForMouseEvents`), et absentes
+sans lever d'exception si le fichier correspondant n'existe pas
+(`asset_paths.asset_path`, retourne `None` — l'interface s'affiche
+normalement sans elles, vérifié par test). `packaging/r36s_studio.spec`
+n'inclut chaque image dans le binaire empaqueté que si elle est présente au
+moment de la construction, même principe — vérifié de bout en bout sur le
+vrai binaire pour `console.png` (`sys._MEIPASS` résout bien `gui/assets/`
+une fois empaqueté, via le même mécanisme que l'horodatage de construction,
+§5 plus haut).
+
+> ⚠️ **Dérogation délibérée à la contrainte « jamais de dégradé ni de
+> lueur ».** Cette règle, posée pour le premier habillage (ci-dessus),
+> visait les aplats de l'interface elle-même (boutons, bandeaux, badges) —
+> Qt les rend mal. Elle a été explicitement levée, sur demande, pour un seul
+> élément décoratif : la console de la colonne droite porte deux effets
+> lumineux permanents, tous deux peints en Qt pur, sans image
+> supplémentaire.
+>
+> - **Socle lumineux** (`screens.ConsoleBasePlate`) : une ellipse aplatie
+>   sous la console (~70 % de sa largeur), peinte via `QRadialGradient`
+>   (cyan → transparent) dans `paintEvent` — technique de repère mis à
+>   l'échelle (`painter.scale`) pour obtenir un dégradé radial elliptique à
+>   partir d'un `QRadialGradient` qui n'accepte qu'un rayon unique. Son
+>   opacité pulse entre 25 % et 55 % sur un cycle de 3 s.
+> - **Halo** (`ConsoleHalo`) : une ellipse plus large que la console,
+>   centrée derrière elle, peinte comme le socle (`QRadialGradient` cyan →
+>   transparent). Son opacité pulse entre 15 % et 38 % sur un cycle de 4 s.
+>   Peinte plutôt qu'un `QGraphicsDropShadowEffect` — voir le correctif de
+>   performance ci-dessous, c'est le second essai de cet élément.
+> - **Flottaison** : la console se déplace de ±6 px sur un cycle de 6 s, via
+>   une propriété `floatOffset` animée qui décale le point de dessin dans
+>   `paintEvent` plutôt que la géométrie du widget (évite tout conflit avec
+>   le système de layout).
+>
+> Les trois animations (`QPropertyAnimation`, `QEasingCurve.InOutSine`,
+> boucle infinie) sont regroupées dans un unique `QParallelAnimationGroup`
+> (`ConsoleStage._group`) pour une pause/reprise centralisée. Le socle et le
+> halo sont volontairement déphasés (périodes différentes, 3 s vs 4 s, plus
+> un décalage de départ explicite sur l'animation du halo,
+> `setCurrentTime(cycle // 2)`) pour qu'ils ne « respirent » jamais à
+> l'unisson. `ConsoleStage.pause()`/`.resume()` sont appelés par
+> `MainWindow` autour de chaque opération disque (`_start_worker`/
+> `_on_worker_finished`) pour ne pas consommer de ressources pendant une
+> écriture. Un réglage (case à cocher « Animations de la console »,
+> `MainView.animation_toggle`) permet de les désactiver complètement —
+> `set_animations_enabled(False)` arrête le groupe et remet les trois
+> valeurs à leur état de repos plutôt que de les figer à une valeur
+> intermédiaire arbitraire.
+
+> ⚠️ **Correctif de performance, constaté en conditions réelles :
+> l'animation de la console saccadait fortement.** Cause : le halo
+> d'origine (ci-dessus) était un `QGraphicsDropShadowEffect` — Qt
+> recalcule le flou gaussien de cet effet à chaque repeint du widget
+> source, quel que soit le rayon demandé, et la flottaison changeait
+> justement l'apparence de `ConsoleArt` en continu (donc un recalcul de
+> flou à chaque frame). Trois correctifs, tous dans `screens.py` :
+>
+> 1. **Le halo n'est plus un `QGraphicsEffect`.** `ConsoleHalo` (ci-dessus)
+>    le remplace par une ellipse peinte, sur le même principe que le socle
+>    -- seule l'opacité s'anime (entre 15 % et 38 %), plus de rayon de flou
+>    à recalculer.
+> 2. **Le dégradé radial est mis en cache.** `_RadialGlowWidget`, classe de
+>    base commune à `ConsoleBasePlate` et `ConsoleHalo`, ne reconstruit son
+>    `QRadialGradient` que dans `resizeEvent` (peint une fois dans un
+>    `QPixmap` mis en cache) — jamais depuis le setter de `glowOpacity`.
+>    `paintEvent` se limite à un `drawPixmap` + `painter.setOpacity`.
+> 3. **Le repeint est cadencé et limité en surface.** Les setters de
+>    propriété (`floatOffset`, `glowOpacity`) ne déclenchent plus eux-mêmes
+>    de `update()` — `QPropertyAnimation` met sinon à jour ses valeurs à la
+>    fréquence du taux de rafraîchissement de l'écran, bien plus vite que
+>    nécessaire pour une respiration sur plusieurs secondes.
+>    `ConsoleStage._repaint_timer`, un `QTimer` cadencé à 33 ms
+>    (~30 images/seconde), impose un unique repeint groupé par tick, limité
+>    à `_console_update_rect` (union de la console, de son halo et de son
+>    socle, recalculée dans `resizeEvent`) plutôt que `self.rect()` (qui
+>    couvrirait toute la zone du haut de la colonne droite, marges vides
+>    comprises) — et à plus forte raison jamais toute la fenêtre. Ce
+>    minuteur ne tourne que pendant que le groupe d'animations tourne
+>    réellement : arrêté dans `pause()` (déjà appelé autour de chaque
+>    opération disque) et à la désactivation du réglage, démarré dans
+>    `resume()`.
+>
+> **Vérifié** : mesure de charge CPU (`resource.getrusage`, backend Qt
+> `offscreen`) sur `MainWindow` au repos, animations actives, sur 15 s :
+> environ 7 à 9 % d'un cœur, entièrement imputable à la boucle de repeint
+> de la console (retombe à 0 % avec `set_animations_enabled(False)`,
+> confirmé en isolant la mesure). Ce chiffre est probablement surestimé
+> par rapport à un vrai écran : le backend `offscreen` rasterise tout en
+> logiciel à chaque repeint, sans la compositing GPU dont bénéficierait un
+> affichage réel — mais aucun écran physique n'était disponible pour
+> confirmer un chiffre définitif en conditions réelles.
 
 ---
 

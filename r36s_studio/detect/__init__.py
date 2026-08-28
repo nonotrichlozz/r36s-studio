@@ -16,6 +16,7 @@ simple lecture du système de fichiers local (aucune commande système)."""
 
 from __future__ import annotations
 
+import platform
 import subprocess
 from enum import Enum
 from typing import Dict, List, Optional
@@ -49,6 +50,7 @@ class StepStatus(Enum):
     AVAILABLE = "available"  # faisable
     DONE = "done"  # déjà faite
     NOT_RELEVANT = "not_relevant"  # non pertinente pour la carte branchée
+    PLATFORM_LIMITED = "platform_limited"  # possible en soi, mais bloqué par cet OS (badge « PC ou Linux »)
 
 
 def _list_partitions_safe(device: Optional[Device]) -> Optional[List[PartitionInfo]]:
@@ -95,7 +97,16 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
             else (StepStatus.DONE if is_arkos else StepStatus.AVAILABLE)
         ),
         INJECT_BOOT: _injection_status(is_arkos),
-        COPY_GAMES: _injection_status(is_arkos),
+        # EASYROMS est en NTFS sur une vraie carte R36S (§4.4) : macOS ne
+        # monte le NTFS qu'en lecture seule, donc cette étape échoue
+        # toujours sur cet OS, quelle que soit la carte branchée (ou même
+        # sans carte du tout) -- une limite de la plateforme, pas de la
+        # carte. Prioritaire sur `_injection_status` : contrairement à
+        # NOT_RELEVANT (qui dépend de la carte), ce statut ne changerait
+        # pas en branchant une autre carte.
+        COPY_GAMES: (
+            StepStatus.PLATFORM_LIMITED if platform.system() == "Darwin" else _injection_status(is_arkos)
+        ),
         EJECT: StepStatus.AVAILABLE if has_card else StepStatus.NOT_RELEVANT,
     }
 

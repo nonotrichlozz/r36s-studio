@@ -55,11 +55,23 @@ BUILD_TIMESTAMP_FILE = PROJECT_ROOT / "build" / "build_timestamp.txt"
 BUILD_TIMESTAMP_FILE.parent.mkdir(parents=True, exist_ok=True)
 BUILD_TIMESTAMP_FILE.write_text(datetime.now().strftime("%d/%m/%Y à %H:%M"))
 
+# Illustrations décoratives (§5, gui/asset_paths.py) : incluses seulement
+# si présentes -- leur absence ne doit jamais empêcher la construction ni
+# l'affichage de l'interface (§5). `"assets"` comme destination doit
+# correspondre à ce qu'`asset_paths.assets_dir()` attend de trouver sous
+# `sys._MEIPASS` une fois l'app empaquetée.
+ASSETS_DIR = PROJECT_ROOT / "r36s_studio" / "gui" / "assets"
+EXTRA_DATAS = [
+    (str(ASSETS_DIR / name), "assets")
+    for name in ("console.png", "circuit.png")
+    if (ASSETS_DIR / name).exists()
+]
+
 a = Analysis(
     [ENTRY_SCRIPT],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
-    datas=[(str(BUILD_TIMESTAMP_FILE), ".")],
+    datas=[(str(BUILD_TIMESTAMP_FILE), ".")] + EXTRA_DATAS,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

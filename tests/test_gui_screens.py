@@ -247,6 +247,19 @@ def test_home_screen_set_busy_false_reenables_steps_and_backup_row(qapp):
     assert screen._backup_row.isEnabled() is True
 
 
+def test_home_screen_set_busy_also_disables_assisted_mode_button(qapp):
+    """Changer de mode en plein flash ou en pleine copie laisserait un job
+    orphelin (§5 mode assisté) -- le bouton de bascule doit être désactivé
+    pendant l'opération, comme les six étapes."""
+    screen = HomeScreen()
+
+    screen.set_busy(True)
+    assert screen._assisted_mode_button.isEnabled() is False
+
+    screen.set_busy(False)
+    assert screen._assisted_mode_button.isEnabled() is True
+
+
 def test_home_screen_disabled_row_does_not_emit_on_click(qapp):
     screen = HomeScreen()
     received = []
@@ -728,6 +741,19 @@ def test_assisted_landing_screen_prepare_button_has_cta_role(qapp):
         screen = AssistedLandingScreen()
 
     assert screen._prepare_button.property("role") == "cta"
+
+
+def test_assisted_landing_screen_set_busy_disables_expert_button(qapp):
+    """Symétrique de HomeScreen.set_busy (§5 mode assisté) -- changer de
+    mode en plein flash ou en pleine copie laisserait un job orphelin."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+
+    screen.set_busy(True)
+    assert screen._expert_button.isEnabled() is False
+
+    screen.set_busy(False)
+    assert screen._expert_button.isEnabled() is True
 
 
 # --- WizardStepPanel : une étape à la fois, mode assisté (§5) --------------

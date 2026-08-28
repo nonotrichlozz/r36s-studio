@@ -709,6 +709,9 @@ class HomeScreen(Screen):
         for row in self._tiles.values():
             row.setEnabled(not busy)
         self._backup_row.setEnabled(not busy)
+        # Changer de mode en plein flash ou en pleine copie laisserait un
+        # job orphelin (§5 mode assisté) -- même garde que les étapes.
+        self._assisted_mode_button.setEnabled(not busy)
 
     def _build_row(self, letter: str, title: str, desc: str, signal: Signal) -> Tuple[ClickableFrame, QLabel]:
         """Une ligne d'étape : icône (lettre) à gauche, titre + description
@@ -1404,6 +1407,16 @@ class AssistedLandingScreen(Screen):
         root.addLayout(button_row)
 
         root.addStretch(3)
+
+    def set_busy(self, busy: bool) -> None:
+        """Changer de mode en plein flash ou en pleine copie laisserait un
+        job orphelin (§5 mode assisté) -- même garde que
+        `HomeScreen.set_busy`, sur le bouton symétrique. Landing n'est en
+        pratique jamais visible pendant une opération en cours (l'écran
+        bascule vers `MainView` dès qu'une opération démarre), mais reste
+        gardé défensivement -- notamment la brève fenêtre entre une
+        annulation coopérative et l'arrêt effectif du job."""
+        self._expert_button.setEnabled(not busy)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)

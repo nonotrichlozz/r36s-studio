@@ -374,6 +374,30 @@ def test_start_worker_disables_home_and_reenables_on_finish(mock_list, mock_filt
 
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
+def test_start_worker_disables_both_mode_switch_buttons_and_reenables_on_finish(mock_list, mock_filter, qapp):
+    """Changer de mode en plein flash ou en pleine copie laisserait un job
+    orphelin (§5 mode assisté) -- les deux boutons de bascule (Mode
+    assisté sur HomeScreen, Mode expert sur AssistedLandingScreen) doivent
+    être désactivés pendant toute opération disque, dans les deux sens."""
+    window = MainWindow()
+    window._mode = "backup"
+    window._device = _make_device()
+    window._file_path = "/tmp/out.img"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+        assert window._home._assisted_mode_button.isEnabled() is False
+        assert window._assisted_landing._expert_button.isEnabled() is False
+
+        window._on_worker_finished(True)
+
+    assert window._home._assisted_mode_button.isEnabled() is True
+    assert window._assisted_landing._expert_button.isEnabled() is True
+
+
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
 def test_start_worker_pauses_console_stage_and_resumes_on_finish(mock_list, mock_filter, qapp):
     """§5 (animations console) : mises en pause pendant une opération
     disque pour ne pas consommer de ressources, reprises à la fin."""

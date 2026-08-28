@@ -768,6 +768,23 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > mode expert). Vérifié par un test qui traverse la bascule dans les deux
 > sens et contrôle que la configuration suit à chaque fois.
 >
+> ⚠️ **Garde ajoutée : les deux boutons de bascule restaient cliquables
+> pendant une opération disque.** Changer de mode en plein flash ou en
+> pleine copie laisserait un job orphelin. `HomeScreen.set_busy`
+> (existant, désactivait déjà les six étapes) désactive maintenant aussi
+> `_assisted_mode_button` ; `AssistedLandingScreen.set_busy` (nouveau,
+> même principe) désactive `_expert_button` — gardé défensivement même si
+> l'accueil n'est en pratique jamais visible pendant une opération en
+> cours dans le déroulé normal, sauf brièvement entre une annulation
+> coopérative (`_cancel_wizard`) et l'arrêt effectif du job. `MainWindow`
+> appelle les deux `set_busy` ensemble, à l'entrée (`_start_worker`) et à
+> la sortie (`_on_worker_finished`) de toute opération passant par ce
+> pipeline (backup/flash/extract_boot/extract_easyroms/inject_boot/
+> copy_games, mode expert et mode assisté confondus) — pas étendu à
+> l'identification (étape 2) ni au calcul d'empreinte (étapes 1/4) : ces
+> lectures en arrière-plan ne laissent rien d'orphelin de dangereux si le
+> mode change entre-temps, contrairement à une écriture.
+>
 > **Parcours guidé, une étape à la fois** (`WizardStepPanel`, remplace
 > `HomeScreen` dans la colonne gauche de `MainView` — généralisée avec un
 > `QStackedWidget` interne, `show_home()`/`show_wizard_panel()`) : sept

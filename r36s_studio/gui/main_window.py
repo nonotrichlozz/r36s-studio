@@ -296,6 +296,10 @@ class MainWindow(QMainWindow):
     def _start_worker(self) -> None:
         self._log_panel.start_operation(tr(_OPERATION_TITLE_KEYS[self._mode]))
         self._home.set_busy(True)
+        # Changer de mode en plein flash ou en pleine copie laisserait un
+        # job orphelin (§5 mode assisté) -- garde symétrique sur les deux
+        # boutons de bascule, quel que soit l'écran effectivement visible.
+        self._assisted_landing.set_busy(True)
         if self._console_stage is not None:
             # Pas d'intérêt à faire tourner ces animations pour rien
             # pendant une opération longue (§5) -- le journal de bord
@@ -390,6 +394,7 @@ class MainWindow(QMainWindow):
     @Slot(bool)
     def _on_worker_finished(self, ok: bool) -> None:
         self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
             self._console_stage.resume()
         if self._wizard_active:

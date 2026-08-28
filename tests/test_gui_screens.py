@@ -979,6 +979,37 @@ def test_file_dialog_back_button_closes_dialog(qapp):
     assert dialog.isVisible() is False
 
 
+# --- FileDialog : bouton releases, flash uniquement (§5 mode assisté) ------
+
+
+def test_file_dialog_shows_releases_button_only_in_flash_mode(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash")
+    assert dialog._releases_button.isVisible() is True
+
+    dialog.set_mode("backup")
+    assert dialog._releases_button.isVisible() is False
+
+    dialog.set_mode("extract_boot")
+    assert dialog._releases_button.isVisible() is False
+
+    dialog.set_mode("inject_boot")
+    assert dialog._releases_button.isVisible() is False
+
+
+def test_file_dialog_releases_button_emits_signal(qapp):
+    dialog = FileDialog()
+    dialog.set_mode("flash")
+    received = []
+    dialog.releases_requested.connect(lambda: received.append(True))
+
+    dialog._releases_button.click()
+
+    assert received == [True]
+
+
 # --- FileDialog : liste des archives existantes (étapes D/E, §4.4) --------
 
 

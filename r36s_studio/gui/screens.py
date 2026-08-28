@@ -878,6 +878,7 @@ class FileDialog(Dialog):
     repli « Parcourir… » pour une source manuelle."""
 
     file_chosen = Signal(str)
+    releases_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -887,6 +888,13 @@ class FileDialog(Dialog):
         self._title = QLabel()
         self._title.setProperty("role", "title")
         layout.addWidget(self._title)
+
+        # Flash uniquement (§5 mode assisté, étape 5) -- l'image n'est pas
+        # hébergée sur GitHub (Mega/Google Drive/OneDrive/torrent), donc
+        # rien à automatiser au-delà de l'ouverture de cette page.
+        self._releases_button = QPushButton(tr("file_releases_button"))
+        self._releases_button.clicked.connect(self.releases_requested.emit)
+        layout.addWidget(self._releases_button)
 
         self._archive_list = QListWidget()
         self._archive_list.setSelectionMode(QListWidget.SingleSelection)
@@ -938,6 +946,7 @@ class FileDialog(Dialog):
         self.setWindowTitle(tr(_FILE_TITLE_KEYS[mode]))
         self._path_label.setText(default_path or "")
         self._next_button.setEnabled(bool(default_path))
+        self._releases_button.setVisible(mode == "flash")
 
         is_archive_mode = mode in _ARCHIVE_MODES
         self._archive_list.clear()

@@ -30,6 +30,7 @@ from r36s_studio.partitions import (
     inject_boot,
     locate_mounted,
 )
+from r36s_studio.safety.card_fingerprint import compute_boot_fingerprint
 
 
 class PartitionJobRunner(QThread):
@@ -133,3 +134,22 @@ class WizardIdentifyRunner(QThread):
             return
         info = identify_from_boot_directory(boot.mountpoint) if boot.mountpoint else None
         self.finished_identify.emit(info)
+
+
+class WizardFingerprintRunner(QThread):
+    """Empreinte de contenu de la carte (§5 mode assisté, garde-fou des
+    étapes 1/4, `safety/card_fingerprint.py`), sur un thread séparé comme
+    `WizardIdentifyRunner` -- `compute_boot_fingerprint` peut monter la
+    partition BOOT et bloquer jusqu'à `MOUNT_WAIT_SECONDS` (§4.4). Geler
+    l'interface pendant ce montage se lit comme un plantage, constaté en
+    usage réel -- c'est tout le correctif : ne plus jamais appeler
+    `compute_boot_fingerprint` directement sur le thread Qt principal."""
+
+    finished_fingerprint = Signal(object)  # Optional[str]
+
+    def __init__(self, device_path: str, parent=None):
+        super().__init__(parent)
+        self._device_path = device_path
+
+    def run(self) -> None:
+        self.finished_fingerprint.emit(compute_boot_fingerprint(self._device_path))

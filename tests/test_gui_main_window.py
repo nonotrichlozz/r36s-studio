@@ -1046,48 +1046,89 @@ def test_prepare_button_starts_wizard_on_step_one(mock_list, mock_filter, mock_d
     assert window._wizard_poll_timer.isActive() is True
 
 
+def _mock_fingerprint_runner_class():
+    """Même principe que `_mock_identify_runner_class`, pour
+    `WizardFingerprintRunner` (§5 mode assisté, correctif : plus de
+    `compute_boot_fingerprint` synchrone sur le thread principal)."""
+    instances = []
+
+    def _factory(device_path, parent=None):
+        instance = MagicMock()
+        instance.device_path = device_path
+        instances.append(instance)
+        return instance
+
+    factory = MagicMock(side_effect=_factory)
+    factory.instances = instances
+    return factory
+
+
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_wizard_step_one_poll_enables_continue_once_a_card_is_found(
+def test_wizard_step_one_poll_starts_fingerprint_runner_on_a_separate_thread(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
+    """Correctif : monter BOOT pour calculer l'empreinte (§4.4) peut
+    bloquer jusqu'à MOUNT_WAIT_SECONDS -- un gel de l'interface pendant ce
+    montage se lit comme un plantage. `_on_wizard_poll` ne doit donc plus
+    jamais appeler `compute_boot_fingerprint` directement sur le thread Qt
+    principal, seulement démarrer `WizardFingerprintRunner`."""
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
+    fingerprint_runner_class = _mock_fingerprint_runner_class()
 
     window = MainWindow()
     window._assisted_landing.prepare_requested.emit()
     assert window._wizard_panel._continue_button.isEnabled() is False
 
-    with patch("r36s_studio.gui.main_window.compute_boot_fingerprint", return_value="fp-source"):
+    with patch("r36s_studio.gui.main_window.WizardFingerprintRunner", fingerprint_runner_class):
         window._on_wizard_poll()
 
-    assert window._wizard_panel._continue_button.isEnabled() is True
-    assert window._wizard_source_device is device
-    assert window._wizard_source_fingerprint == "fp-source"
-    assert window._wizard_poll_timer.isActive() is False  # trouvé -> plus besoin de reinterroger
+    fingerprint_runner_class.assert_called_once_with(device.path, parent=window)
+    fingerprint_runner_class.instances[0].start.assert_called_once()
+    # Toujours en attente du résultat -- rien n'est encore décidé.
+    assert window._wizard_panel._continue_button.isEnabled() is False
+    assert window._wizard_source_device is None
+    assert window._wizard_poll_timer.isActive() is False  # pas de deuxième calcul en parallèle
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices")
-@patch("r36s_studio.gui.main_window.list_devices")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_fingerprint_ready_for_detect_source_stores_device_and_enables_continue(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    device = _make_device()
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    window._on_wizard_fingerprint_ready(WizardJob.DETECT_SOURCE, device, "fp-source")
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    assert window._wizard_source_device is device
+    assert window._wizard_source_fingerprint == "fp-source"
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_continue_on_step_one_advances_to_identify_and_starts_identify_runner(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     device = _make_device()
-    mock_list.return_value = [device]
-    mock_filter.return_value = [device]
     identify_runner_class = _mock_identify_runner_class()
 
     window = MainWindow()
     window._assisted_landing.prepare_requested.emit()
-    with patch("r36s_studio.gui.main_window.compute_boot_fingerprint", return_value="fp-source"):
-        window._on_wizard_poll()
+    window._on_wizard_fingerprint_ready(WizardJob.DETECT_SOURCE, device, "fp-source")
 
     with patch("r36s_studio.gui.main_window.WizardIdentifyRunner", identify_runner_class):
         window._wizard_panel.continue_requested.emit()
@@ -1136,19 +1177,40 @@ def _target_setup(window, device):
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_wizard_step_four_refuses_to_continue_when_fingerprint_matches_source(
+def test_wizard_step_four_poll_also_starts_fingerprint_runner(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     same_card = _make_device(path="/dev/fake-disk-test-9")
     mock_list.return_value = [same_card]
     mock_filter.return_value = [same_card]
+    fingerprint_runner_class = _mock_fingerprint_runner_class()
 
     window = MainWindow()
     _target_setup(window, same_card)
     window._enter_wizard_job(WizardJob.DETECT_TARGET)
 
-    with patch("r36s_studio.gui.main_window.compute_boot_fingerprint", return_value="fp-source"):
+    with patch("r36s_studio.gui.main_window.WizardFingerprintRunner", fingerprint_runner_class):
         window._on_wizard_poll()
+
+    fingerprint_runner_class.assert_called_once_with(same_card.path, parent=window)
+    assert window._wizard_poll_timer.isActive() is False  # pas de deuxième calcul en parallèle
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_step_four_refuses_to_continue_when_fingerprint_matches_source(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    same_card = _make_device(path="/dev/fake-disk-test-9")
+
+    window = MainWindow()
+    _target_setup(window, same_card)
+    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+
+    window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, same_card, "fp-source")
 
     assert window._wizard_panel._continue_button.isEnabled() is False
     assert window._wizard_target_device is None
@@ -1158,21 +1220,18 @@ def test_wizard_step_four_refuses_to_continue_when_fingerprint_matches_source(
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices")
-@patch("r36s_studio.gui.main_window.list_devices")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_four_allows_continue_when_fingerprint_differs(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     new_card = _make_device(path="/dev/fake-disk-test-9")
-    mock_list.return_value = [new_card]
-    mock_filter.return_value = [new_card]
 
     window = MainWindow()
     _target_setup(window, new_card)
     window._enter_wizard_job(WizardJob.DETECT_TARGET)
 
-    with patch("r36s_studio.gui.main_window.compute_boot_fingerprint", return_value="fp-blank-or-different"):
-        window._on_wizard_poll()
+    window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, new_card, "fp-blank-or-different")
 
     assert window._wizard_panel._continue_button.isEnabled() is True
     assert window._wizard_target_device is new_card
@@ -1248,3 +1307,20 @@ def test_wizard_cancel_returns_to_landing_and_stops_polling(
     assert window._root_stack.currentWidget() is window._assisted_landing
     assert window._wizard_poll_timer.isActive() is False
     assert window._wizard_active is False
+
+
+# --- bouton "Voir les versions disponibles" (flash, §5 mode assisté) -------
+
+
+@patch("r36s_studio.gui.main_window.webbrowser.open")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_releases_button_opens_darkos_r36s_releases_url(mock_list, mock_filter, mock_load, mock_open, qapp):
+    from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL
+
+    window = MainWindow()
+
+    window._file_dialog.releases_requested.emit()
+
+    mock_open.assert_called_once_with(DARKOS_R36S_RELEASES_URL)

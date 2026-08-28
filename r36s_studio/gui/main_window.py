@@ -12,6 +12,7 @@ permanent (`LogPanel`), pas dans des écrans Exécution/Résultat séparés
 from __future__ import annotations
 
 import subprocess
+import webbrowser
 from pathlib import Path
 from typing import List, Optional
 
@@ -22,12 +23,13 @@ from r36s_studio import config as app_config
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify.dtb import DtbInfo
+from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, filter_devices
-from r36s_studio.safety.card_fingerprint import compute_boot_fingerprint, is_same_card
+from r36s_studio.safety.card_fingerprint import is_same_card
 
-from .partition_runner import PartitionJobRunner, WizardIdentifyRunner
+from .partition_runner import PartitionJobRunner, WizardFingerprintRunner, WizardIdentifyRunner
 from .reveal import reveal
 from .screens import (
     AssistedLandingScreen,
@@ -182,6 +184,7 @@ class MainWindow(QMainWindow):
         self._device_dialog.device_chosen.connect(self._on_device_chosen)
 
         self._file_dialog.file_chosen.connect(self._on_file_chosen)
+        self._file_dialog.releases_requested.connect(self._on_releases_requested)
 
         self._confirm_dialog.confirmed.connect(self._on_confirmed)
 
@@ -418,6 +421,16 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, tr("app_title"), str(exc))
 
+    def _on_releases_requested(self) -> None:
+        """Bouton « Voir les versions disponibles » de `FileDialog` (flash
+        uniquement) -- l'image n'est pas hébergée sur GitHub (Mega/Google
+        Drive/OneDrive/torrent, §5 mode assisté), donc rien à automatiser
+        au-delà de l'ouverture de cette page dans le navigateur."""
+        try:
+            webbrowser.open(DARKOS_R36S_RELEASES_URL)
+        except Exception as exc:
+            QMessageBox.warning(self, tr("app_title"), str(exc))
+
     # --- fenêtre Aide (macOS uniquement, §3) --------------------------------
 
     def _on_open_settings_requested(self) -> None:
@@ -547,24 +560,44 @@ class MainWindow(QMainWindow):
     def _on_wizard_poll(self) -> None:
         devices = self._list_safe_devices()
         candidate = devices[0] if len(devices) == 1 else None
-        job = self._wizard_flow.current_job()
 
         if candidate is None:
             self._wizard_panel.set_status(tr("wizard_status_waiting"))
             self._wizard_panel.set_can_continue(False)
             return
 
+        # L'empreinte peut monter BOOT et bloquer jusqu'à
+        # MOUNT_WAIT_SECONDS (§4.4) -- calculée sur un thread séparé
+        # (`WizardFingerprintRunner`), jamais ici sur le thread Qt
+        # principal (un gel de l'interface pendant ce montage se lit
+        # comme un plantage, constaté en usage réel). Le sondage s'arrête
+        # pendant ce calcul, pour ne pas en démarrer un deuxième en
+        # parallèle au tick suivant -- `_on_wizard_fingerprint_ready` le
+        # relance lui-même si la carte détectée à l'étape 4 s'avère être
+        # la même qu'à l'étape 1.
+        self._wizard_poll_timer.stop()
+        self._wizard_panel.set_can_continue(False)
+        job = self._wizard_flow.current_job()
+        self._fingerprint_runner = WizardFingerprintRunner(candidate.path, parent=self)
+        self._fingerprint_runner.finished_fingerprint.connect(
+            lambda fingerprint: self._on_wizard_fingerprint_ready(job, candidate, fingerprint)
+        )
+        self._fingerprint_runner.start()
+
+    def _on_wizard_fingerprint_ready(
+        self, job: WizardJob, candidate: Device, fingerprint: Optional[str]
+    ) -> None:
         if job == WizardJob.DETECT_SOURCE:
-            self._wizard_poll_timer.stop()
+            self._wizard_poll_timer.stop()  # trouvé -> plus besoin de reinterroger
             self._wizard_source_device = candidate
-            self._wizard_source_fingerprint = compute_boot_fingerprint(candidate.path)
+            self._wizard_source_fingerprint = fingerprint
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
             self._wizard_panel.set_can_continue(True)
         elif job == WizardJob.DETECT_TARGET:
-            fingerprint = compute_boot_fingerprint(candidate.path)
             if is_same_card(self._wizard_source_fingerprint, fingerprint):
                 self._wizard_panel.set_status(tr("wizard_status_same_card"))
                 self._wizard_panel.set_can_continue(False)
+                self._wizard_poll_timer.start()  # continue d'attendre une vraie carte différente
                 return
             self._wizard_poll_timer.stop()
             self._wizard_target_device = candidate

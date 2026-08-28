@@ -73,6 +73,10 @@ STRINGS = {
     "wizard_step7_title": "7. Éjection",
     "wizard_step7_instruction": "On retire ta carte neuve en toute sécurité — elle est prête.",
     "wizard_finished": "Ta carte est prête ! Tu peux la retirer et la mettre dans ta console.",
+    # Fenêtre Choix du fichier, flash uniquement (§5 mode assisté, étape 5)
+    # -- l'image n'est pas hébergée sur GitHub (Mega, Google Drive,
+    # OneDrive, torrent), seul le lien vers la page des releases est ouvert.
+    "file_releases_button": "Voir les versions disponibles en ligne",
     # Choix du périphérique
     "device_title": "Choisis ta carte SD",
     "device_refresh": "Rafraîchir",

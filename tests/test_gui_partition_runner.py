@@ -188,3 +188,65 @@ def test_cancel_sets_should_cancel_flag_passed_to_job(mock_copy, qapp):
     runner.run()
 
     assert captured["should_cancel"]() is True
+
+
+# --- WizardIdentifyRunner (étape 2 du mode assisté, §5) ---------------------
+#
+# Distingue trois échecs (message d'étape 2 différent pour chacun) :
+# montage impossible (carte défaillante), montée mais aucun .dtb, .dtb
+# présents mais tous invalides -- les deux derniers sont décidés par
+# identify_from_boot_directory (identify/__init__.py, ses propres tests) ;
+# ici on vérifie seulement le cas du montage, propre à ce runner.
+
+from r36s_studio.gui.partition_runner import WizardIdentifyRunner
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+from r36s_studio.partitions.locate import PartitionInfo
+
+
+@patch("r36s_studio.gui.partition_runner.locate_mounted", side_effect=PartitionNotMounted("BOOT", "/dev/x"))
+def test_wizard_identify_runner_emits_mount_failed_when_locate_mounted_raises(mock_locate, qapp):
+    runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
+    results = []
+    runner.finished_identify.connect(lambda result: results.append(result))
+
+    runner.run()
+
+    assert results == [IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED)]
+
+
+@patch(
+    "r36s_studio.gui.partition_runner.locate_mounted",
+    return_value=PartitionInfo("/dev/fake-disk-test-5s1", "", "fat16", None),
+)
+def test_wizard_identify_runner_emits_mount_failed_when_mountpoint_is_empty(mock_locate, qapp):
+    """`locate_mounted` peut réussir sans lever tout en renvoyant une
+    partition sans mountpoint effectif (cas limite) -- traité comme un
+    montage raté, pas comme « aucun .dtb trouvé » (qui suppose une
+    partition lisible)."""
+    runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
+    results = []
+    runner.finished_identify.connect(lambda result: results.append(result))
+
+    runner.run()
+
+    assert results == [IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED)]
+
+
+@patch("r36s_studio.gui.partition_runner.identify_from_boot_directory")
+@patch(
+    "r36s_studio.gui.partition_runner.locate_mounted",
+    return_value=PartitionInfo("/dev/fake-disk-test-5s1", "", "fat16", "/Volumes/BOOT"),
+)
+def test_wizard_identify_runner_delegates_to_identify_from_boot_directory_once_mounted(
+    mock_locate, mock_identify, qapp
+):
+    expected = IdentifyResult(failure_reason=IdentifyFailureReason.NO_DTB_FOUND)
+    mock_identify.return_value = expected
+    runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
+    results = []
+    runner.finished_identify.connect(lambda result: results.append(result))
+
+    runner.run()
+
+    mock_identify.assert_called_once_with("/Volumes/BOOT")
+    assert results == [expected]

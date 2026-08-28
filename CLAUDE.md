@@ -864,6 +864,29 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > plantage, le résultat arrive simplement après coup sur un panneau déjà
 > quitté.
 >
+> ⚠️ **Message d'échec affiné : trois causes distinctes plutôt qu'un
+> « impossible d'identifier » générique.** `identify.IdentifyResult`
+> (`info` + `failure_reason: Optional[IdentifyFailureReason]`) remplace
+> le simple `Optional[DtbInfo]` qu'`identify_from_boot_directory`
+> renvoyait avant. Trois causes, trois messages :
+> - `MOUNT_FAILED` — la partition BOOT elle-même n'a pas pu être montée
+>   (décidé par `WizardIdentifyRunner`, avant même d'appeler
+>   `identify_from_boot_directory`) : message suggérant explicitement une
+>   carte défaillante — fréquent sur les cartes fournies avec la console
+>   R36S, constaté en usage réel.
+> - `NO_DTB_FOUND` — partition montée et lisible, mais aucun `.dtb`
+>   dessus.
+> - `ALL_DTB_INVALID` — des `.dtb` existent mais aucun n'a pu être
+>   analysé (`InvalidDtbError`/`OSError` sur chacun).
+>
+> Les trois restent non bloquantes (`set_can_continue(True)` dans tous
+> les cas) et se terminent par le même repli MultiPanel — seule la partie
+> diagnostic du message change. Vocabulaire (§5) : le message principal
+> reste sans jargon (« ta carte », jamais « partition »/« .dtb »/
+> « BOOT ») ; le mot « défaillante » est le seul terme volontairement
+> plus insistant, à la demande explicite d'un utilisateur qui voulait que
+> l'appli suggère cette cause précise plutôt que rester vague.
+>
 > ⚠️ **Corrigé, constaté en conditions réelles : geler l'interface pendant
 > le montage se lit comme un plantage.** `_on_wizard_poll` (étapes 1/4)
 > appelait `compute_boot_fingerprint` directement sur le thread Qt

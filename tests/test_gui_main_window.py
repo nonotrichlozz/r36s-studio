@@ -1356,6 +1356,7 @@ def test_wizard_continue_on_step_one_advances_to_identify_and_starts_identify_ru
 def test_wizard_identify_success_enables_continue_and_logs_result(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
+    from r36s_studio.identify import IdentifyResult
     from r36s_studio.identify.dtb import DtbInfo
 
     window = MainWindow()
@@ -1364,11 +1365,77 @@ def test_wizard_identify_success_enables_continue_and_logs_result(
     window._wizard_panel._continue_button.setEnabled(False)
 
     info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
-    window._on_wizard_identify_finished(info)
+    window._on_wizard_identify_finished(IdentifyResult(info=info))
 
     assert window._wizard_panel._continue_button.isEnabled() is True
     log_text = window._log_panel._log_view.toPlainText()
     assert "rk3326-evb-lp3-v12" in log_text
+
+
+# --- échec d'identification : trois causes distinctes, trois messages -----
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_mount_failed_suggests_a_faulty_card(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    window._on_wizard_identify_finished(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "défaillante" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_no_dtb_found_message_differs_from_mount_failed(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    window._on_wizard_identify_finished(IdentifyResult(failure_reason=IdentifyFailureReason.NO_DTB_FOUND))
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "défaillante" not in log_text
+    assert "aucune information d'écran" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_invalid_dtb_message_differs_from_the_other_two(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    window._on_wizard_identify_finished(IdentifyResult(failure_reason=IdentifyFailureReason.ALL_DTB_INVALID))
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "défaillante" not in log_text
+    assert "aucune information d'écran" not in log_text
+    assert "illisible ou corrompu" in log_text
 
 
 # --- étape 4 : garde-fou par empreinte de contenu, pas path/size_bytes -----

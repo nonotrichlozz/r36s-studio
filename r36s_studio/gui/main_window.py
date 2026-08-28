@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 from r36s_studio import config as app_config
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
-from r36s_studio.identify.dtb import DtbInfo
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives
 from r36s_studio.partitions.eject import eject as eject_device
@@ -68,6 +68,16 @@ _WIZARD_JOB_TO_EXPERT_MODE = {
     WizardJob.EXTRACT_BOOT: "extract_boot",
     WizardJob.EXTRACT_EASYROMS: "extract_easyroms",
     WizardJob.INJECT_BOOT: "inject_boot",
+}
+# Étape 2 (identification) : un message distinct par cause d'échec plutôt
+# qu'un « impossible d'identifier » générique -- le montage raté suggère
+# une carte défaillante (courant sur les cartes fournies avec la
+# console), distinct d'une partition lisible sans .dtb ou avec des .dtb
+# corrompus (identify/__init__.py::IdentifyFailureReason).
+_IDENTIFY_FAILURE_MESSAGE_KEYS = {
+    IdentifyFailureReason.MOUNT_FAILED: "wizard_identify_failed_mount",
+    IdentifyFailureReason.NO_DTB_FOUND: "wizard_identify_failed_no_dtb",
+    IdentifyFailureReason.ALL_DTB_INVALID: "wizard_identify_failed_invalid_dtb",
 }
 
 # Pane "Accès complet au disque" de Réglages Système -- lien profond ouvert
@@ -715,14 +725,17 @@ class MainWindow(QMainWindow):
         self._identify_runner.finished_identify.connect(self._on_wizard_identify_finished)
         self._identify_runner.start()
 
-    def _on_wizard_identify_finished(self, info: Optional[DtbInfo]) -> None:
-        if info is None:
-            self._log_panel.append_log(tr("wizard_identify_failed"))
-            self._wizard_panel.set_status(tr("wizard_identify_failed"))
+    def _on_wizard_identify_finished(self, result: IdentifyResult) -> None:
+        if result.info is not None:
+            message = tr(
+                "wizard_identify_result",
+                board=result.info.board_compatible or "?",
+                panel=result.info.panel_compatible or "?",
+            )
         else:
-            message = tr("wizard_identify_result", board=info.board_compatible or "?", panel=info.panel_compatible or "?")
-            self._log_panel.append_log(message)
-            self._wizard_panel.set_status(message)
+            message = tr(_IDENTIFY_FAILURE_MESSAGE_KEYS[result.failure_reason])
+        self._log_panel.append_log(message)
+        self._wizard_panel.set_status(message)
         self._wizard_panel.set_can_continue(True)
 
     # --- étapes 3/6 : extraction/injection, réutilise PartitionJobRunner ----

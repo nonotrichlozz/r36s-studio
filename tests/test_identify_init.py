@@ -1,22 +1,33 @@
 """Tests de identify/__init__.py -- identify_from_boot_directory, utilisée
 par l'étape 2 du mode assisté (§5 mode assisté) pour identifier la console
 à partir des `.dtb` déjà présents sur la partition BOOT montée (avant toute
-copie -- distinct de l'extraction elle-même, étape 3)."""
+copie -- distinct de l'extraction elle-même, étape 3).
+
+Distingue trois échecs (message d'étape 2 différent pour chacun, §5 mode
+assisté) : aucun `.dtb` trouvé (`NO_DTB_FOUND`) vs des `.dtb` présents mais
+tous invalides (`ALL_DTB_INVALID`) -- le troisième cas, le montage lui-même
+qui échoue (carte défaillante), est décidé un niveau au-dessus
+(`WizardIdentifyRunner`, avant même d'appeler cette fonction)."""
 
 from __future__ import annotations
 
-from r36s_studio.identify import identify_from_boot_directory
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, identify_from_boot_directory
 from r36s_studio.identify.dtb import DtbInfo
 
 
-def test_returns_none_when_directory_has_no_dtb_file(tmp_path):
+def test_returns_no_dtb_found_when_directory_has_no_dtb_file(tmp_path):
     (tmp_path / "boot.ini").write_text("console=r36s", encoding="utf-8")
 
-    assert identify_from_boot_directory(tmp_path) is None
+    result = identify_from_boot_directory(tmp_path)
+
+    assert result == IdentifyResult(info=None, failure_reason=IdentifyFailureReason.NO_DTB_FOUND)
 
 
-def test_returns_none_when_directory_does_not_exist(tmp_path):
-    assert identify_from_boot_directory(tmp_path / "does-not-exist") is None
+def test_returns_no_dtb_found_when_directory_does_not_exist(tmp_path):
+    result = identify_from_boot_directory(tmp_path / "does-not-exist")
+
+    assert result.info is None
+    assert result.failure_reason == IdentifyFailureReason.NO_DTB_FOUND
 
 
 def test_parses_the_first_valid_dtb_found(tmp_path):
@@ -25,9 +36,10 @@ def test_parses_the_first_valid_dtb_found(tmp_path):
     (tmp_path / "broken.dtb").write_bytes(b"not a real dtb")
     (tmp_path / "board.dtb").write_bytes(_build_fake_dtb())
 
-    info = identify_from_boot_directory(tmp_path)
+    result = identify_from_boot_directory(tmp_path)
 
-    assert info == DtbInfo(
+    assert result.failure_reason is None
+    assert result.info == DtbInfo(
         board_compatible="rk3326-evb-lp3-v12",
         panel_compatible="sitronix,st7703",
         timings={
@@ -51,7 +63,17 @@ def test_skips_invalid_dtb_files_and_uses_the_next_valid_one(tmp_path):
     (tmp_path / "a_broken.dtb").write_bytes(b"garbage, not a dtb at all")
     (tmp_path / "b_valid.dtb").write_bytes(_build_fake_dtb())
 
-    info = identify_from_boot_directory(tmp_path)
+    result = identify_from_boot_directory(tmp_path)
 
-    assert info is not None
-    assert info.board_compatible == "rk3326-evb-lp3-v12"
+    assert result.info is not None
+    assert result.info.board_compatible == "rk3326-evb-lp3-v12"
+    assert result.failure_reason is None
+
+
+def test_returns_all_dtb_invalid_when_every_dtb_file_is_unreadable(tmp_path):
+    (tmp_path / "a_broken.dtb").write_bytes(b"garbage, not a dtb at all")
+    (tmp_path / "b_broken.dtb").write_bytes(b"also not a dtb")
+
+    result = identify_from_boot_directory(tmp_path)
+
+    assert result == IdentifyResult(info=None, failure_reason=IdentifyFailureReason.ALL_DTB_INVALID)

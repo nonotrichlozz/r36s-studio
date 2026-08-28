@@ -16,7 +16,7 @@ import subprocess
 from PySide6.QtCore import QThread, Signal
 
 from r36s_studio.devices import Device
-from r36s_studio.identify import identify_from_boot_directory
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, identify_from_boot_directory
 from r36s_studio.imaging.copy import OperationCancelled, ProgressEvent
 from r36s_studio.partitions import (
     BOOT_LABEL,
@@ -115,12 +115,16 @@ class WizardIdentifyRunner(QThread):
     exploitable (`identify.identify_from_boot_directory`), sur un thread
     séparé comme `PartitionJobRunner` -- `locate_mounted` peut bloquer
     jusqu'à `MOUNT_WAIT_SECONDS` (§4.4) si le système n'a pas encore monté
-    la partition automatiquement. Émet toujours `finished_identify`, avec
-    `None` si rien d'exploitable n'a été trouvé -- ne lève jamais (§4.5 :
-    une détection ratée ne doit jamais planter l'interface, et l'absence
-    d'identification a un repli prévu, MultiPanel)."""
+    la partition automatiquement. Émet toujours `finished_identify`
+    (`IdentifyResult`) -- ne lève jamais (§4.5 : une détection ratée ne
+    doit jamais planter l'interface, et l'absence d'identification a un
+    repli prévu, MultiPanel). Distingue le montage raté (`MOUNT_FAILED` --
+    carte probablement défaillante, courant sur les cartes fournies avec
+    la console) des deux échecs décidés par `identify_from_boot_directory`
+    une fois la partition lisible (`NO_DTB_FOUND`/`ALL_DTB_INVALID`) --
+    chacun a son propre message à l'étape 2."""
 
-    finished_identify = Signal(object)  # Optional[DtbInfo]
+    finished_identify = Signal(object)  # IdentifyResult
 
     def __init__(self, device_path: str, parent=None):
         super().__init__(parent)
@@ -130,10 +134,12 @@ class WizardIdentifyRunner(QThread):
         try:
             boot = locate_mounted(self._device_path, BOOT_LABEL)
         except (PartitionNotFound, PartitionNotMounted, OSError, subprocess.CalledProcessError):
-            self.finished_identify.emit(None)
+            self.finished_identify.emit(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
             return
-        info = identify_from_boot_directory(boot.mountpoint) if boot.mountpoint else None
-        self.finished_identify.emit(info)
+        if not boot.mountpoint:
+            self.finished_identify.emit(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
+            return
+        self.finished_identify.emit(identify_from_boot_directory(boot.mountpoint))
 
 
 class WizardFingerprintRunner(QThread):

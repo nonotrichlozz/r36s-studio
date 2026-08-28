@@ -65,7 +65,22 @@ STRINGS = {
     # mode assisté, avec la raison de chaque exclusion.
     "wizard_diagnostic_summary": "Détection : {accepted} carte(s) retenue(s), {rejected} écartée(s)",
     "wizard_identify_result": "Console identifiée : {board} (écran {panel}).",
-    "wizard_identify_failed": "Impossible d'identifier ta console — la version MultiPanel sera proposée par défaut.",
+    # Trois causes distinctes (§5 mode assisté) plutôt qu'un message
+    # générique -- chacune se termine par le même repli (MultiPanel), le
+    # parcours n'est jamais bloqué par un échec d'identification.
+    "wizard_identify_failed_mount": (
+        "Impossible de lire ta carte d'origine — elle semble défaillante. "
+        "C'est fréquent avec les cartes fournies avec la console R36S. "
+        "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
+    ),
+    "wizard_identify_failed_no_dtb": (
+        "Ta carte a été lue, mais aucune information d'écran n'a été trouvée dessus. "
+        "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
+    ),
+    "wizard_identify_failed_invalid_dtb": (
+        "Le fichier de réglages d'écran de ta carte est illisible ou corrompu. "
+        "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
+    ),
     "wizard_step1_title": "1. Insère ta carte SD d'origine",
     "wizard_step1_instruction": "Branche l'ancienne carte SD de ta console sur ton ordinateur.",
     "wizard_step2_title": "2. Identification de ta console",

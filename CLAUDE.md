@@ -875,9 +875,16 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 >   carte défaillante — fréquent sur les cartes fournies avec la console
 >   R36S, constaté en usage réel.
 > - `NO_DTB_FOUND` — partition montée et lisible, mais aucun `.dtb`
->   dessus.
-> - `ALL_DTB_INVALID` — des `.dtb` existent mais aucun n'a pu être
->   analysé (`InvalidDtbError`/`OSError` sur chacun).
+>   dessus (ex. une carte fraîchement flashée) : le message le dit
+>   explicitement et précise que l'identification se refera d'elle-même
+>   une fois l'écran d'origine réinjecté (étape 6).
+> - `ALL_DTB_INVALID` — des `.dtb` existent mais aucun n'est exploitable :
+>   soit `InvalidDtbError`/`OSError` au parsing, soit — affiné depuis la
+>   première version — structurellement valide mais sans `compatible`
+>   racine (`info.board_compatible` vide/`None`). Un DTB qui « parse »
+>   sans rien identifier n'est pas un succès : une identification
+>   affichant « Console identifiée : ? » n'aide personne, mieux vaut le
+>   traiter comme les autres candidats invalides et continuer à chercher.
 >
 > Les trois restent non bloquantes (`set_can_continue(True)` dans tous
 > les cas) et se terminent par le même repli MultiPanel — seule la partie
@@ -886,6 +893,25 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > « BOOT ») ; le mot « défaillante » est le seul terme volontairement
 > plus insistant, à la demande explicite d'un utilisateur qui voulait que
 > l'appli suggère cette cause précise plutôt que rester vague.
+>
+> **Journalisé dans tous les cas, succès compris** (« journalise... le
+> chemin monté et la liste des fichiers examinés ») : `IdentifyResult`
+> porte désormais `scanned_directory`/`examined_files` (toujours
+> renseignés par `identify_from_boot_directory`, y compris en cas de
+> succès) et `detail` (le message brut de l'exception, uniquement pour
+> `MOUNT_FAILED` — rien à scanner dans ce cas, donc pas de
+> `scanned_directory`). `_on_wizard_identify_finished` ajoute ces lignes
+> au journal après le message principal, jamais dedans (§5 vocabulaire).
+>
+> **Mode test sans carte physique** : `python -m r36s_studio identify
+> --boot-dir DIR` (`cmd_identify`, `__main__.py`) lance
+> `identify_from_boot_directory` directement sur un dossier local — pour
+> valider le parseur DTB et la future table de correspondance sur des
+> variantes de console fournies par d'autres utilisateurs, sans dépendre
+> d'une carte réelle. Sortie texte simple, pas le protocole JSON Lines
+> (§3) : c'est un outil de diagnostic interactif, jamais piloté par la
+> GUI. `MOUNT_FAILED` n'est jamais produit par cette commande (rien à
+> monter, `identify_from_boot_directory` ne le renvoie jamais lui-même).
 >
 > ⚠️ **Corrigé, constaté en conditions réelles : geler l'interface pendant
 > le montage se lit comme un plantage.** `_on_wizard_poll` (étapes 1/4)

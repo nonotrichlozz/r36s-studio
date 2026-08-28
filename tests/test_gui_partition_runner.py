@@ -205,13 +205,18 @@ from r36s_studio.partitions.locate import PartitionInfo
 
 @patch("r36s_studio.gui.partition_runner.locate_mounted", side_effect=PartitionNotMounted("BOOT", "/dev/x"))
 def test_wizard_identify_runner_emits_mount_failed_when_locate_mounted_raises(mock_locate, qapp):
+    """`detail` porte le message brut de l'exception -- diagnosticable
+    dans le journal (§5 mode assisté), en plus du message convivial."""
     runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
     results = []
     runner.finished_identify.connect(lambda result: results.append(result))
 
     runner.run()
 
-    assert results == [IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED)]
+    assert len(results) == 1
+    assert results[0].info is None
+    assert results[0].failure_reason == IdentifyFailureReason.MOUNT_FAILED
+    assert "BOOT" in results[0].detail
 
 
 @patch(

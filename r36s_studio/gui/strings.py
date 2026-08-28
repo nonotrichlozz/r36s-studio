@@ -74,13 +74,21 @@ STRINGS = {
         "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
     ),
     "wizard_identify_failed_no_dtb": (
-        "Ta carte a été lue, mais aucune information d'écran n'a été trouvée dessus. "
-        "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
+        "Ta carte a été lue, mais ne contient pas de fichier d'identification — "
+        "c'est le cas d'une carte fraîchement flashée. L'identification se fera "
+        "automatiquement une fois l'écran d'origine réinjecté (étape 6). "
+        "Tu peux continuer : la version MultiPanel sera utilisée en attendant."
     ),
     "wizard_identify_failed_invalid_dtb": (
-        "Le fichier de réglages d'écran de ta carte est illisible ou corrompu. "
+        "Le fichier de réglages d'écran de ta carte est illisible, corrompu, "
+        "ou ne contient pas les informations attendues. "
         "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
     ),
+    # Journal de bord uniquement (§5 vocabulaire) -- diagnostic technique,
+    # jamais dans le message principal.
+    "wizard_identify_log_directory": "Dossier examiné : {path}",
+    "wizard_identify_log_files": "Fichiers .dtb examinés ({count}) : {files}",
+    "wizard_identify_log_no_files": "Aucun fichier .dtb trouvé dans ce dossier.",
     "wizard_step1_title": "1. Insère ta carte SD d'origine",
     "wizard_step1_instruction": "Branche l'ancienne carte SD de ta console sur ton ordinateur.",
     "wizard_step2_title": "2. Identification de ta console",

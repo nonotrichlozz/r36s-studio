@@ -1413,7 +1413,7 @@ def test_wizard_identify_no_dtb_found_message_differs_from_mount_failed(
     assert window._wizard_panel._continue_button.isEnabled() is True
     log_text = window._log_panel._log_view.toPlainText()
     assert "défaillante" not in log_text
-    assert "aucune information d'écran" in log_text
+    assert "fraîchement flashée" in log_text
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
@@ -1434,8 +1434,78 @@ def test_wizard_identify_invalid_dtb_message_differs_from_the_other_two(
     assert window._wizard_panel._continue_button.isEnabled() is True
     log_text = window._log_panel._log_view.toPlainText()
     assert "défaillante" not in log_text
-    assert "aucune information d'écran" not in log_text
-    assert "illisible ou corrompu" in log_text
+    assert "fraîchement flashée" not in log_text
+    assert "illisible, corrompu" in log_text
+
+
+# --- journal : chemin examiné et fichiers .dtb, dans tous les cas ---------
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_logs_scanned_directory_and_examined_files_on_success(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyResult
+    from r36s_studio.identify.dtb import DtbInfo
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
+    result = IdentifyResult(info=info, scanned_directory="/Volumes/BOOT", examined_files=["/Volumes/BOOT/board.dtb"])
+    window._on_wizard_identify_finished(result)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "/Volumes/BOOT" in log_text
+    assert "board.dtb" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_logs_scanned_directory_and_examined_files_on_no_dtb_found(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    result = IdentifyResult(
+        failure_reason=IdentifyFailureReason.NO_DTB_FOUND,
+        scanned_directory="/Volumes/BOOT",
+        examined_files=[],
+    )
+    window._on_wizard_identify_finished(result)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "/Volumes/BOOT" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_logs_raw_detail_on_mount_failed(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    result = IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED, detail="délai dépassé sur /dev/x")
+    window._on_wizard_identify_finished(result)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "délai dépassé sur /dev/x" in log_text
 
 
 # --- étape 4 : garde-fou par empreinte de contenu, pas path/size_bytes -----

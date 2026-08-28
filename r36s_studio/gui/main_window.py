@@ -735,6 +735,26 @@ class MainWindow(QMainWindow):
         else:
             message = tr(_IDENTIFY_FAILURE_MESSAGE_KEYS[result.failure_reason])
         self._log_panel.append_log(message)
+
+        # Diagnostic technique, dans tous les cas (§5 vocabulaire : jamais
+        # dans le message principal, toujours en ligne supplémentaire du
+        # journal) -- absent seulement quand le montage lui-même a échoué
+        # (rien n'a pu être scanné).
+        if result.scanned_directory:
+            self._log_panel.append_log(tr("wizard_identify_log_directory", path=result.scanned_directory))
+            if result.examined_files:
+                self._log_panel.append_log(
+                    tr(
+                        "wizard_identify_log_files",
+                        count=len(result.examined_files),
+                        files=", ".join(result.examined_files),
+                    )
+                )
+            else:
+                self._log_panel.append_log(tr("wizard_identify_log_no_files"))
+        if result.detail:
+            self._log_panel.append_log(result.detail)
+
         self._wizard_panel.set_status(message)
         self._wizard_panel.set_can_continue(True)
 

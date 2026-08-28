@@ -133,8 +133,10 @@ class WizardIdentifyRunner(QThread):
     def run(self) -> None:
         try:
             boot = locate_mounted(self._device_path, BOOT_LABEL)
-        except (PartitionNotFound, PartitionNotMounted, OSError, subprocess.CalledProcessError):
-            self.finished_identify.emit(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
+        except (PartitionNotFound, PartitionNotMounted, OSError, subprocess.CalledProcessError) as exc:
+            self.finished_identify.emit(
+                IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED, detail=str(exc))
+            )
             return
         if not boot.mountpoint:
             self.finished_identify.emit(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))

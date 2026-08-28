@@ -28,6 +28,14 @@
 - `python -m r36s_studio eject --device X` — démonte toutes les partitions
   de la carte et l'éjecte (étape F du workflow à deux cartes, §4.5) ; émet
   une confirmation explicite que la carte peut être retirée physiquement.
+- `python -m r36s_studio identify --boot-dir DIR` (phase 8, mode assisté
+  §5) — lance `identify.identify_from_boot_directory` sur un dossier
+  local de `.dtb`, sans carte physique ni montage : pour valider le
+  parseur DTB et la future table de correspondance sur des variantes de
+  console fournies par d'autres utilisateurs, pas seulement sur la carte
+  du développeur. Sortie texte simple (pas le protocole JSON Lines, §3 --
+  cette commande est un outil de diagnostic interactif, pas un worker
+  piloté par la GUI).
 
 `--worker`, `--progress-file` et `--cancel-file` sur `backup`/`flash` sont
 un détail d'implémentation réservé à la GUI (§3 : le worker, même binaire,
@@ -54,6 +62,7 @@ from pathlib import Path
 from typing import List, Optional, TextIO
 
 from r36s_studio.devices import Device, list_devices
+from r36s_studio.identify import identify_from_boot_directory
 from r36s_studio.imaging import OperationCancelled, ProgressEvent, backup_device, flash_device
 from r36s_studio.partitions import (
     BOOT_LABEL,
@@ -505,6 +514,36 @@ def cmd_extract_easyroms(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_identify(args: argparse.Namespace) -> int:
+    """Lance `identify_from_boot_directory` sur un dossier local -- sans
+    carte physique, sans montage, aucune commande système. Pensé pour
+    valider le parseur DTB et la future table de correspondance sur des
+    variantes de console fournies par d'autres utilisateurs (un dossier
+    de `.dtb` reçu par e-mail, une archive déjà extraite...), pas
+    seulement sur la propre carte du développeur."""
+    result = identify_from_boot_directory(args.boot_dir)
+
+    print(f"Dossier examiné : {result.scanned_directory}")
+    if result.examined_files:
+        print(f"Fichiers .dtb trouvés ({len(result.examined_files)}) :")
+        for path in result.examined_files:
+            print(f"  {path}")
+    else:
+        print("Aucun fichier .dtb trouvé.")
+
+    if result.info is not None:
+        print(f"Carte identifiée : {result.info.board_compatible}")
+        print(f"Écran : {result.info.panel_compatible or '(non trouvé)'}")
+        if result.info.timings:
+            print("Timings :")
+            for key, value in result.info.timings.items():
+                print(f"  {key} = {value}")
+        return 0
+
+    print(f"Échec de l'identification : {result.failure_reason.value}")
+    return 1
+
+
 def cmd_eject(args: argparse.Namespace) -> int:
     device = _resolve_device_or_report(args)
     if device is None:
@@ -669,6 +708,17 @@ def build_parser() -> argparse.ArgumentParser:
     extract_easyroms_parser.add_argument("--cancel-file", help=argparse.SUPPRESS)
     _add_dev_args(extract_easyroms_parser)
     extract_easyroms_parser.set_defaults(func=cmd_extract_easyroms)
+
+    identify_parser = subparsers.add_parser(
+        "identify",
+        help="Teste le module d'identification (§4.5) sur un dossier local de .dtb, sans carte physique",
+    )
+    identify_parser.add_argument(
+        "--boot-dir",
+        required=True,
+        help="Dossier contenant des .dtb à analyser (BOOT déjà extrait, ou fourni par un autre utilisateur)",
+    )
+    identify_parser.set_defaults(func=cmd_identify)
 
     eject_parser = subparsers.add_parser(
         "eject", help="Démonte toutes les partitions de la carte et l'éjecte"

@@ -743,6 +743,88 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > affichage réel — mais aucun écran physique n'était disponible pour
 > confirmer un chiffre définitif en conditions réelles.
 
+> **Mode assisté (phase 8), par défaut au lancement.** Le mode expert
+> (six étapes, ci-dessus) reste disponible en entier, mais n'est plus
+> l'écran de démarrage — `config.py` (première vraie implémentation de
+> `~/.config/r36s-studio/config.json`, §6) mémorise `ui_mode`
+> (`"assisted"` par défaut, `"expert"`) d'un lancement à l'autre.
+>
+> **Accueil** (`gui/screens.py::AssistedLandingScreen`) : sa propre
+> `ConsoleStage` (instance séparée de celle de `MainView`, plus grande,
+> centrée — les deux écrans ne sont jamais affichés en même temps, donc
+> pas de conflit de parent), un bouton cyan plein « Préparer ma carte
+> automatiquement » (nouveau rôle `QPushButton[role="cta"]`, `theme.py`)
+> et un bouton discret « Mode expert » en haut à droite.
+>
+> **Parcours guidé, une étape à la fois** (`WizardStepPanel`, remplace
+> `HomeScreen` dans la colonne gauche de `MainView` — généralisée avec un
+> `QStackedWidget` interne, `show_home()`/`show_wizard_panel()`) : sept
+> étapes visibles, mais huit *jobs* suivis en interne
+> (`gui/wizard_flow.py::WizardFlow`, testable sans Qt) — l'étape 3
+> (« Copie de l'écran et des jeux ») recouvre `EXTRACT_BOOT` puis
+> `EXTRACT_EASYROMS`, deux jobs indépendants avec chacun leur statut
+> fait/pas fait. C'est ce qui garantit qu'après une erreur, « Reprendre »
+> ne rejoue jamais un job déjà réussi : `current_job()` reste sur le job
+> qui a réellement échoué (le précédent reste marqué fait), même en cas
+> de succès partiel — vérifié par un test dédié au scénario exact BOOT
+> réussi / EASYROMS en échec.
+>
+> `MainWindow` orchestre les sept étapes en réutilisant tel quel le
+> pipeline `_start_worker`/`_on_worker_finished` du mode expert
+> (`PartitionJobRunner` pour extract/inject, `WorkerRunner` pour le
+> flash) — un simple drapeau `_wizard_active` décide si la fin
+> d'opération avance la machine à états ou suit le chemin expert
+> existant. La détection de carte (étapes 1 et 4) interroge
+> `list_devices`/`filter_devices` par `QTimer` (1,5 s).
+>
+> **Garde-fou de l'étape 4** (« insère ta carte neuve ») : comparer
+> `path`/`size_bytes` entre la carte de l'étape 1 et celle de l'étape 4
+> ne suffit pas — sur macOS le chemin d'un disque peut changer d'un
+> branchement à l'autre, et deux cartes du même modèle ont exactement la
+> même taille. `safety/card_fingerprint.py` calcule à la place une
+> empreinte sha256 du contenu de la partition BOOT (noms de fichiers,
+> tailles, contenu tronqué à 64 Ko par fichier), sans élévation (montage
+> lecture seule, comme `extract_boot`) — jamais via l'accès brut au
+> périphérique, qui exigerait l'élévation (§3) juste pour comparer deux
+> cartes à une étape qui n'écrit rien. `is_same_card()` ne conclut à
+> l'identité que si les deux empreintes existent et sont égales ; une
+> carte vierge (sans BOOT lisible) n'a pas d'empreinte et n'est donc
+> jamais prise pour la carte d'origine — l'étape 4 refuse explicitement
+> de continuer tant que la carte détectée a la même empreinte que celle
+> de l'étape 1.
+>
+> **Étape 2 (identification)** : `identify.identify_from_boot_directory`
+> (scanne les `.dtb` d'un dossier — mountpoint BOOT ici, ou une archive
+> déjà extraite en mode expert) tourne sur un thread séparé
+> (`WizardIdentifyRunner`, `gui/partition_runner.py`) plutôt que sur le
+> thread Qt principal, car `locate_mounted` peut bloquer jusqu'à
+> `MOUNT_WAIT_SECONDS` (10 s, §4.4) si le système n'a pas encore monté la
+> partition. **Non résolu, connu** : `_on_wizard_poll` (étapes 1/4),
+> lui, appelle `compute_boot_fingerprint` directement sur le thread
+> principal — le même risque de blocage bref existe donc là, pas encore
+> déplacé sur un thread séparé (à faire sur le même principe que
+> `WizardIdentifyRunner` si ça se révèle gênant en usage réel). De même,
+> annuler pendant l'étape 2 arrête l'affichage mais ne peut pas
+> interrompre le thread d'identification déjà lancé (pas de point
+> d'annulation coopératif dans `locate_mounted`) — sans risque de
+> plantage, le résultat arrive simplement après coup sur un panneau déjà
+> quitté.
+>
+> **Étape 5 (flash)** : ouvre le sélecteur de fichier classique
+> (`FileDialog`, identique au mode expert) plutôt que le téléchargement
+> guidé prévu (rappel de la console identifiée + bouton vers la page des
+> releases) — ce dernier dépend d'un module `identify/releases.py` non
+> encore écrit, lui-même en attente d'une URL de dépôt GitHub officiel
+> (ArkOS/dArkOS) qu'il n'est pas question de deviner (jamais d'URL
+> générée sans confiance).
+>
+> **Erreur, à n'importe quelle étape** : le parcours s'arrête,
+> `LogPanel.finish_error` affiche le message clair (§5, vocabulaire),
+> `WizardStepPanel.show_error()` remplace le bouton Continuer par
+> Reprendre/Mode expert. Mode expert depuis une étape en erreur ne défait
+> rien : une archive BOOT/EASYROMS déjà extraite reste utilisable depuis
+> l'étape D/E du mode expert.
+
 ---
 
 ## 6. Packaging et diffusion

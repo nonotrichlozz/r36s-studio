@@ -1114,6 +1114,164 @@ def _mock_fingerprint_runner_class():
     return factory
 
 
+# --- plusieurs cartes candidates à l'étape 1/4 : proposer un choix --------
+#
+# Bug rapporté : _list_safe_devices() peut retourner plusieurs candidates
+# (ex. un disque USB qui passe le filtre en plus de la carte SD) -- avant
+# ce correctif, `candidate` retombait à None dans ce cas, indiscernable de
+# "aucune carte" (même statut "en attente"), ce qui donnait l'impression
+# que la détection était cassée en mode assisté alors qu'elle voit
+# exactement la même chose que le mode expert (_list_safe_devices()
+# partagée par les deux).
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_step_one_poll_with_multiple_candidates_opens_device_dialog(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    sd_card = _make_device(path="/dev/fake-disk-test-1", display="Carte SD")
+    usb_disk = _make_device(path="/dev/fake-disk-test-2", display="Disque USB 123 Go")
+    mock_list.return_value = [sd_card, usb_disk]
+    mock_filter.return_value = [sd_card, usb_disk]
+    fingerprint_runner_class = _mock_fingerprint_runner_class()
+
+    window = MainWindow()
+    window.show()
+    window._assisted_landing.prepare_requested.emit()
+
+    with patch("r36s_studio.gui.main_window.WizardFingerprintRunner", fingerprint_runner_class):
+        window._on_wizard_poll()
+
+    fingerprint_runner_class.assert_not_called()  # pas de choix fait -> pas d'empreinte encore
+    assert window._device_dialog.isVisible() is True
+    assert window._device_dialog._devices == [sd_card, usb_disk]
+    assert window._wizard_poll_timer.isActive() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_choosing_a_candidate_from_device_dialog_starts_fingerprint_check(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    sd_card = _make_device(path="/dev/fake-disk-test-1", display="Carte SD")
+    usb_disk = _make_device(path="/dev/fake-disk-test-2", display="Disque USB 123 Go")
+    mock_list.return_value = [sd_card, usb_disk]
+    mock_filter.return_value = [sd_card, usb_disk]
+    fingerprint_runner_class = _mock_fingerprint_runner_class()
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._on_wizard_poll()  # ouvre la fenêtre Choix de la carte (2 candidates)
+
+    with patch("r36s_studio.gui.main_window.WizardFingerprintRunner", fingerprint_runner_class):
+        window._device_dialog.device_chosen.emit(sd_card)
+
+    assert window._device_dialog.isVisible() is False
+    fingerprint_runner_class.assert_called_once_with(sd_card.path, parent=window)
+    # Ne doit pas non plus avoir déclenché le chemin mode expert.
+    assert window._device is None
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_poll_logs_rejected_devices_with_reason_once(mock_list, mock_load, mock_save, qapp):
+    """Trace diagnosticable (§5 mode assisté) : combien de périphériques
+    trouvés et lesquels écartés, avec la raison -- sans filtre
+    supplémentaire côté assisté (même appel que le mode expert). Ne doit
+    pas se répéter à chaque sondage identique (pas de spam du journal)."""
+    system_disk = Device(
+        path="/dev/fake-disk-test-1",
+        display="Disque système",
+        size_bytes=500_000_000_000,
+        removable=False,
+        bus="Internal",
+        is_system=True,
+        mountpoints=["/"],
+    )
+    mock_list.return_value = [system_disk]
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    window._on_wizard_poll()
+    window._on_wizard_poll()  # état identique -> ne doit pas dupliquer la ligne
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert log_text.count("Détection") == 1
+    assert "Disque système" in log_text
+    assert "carte système" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_step_panel_refresh_button_triggers_immediate_poll(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    fingerprint_runner_class = _mock_fingerprint_runner_class()
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_poll_timer.stop()
+
+    with patch("r36s_studio.gui.main_window.WizardFingerprintRunner", fingerprint_runner_class):
+        window._wizard_panel.refresh_requested.emit()
+
+    # Relance immédiatement une recherche, sans attendre le prochain tick
+    # (jusqu'à 1,5 s) -- la carte est trouvée du premier coup, le sondage
+    # s'arrête donc de nouveau (comportement normal, déjà couvert par
+    # test_wizard_step_one_poll_starts_fingerprint_runner_on_a_separate_thread).
+    fingerprint_runner_class.assert_called_once_with(device.path, parent=window)
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_step_panel_refresh_button_resumes_automatic_polling_when_nothing_found(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    """Cas d'un rafraîchissement manuel après un choix annulé dans la
+    fenêtre Choix de la carte : le sondage automatique doit reprendre,
+    pas seulement une recherche isolée."""
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_poll_timer.stop()
+
+    window._wizard_panel.refresh_requested.emit()
+
+    assert window._wizard_poll_timer.isActive() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_step_one_shows_refresh_button(mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window.show()
+
+    window._assisted_landing.prepare_requested.emit()
+
+    assert window._wizard_panel._refresh_button.isVisible() is True
+
+
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))

@@ -1439,6 +1439,7 @@ class WizardStepPanel(Screen):
     cancel_requested = Signal()
     resume_requested = Signal()
     expert_mode_requested = Signal()
+    refresh_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1457,6 +1458,14 @@ class WizardStepPanel(Screen):
         self._status_label.setProperty("role", "secondary")
         self._status_label.setWordWrap(True)
         layout.addWidget(self._status_label)
+
+        # Étapes 1/4 (détection) uniquement -- relance la recherche
+        # manuellement quand le sondage automatique n'aboutit pas, comme
+        # le bouton équivalent du mode expert (§5 mode assisté).
+        self._refresh_button = QPushButton(tr("home_refresh"))
+        self._refresh_button.setVisible(False)
+        self._refresh_button.clicked.connect(self.refresh_requested.emit)
+        layout.addWidget(self._refresh_button)
 
         layout.addStretch()
 
@@ -1481,9 +1490,18 @@ class WizardStepPanel(Screen):
         self._cancel_button.clicked.connect(self.cancel_requested.emit)
         layout.addWidget(self._cancel_button)
 
-    def show_step(self, title: str, instruction: str, status: str = "", *, can_continue: bool = False) -> None:
+    def show_step(
+        self,
+        title: str,
+        instruction: str,
+        status: str = "",
+        *,
+        can_continue: bool = False,
+        show_refresh: bool = False,
+    ) -> None:
         """Affiche une nouvelle étape -- revient toujours à l'état normal
-        (Continuer), même si l'étape précédente était en erreur."""
+        (Continuer), même si l'étape précédente était en erreur.
+        `show_refresh` : étapes 1/4 (détection) uniquement."""
         self._title_label.setText(title)
         self._instruction_label.setText(instruction)
         self._status_label.setText(status)
@@ -1492,6 +1510,7 @@ class WizardStepPanel(Screen):
         self._continue_button.setEnabled(can_continue)
         self._resume_button.setVisible(False)
         self._expert_button.setVisible(False)
+        self._refresh_button.setVisible(show_refresh)
 
     def set_status(self, status: str) -> None:
         self._status_label.setText(status)

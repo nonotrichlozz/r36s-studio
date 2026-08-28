@@ -769,6 +769,36 @@ def test_wizard_step_panel_show_step_sets_title_instruction_and_status(qapp):
     assert panel._status_label.text() == "Statut"
 
 
+def test_wizard_step_panel_show_step_hides_refresh_by_default(qapp):
+    panel = WizardStepPanel()
+
+    panel.show_step("Titre", "Consigne")
+
+    assert panel._refresh_button.isVisible() is False
+
+
+def test_wizard_step_panel_show_step_can_show_refresh(qapp):
+    """Étapes 1/4 (détection) uniquement -- relance la recherche
+    manuellement quand le sondage automatique n'aboutit pas."""
+    panel = WizardStepPanel()
+    panel.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    panel.show_step("Titre", "Consigne", show_refresh=True)
+
+    assert panel._refresh_button.isVisible() is True
+
+
+def test_wizard_step_panel_refresh_button_emits_signal(qapp):
+    panel = WizardStepPanel()
+    panel.show_step("Titre", "Consigne", show_refresh=True)
+    received = []
+    panel.refresh_requested.connect(lambda: received.append(True))
+
+    panel._refresh_button.click()
+
+    assert received == [True]
+
+
 def test_wizard_step_panel_show_step_defaults_continue_to_disabled(qapp):
     panel = WizardStepPanel()
 

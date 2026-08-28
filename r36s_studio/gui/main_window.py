@@ -14,7 +14,7 @@ from __future__ import annotations
 import subprocess
 import webbrowser
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QTimer, Slot
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
@@ -26,7 +26,7 @@ from r36s_studio.identify.dtb import DtbInfo
 from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives
 from r36s_studio.partitions.eject import eject as eject_device
-from r36s_studio.safety import SafetyConfig, filter_devices
+from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card
 
 from .partition_runner import PartitionJobRunner, WizardFingerprintRunner, WizardIdentifyRunner
@@ -125,6 +125,7 @@ class MainWindow(QMainWindow):
         self._wizard_target_device: Optional[Device] = None
         self._wizard_boot_archive: Optional[str] = None
         self._wizard_easyroms_archive: Optional[str] = None
+        self._wizard_last_poll_diagnostic: Optional[tuple] = None
 
         # Vue permanente, deux colonnes -- ne change plus jamais de
         # structure (§5, refonte navigation). `_home` (gauche, mode
@@ -200,16 +201,39 @@ class MainWindow(QMainWindow):
         self._wizard_panel.cancel_requested.connect(self._cancel_wizard)
         self._wizard_panel.resume_requested.connect(self._resume_wizard)
         self._wizard_panel.expert_mode_requested.connect(self._switch_to_expert_mode)
+        self._wizard_panel.refresh_requested.connect(self._on_wizard_refresh_requested)
 
     # --- colonne gauche, annotée par detect.detect_workflow_status (§4.5) --
 
-    def _list_safe_devices(self) -> List[Device]:
+    def _list_devices_with_diagnostics(self) -> Tuple[List[Device], List[str]]:
+        """Un seul appel `list_devices`/`filter_devices` -- le mode expert
+        (`_refresh_devices`/`_refresh_home_state`) et le mode assisté
+        (`_on_wizard_poll`) voient donc toujours exactement la même chose
+        au même instant : un écart apparent entre les deux n'est jamais dû
+        à un filtre supplémentaire côté assisté. Retourne en plus une
+        ligne de diagnostic par périphérique écarté (`safety.
+        describe_rejection`), pour tracer dans le journal *pourquoi* --
+        plutôt que de laisser deviner un écart entre les deux modes."""
         try:
-            devices = list_devices()
+            raw_devices = list_devices()
         except NotImplementedError as exc:
             QMessageBox.critical(self, tr("app_title"), str(exc))
-            return []
-        return filter_devices(devices, SafetyConfig())
+            return [], []
+        config = SafetyConfig()
+        accepted = filter_devices(raw_devices, config)
+        accepted_paths = {device.path for device in accepted}
+        rejected_lines = []
+        for device in raw_devices:
+            if device.path in accepted_paths:
+                continue
+            reason = describe_rejection(device, config)
+            if reason is not None:
+                rejected_lines.append(f"{device.display} ({device.path}) : {reason}")
+        return accepted, rejected_lines
+
+    def _list_safe_devices(self) -> List[Device]:
+        accepted, _ = self._list_devices_with_diagnostics()
+        return accepted
 
     def _refresh_home_state(self) -> None:
         """Une seule carte candidate : son contenu annote le statut des six
@@ -236,6 +260,19 @@ class MainWindow(QMainWindow):
     # --- carte choisie -> fenêtre Fichier, ou directement l'opération -------
 
     def _on_device_chosen(self, device: Device) -> None:
+        if self._wizard_active and self._wizard_flow.current_job() in (
+            WizardJob.DETECT_SOURCE,
+            WizardJob.DETECT_TARGET,
+        ):
+            # Choix fait dans la fenêtre Choix de la carte, ouverte parce
+            # que plusieurs cartes candidates étaient présentes (§4.2) --
+            # ne touche jamais `self._mode`/`self._device` (état du mode
+            # expert) : reprend directement le même chemin qu'un candidat
+            # unique auto-détecté.
+            self._device_dialog.close()
+            self._start_wizard_fingerprint_check(device)
+            return
+
         self._device = device
         self._device_dialog.close()
 
@@ -514,6 +551,7 @@ class MainWindow(QMainWindow):
         self._wizard_target_device = None
         self._wizard_boot_archive = None
         self._wizard_easyroms_archive = None
+        self._wizard_last_poll_diagnostic = None
         self._log_panel.set_idle()
         self._main_view.show_wizard_panel()
         self._root_stack.setCurrentWidget(self._main_view)
@@ -536,9 +574,12 @@ class MainWindow(QMainWindow):
             return
 
         title_key, instruction_key = _WIZARD_STEP_STRINGS[job]
-        self._wizard_panel.show_step(tr(title_key), tr(instruction_key), can_continue=False)
+        is_detect_step = job in (WizardJob.DETECT_SOURCE, WizardJob.DETECT_TARGET)
+        self._wizard_panel.show_step(
+            tr(title_key), tr(instruction_key), can_continue=False, show_refresh=is_detect_step
+        )
 
-        if job in (WizardJob.DETECT_SOURCE, WizardJob.DETECT_TARGET):
+        if is_detect_step:
             self._wizard_panel.set_status(tr("wizard_status_waiting"))
             self._wizard_poll_timer.start()
         elif job == WizardJob.IDENTIFY:
@@ -575,14 +616,50 @@ class MainWindow(QMainWindow):
     # --- étapes 1/4 : détection, avec garde-fou d'empreinte à l'étape 4 -----
 
     def _on_wizard_poll(self) -> None:
-        devices = self._list_safe_devices()
-        candidate = devices[0] if len(devices) == 1 else None
+        devices, rejected_lines = self._list_devices_with_diagnostics()
+        self._log_wizard_detection_diagnostic(len(devices), rejected_lines)
 
-        if candidate is None:
+        if len(devices) > 1:
+            # Plusieurs cartes candidates (ex. un disque USB qui passe le
+            # filtre en plus de la carte SD, §4.2) : avant ce correctif,
+            # `candidate` retombait à `None`, indiscernable de « aucune
+            # carte » -- proposer un choix plutôt que de rester bloqué en
+            # silence, comme le mode expert le fait déjà via cette même
+            # fenêtre.
+            self._wizard_poll_timer.stop()
+            self._wizard_panel.set_status(tr("wizard_status_multiple_candidates"))
+            self._device_dialog.set_devices(devices)
+            self._device_dialog.open()
+            return
+
+        if not devices:
             self._wizard_panel.set_status(tr("wizard_status_waiting"))
             self._wizard_panel.set_can_continue(False)
             return
 
+        self._start_wizard_fingerprint_check(devices[0])
+
+    def _log_wizard_detection_diagnostic(self, accepted_count: int, rejected_lines: List[str]) -> None:
+        """Combien de cartes retenues et lesquelles écartées, avec la
+        raison (§5 mode assisté) -- diagnosticable directement dans le
+        journal plutôt que de laisser deviner un écart apparent avec le
+        mode expert (qui appelle exactement la même détection,
+        `_list_devices_with_diagnostics`). Ne journalise que si l'état
+        diffère du dernier sondage, pour ne pas noyer le journal d'une
+        ligne toutes les 1,5 s en attendant une carte."""
+        signature = (accepted_count, tuple(rejected_lines))
+        if signature == self._wizard_last_poll_diagnostic:
+            return
+        self._wizard_last_poll_diagnostic = signature
+        if accepted_count == 1 and not rejected_lines:
+            return  # cas normal, rien à signaler
+        self._log_panel.append_log(
+            tr("wizard_diagnostic_summary", accepted=accepted_count, rejected=len(rejected_lines))
+        )
+        for line in rejected_lines:
+            self._log_panel.append_log(f"  — {line}")
+
+    def _start_wizard_fingerprint_check(self, candidate: Device) -> None:
         # L'empreinte peut monter BOOT et bloquer jusqu'à
         # MOUNT_WAIT_SECONDS (§4.4) -- calculée sur un thread séparé
         # (`WizardFingerprintRunner`), jamais ici sur le thread Qt
@@ -600,6 +677,16 @@ class MainWindow(QMainWindow):
             lambda fingerprint: self._on_wizard_fingerprint_ready(job, candidate, fingerprint)
         )
         self._fingerprint_runner.start()
+
+    def _on_wizard_refresh_requested(self) -> None:
+        """Bouton Rafraîchir (étapes 1/4, §5 mode assisté) -- relance la
+        recherche manuellement, sans attendre le prochain tick (jusqu'à
+        1,5 s), utile quand le sondage automatique n'a rien trouvé ou
+        reste bloqué après un choix annulé dans la fenêtre Choix de la
+        carte (plusieurs candidates)."""
+        if not self._wizard_poll_timer.isActive():
+            self._wizard_poll_timer.start()
+        self._on_wizard_poll()
 
     def _on_wizard_fingerprint_ready(
         self, job: WizardJob, candidate: Device, fingerprint: Optional[str]

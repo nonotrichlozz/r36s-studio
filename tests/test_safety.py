@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from r36s_studio.devices import Device
-from r36s_studio.safety import SafetyConfig, filter_devices, is_allowed
+from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices, is_allowed
 
 
 def make_device(**overrides) -> Device:
@@ -138,3 +138,48 @@ def test_filter_devices_uses_default_config_when_none_given():
     # Ne doit pas planter même sans config explicite (utilise SafetyConfig()).
     devices = [make_device(size_bytes=0)]
     assert filter_devices(devices) == []
+
+
+# --- describe_rejection : diagnostic (§5 mode assisté, journal de bord) ----
+#
+# Même règles que is_allowed, mais avec la raison -- utilisé pour tracer
+# dans le journal pourquoi un périphérique n'apparaît pas dans la liste
+# plutôt que de laisser l'utilisateur deviner un écart entre les modes.
+
+
+def test_describe_rejection_returns_none_when_allowed(config):
+    assert describe_rejection(make_device(), config) is None
+
+
+def test_describe_rejection_flags_system_disk(config):
+    device = make_device(is_system=True, mountpoints=["/"])
+    assert describe_rejection(device, config) is not None
+    assert "système" in describe_rejection(device, config)
+
+
+def test_describe_rejection_flags_app_path(config, tmp_path):
+    device = make_device(mountpoints=[str(tmp_path)])
+    reason = describe_rejection(device, config)
+    assert reason is not None
+    assert "application" in reason
+
+
+def test_describe_rejection_flags_non_removable_non_usb(config):
+    device = make_device(removable=False, bus="SATA")
+    reason = describe_rejection(device, config)
+    assert reason is not None
+    assert "amovible" in reason or "USB" in reason
+
+
+def test_describe_rejection_flags_zero_size(config):
+    device = make_device(size_bytes=0)
+    reason = describe_rejection(device, config)
+    assert reason is not None
+    assert "taille" in reason
+
+
+def test_describe_rejection_flags_oversized(config):
+    device = make_device(size_bytes=config.max_size_bytes + 1)
+    reason = describe_rejection(device, config)
+    assert reason is not None
+    assert "taille" in reason

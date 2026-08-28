@@ -785,6 +785,36 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > lectures en arrière-plan ne laissent rien d'orphelin de dangereux si le
 > mode change entre-temps, contrairement à une écriture.
 >
+> ⚠️ **Bug rapporté et corrigé : la carte semblait détectée en mode
+> expert mais pas en mode assisté à l'étape 1.** Diagnostic : les deux
+> modes appellent la même fonction (`_list_devices_with_diagnostics`, qui
+> encapsule `list_devices`/`filter_devices`) — il n'y a jamais eu de
+> filtre différent côté assisté. La vraie cause : `_on_wizard_poll`
+> n'acceptait de continuer que si `_list_safe_devices()` renvoyait
+> *exactement* un candidat ; à plusieurs (ex. un disque USB qui passe le
+> filtre §4.2 en plus de la carte SD), `candidate` retombait à `None` —
+> indiscernable de « aucune carte », d'où l'impression d'une détection
+> cassée alors qu'elle voyait la bonne carte, simplement noyée avec une
+> autre. **Corrigé** : au-delà d'un candidat, `_on_wizard_poll` arrête le
+> sondage et ouvre la fenêtre Choix de la carte (`DeviceDialog`, la même
+> qu'en mode expert) plutôt que de rester bloqué en silence ;
+> `_on_device_chosen` reconnaît ce contexte (étape 1/4 en cours) et
+> reprend directement le calcul d'empreinte sur la carte choisie, sans
+> toucher `self._mode`/`self._device` du mode expert.
+>
+> **Diagnostic dans le journal** : `safety.describe_rejection` (nouveau,
+> mêmes règles que `is_allowed` mais avec la raison) permet à
+> `_list_devices_with_diagnostics` de tracer, à chaque sondage dont le
+> résultat change, combien de cartes sont retenues et lesquelles sont
+> écartées et pourquoi (« carte système », « ni amovible ni en USB »...)
+> — dédoublonné par signature pour ne pas noyer le journal d'une ligne
+> toutes les 1,5 s en attendant une carte.
+>
+> **Bouton Rafraîchir, étapes 1/4** : symétrique de celui du mode expert
+> (`DeviceDialog`) — relance la recherche immédiatement (sans attendre le
+> tick suivant) et redémarre le sondage automatique s'il s'était arrêté,
+> notamment après un choix annulé dans la fenêtre Choix de la carte.
+>
 > **Parcours guidé, une étape à la fois** (`WizardStepPanel`, remplace
 > `HomeScreen` dans la colonne gauche de `MainView` — généralisée avec un
 > `QStackedWidget` interne, `show_home()`/`show_wizard_panel()`) : sept

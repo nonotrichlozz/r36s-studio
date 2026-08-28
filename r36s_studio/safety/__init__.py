@@ -47,24 +47,35 @@ def _contains_app_path(device: Device, app_path: str) -> bool:
 def is_allowed(device: Device, config: SafetyConfig | None = None) -> bool:
     """Applique les cinq règles de refus du §4.2. Retourne False dès qu'une
     seule s'applique."""
+    return describe_rejection(device, config) is None
+
+
+def describe_rejection(device: Device, config: SafetyConfig | None = None) -> str | None:
+    """Même règles que `is_allowed`, mais avec la raison -- `None` si le
+    périphérique est autorisé. Sert à tracer dans le journal de bord
+    pourquoi un périphérique n'apparaît pas dans la liste (§5 mode
+    assisté) : un écart apparent entre deux écrans de l'appli n'est
+    presque jamais un filtre différent (les deux appellent la même
+    fonction), plutôt une carte exclue silencieusement -- ce texte, lui,
+    est technique par nécessité (destiné au journal, §5 vocabulaire)."""
     config = config or SafetyConfig()
 
     if device.is_system:
-        return False
+        return "carte système"
 
     if _contains_app_path(device, config.app_path):
-        return False
+        return "contient le dossier de l'application"
 
     if not device.removable and device.bus.upper() != "USB":
-        return False
+        return "ni amovible ni en USB"
 
     if not device.size_bytes or device.size_bytes <= 0:
-        return False
+        return "taille nulle ou inconnue"
 
     if device.size_bytes > config.max_size_bytes:
-        return False
+        return "dépasse le seuil de taille"
 
-    return True
+    return None
 
 
 def filter_devices(devices: list[Device], config: SafetyConfig | None = None) -> list[Device]:
@@ -72,4 +83,4 @@ def filter_devices(devices: list[Device], config: SafetyConfig | None = None) ->
     return [d for d in devices if is_allowed(d, config)]
 
 
-__all__ = ["SafetyConfig", "DEFAULT_MAX_SIZE_BYTES", "is_allowed", "filter_devices"]
+__all__ = ["SafetyConfig", "DEFAULT_MAX_SIZE_BYTES", "is_allowed", "describe_rejection", "filter_devices"]

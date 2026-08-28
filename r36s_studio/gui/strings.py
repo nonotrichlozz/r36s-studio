@@ -59,6 +59,11 @@ STRINGS = {
     "wizard_status_waiting": "En attente de ta carte…",
     "wizard_status_device_found": "Carte reconnue : {display}",
     "wizard_status_same_card": "C'est la même carte — insère la carte neuve, pas l'ancienne.",
+    "wizard_status_multiple_candidates": "Plusieurs cartes détectées — choisis la bonne.",
+    # Journal de bord (§5 vocabulaire : le détail technique n'apparaît
+    # que là) -- combien de périphériques retenus/écartés à un sondage du
+    # mode assisté, avec la raison de chaque exclusion.
+    "wizard_diagnostic_summary": "Détection : {accepted} carte(s) retenue(s), {rejected} écartée(s)",
     "wizard_identify_result": "Console identifiée : {board} (écran {panel}).",
     "wizard_identify_failed": "Impossible d'identifier ta console — la version MultiPanel sera proposée par défaut.",
     "wizard_step1_title": "1. Insère ta carte SD d'origine",

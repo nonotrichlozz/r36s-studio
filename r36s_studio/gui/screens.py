@@ -23,6 +23,7 @@ from PySide6.QtCore import (
     QPointF,
     QPropertyAnimation,
     QRect,
+    QSize,
     Qt,
     QTimer,
     Signal,
@@ -205,6 +206,13 @@ class ConsoleArt(QWidget):
 
     _OPACITY = 0.70
 
+    # Amplitude de la flottaison verticale (§5) -- définie ici plutôt que
+    # sur `ConsoleStage` (qui pilote l'animation) car `resizeEvent`
+    # ci-dessous en a besoin pour réserver sa propre marge de mise à
+    # l'échelle ; `ConsoleStage` la référence (`ConsoleArt._FLOAT_AMPLITUDE`)
+    # plutôt que de dupliquer la valeur.
+    _FLOAT_AMPLITUDE = 6.0
+
     def __init__(self, pixmap: QPixmap, parent=None):
         super().__init__(parent)
         self._source_pixmap = pixmap
@@ -225,7 +233,21 @@ class ConsoleArt(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)
-        self._scaled_pixmap = self._source_pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        # Bug corrigé, constaté en pratique sur l'accueil du mode assisté
+        # (boîte plus grande/plus carrée que celle du mode expert) : sans
+        # cette réserve, quand la hauteur devient la contrainte liante du
+        # redimensionnement proportionnel (`Qt.KeepAspectRatio`), le pixmap
+        # scalé remplit *exactement* toute la hauteur du widget -- zéro
+        # marge pour `floatOffset`, qui pousse alors le bas de la console
+        # hors des limites de peinture du widget dès que la flottaison
+        # devient positive (Qt rogne toute peinture au-delà du rect d'un
+        # widget). Mettre à l'échelle vers une taille cible réduite de
+        # `2 * amplitude` en hauteur garantit `rendered.height() <=
+        # self.height() - 2 * amplitude`, donc au moins `amplitude` de
+        # marge de chaque côté dans les limites propres du widget, quelle
+        # que soit la contrainte liante.
+        target = QSize(self.width(), max(1, self.height() - 2 * int(self._FLOAT_AMPLITUDE)))
+        self._scaled_pixmap = self._source_pixmap.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
@@ -394,7 +416,16 @@ class ConsoleStage(QWidget):
 
     _PLATE_CYCLE_MS = 3000
     _GLOW_CYCLE_MS = 4000
-    _FLOAT_AMPLITUDE = 6.0
+    # Référence la constante de `ConsoleArt` (qui en a besoin pour sa
+    # propre réserve de marge, voir sa docstring) plutôt que de dupliquer
+    # la valeur -- une seule source de vérité.
+    _FLOAT_AMPLITUDE = ConsoleArt._FLOAT_AMPLITUDE
+    # Facteurs déjà utilisés plus bas pour la taille du socle/du halo,
+    # nommés ici pour dériver les marges réservées ci-dessous des mêmes
+    # constantes plutôt que de deviner des valeurs séparées.
+    _PLATE_WIDTH_RATIO = 0.7
+    _PLATE_HEIGHT_RATIO = 0.22
+    _HALO_SCALE = 1.35
     _FLOAT_CYCLE_MS = 6000
     _REPAINT_INTERVAL_MS = 33  # ~30 im/s -- voir la docstring de la classe
 
@@ -458,19 +489,43 @@ class ConsoleStage(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)
-        self._console_art.setGeometry(self.rect())
+
+        # Bug corrigé, constaté en pratique sur l'accueil du mode assisté
+        # (boîte plus grande/plus carrée que celle du mode expert, où la
+        # console passait jusqu'ici inaperçue) : donner à `ConsoleArt` tout
+        # `self.rect()` ne laisse aucune marge pour le halo (jusqu'à 17,5 %
+        # de la hauteur rendue au-delà du haut et du bas de la console,
+        # `_HALO_SCALE`) ni pour le socle (sous la console) -- ces deux
+        # widgets, enfants de `self` comme `ConsoleArt`, sont alors rognés
+        # aux limites de `self` dès qu'ils en dépassent (Qt rogne toute
+        # peinture d'un widget enfant au rect de son parent). Réservé à
+        # partir des dimensions du widget lui-même (majorants sûrs : la
+        # console rendue ne peut jamais dépasser la boîte qu'on lui donne)
+        # plutôt que de la taille rendue -- évite la dépendance circulaire
+        # (la marge nécessaire dépend de la taille rendue, qui dépend
+        # elle-même de la marge réservée). Une légère surestimation n'est
+        # jamais un problème ; l'inverse est justement le bug corrigé ici.
+        plate_width_bound = max(20, int(self.width() * self._PLATE_WIDTH_RATIO))
+        plate_height_bound = max(10, int(plate_width_bound * self._PLATE_HEIGHT_RATIO))
+        halo_excess_bound = int(self.height() * (self._HALO_SCALE - 1) / 2)
+        top_margin = max(int(self._FLOAT_AMPLITUDE), halo_excess_bound)
+        bottom_margin = max(int(self._FLOAT_AMPLITUDE), halo_excess_bound) + plate_height_bound
+
+        art_box = QRect(0, top_margin, self.width(), max(1, self.height() - top_margin - bottom_margin))
+        self._console_art.setGeometry(art_box)
         rendered = self._console_art.rendered_size()
         art_width = rendered.width() or int(self.width() * 0.6)
         # `ConsoleArt.paintEvent` centre toujours l'image verticalement
-        # dans son propre rect (qui couvre `self`, voir ligne ci-dessus) :
-        # ce centre est donc toujours exact, jamais une valeur de repli --
+        # dans son propre rect (`art_box` ci-dessus, pas tout `self`) : ce
+        # centre est donc toujours exact, jamais une valeur de repli --
         # seule sa taille dépend de `rendered`, pas encore connue lors du
         # tout premier passage de layout.
-        art_center_y = self.height() // 2
-        art_bottom = (self.height() + rendered.height()) // 2 if rendered.height() else self.height()
+        art_center_y = art_box.top() + art_box.height() // 2
+        art_height = rendered.height() or int(art_box.height() * 0.6)
+        art_bottom = art_center_y + art_height // 2
 
-        plate_width = max(20, int(art_width * 0.7))
-        plate_height = max(10, int(plate_width * 0.22))
+        plate_width = max(20, int(art_width * self._PLATE_WIDTH_RATIO))
+        plate_height = max(10, int(plate_width * self._PLATE_HEIGHT_RATIO))
         plate_x = (self.width() - plate_width) // 2
         plate_y = art_bottom - plate_height // 2
         self._base_plate.setGeometry(plate_x, plate_y, plate_width, plate_height)
@@ -478,9 +533,8 @@ class ConsoleStage(QWidget):
         # Halo (§5) : une ellipse plus large que la console rendue,
         # centrée derrière elle -- remplace la zone que couvrait
         # auparavant le flou du QGraphicsDropShadowEffect.
-        art_height = rendered.height() or int(self.height() * 0.6)
-        halo_width = max(20, int(art_width * 1.35))
-        halo_height = max(20, int(art_height * 1.35))
+        halo_width = max(20, int(art_width * self._HALO_SCALE))
+        halo_height = max(20, int(art_height * self._HALO_SCALE))
         halo_x = (self.width() - halo_width) // 2
         halo_y = art_center_y - halo_height // 2
         halo_rect = QRect(halo_x, halo_y, halo_width, halo_height)

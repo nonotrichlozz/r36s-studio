@@ -572,14 +572,112 @@ def test_console_stage_positions_base_plate_under_the_console(qapp):
     stage.resize(400, 300)
     stage.show()
 
+    # La console est centrée dans `art_box` (une réserve verticale pour le
+    # halo/le socle, pas tout `stage.rect()`, §5 correctif de rognage) --
+    # même formule de marge que `ConsoleStage.resizeEvent`.
+    plate_width_bound = max(20, int(stage.width() * ConsoleStage._PLATE_WIDTH_RATIO))
+    plate_height_bound = max(10, int(plate_width_bound * ConsoleStage._PLATE_HEIGHT_RATIO))
+    halo_excess_bound = int(stage.height() * (ConsoleStage._HALO_SCALE - 1) / 2)
+    top_margin = max(int(ConsoleStage._FLOAT_AMPLITUDE), halo_excess_bound)
+    bottom_margin = max(int(ConsoleStage._FLOAT_AMPLITUDE), halo_excess_bound) + plate_height_bound
+    art_center_y = top_margin + (stage.height() - top_margin - bottom_margin) // 2
+    art_rect_bottom = art_center_y + stage._console_art.rendered_size().height() // 2
+
     plate_rect = stage._base_plate.geometry()
-    art_rect_bottom = stage.height() // 2 + stage._console_art.rendered_size().height() // 2
 
     # Le socle est centré horizontalement et sa largeur avoisine 70 % de
     # celle de la console rendue (§5).
     assert plate_rect.width() > 0
     assert abs(plate_rect.center().x() - stage.width() // 2) <= 1
     assert abs(plate_rect.center().y() - art_rect_bottom) <= plate_rect.height()
+
+
+# --- bug corrigé : console tronquée + socle invisible sur une boîte -------
+# --- plus carrée/plus haute que large (accueil du mode assisté, §5) -------
+#
+# Constaté en pratique : le bas de la console était tronqué net (rognée
+# sous les joysticts) et le socle lumineux n'apparaissait jamais du tout,
+# uniquement sur l'accueil du mode assisté (boîte plus grande, plus
+# carrée) -- jamais sur la colonne droite du mode expert (boîte plus
+# large que haute). Cause : `ConsoleArt` recevait tout `stage.rect()`
+# sans marge réservée ; quand la hauteur devient la contrainte liante du
+# redimensionnement proportionnel, le pixmap scalé remplit exactement
+# toute la hauteur du widget -- zéro marge pour `floatOffset` (bas rogné
+# dès que la flottaison est positive) et pour le socle/le halo (poussés
+# hors des limites de `stage`, rognés par Qt aux bornes de son parent).
+# Désactiver « Animations de la console » faisait disparaître le défaut
+# (`floatOffset` reste alors à 0) -- confirmant que c'est bien la
+# flottaison qui sortait la console de sa zone de dessin.
+
+
+def _assert_nothing_clips_at_any_float_offset(stage):
+    """Balaie tout le cycle de `floatOffset` (pas seulement les deux
+    bornes) et vérifie qu'aucun repeint de la console ne dépasserait les
+    limites de son propre widget, et que le halo/le socle restent
+    entièrement dans `stage.rect()`."""
+    art = stage._console_art
+    for offset in (
+        -ConsoleArt._FLOAT_AMPLITUDE,
+        -ConsoleArt._FLOAT_AMPLITUDE / 2,
+        0.0,
+        ConsoleArt._FLOAT_AMPLITUDE / 2,
+        ConsoleArt._FLOAT_AMPLITUDE,
+    ):
+        art.floatOffset = offset
+        rendered = art.rendered_size()
+        y = (art.height() - rendered.height()) / 2 + offset
+        assert y >= 0, f"console rognée en haut à floatOffset={offset} (y={y})"
+        assert y + rendered.height() <= art.height(), (
+            f"console rognée en bas à floatOffset={offset} " f"(y={y}, hauteur rendue={rendered.height()})"
+        )
+
+    stage_rect = stage.rect()
+    assert stage_rect.contains(stage._halo.geometry()), "halo rogné par les limites de ConsoleStage"
+    assert stage_rect.contains(stage._base_plate.geometry()), "socle rogné par les limites de ConsoleStage"
+
+
+def test_console_stage_nothing_clips_on_a_tall_square_ish_box(qapp):
+    """Reproduit la forme de boîte de l'accueil du mode assisté (plus
+    grande, plus carrée que celle du mode expert) où le défaut a été
+    constaté."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.resize(360, 420)  # plus haute que large -- la hauteur lie le scaling
+    stage.show()
+
+    _assert_nothing_clips_at_any_float_offset(stage)
+
+
+def test_console_stage_nothing_clips_on_a_wide_box(qapp):
+    """Forme de boîte du mode expert (plus large que haute) -- déjà
+    correcte avant le correctif, doit le rester."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.resize(640, 220)
+    stage.show()
+
+    _assert_nothing_clips_at_any_float_offset(stage)
+
+
+def test_console_stage_nothing_clips_on_a_small_box(qapp):
+    """Boîte très petite (redimensionnement en cours, premières passes de
+    layout) -- ne doit jamais lever ni produire de géométrie négative
+    absurde."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.resize(60, 50)
+    stage.show()
+
+    _assert_nothing_clips_at_any_float_offset(stage)
+
+
+def test_console_art_reserves_float_margin_even_when_height_is_the_binding_constraint(qapp):
+    """Test ciblé sur `ConsoleArt` seul (sans `ConsoleStage`) : une boîte
+    carrée pour un pixmap carré rend la hauteur strictement liante --
+    exactement le cas dégénéré à l'origine du bug."""
+    art = ConsoleArt(_fake_pixmap())
+    art.resize(200, 200)
+
+    rendered = art.rendered_size()
+
+    assert rendered.height() <= 200 - 2 * ConsoleArt._FLOAT_AMPLITUDE
 
 
 def test_build_window_backdrop_returns_none_when_asset_missing(qapp):

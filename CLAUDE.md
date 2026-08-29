@@ -1010,6 +1010,54 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > affichage réel — mais aucun écran physique n'était disponible pour
 > confirmer un chiffre définitif en conditions réelles.
 
+> ⚠️ **Bug corrigé, constaté en conditions réelles : le bas de la console
+> tronqué net (rognée sous les joysticks) et le socle lumineux jamais
+> visible du tout — uniquement sur l'accueil du mode assisté, jamais sur
+> la colonne droite du mode expert.** Confirmé en désactivant le réglage
+> « Animations de la console » : l'image s'affichait alors entière,
+> pointant directement vers la flottaison (`floatOffset`) comme cause.
+>
+> Cause réelle : `ConsoleStage.resizeEvent` donnait à `ConsoleArt` tout
+> `self.rect()`, sans aucune marge réservée, avant de mettre le pixmap à
+> l'échelle (`Qt.KeepAspectRatio`). Quand la hauteur de la boîte devient la
+> contrainte liante du redimensionnement proportionnel — le cas sur
+> l'accueil du mode assisté, dont la `ConsoleStage` est délibérément « plus
+> grande, plus carrée » (note plus haut) que celle, plus large que haute,
+> du mode expert — le pixmap scalé remplit *exactement* toute la hauteur
+> du widget, laissant zéro marge : `floatOffset` pousse alors le bas de la
+> console hors des limites de peinture du widget dès qu'il devient positif
+> (Qt rogne toute peinture au-delà du rect propre d'un widget), et le halo/
+> le socle (calculés à partir de cette même hauteur rendue, sans marge) se
+> retrouvent positionnés hors des limites de `ConsoleStage` lui-même —
+> rognés à leur tour, puisque Qt rogne aussi un widget enfant aux bornes de
+> son parent.
+>
+> **Corrigé à deux niveaux, complémentaires :**
+> 1. `ConsoleArt.resizeEvent` met désormais à l'échelle vers une taille
+>    cible réduite de `2 * _FLOAT_AMPLITUDE` en hauteur (au lieu de
+>    `self.size()` telle quelle) — garantit `rendered.height() <=
+>    self.height() - 2 * amplitude`, donc au moins l'amplitude de marge de
+>    chaque côté *dans les limites propres du widget*, quelle que soit la
+>    contrainte liante. Fixe le rognage du bas de la console.
+> 2. `ConsoleStage.resizeEvent` réserve en plus une marge verticale (haut
+>    et bas) *autour* de la boîte donnée à `ConsoleArt`, dérivée des mêmes
+>    constantes que la taille du halo (`_HALO_SCALE`, jusqu'à 17,5 % de la
+>    hauteur rendue au-delà du haut et du bas de la console) et du socle
+>    (`_PLATE_WIDTH_RATIO`/`_PLATE_HEIGHT_RATIO`) — calculée à partir des
+>    dimensions du widget lui-même plutôt que de la taille rendue (majorants
+>    sûrs, la console rendue ne pouvant jamais dépasser la boîte qu'on lui
+>    donne), pour éviter la dépendance circulaire entre marge réservée et
+>    taille rendue. Fixe l'invisibilité du socle et un éventuel rognage du
+>    halo.
+>
+> `ConsoleArt._FLOAT_AMPLITUDE` devient la source de vérité unique (déplacé
+> depuis `ConsoleStage`, qui la référence désormais) : `ConsoleArt` en a
+> besoin pour sa propre réserve de marge (point 1), `ConsoleStage` pour la
+> sienne (point 2) et pour `_console_update_rect`. Vérifié par des tests
+> couvrant plusieurs formes de boîte (plus haute que large, plus large que
+> haute, très petite) balayant tout le cycle de `floatOffset`, pas
+> seulement ses deux bornes (`tests/test_gui_screens.py`).
+
 > **Mode assisté (phase 8), par défaut au lancement.** Le mode expert
 > (six étapes, ci-dessus) reste disponible en entier, mais n'est plus
 > l'écran de démarrage — `config.py` (première vraie implémentation de

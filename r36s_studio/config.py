@@ -20,10 +20,19 @@ from pathlib import Path
 DEFAULT_UI_MODE = "assisted"
 _VALID_UI_MODES = {"assisted", "expert"}
 
+# Firmware choisi pour l'étape de flash (§4.6 étape C / §5 mode assisté
+# étape 5) : "arkos" (dArkOS, la configuration classique) ou "rocknix"
+# (système plus récent, transfert de jeux par USB intégré). Mémorisé d'un
+# lancement à l'autre comme `ui_mode`, avec le même principe de repli
+# silencieux sur la valeur par défaut.
+DEFAULT_FIRMWARE = "arkos"
+_VALID_FIRMWARES = {"arkos", "rocknix"}
+
 
 @dataclass
 class AppConfig:
     ui_mode: str = DEFAULT_UI_MODE
+    firmware: str = DEFAULT_FIRMWARE
 
 
 def config_dir() -> Path:
@@ -50,7 +59,10 @@ def load_config() -> AppConfig:
     ui_mode = raw.get("ui_mode")
     if ui_mode not in _VALID_UI_MODES:
         ui_mode = DEFAULT_UI_MODE
-    return AppConfig(ui_mode=ui_mode)
+    firmware = raw.get("firmware")
+    if firmware not in _VALID_FIRMWARES:
+        firmware = DEFAULT_FIRMWARE
+    return AppConfig(ui_mode=ui_mode, firmware=firmware)
 
 
 def save_config(config: AppConfig) -> None:

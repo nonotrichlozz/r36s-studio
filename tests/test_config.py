@@ -63,6 +63,32 @@ def test_load_config_falls_back_to_default_on_unknown_ui_mode_value(tmp_path):
     assert loaded.ui_mode == "assisted"
 
 
+def test_load_config_defaults_to_arkos_firmware_when_no_file_exists(tmp_path):
+    with patch("r36s_studio.config.config_path", return_value=tmp_path / "config.json"):
+        loaded = config.load_config()
+
+    assert loaded.firmware == "arkos"
+
+
+def test_save_then_load_roundtrips_firmware(tmp_path):
+    path = tmp_path / "config.json"
+    with patch("r36s_studio.config.config_path", return_value=path):
+        config.save_config(config.AppConfig(firmware="rocknix"))
+        loaded = config.load_config()
+
+    assert loaded.firmware == "rocknix"
+
+
+def test_load_config_falls_back_to_default_on_unknown_firmware_value(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"firmware": "n\'importe quoi"}', encoding="utf-8")
+
+    with patch("r36s_studio.config.config_path", return_value=path):
+        loaded = config.load_config()
+
+    assert loaded.firmware == "arkos"
+
+
 def test_save_config_never_stores_a_secret_looking_key(tmp_path):
     """Garde-fou léger, cohérent avec la règle §9 (« aucun secret dans le
     dépôt ») : ce module ne doit jamais introduire de champ de ce genre."""

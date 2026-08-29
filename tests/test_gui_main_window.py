@@ -9,8 +9,10 @@ aucune écriture disque."""
 
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+from r36s_studio import config as app_config
 from r36s_studio.config import AppConfig
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
@@ -1904,6 +1906,178 @@ def test_wizard_inject_boot_runs_normally_when_archive_present(mock_list, mock_f
         window._enter_wizard_job(WizardJob.INJECT_BOOT)
 
     runner_class.assert_called_once_with("inject_boot", device, window._wizard_boot_archive, parent=window)
+
+
+# --- étapes A/B : réutiliser une sauvegarde déjà connue pour la carte -----
+# --- source (§5 mode assisté) plutôt que de tout recopier à nouveau ------
+#
+# Chaque test construit sa propre AppConfig fraîche (jamais _EXPERT_MODE_
+# CONFIG, un singleton partagé entre tests -- le muter ici polluerait les
+# autres tests qui le réutilisent).
+
+
+def _config_with_archive_record(fingerprint, label, path, created_at="2026-07-06T00:21:00"):
+    cfg = AppConfig(ui_mode="expert")
+    app_config.set_archive_record(cfg, fingerprint, label, path, created_at=datetime.fromisoformat(created_at))
+    return cfg
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_extraction_step_opens_reuse_dialog_when_a_valid_record_exists(mock_list, mock_filter, qapp, tmp_path):
+    existing = tmp_path / "BOOT_2026-07-06_00-21"
+    existing.mkdir()
+    cfg = _config_with_archive_record("fp-source", "BOOT", str(existing))
+
+    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
+        window = MainWindow()
+    window.show()
+    window._wizard_source_fingerprint = "fp-source"
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._enter_wizard_extraction_step(WizardJob.EXTRACT_BOOT)
+
+    runner_class.assert_not_called()
+    assert window._archive_reuse_dialog.isVisible() is True
+    assert str(existing) in window._archive_reuse_dialog._message.text()
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_extraction_step_ignores_stale_record_when_path_no_longer_exists(mock_list, mock_filter, qapp, tmp_path):
+    """L'utilisateur a pu déplacer ou supprimer l'archive depuis --
+    `config.py` ne mémorise qu'un chemin, jamais une garantie de
+    présence : ne jamais proposer un dossier qui n'existe plus."""
+    missing = tmp_path / "BOOT_gone"  # jamais créé
+    cfg = _config_with_archive_record("fp-source", "BOOT", str(missing))
+
+    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
+        window = MainWindow()
+    window._wizard_source_fingerprint = "fp-source"
+    window._wizard_source_device = _make_device()
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._enter_wizard_extraction_step(WizardJob.EXTRACT_BOOT)
+
+    assert window._archive_reuse_dialog.isVisible() is False
+    runner_class.assert_called_once()  # repart directement sur une nouvelle extraction
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_extraction_step_runs_directly_without_any_record(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._wizard_source_fingerprint = "fp-source-without-record"
+    window._wizard_source_device = _make_device()
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._enter_wizard_extraction_step(WizardJob.EXTRACT_EASYROMS)
+
+    assert window._archive_reuse_dialog.isVisible() is False
+    runner_class.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_reuse_requested_sets_archive_and_advances_without_running_the_job(mock_list, mock_filter, qapp, tmp_path):
+    existing = tmp_path / "EASYROMS_2026-07-06_00-25"
+    existing.mkdir()
+    cfg = _config_with_archive_record("fp-source", "EASYROMS", str(existing))
+
+    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
+        window = MainWindow()
+    window._wizard_source_fingerprint = "fp-source"
+    window._wizard_flow.reset()
+    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+    window._wizard_flow.mark_done(WizardJob.IDENTIFY)
+    window._wizard_flow.mark_done(WizardJob.EXTRACT_BOOT)
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._enter_wizard_extraction_step(WizardJob.EXTRACT_EASYROMS)
+        window._archive_reuse_dialog.reuse_requested.emit()
+
+    runner_class.assert_not_called()
+    assert window._wizard_easyroms_archive == str(existing)
+    assert window._wizard_flow.is_done(WizardJob.EXTRACT_EASYROMS) is True
+    assert window._wizard_flow.current_job() == WizardJob.DETECT_TARGET
+    log_text = window._log_panel._log_view.toPlainText()
+    assert str(existing) in log_text
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_redo_requested_runs_the_partition_job_with_a_freshly_generated_path(mock_list, mock_filter, qapp, tmp_path):
+    existing = tmp_path / "BOOT_2026-07-06_00-21"
+    existing.mkdir()
+    cfg = _config_with_archive_record("fp-source", "BOOT", str(existing))
+
+    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
+        window = MainWindow()
+    window.show()
+    window._wizard_source_fingerprint = "fp-source"
+    window._wizard_source_device = _make_device()
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._enter_wizard_extraction_step(WizardJob.EXTRACT_BOOT)
+        window._archive_reuse_dialog._redo_button.click()
+
+    runner_class.assert_called_once()
+    assert window._archive_reuse_dialog.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_reuse_cancelled_cancels_the_whole_wizard(mock_list, mock_filter, qapp, tmp_path):
+    existing = tmp_path / "BOOT_2026-07-06_00-21"
+    existing.mkdir()
+    cfg = _config_with_archive_record("fp-source", "BOOT", str(existing))
+
+    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
+        window = MainWindow()
+    window._wizard_source_fingerprint = "fp-source"
+    window._wizard_active = True
+    window._main_view.show_wizard_panel()
+    window._root_stack.setCurrentWidget(window._main_view)
+
+    window._enter_wizard_extraction_step(WizardJob.EXTRACT_BOOT)
+    window._archive_reuse_dialog.cancelled.emit()
+
+    assert window._wizard_active is False
+    assert window._root_stack.currentWidget() is window._assisted_landing
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_successful_extraction_persists_archive_record_to_config(mock_list, mock_filter, qapp):
+    # `_on_wizard_job_finished` avance de lui-même vers l'étape suivante
+    # (EXTRACT_EASYROMS) une fois EXTRACT_BOOT marqué fait -- `PartitionJobRunner`
+    # doit donc être mocké ici aussi, sans quoi ce test lancerait pour de
+    # vrai un job avec un périphérique source jamais défini (`None`).
+    cfg = AppConfig(ui_mode="expert")
+    runner_class = _mock_partition_runner_class()
+    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg), patch(
+        "r36s_studio.gui.main_window.app_config.save_config"
+    ) as mock_save, patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window = MainWindow()
+        window._wizard_source_fingerprint = "fp-source"
+        window._wizard_source_device = _make_device()
+        window._mode = "extract_boot"
+        window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+        window._wizard_flow.reset()
+        window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+        window._wizard_flow.mark_done(WizardJob.IDENTIFY)
+
+        window._on_wizard_job_finished(True)
+
+    record = app_config.get_archive_record(window._app_config, "fp-source", "BOOT")
+    assert record["path"] == "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    mock_save.assert_called_once_with(window._app_config)
 
 
 # --- étape 4 : garde-fou par empreinte de contenu, pas path/size_bytes -----

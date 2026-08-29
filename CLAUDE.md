@@ -570,6 +570,44 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > indéfiniment, aussi longtemps que l'utilisateur ne les supprime pas
 > lui-même — ce qui correspond à l'attente : ce sont ses sauvegardes.
 
+> **Réutilisation d'une sauvegarde déjà connue (phase 8), étapes A/B.**
+> Reflasher plusieurs fois la même carte d'origine (essais successifs,
+> plusieurs consoles à préparer avec la même carte source) recopiait
+> intégralement le BOOT et l'EASYROMS à chaque passage — sur EASYROMS,
+> plusieurs Go recopiés inutilement à chaque fois, alors que le contenu
+> de la carte source n'a pas changé entre deux passages.
+>
+> `config.py::AppConfig.archive_records` mémorise désormais, par
+> empreinte de carte source (`safety.card_fingerprint`, déjà calculée à
+> l'étape 1 pour le garde-fou de l'étape 4, §5 mode assisté), le chemin
+> et la date de la dernière archive BOOT/EASYROMS créée — écrasé
+> silencieusement à chaque nouvelle extraction (jamais deux
+> enregistrements gardés pour la même combinaison carte/label).
+> `get_archive_record`/`set_archive_record` encapsulent la lecture/
+> écriture ; un fichier de configuration corrompu ou modifié à la main
+> retombe sur des enregistrements vides plutôt que de faire planter le
+> chargement (même principe que `ui_mode`/`firmware`).
+>
+> À l'entrée des étapes A/B (`_enter_wizard_extraction_step`), si un
+> enregistrement existe pour l'empreinte de la carte source : **vérifie
+> d'abord que le dossier référencé existe encore sur le disque**
+> (`Path(record["path"]).is_dir()`) — l'utilisateur a pu le déplacer ou
+> le supprimer depuis, `config.py` ne mémorisant qu'un chemin, jamais une
+> garantie de présence. S'il existe, `screens.py::ArchiveReuseDialog`
+> propose trois choix, avec la date et le chemin complet de la
+> sauvegarde existante : réutiliser (mis en avant par défaut, bouton
+> `role="primary"` et `setDefault(True)`), refaire la sauvegarde
+> (relance l'extraction normalement, écrase l'ancien enregistrement une
+> fois terminée), ou annuler tout le parcours (jamais une réutilisation
+> silencieuse). Un dossier disparu retombe directement sur une nouvelle
+> extraction, sans passer par cette fenêtre.
+>
+> Portée volontairement limitée au mode assisté (`_on_wizard_job_finished`,
+> qui est déjà le point d'arrivée spécifique au parcours guidé, distinct
+> du générique `_on_worker_finished`) : le mode expert n'a pas de notion
+> de carte source « suivie » d'une étape à l'autre (chaque tuile A-F est
+> indépendante), donc rien à mémoriser côté empreinte pour ce chemin.
+
 ### 4.5 `detect/` — statut des étapes du parcours
 
 > ⚠️ **Correction de conception.** Ce module a d'abord été pensé autour d'un état

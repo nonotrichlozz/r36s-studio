@@ -42,6 +42,7 @@ from .partition_runner import (
 )
 from .reveal import reveal
 from .screens import (
+    ArchiveReuseDialog,
     AssistedLandingScreen,
     ConfirmDialog,
     DeviceDialog,
@@ -164,6 +165,12 @@ class MainWindow(QMainWindow):
         self._wizard_boot_archive: Optional[str] = None
         self._wizard_easyroms_archive: Optional[str] = None
         self._wizard_last_poll_diagnostic: Optional[tuple] = None
+        # Étapes A/B (§5 mode assisté) : job en attente d'une réponse de
+        # `ArchiveReuseDialog` (réutiliser/refaire/annuler) quand une
+        # sauvegarde existe déjà pour l'empreinte de la carte source --
+        # évite de recopier inutilement plusieurs Go à chaque nouveau
+        # passage sur la même carte (EASYROMS en particulier).
+        self._pending_extraction_job: Optional[WizardJob] = None
 
         # Vue permanente, deux colonnes -- ne change plus jamais de
         # structure (§5, refonte navigation). `_home` (gauche, mode
@@ -197,6 +204,7 @@ class MainWindow(QMainWindow):
         self._confirm_dialog = ConfirmDialog(self)
         self._help_dialog = HelpDialog(self)
         self._rocknix_variant_dialog = RocknixVariantDialog(self)
+        self._archive_reuse_dialog = ArchiveReuseDialog(self)
 
         self._wire_signals()
         self._refresh_home_state()
@@ -229,6 +237,9 @@ class MainWindow(QMainWindow):
         self._file_dialog.firmware_changed.connect(self._on_firmware_changed)
         self._file_dialog.rocknix_download_requested.connect(self._on_rocknix_download_requested)
         self._rocknix_variant_dialog.variant_chosen.connect(self._on_rocknix_variant_chosen)
+        self._archive_reuse_dialog.reuse_requested.connect(self._on_archive_reuse_requested)
+        self._archive_reuse_dialog.redo_requested.connect(self._on_archive_redo_requested)
+        self._archive_reuse_dialog.cancelled.connect(self._on_archive_reuse_cancelled)
 
         self._confirm_dialog.confirmed.connect(self._on_confirmed)
 
@@ -733,6 +744,7 @@ class MainWindow(QMainWindow):
         self._wizard_boot_archive = None
         self._wizard_easyroms_archive = None
         self._wizard_last_poll_diagnostic = None
+        self._pending_extraction_job = None
         self._log_panel.set_idle()
         self._main_view.show_wizard_panel()
         self._root_stack.setCurrentWidget(self._main_view)
@@ -766,7 +778,7 @@ class MainWindow(QMainWindow):
         elif job == WizardJob.IDENTIFY:
             self._enter_wizard_identify_step()
         elif job in (WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
-            self._run_wizard_partition_job(job)
+            self._enter_wizard_extraction_step(job)
         elif job == WizardJob.FLASH:
             self._enter_wizard_flash()
         elif job == WizardJob.INJECT_BOOT:
@@ -1015,6 +1027,48 @@ class MainWindow(QMainWindow):
 
     # --- étapes 3/6 : extraction/injection, réutilise PartitionJobRunner ----
 
+    def _enter_wizard_extraction_step(self, job: WizardJob) -> None:
+        """Étapes A/B (§5 mode assisté) : si une sauvegarde existe déjà
+        pour l'empreinte de la carte source (`safety.card_fingerprint`,
+        calculée à l'étape 1), propose de la réutiliser plutôt que de tout
+        recopier à nouveau -- EASYROMS en particulier peut représenter
+        plusieurs Go recopiés inutilement à chaque nouveau passage sur la
+        même carte. Vérifie que le dossier référencé existe encore sur le
+        disque avant de le proposer : l'utilisateur a pu le déplacer ou le
+        supprimer depuis (`config.py` ne mémorise qu'un chemin, jamais une
+        garantie de présence)."""
+        label = BOOT_LABEL if job == WizardJob.EXTRACT_BOOT else EASYROMS_LABEL
+        record = app_config.get_archive_record(self._app_config, self._wizard_source_fingerprint, label)
+        if record is not None and Path(record["path"]).is_dir():
+            self._pending_extraction_job = job
+            self._archive_reuse_dialog.set_archive(_WIZARD_JOB_TO_EXPERT_MODE[job], record["path"], record["created_at"])
+            self._archive_reuse_dialog.open()
+            return
+        self._run_wizard_partition_job(job)
+
+    def _on_archive_reuse_requested(self) -> None:
+        job = self._pending_extraction_job
+        self._pending_extraction_job = None
+        label = BOOT_LABEL if job == WizardJob.EXTRACT_BOOT else EASYROMS_LABEL
+        record = app_config.get_archive_record(self._app_config, self._wizard_source_fingerprint, label)
+        path = record["path"]
+        if job == WizardJob.EXTRACT_BOOT:
+            self._wizard_boot_archive = path
+        else:
+            self._wizard_easyroms_archive = path
+        self._log_panel.append_log(tr("wizard_archive_reused_log", path=path))
+        self._wizard_flow.mark_done(job)
+        self._enter_wizard_job(self._wizard_flow.current_job())
+
+    def _on_archive_redo_requested(self) -> None:
+        job = self._pending_extraction_job
+        self._pending_extraction_job = None
+        self._run_wizard_partition_job(job)
+
+    def _on_archive_reuse_cancelled(self) -> None:
+        self._pending_extraction_job = None
+        self._cancel_wizard()
+
     def _run_wizard_partition_job(self, job: WizardJob) -> None:
         self._mode = _WIZARD_JOB_TO_EXPERT_MODE[job]
         if job == WizardJob.EXTRACT_BOOT:
@@ -1042,6 +1096,15 @@ class MainWindow(QMainWindow):
             self._wizard_boot_archive = self._file_path
         elif job == WizardJob.EXTRACT_EASYROMS:
             self._wizard_easyroms_archive = self._file_path
+
+        if job in (WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS) and self._wizard_source_fingerprint:
+            # Mémorisé pour un prochain passage sur la même carte source
+            # (§5 mode assisté) -- remplace silencieusement un
+            # enregistrement précédent pour cette combinaison, la
+            # nouvelle extraction étant plus fraîche que l'ancienne.
+            label = BOOT_LABEL if job == WizardJob.EXTRACT_BOOT else EASYROMS_LABEL
+            app_config.set_archive_record(self._app_config, self._wizard_source_fingerprint, label, self._file_path)
+            app_config.save_config(self._app_config)
 
         archive_info = self._archive_info()
         if archive_info:

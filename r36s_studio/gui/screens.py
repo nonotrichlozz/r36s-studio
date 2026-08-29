@@ -987,6 +987,15 @@ _FRENCH_MONTHS = [
 ]  # fmt: skip
 
 
+def format_datetime_label(timestamp) -> str:
+    """Date/heure conviviale (§5, pas de jargon) -- ex. « 6 juillet 2026 à
+    00h21 » -- réutilisée par `format_archive_label` (nom d'un dossier
+    d'archive horodaté) et `ArchiveReuseDialog` (date d'une sauvegarde déjà
+    mémorisée dans la configuration, §5 mode assisté)."""
+    month = _FRENCH_MONTHS[timestamp.month - 1]
+    return f"{timestamp.day} {month} {timestamp.year} à {timestamp.hour:02d}h{timestamp.minute:02d}"
+
+
 def format_archive_label(path) -> str:
     """Nom convivial (§5, pas de jargon) d'un dossier d'archive horodaté —
     ex. « 6 juillet 2026 à 00h21 » plutôt que le nom de dossier brut. Repli
@@ -999,8 +1008,7 @@ def format_archive_label(path) -> str:
     timestamp = parse_archive_timestamp(path)
     if timestamp is None:
         return path.name
-    month = _FRENCH_MONTHS[timestamp.month - 1]
-    return f"{timestamp.day} {month} {timestamp.year} à {timestamp.hour:02d}h{timestamp.minute:02d}"
+    return format_datetime_label(timestamp)
 
 
 class FileDialog(Dialog):
@@ -1247,6 +1255,87 @@ class ConfirmDialog(Dialog):
 
     def _update_go_enabled(self) -> None:
         self._go_button.setEnabled(self._checkbox.isChecked())
+
+
+def _format_archive_reuse_date(created_at) -> str:
+    """`created_at` : `datetime` ou chaîne ISO 8601 (telle que stockée
+    dans `config.py::archive_records`) -- repli sur la chaîne brute si
+    elle est illisible, jamais un plantage pour un simple affichage de
+    date."""
+    if isinstance(created_at, str):
+        try:
+            created_at = datetime.fromisoformat(created_at)
+        except ValueError:
+            return created_at
+    return format_datetime_label(created_at)
+
+
+class ArchiveReuseDialog(Dialog):
+    """Propose de réutiliser une sauvegarde BOOT/EASYROMS déjà connue pour
+    la carte source détectée (même empreinte de contenu, §5 mode assisté,
+    `safety.card_fingerprint`) plutôt que de tout recopier à nouveau à
+    chaque nouveau passage sur la même carte -- EASYROMS en particulier
+    peut représenter plusieurs Go recopiés inutilement. Trois choix :
+    réutiliser (mis en avant par défaut, `role="primary"`), refaire la
+    sauvegarde, ou annuler tout le parcours -- jamais une réutilisation
+    silencieuse, l'utilisateur garde toujours la main."""
+
+    reuse_requested = Signal()
+    redo_requested = Signal()
+    cancelled = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        self._title = QLabel()
+        self._title.setProperty("role", "title")
+        layout.addWidget(self._title)
+
+        self._message = QLabel()
+        self._message.setWordWrap(True)
+        layout.addWidget(self._message)
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        self._cancel_button = QPushButton(tr("archive_reuse_cancel"))
+        self._cancel_button.clicked.connect(self._on_cancel)
+        self._redo_button = QPushButton(tr("archive_reuse_redo"))
+        self._redo_button.clicked.connect(self._on_redo)
+        self._reuse_button = QPushButton(tr("archive_reuse_reuse"))
+        self._reuse_button.setProperty("role", "primary")
+        self._reuse_button.setDefault(True)
+        self._reuse_button.clicked.connect(self._on_reuse)
+        buttons.addWidget(self._cancel_button)
+        buttons.addStretch()
+        buttons.addWidget(self._redo_button)
+        buttons.addWidget(self._reuse_button)
+        layout.addLayout(buttons)
+
+        self.resize(460, 260)
+
+    def set_archive(self, mode: str, path: str, created_at) -> None:
+        """`mode` : "extract_boot" ou "extract_easyroms" -- décide du
+        vocabulaire (§5, jamais "BOOT"/"EASYROMS" dans le message
+        principal, seul le chemin brut apparaît, comme pour le
+        récapitulatif de fin de parcours). `created_at` : voir
+        `_format_archive_reuse_date`."""
+        title_key = "archive_reuse_title_boot" if mode == "extract_boot" else "archive_reuse_title_easyroms"
+        message_key = "archive_reuse_message_boot" if mode == "extract_boot" else "archive_reuse_message_easyroms"
+        self._title.setText(tr(title_key))
+        self.setWindowTitle(tr(title_key))
+        self._message.setText(tr(message_key, date=_format_archive_reuse_date(created_at), path=path))
+
+    def _on_reuse(self) -> None:
+        self.close()
+        self.reuse_requested.emit()
+
+    def _on_redo(self) -> None:
+        self.close()
+        self.redo_requested.emit()
+
+    def _on_cancel(self) -> None:
+        self.close()
+        self.cancelled.emit()
 
 
 _OPERATION_TITLE_KEYS = {

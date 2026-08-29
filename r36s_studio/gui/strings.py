@@ -124,6 +124,7 @@ STRINGS = {
     # §5 mode assisté) -- pas seulement à la fin, journal de bord uniquement
     # (§5 vocabulaire).
     "wizard_archive_destination_log": "Destination : {path}",
+    "wizard_archive_reused_log": "Sauvegarde déjà existante réutilisée, sans recopie : {path}",
     # Récapitulatif de fin de parcours (§5 mode assisté) : où sont les
     # sauvegardes et qu'elles sont conservées.
     "wizard_archives_summary": (
@@ -180,6 +181,20 @@ STRINGS = {
     "confirm_erase": "Toutes les données de « {display} » ({size_go:.1f} Go) seront définitivement effacées.",
     "confirm_go": "Effacer et écrire",
     "confirm_cancel": "Annuler",
+    # Réutilisation d'une sauvegarde déjà connue (§5 mode assisté, étapes
+    # A/B) -- évite de recopier inutilement plusieurs Go à chaque nouveau
+    # passage sur la même carte.
+    "archive_reuse_title_boot": "Écran d'origine déjà sauvegardé",
+    "archive_reuse_message_boot": (
+        "Une sauvegarde de l'écran d'origine de cette carte existe déjà, du {date} :\n{path}"
+    ),
+    "archive_reuse_title_easyroms": "Jeux et sauvegardes déjà sauvegardés",
+    "archive_reuse_message_easyroms": (
+        "Une sauvegarde de tes jeux et sauvegardes pour cette carte existe déjà, du {date} :\n{path}"
+    ),
+    "archive_reuse_reuse": "Réutiliser cette sauvegarde",
+    "archive_reuse_redo": "Refaire la sauvegarde",
+    "archive_reuse_cancel": "Annuler",
     # Journal de bord (colonne droite, §5 -- remplace les anciens écrans
     # Exécution et Résultat) : en-tête au repos ou pendant une opération.
     "log_header_idle": "En attente",

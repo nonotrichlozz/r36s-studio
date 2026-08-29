@@ -372,6 +372,13 @@ class MainWindow(QMainWindow):
 
     def _start_worker(self) -> None:
         self._log_panel.start_operation(tr(_OPERATION_TITLE_KEYS[self._mode]))
+        if self._mode in _EXTRACTION_MODES:
+            # Annoncé dès le début de la copie, pas seulement à la fin
+            # (§5 mode assisté) : un débutant qui ne voit le chemin
+            # qu'au succès final n'a aucune idée d'où va sa sauvegarde
+            # pendant que ça copie, ni où la retrouver si l'opération
+            # échoue en cours de route.
+            self._log_panel.append_log(tr("wizard_archive_destination_log", path=self._file_path))
         self._home.set_busy(True)
         # Changer de mode en plein flash ou en pleine copie laisserait un
         # job orphelin (§5 mode assisté) -- garde symétrique sur les deux
@@ -731,6 +738,22 @@ class MainWindow(QMainWindow):
     def _finish_wizard(self) -> None:
         self._wizard_active = False
         self._log_panel.append_log(tr("wizard_finished"))
+        # Récapitulatif de fin de parcours (§5 mode assisté) : où sont les
+        # sauvegardes BOOT/EASYROMS et qu'elles sont conservées -- rien ne
+        # les supprime automatiquement (ni ici, ni dans `partitions/
+        # archives.py`, qui n'expose d'ailleurs aucune fonction de
+        # suppression). Bouton Afficher pointant vers le dossier parent
+        # commun aux deux (`default_archives_dir`) plutôt qu'une seule des
+        # deux archives -- un seul bouton ne peut révéler qu'un chemin.
+        self._log_panel.finish_success(
+            tr(
+                "wizard_archives_summary",
+                boot_path=self._wizard_boot_archive or "?",
+                easyroms_path=self._wizard_easyroms_archive or "?",
+            ),
+            allow_eject=False,
+            reveal_path=str(archives.default_archives_dir()),
+        )
         self._wizard_panel.show_step(tr("wizard_step7_title"), tr("wizard_finished"), can_continue=False)
         self._refresh_home_state()
 

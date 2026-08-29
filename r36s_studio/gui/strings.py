@@ -104,6 +104,16 @@ STRINGS = {
     "wizard_step7_title": "7. Éjection",
     "wizard_step7_instruction": "On retire ta carte neuve en toute sécurité — elle est prête.",
     "wizard_finished": "Ta carte est prête ! Tu peux la retirer et la mettre dans ta console.",
+    # Chemin de destination annoncé dès le début de la copie (étapes A/B,
+    # §5 mode assisté) -- pas seulement à la fin, journal de bord uniquement
+    # (§5 vocabulaire).
+    "wizard_archive_destination_log": "Destination : {path}",
+    # Récapitulatif de fin de parcours (§5 mode assisté) : où sont les
+    # sauvegardes et qu'elles sont conservées.
+    "wizard_archives_summary": (
+        "Tes sauvegardes sont conservées sur ton ordinateur : l'écran d'origine "
+        "dans {boot_path}, tes jeux et sauvegardes dans {easyroms_path}."
+    ),
     # Fenêtre Choix du fichier, flash uniquement (§5 mode assisté, étape 5)
     # -- l'image n'est pas hébergée sur GitHub (Mega, Google Drive,
     # OneDrive, torrent), seul le lien vers la page des releases est ouvert.

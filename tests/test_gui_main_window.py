@@ -893,6 +893,66 @@ def test_extract_boot_success_logs_archive_path_size_and_shows_reveal(mock_list,
     assert window._log_panel._reveal_button.isVisible() is True
 
 
+# --- chemin de destination annoncé dès le début de la copie (§5 mode --------
+# --- assisté) : un débutant qui ne le voit qu'au succès final n'a aucune --
+# --- idée d'où va sa sauvegarde pendant que ça copie. --------------------
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_extract_boot_logs_destination_path_at_start_not_only_at_end(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._mode = "extract_boot"
+    window._device = _make_device()
+    window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._start_worker()
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Destination : /home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_extract_easyroms_logs_destination_path_at_start(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._mode = "extract_easyroms"
+    window._device = _make_device()
+    window._file_path = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25"
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._start_worker()
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Destination : /home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_inject_boot_does_not_log_a_destination_line(mock_list, mock_filter, mock_load, qapp):
+    """La destination est ici une partition de la carte, pas un dossier de
+    l'ordinateur -- pas la même confusion que pour les étapes A/B, donc pas
+    la même annonce (§5 mode assisté, portée volontairement limitée aux
+    étapes d'extraction)."""
+    window = MainWindow()
+    window._mode = "inject_boot"
+    window._device = _make_device()
+    window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._start_worker()
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Destination :" not in log_text
+
+
 @patch("r36s_studio.gui.main_window.reveal")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
@@ -1686,6 +1746,55 @@ def test_wizard_resume_after_easyroms_failure_only_reruns_easyroms_not_boot(
     assert resume_call_args.mode == "extract_easyroms"
     assert resume_call_args.device is device
     assert "EASYROMS" in resume_call_args.source_path
+
+
+# --- récapitulatif de fin de parcours : où sont les sauvegardes (§5 mode ----
+# --- assisté), et qu'elles sont conservées -- jamais supprimées automatiquement
+
+
+@patch("r36s_studio.gui.main_window.archives.default_archives_dir")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_finish_shows_archives_summary_with_reveal_button(mock_list, mock_filter, mock_load, mock_dir, qapp):
+    from pathlib import Path
+
+    mock_dir.return_value = Path("/home/x/Documents/R36S Studio")
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._main_view.show_wizard_panel()
+    window._root_stack.setCurrentWidget(window._main_view)  # _log_panel vit dans _main_view
+    window._wizard_boot_archive = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    window._wizard_easyroms_archive = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25"
+
+    window._finish_wizard()
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "conservées" in log_text
+    assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
+    assert "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25" in log_text
+    assert window._log_panel._reveal_button.isVisible() is True
+    assert window._log_panel._reveal_path == "/home/x/Documents/R36S Studio"
+
+
+@patch("r36s_studio.gui.main_window.reveal")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_finish_reveal_button_opens_the_shared_archives_folder(
+    mock_list, mock_filter, mock_load, mock_reveal, qapp
+):
+    window = MainWindow()
+    window._wizard_boot_archive = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    window._wizard_easyroms_archive = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25"
+
+    window._finish_wizard()
+    window._log_panel._reveal_button.click()
+
+    mock_reveal.assert_called_once()
+    from r36s_studio.partitions import archives
+
+    assert mock_reveal.call_args[0][0] == str(archives.default_archives_dir())
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")

@@ -483,6 +483,46 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > que la carte peut être retirée physiquement est à la charge de l'appelant
 > (CLI : message `emit_log` ; GUI : journal de bord permanent, §5, ou boîte de
 > dialogue) — jamais un succès silencieux.
+>
+> **Visibilité des archives en mode assisté (phase 8).** En mode expert,
+> l'écran Choix du fichier (ci-dessus) et le résultat de fin d'étape
+> montrent déjà le chemin choisi. En mode assisté, le parcours enchaîne les
+> étapes sans repasser par cet écran de choix pour les étapes A/B (le
+> dossier proposé par défaut est accepté silencieusement,
+> `_run_wizard_partition_job`) — sans autre indication, un débutant ne sait
+> ni où ses sauvegardes atterrissent pendant la copie, ni si elles sont
+> conservées une fois la carte reflashée. Deux ajouts dans
+> `gui/main_window.py` :
+> - `_start_worker` journalise `"Destination : {chemin}"` dès le début de
+>   la copie pour les étapes A/B (`_EXTRACTION_MODES`) — pas seulement au
+>   succès final (`_archive_info`, déjà en place) : si l'opération est
+>   longue ou échoue en cours de route, l'utilisateur sait déjà où
+>   regarder, il n'a pas à attendre la fin.
+> - `_finish_wizard` (fin des sept étapes) affiche un récapitulatif dans
+>   le journal — chemin complet de l'archive BOOT *et* de l'archive
+>   EASYROMS, avec la mention explicite qu'elles sont conservées — plus le
+>   bouton de révélation habituel (`LogPanel.finish_success`, déjà utilisé
+>   pour A/B individuellement), pointant cette fois vers le dossier parent
+>   commun aux deux (`archives.default_archives_dir()`) plutôt qu'une
+>   seule des deux archives : un seul bouton ne peut réveler qu'un chemin.
+>
+> **Dossier de destination en mode assisté, confirmé** : le même que le
+> mode expert, `archives.default_archives_dir()` =
+> `~/Documents/R36S Studio/` (§4.4 ci-dessus) — le mode assisté ne
+> redéfinit rien de spécifique, il appelle la même fonction avec le même
+> résultat par défaut.
+>
+> **Vérifié : aucun nettoyage automatique ne supprime ces archives.**
+> `partitions/archives.py` n'expose que `default_archives_dir`/
+> `new_archive_path`/`list_archives`/`parse_archive_timestamp` — aucune
+> fonction de suppression. Une recherche dans tout le projet
+> (`shutil.rmtree`/`os.remove`/`.unlink`/`tempfile`) ne trouve qu'un seul
+> appel de suppression sans rapport : `partitions/copy.py` retire un
+> petit fichier sonde qu'il vient de créer lui-même pour vérifier qu'un
+> point de montage est inscriptible (§4.4, détection NTFS macOS), jamais
+> une archive BOOT/EASYROMS. Ces dossiers horodatés sont donc conservés
+> indéfiniment, aussi longtemps que l'utilisateur ne les supprime pas
+> lui-même — ce qui correspond à l'attente : ce sont ses sauvegardes.
 
 ### 4.5 `detect/` — statut des étapes du parcours
 

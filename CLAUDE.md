@@ -483,6 +483,68 @@ Après un flash, proposer une **vérification** : relire la carte et comparer le
 SHA-256 avec celui de l'image source. Facultatif mais c'est ce qui distingue un outil
 sérieux d'un script.
 
+> **Choix du firmware (phase 8), étape C / étape 5 du mode assisté.**
+> L'étape de flash propose désormais deux firmwares, avec une courte
+> description plutôt qu'un choix technique sec (`gui/screens.py::FileDialog`) :
+> **ArkOS / dArkOS**, la configuration classique, et **ROCKNIX**, un système
+> plus récent avec le transfert de jeux par USB intégré. Le choix est
+> mémorisé d'un lancement à l'autre (`config.py::AppConfig.firmware`,
+> `"arkos"` par défaut, même principe que `ui_mode`).
+>
+> Les deux dépôts ne se prêtent pas au même traitement, ce qui explique la
+> dissymétrie entre les deux options :
+> - **dArkOS** (`identify/releases.py`) : les images ne sont pas hébergées
+>   sur GitHub (elles renvoient vers Mega, Google Drive, OneDrive, un
+>   torrent) — comportement inchangé, le bouton se contente d'ouvrir
+>   `https://github.com/southoz/dArkOSRE-R36/releases` dans le navigateur,
+>   l'utilisateur télécharge et choisit le fichier lui-même.
+> - **ROCKNIX** (`identify/rocknix.py`) : le dépôt
+>   (`https://github.com/ROCKNIX/distribution/releases`) attache ses
+>   images directement à chaque release GitHub — le téléchargement
+>   automatique est donc possible. Le module interroge l'API GitHub
+>   (`/releases/latest`), sélectionne l'asset dont le nom contient
+>   `rk3326` (le SoC de la R36S — ROCKNIX publie une image par SoC,
+>   partagée par toutes les consoles qui l'utilisent, pas une image par
+>   modèle de console) avec une extension d'image reconnue (§4.3), et
+>   cherche une somme de contrôle associée (un sidecar `{image}.sha256`,
+>   ou un fichier de sommes partagé par la release, ex. `SHA256SUMS`) —
+>   absente, le téléchargement reste utilisable sans vérification plutôt
+>   que d'échouer, comme pour dArkOS où aucune somme n'est jamais fournie.
+>   Le téléchargement lui-même se fait par blocs avec progression réelle
+>   et annulation coopérative (même principe que `imaging/copy.py`), sur
+>   un thread séparé (`gui/partition_runner.py::RocknixDownloadRunner`) —
+>   un appel réseau bloquant sur le thread Qt principal se lirait comme un
+>   gel de l'interface, même piège que le montage d'une partition (§4.4).
+>   Enregistré dans `~/Documents/R36S Studio/Firmwares/`
+>   (`identify/rocknix.default_firmware_downloads_dir`, même convention
+>   que `partitions/archives.py`, jamais `~/.config`, §6). Un
+>   téléchargement réussi enchaîne directement sur la fenêtre Confirmation
+>   (§5), exactement comme un fichier choisi manuellement — le pipeline de
+>   flash existant n'a pas besoin de distinguer les deux origines.
+>
+> ⚠️ **Sélection d'asset non vérifiée sur une vraie release ROCKNIX.**
+> Le nommage exact des assets (`rk3326` dans le nom, extension `.img.gz`/
+> `.img.xz`/`.img.zip`/`.img`) est une hypothèse construite à partir des
+> conventions habituelles de ROCKNIX, pas confirmée en interrogeant
+> l'API GitHub réelle au moment d'écrire ce module — contrairement au
+> reste du projet, où chaque hypothèse de ce genre a jusqu'ici été
+> vérifiée sur du vrai matériel ou une vraie release avant d'être tenue
+> pour acquise (voir les nombreux ⚠️ précédents de ce document). À
+> confirmer dès que possible contre une vraie réponse de
+> `https://api.github.com/repos/ROCKNIX/distribution/releases/latest` —
+> et `select_r36s_asset`/`find_checksum_asset` (`identify/rocknix.py`)
+> à ajuster en conséquence si le nommage réel diverge.
+>
+> **Idée future, pas implémentée** : ROCKNIX fournit un script
+> `importpanel.py` qui génère un `mipi-panel.dtbo` à partir d'un `.dtb`
+> d'origine (le même type de fichier que celui déjà lu par
+> `identify/dtb.py` pour reconnaître le modèle de console, §4.5/§5 étape
+> 2). Une fois la console identifiée par notre module `identify`, on
+> pourrait imaginer une fonction ultérieure qui invoque `importpanel.py`
+> sur le `.dtb` extrait à l'étape A pour produire automatiquement l'overlay
+> d'écran ROCKNIX correspondant — mais ceci reste une piste, à explorer
+> seulement si l'utilisateur en a besoin.
+
 ---
 
 ## 5. Interface

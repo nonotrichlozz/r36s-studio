@@ -20,6 +20,7 @@ from PySide6.QtCore import (
     Property,
     QEasingCurve,
     QParallelAnimationGroup,
+    QPoint,
     QPointF,
     QPropertyAnimation,
     QRect,
@@ -264,8 +265,48 @@ class ConsoleArt(QWidget):
         """Taille réelle de l'image affichée (après mise à l'échelle avec
         conservation du ratio) -- `ConsoleStage` s'en sert pour placer le
         socle lumineux exactement sous la console, pas sous tout le
-        widget (bien plus grand, il occupe toute la zone du haut)."""
+        widget (bien plus grand, il occupe toute la zone du haut).
+
+        ⚠️ Peut être périmée juste après un `setGeometry()` sur ce widget :
+        bug corrigé, constaté en pratique -- `ConsoleStage.resizeEvent`
+        appelle `self._console_art.setGeometry(...)` alors que `self`
+        (`ConsoleStage`) est *elle-même* en train de traiter son propre
+        `resizeEvent`, déclenché par l'activation d'un layout parent (pas
+        un `.resize()` direct sur un widget autonome, comme dans les
+        tests unitaires les plus simples) -- Qt diffère alors la livraison
+        du `resizeEvent` de `ConsoleArt` plutôt que de l'envoyer sur le
+        coup, laissant `_scaled_pixmap` (donc `rendered_size()`) refléter
+        l'état *précédent* jusqu'au prochain passage de la boucle
+        d'événements. `ConsoleStage.resizeEvent` ne s'appuie donc plus sur
+        cette méthode pour ses propres calculs (`_fit_within_aspect_ratio`
+        ci-dessous, un calcul pur qui ne dépend d'aucune livraison
+        d'événement) -- seul `set_archive`-like usage ponctuel après un
+        rendu déjà stabilisé (tests, `paintEvent` déjà à jour) peut encore
+        s'y fier sans risque."""
         return self._scaled_pixmap.size()
+
+    def source_size(self):
+        """Taille de l'image source, avant mise à l'échelle -- utilisée
+        par `ConsoleStage._fit_within_aspect_ratio` pour calculer, par le
+        calcul plutôt qu'en lisant `rendered_size()` (périmée juste après
+        un `setGeometry`, voir sa docstring), la taille qu'aurait le rendu
+        pour une boîte donnée."""
+        return self._source_pixmap.size()
+
+
+def _fit_within_aspect_ratio(source, target):
+    """Réplique `QPixmap.scaled(target, Qt.KeepAspectRatio)` par le calcul
+    plutôt que d'attendre le résultat réel de `ConsoleArt` -- voir la mise
+    en garde sur `ConsoleArt.rendered_size()` : lire cette taille juste
+    après un `setGeometry()`, à l'intérieur du `resizeEvent` d'un widget
+    parent, peut refléter l'état précédent (livraison différée par Qt).
+    `ConsoleStage.resizeEvent` a besoin de cette taille immédiatement pour
+    calculer les marges du halo/du socle -- ce calcul, indépendant de tout
+    événement Qt, ne peut jamais être périmé."""
+    if source.isEmpty() or target.width() <= 0 or target.height() <= 0:
+        return QSize(0, 0)
+    scale = min(target.width() / source.width(), target.height() / source.height())
+    return QSize(max(1, round(source.width() * scale)), max(1, round(source.height() * scale)))
 
 
 class _RadialGlowWidget(QWidget):
@@ -405,14 +446,30 @@ class ConsoleStage(QWidget):
     déclenchent donc plus eux-mêmes de repeint dans leurs setters de
     propriété : `_repaint_timer`, un simple `QTimer` cadencé à 33 ms
     (~30 images/seconde, largement suffisant pour l'œil sur ce genre de
-    mouvement), impose un unique repeint groupé par tick, limité au plus
-    petit rectangle couvrant la console, son halo et son socle
-    (`_console_update_rect`, recalculé dans `resizeEvent` -- pas
-    `self.rect()`, sensiblement plus grand que ce qui est réellement
-    visible) -- jamais toute la fenêtre. Le minuteur ne tourne que pendant
-    que le groupe d'animations tourne réellement (démarré dans
-    `resume()`/`__init__`, arrêté dans `pause()` et à la désactivation) :
-    à l'arrêt, aucun repeint périodique, donc aucun coût."""
+    mouvement), impose un unique repeint groupé par tick pour tous ses
+    widgets enfants d'un coup. Invalide `self.rect()` en entier à chaque
+    tick plutôt qu'une sous-région calculée (bug corrigé : une sous-région
+    qui ne suivait pas exactement le déplacement du socle -- ci-dessous --
+    laissait une partie de l'image sans repeint, donnant l'impression
+    qu'un morceau de la console restait figé pendant que le reste
+    flottait) -- `ConsoleStage` reste petit et le repeint déjà cadencé à
+    30 im/s, le coût d'invalider tout son rect plutôt qu'une sous-région
+    reste négligeable. Le minuteur ne tourne que pendant que le groupe
+    d'animations tourne réellement (démarré dans `resume()`/`__init__`,
+    arrêté dans `pause()` et à la désactivation) : à l'arrêt, aucun
+    repeint périodique, donc aucun coût.
+
+    **Le socle lumineux flotte avec la console, dans le même repère (bug
+    corrigé) :** `ConsoleBasePlate` avait une géométrie fixe, calculée une
+    fois dans `resizeEvent` sans jamais suivre `floatOffset` -- la console
+    flottait pendant que son socle restait immobile, donnant l'impression
+    qu'un morceau se détachait ou s'enfonçait selon le sens du mouvement.
+    `_repaint_console_area` repositionne désormais le socle
+    (`QWidget.move`, qui ne redéclenche jamais `resizeEvent` -- seule la
+    position change, pas la taille, donc aucun recalcul du dégradé mis en
+    cache) à `_plate_base_pos` décalée de `floatOffset`, exactement comme
+    `ConsoleArt.paintEvent` décale son propre tracé -- les deux widgets
+    partagent ainsi la même valeur d'offset à chaque tick."""
 
     _PLATE_CYCLE_MS = 3000
     _GLOW_CYCLE_MS = 4000
@@ -438,7 +495,11 @@ class ConsoleStage(QWidget):
         self._base_plate = ConsoleBasePlate(self)
         self._halo.lower()
         self._base_plate.lower()
-        self._console_update_rect = QRect()
+        # Position de repos du socle (floatOffset == 0), recalculée dans
+        # `resizeEvent` -- `_repaint_console_area` la décale de l'offset
+        # courant à chaque tick pour que le socle flotte avec la console,
+        # dans le même repère (voir la docstring de la classe).
+        self._plate_base_pos = QPoint(0, 0)
 
         self._group = QParallelAnimationGroup(self)
 
@@ -485,36 +546,98 @@ class ConsoleStage(QWidget):
         self._repaint_timer.start()
 
     def _repaint_console_area(self) -> None:
-        self.update(self._console_update_rect)
+        # Le socle flotte avec la console, dans le même repère (bug
+        # corrigé, voir la docstring de la classe) : `move()` ne change
+        # que la position, jamais la taille -- pas de recalcul du dégradé
+        # mis en cache (`_RadialGlowWidget.resizeEvent`), contrairement à
+        # `setGeometry` avec une taille différente. Toute la zone du
+        # widget est invalidée (pas une sous-région calculée, §5 correctif)
+        # : `ConsoleStage` reste petit et déjà cadencé à 30 im/s, le coût
+        # est négligeable, et une sous-région qui ne suivrait pas
+        # exactement chaque élément mobile est justement le bug que ça
+        # corrige.
+        offset = int(self._console_art.floatOffset)
+        self._base_plate.move(self._plate_base_pos.x(), self._plate_base_pos.y() + offset)
+        self.update()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)
 
-        # Bug corrigé, constaté en pratique sur l'accueil du mode assisté
-        # (boîte plus grande/plus carrée que celle du mode expert, où la
-        # console passait jusqu'ici inaperçue) : donner à `ConsoleArt` tout
-        # `self.rect()` ne laisse aucune marge pour le halo (jusqu'à 17,5 %
-        # de la hauteur rendue au-delà du haut et du bas de la console,
-        # `_HALO_SCALE`) ni pour le socle (sous la console) -- ces deux
-        # widgets, enfants de `self` comme `ConsoleArt`, sont alors rognés
-        # aux limites de `self` dès qu'ils en dépassent (Qt rogne toute
-        # peinture d'un widget enfant au rect de son parent). Réservé à
-        # partir des dimensions du widget lui-même (majorants sûrs : la
-        # console rendue ne peut jamais dépasser la boîte qu'on lui donne)
-        # plutôt que de la taille rendue -- évite la dépendance circulaire
-        # (la marge nécessaire dépend de la taille rendue, qui dépend
-        # elle-même de la marge réservée). Une légère surestimation n'est
-        # jamais un problème ; l'inverse est justement le bug corrigé ici.
-        plate_width_bound = max(20, int(self.width() * self._PLATE_WIDTH_RATIO))
-        plate_height_bound = max(10, int(plate_width_bound * self._PLATE_HEIGHT_RATIO))
-        halo_excess_bound = int(self.height() * (self._HALO_SCALE - 1) / 2)
-        top_margin = max(int(self._FLOAT_AMPLITUDE), halo_excess_bound)
-        bottom_margin = max(int(self._FLOAT_AMPLITUDE), halo_excess_bound) + plate_height_bound
+        # Bug corrigé, constaté en pratique : lire `self._console_art.
+        # rendered_size()` juste après `setGeometry()` peut refléter
+        # l'état *précédent* -- Qt diffère la livraison du `resizeEvent`
+        # d'un widget enfant quand ce widget est lui-même redimensionné
+        # depuis l'intérieur du `resizeEvent` d'un parent (le cas ici,
+        # `ConsoleStage` étant redimensionnée par un layout parent réel --
+        # contrairement à un test unitaire qui redimensionne `ConsoleStage`
+        # directement). Toutes les tailles ci-dessous sont donc calculées
+        # par `_fit_within_aspect_ratio` (pur, indépendant de tout
+        # événement Qt) plutôt que lues sur `ConsoleArt` entre deux
+        # `setGeometry` -- `setGeometry` reste appelé pour que Qt peigne
+        # effectivement le bon résultat dès que l'événement différé
+        # arrive, mais plus rien ici ne dépend de son délai de livraison.
+        source_size = self._console_art.source_size()
 
-        art_box = QRect(0, top_margin, self.width(), max(1, self.height() - top_margin - bottom_margin))
+        # Réserve aussi une marge horizontale : le halo est `_HALO_SCALE`
+        # fois plus large que la console -- sans cette réserve, son bord
+        # peut dépasser `self.width()` dès que la console s'ajuste par la
+        # largeur (contrainte liante), quelle que soit la marge verticale
+        # par ailleurs. `fit_width` est donc la largeur maximale que la
+        # console peut occuper tout en laissant son halo entièrement dans
+        # `self.width()`.
+        horizontal_margin = int(self.width() * (1 - 1 / self._HALO_SCALE) / 2)
+        fit_width = max(1, self.width() - 2 * horizontal_margin)
+
+        # Passe 1 : dimensions "naturelles" de la console si elle recevait
+        # toute la hauteur disponible (comme avant le correctif de
+        # rognage, et en tenant compte de la propre marge interne de
+        # `ConsoleArt` pour sa flottaison) -- sert uniquement à estimer, à
+        # partir de la taille RENDUE réelle (pas de la boîte entière), les
+        # marges réellement nécessaires pour le halo/le socle. Bug
+        # corrigé : estimer ces marges à partir de `self.width()`/
+        # `self.height()` (comme la première version de ce correctif)
+        # surestimait grossièrement dès que la console est engendrée par
+        # la hauteur plutôt que par la largeur -- le socle, dont la
+        # largeur suit celle de la console (pas celle de la boîte), se
+        # retrouvait démesuré, rétrécissant la console bien plus que
+        # nécessaire (mode expert) voire jusqu'à la rendre invisible
+        # (accueil du mode assisté, boîte plus carrée).
+        natural_target = QSize(fit_width, max(1, self.height() - 2 * int(self._FLOAT_AMPLITUDE)))
+        natural = _fit_within_aspect_ratio(source_size, natural_target)
+        natural_width = natural.width() or int(fit_width * 0.6)
+        natural_height = natural.height() or int(self.height() * 0.6)
+        # Marge verticale déjà présente naturellement (non nulle quand la
+        # largeur est la contrainte liante, comme en mode expert -- nulle
+        # quand c'est la hauteur, comme sur l'accueil du mode assisté).
+        natural_margin = (self.height() - natural_height) / 2
+
+        plate_width_estimate = max(20, int(natural_width * self._PLATE_WIDTH_RATIO))
+        plate_height_estimate = max(10, int(plate_width_estimate * self._PLATE_HEIGHT_RATIO))
+        halo_excess_estimate = natural_height * (self._HALO_SCALE - 1) / 2
+        # Le socle flotte désormais avec la console (bug corrigé
+        # ci-dessus) : sa marge doit couvrir l'amplitude de la flottaison
+        # en plus de sa propre demi-hauteur, pas seulement sa demi-hauteur.
+        plate_clearance = plate_height_estimate / 2 + self._FLOAT_AMPLITUDE
+
+        # Jamais moins que la marge déjà là naturellement (`max` avec
+        # `natural_margin`) : ne réduire que ce qui manque réellement,
+        # jamais un budget entier recalculé à partir de zéro -- c'est ce
+        # qui évite de rétrécir une console déjà correctement dans ses
+        # limites (mode expert, où le socle rentrait déjà de justesse
+        # avant même ce correctif).
+        top_margin = int(max(natural_margin, halo_excess_estimate))
+        bottom_margin = int(max(natural_margin, halo_excess_estimate, plate_clearance))
+
+        art_box = QRect(
+            horizontal_margin,
+            top_margin,
+            fit_width,
+            max(1, self.height() - top_margin - bottom_margin),
+        )
         self._console_art.setGeometry(art_box)
-        rendered = self._console_art.rendered_size()
-        art_width = rendered.width() or int(self.width() * 0.6)
+        final_target = QSize(art_box.width(), max(1, art_box.height() - 2 * int(self._FLOAT_AMPLITUDE)))
+        rendered = _fit_within_aspect_ratio(source_size, final_target)
+        art_width = rendered.width() or int(fit_width * 0.6)
         # `ConsoleArt.paintEvent` centre toujours l'image verticalement
         # dans son propre rect (`art_box` ci-dessus, pas tout `self`) : ce
         # centre est donc toujours exact, jamais une valeur de repli --
@@ -529,6 +652,9 @@ class ConsoleStage(QWidget):
         plate_x = (self.width() - plate_width) // 2
         plate_y = art_bottom - plate_height // 2
         self._base_plate.setGeometry(plate_x, plate_y, plate_width, plate_height)
+        # Position de repos (floatOffset == 0) -- `_repaint_console_area`
+        # la décale de l'offset courant à chaque tick.
+        self._plate_base_pos = QPoint(plate_x, plate_y)
 
         # Halo (§5) : une ellipse plus large que la console rendue,
         # centrée derrière elle -- remplace la zone que couvrait
@@ -537,21 +663,7 @@ class ConsoleStage(QWidget):
         halo_height = max(20, int(art_height * self._HALO_SCALE))
         halo_x = (self.width() - halo_width) // 2
         halo_y = art_center_y - halo_height // 2
-        halo_rect = QRect(halo_x, halo_y, halo_width, halo_height)
-        self._halo.setGeometry(halo_rect)
-
-        # Rectangle d'invalidation du minuteur de repeint (§5, correctif de
-        # performance) : la console (élargie de l'amplitude de la
-        # flottaison, ±6 px, dans les deux sens) unie au halo et au socle --
-        # nettement plus petit que `self.rect()`, qui couvre toute la zone
-        # du haut de la colonne droite, marges vides comprises.
-        art_rect = QRect(
-            (self.width() - art_width) // 2,
-            int(art_center_y - art_height / 2 - self._FLOAT_AMPLITUDE),
-            art_width,
-            int(art_height + 2 * self._FLOAT_AMPLITUDE),
-        )
-        self._console_update_rect = art_rect.united(halo_rect).united(self._base_plate.geometry())
+        self._halo.setGeometry(halo_x, halo_y, halo_width, halo_height)
 
     def pause(self) -> None:
         if self._group.state() == QParallelAnimationGroup.Running:
@@ -581,10 +693,15 @@ class ConsoleStage(QWidget):
             self._base_plate.glowOpacity = ConsoleBasePlate._MIN_OPACITY
             self._halo.glowOpacity = ConsoleHalo._MIN_OPACITY
             self._console_art.floatOffset = 0.0
+            # Le socle suit la flottaison (voir la docstring de la
+            # classe) -- le remettre explicitement à sa position de repos,
+            # comme `floatOffset` ci-dessus, plutôt que de le laisser
+            # décalé de la dernière valeur avant l'arrêt du minuteur.
+            self._base_plate.move(self._plate_base_pos)
             # Le minuteur périodique est arrêté : sans ce repeint explicite,
             # le dernier état visible resterait celui d'avant la
             # désactivation jusqu'au prochain événement Qt fortuit.
-            self.update(self.rect())
+            self.update()
 
 
 def build_console_stage(parent=None) -> Optional[ConsoleStage]:

@@ -1137,10 +1137,99 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > `ConsoleArt._FLOAT_AMPLITUDE` devient la source de vérité unique (déplacé
 > depuis `ConsoleStage`, qui la référence désormais) : `ConsoleArt` en a
 > besoin pour sa propre réserve de marge (point 1), `ConsoleStage` pour la
-> sienne (point 2) et pour `_console_update_rect`. Vérifié par des tests
-> couvrant plusieurs formes de boîte (plus haute que large, plus large que
-> haute, très petite) balayant tout le cycle de `floatOffset`, pas
-> seulement ses deux bornes (`tests/test_gui_screens.py`).
+> sienne (point 2). Vérifié par des tests couvrant plusieurs formes de
+> boîte (plus haute que large, plus large que haute, très petite) balayant
+> tout le cycle de `floatOffset`, pas seulement ses deux bornes
+> (`tests/test_gui_screens.py`).
+
+> ⚠️ **Trois régressions du correctif ci-dessus, corrigées à nouveau,
+> constatées en conditions réelles après coup.** (1) La console avait
+> disparu de l'accueil du mode assisté (seul le bouton « Préparer ma carte
+> automatiquement » restait visible). (2) En mode expert, la console était
+> devenue nettement plus petite qu'avant le premier correctif. (3) Le
+> défaut de découpe persistait, différemment : pendant la flottaison, une
+> partie de l'image restait fixe pendant que le reste montait/descendait
+> — un morceau semblait se détacher ou s'enfoncer selon le sens du
+> mouvement.
+>
+> **Causes réelles, trois bugs distincts :**
+> 1. **(1) et (2), une vraie image (499×500, quasi carrée) contre des
+>    boîtes synthétiques dans les tests.** Le calcul de marge du premier
+>    correctif estimait la taille du socle/du halo à partir de
+>    `self.width()`/`self.height()` (la boîte entière) plutôt que de la
+>    taille *rendue* réellement — un majorant délibérément généreux
+>    « pour ne jamais être insuffisant », mais qui surestimait
+>    grossièrement dès que la console est engendrée par la hauteur (le
+>    cas normal : une image quasi carrée dans une boîte plus large que
+>    haute, en mode expert *comme* sur l'accueil assisté — l'hypothèse
+>    initiale que le mode expert avait une marge naturelle suffisante
+>    était fausse). Sur l'accueil (boîte plus grande), la surestimation
+>    mangeait toute la hauteur disponible ; en mode expert, elle
+>    rétrécissait fortement sans l'annuler complètement.
+>
+>    **Corrigé** par un calcul en deux passes, purement mathématique
+>    (`_fit_within_aspect_ratio`, réplique `QPixmap.scaled(...,
+>    Qt.KeepAspectRatio)` par le calcul) : une première passe estime le
+>    rendu *naturel* (sans marge) pour dériver des tailles de socle/halo
+>    réalistes, puis les marges réservées ne descendent jamais sous la
+>    marge déjà présente naturellement (`max(marge_naturelle,
+>    marge_requise)`) — de quoi éviter de rétrécir une boîte qui
+>    contenait déjà tout, et de ne réserver que ce qui manque vraiment
+>    sinon. Réserve aussi une marge *horizontale* (pas seulement
+>    verticale) : le halo étant `_HALO_SCALE` fois plus large que la
+>    console, son bord peut dépasser `self.width()` dès que la console
+>    s'ajuste par la largeur, ce qu'une réserve uniquement verticale ne
+>    couvrait pas.
+>
+>    Ce calcul en deux passes a révélé un piège Qt distinct au passage :
+>    lire `ConsoleArt.rendered_size()` juste après `setGeometry()`,
+>    *depuis l'intérieur du `resizeEvent` d'un widget parent*, peut
+>    refléter l'état *précédent* — Qt diffère alors la livraison du
+>    `resizeEvent` de l'enfant plutôt que de l'envoyer immédiatement
+>    (constaté en conditions réelles : le calcul lisait `(0, 0)`, une
+>    valeur périmée, menant à des tailles de socle grossièrement fausses
+>    — ex. un socle large de 450px pour une console rendue à 184px). Ce
+>    piège ne se manifestait pas dans les tests unitaires les plus
+>    simples (`ConsoleStage` redimensionnée directement, hors de tout
+>    layout parent), où `setGeometry` livre bien `resizeEvent`
+>    immédiatement — d'où son absence de détection avant la vraie
+>    application. `_fit_within_aspect_ratio` (calcul pur, indépendant de
+>    tout événement Qt) contourne le problème plutôt que de tenter de le
+>    résoudre : `setGeometry` reste appelé pour que Qt peigne
+>    effectivement le bon résultat dès que l'événement différé arrive,
+>    mais plus aucun calcul de `ConsoleStage` n'attend cette livraison.
+> 2. **(3)** `ConsoleBasePlate` avait une géométrie fixe, calculée une
+>    fois dans `resizeEvent` sans jamais suivre `floatOffset` — la
+>    console flottait pendant que son socle restait immobile, donnant
+>    l'impression qu'un morceau se détachait ou s'enfonçait selon le sens
+>    du mouvement (les deux n'étaient pas dessinés dans le même repère).
+>    **Corrigé** : `_repaint_console_area` repositionne désormais le
+>    socle (`QWidget.move`, qui ne redéclenche jamais `resizeEvent` —
+>    seule la position change, pas la taille, donc aucun recalcul du
+>    dégradé mis en cache) à sa position de repos décalée de l'offset
+>    courant, exactement comme `ConsoleArt.paintEvent` décale son propre
+>    tracé — les deux widgets partagent ainsi la même valeur à chaque
+>    tick. `set_animations_enabled(False)` remet aussi le socle à sa
+>    position de repos, symétriquement à `floatOffset = 0.0`.
+> 3. **(3), également** : le rectangle d'invalidation par tick
+>    (`_console_update_rect`, une sous-région calculée) ne suivait pas
+>    exactement chaque élément mobile, laissant une partie de l'image
+>    sans repeint. **Corrigé** en invalidant `self.rect()` en entier à
+>    chaque tick plutôt qu'une sous-région — `ConsoleStage` reste petit
+>    et le repeint déjà cadencé à 30 im/s (§5 correctif de performance
+>    précédent), le coût reste négligeable ; `_console_update_rect` est
+>    retiré, devenu inutile.
+>
+> **Vérifié** : nombres réels recalculés avec la vraie `console.png`
+> (499×500) dans les proportions réelles des deux écrans (mode expert
+> ~616×415, accueil du mode assisté ~1072×329) — rendu contenu dans les
+> deux cas (socle et halo compris), à une taille visiblement raisonnable
+> (~60-70 % de la hauteur disponible), plus grande qu'avec le calcul
+> buggé. Captures d'écran (`QWidget.grab()`, backend `offscreen`) des deux
+> écrans, animations activées (à `floatOffset` bas/médian/haut) puis
+> désactivées : console et halo visibles sur les deux écrans, rien ne
+> semble tronqué. Non confirmé sur un vrai écran, faute d'écran physique
+> disponible ici (même limite que la mesure de charge CPU plus haut).
 
 > **Mode assisté (phase 8), par défaut au lancement.** Le mode expert
 > (six étapes, ci-dessus) reste disponible en entier, mais n'est plus

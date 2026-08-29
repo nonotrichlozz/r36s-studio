@@ -31,7 +31,7 @@ from r36s_studio.gui.screens import (
     build_window_backdrop,
     format_archive_label,
 )
-from PySide6.QtCore import QParallelAnimationGroup, QPropertyAnimation
+from PySide6.QtCore import QParallelAnimationGroup, QPoint, QPropertyAnimation
 from PySide6.QtWidgets import QWidget
 
 
@@ -573,16 +573,13 @@ def test_console_stage_positions_base_plate_under_the_console(qapp):
     stage.resize(400, 300)
     stage.show()
 
-    # La console est centrée dans `art_box` (une réserve verticale pour le
-    # halo/le socle, pas tout `stage.rect()`, §5 correctif de rognage) --
-    # même formule de marge que `ConsoleStage.resizeEvent`.
-    plate_width_bound = max(20, int(stage.width() * ConsoleStage._PLATE_WIDTH_RATIO))
-    plate_height_bound = max(10, int(plate_width_bound * ConsoleStage._PLATE_HEIGHT_RATIO))
-    halo_excess_bound = int(stage.height() * (ConsoleStage._HALO_SCALE - 1) / 2)
-    top_margin = max(int(ConsoleStage._FLOAT_AMPLITUDE), halo_excess_bound)
-    bottom_margin = max(int(ConsoleStage._FLOAT_AMPLITUDE), halo_excess_bound) + plate_height_bound
-    art_center_y = top_margin + (stage.height() - top_margin - bottom_margin) // 2
-    art_rect_bottom = art_center_y + stage._console_art.rendered_size().height() // 2
+    # La console est centrée dans une réserve verticale pour le halo/le
+    # socle (pas tout `stage.rect()`, §5 correctif de rognage) -- lu
+    # directement sur la géométrie/le rendu réels plutôt que de reproduire
+    # la formule de marge interne (qui reste un détail d'implémentation).
+    art_geometry = stage._console_art.geometry()
+    rendered_height = stage._console_art.rendered_size().height()
+    art_rect_bottom = art_geometry.top() + art_geometry.height() // 2 + rendered_height // 2
 
     plate_rect = stage._base_plate.geometry()
 
@@ -679,6 +676,101 @@ def test_console_art_reserves_float_margin_even_when_height_is_the_binding_const
     rendered = art.rendered_size()
 
     assert rendered.height() <= 200 - 2 * ConsoleArt._FLOAT_AMPLITUDE
+
+
+# --- régressions du premier correctif de rognage, corrigées à nouveau -----
+#
+# Trois défauts constatés après le premier correctif (ci-dessus) : (1) la
+# console avait disparu de l'accueil du mode assisté, (2) elle était
+# devenue nettement plus petite en mode expert, (3) pendant la flottaison,
+# le socle restait immobile pendant que la console bougeait -- un morceau
+# semblait se détacher ou s'enfoncer selon le sens du mouvement.
+
+
+def test_console_stage_console_size_is_reasonable_in_a_landscape_box(qapp):
+    """(2) régression : la vraie image `console.png` est quasi carrée
+    (499x500, vérifié) -- dans une boîte paysage comme en mode expert
+    (~616x415), la première version du correctif (marge estimée à partir
+    de `self.width()`/`self.height()`, pas de la taille rendue réelle)
+    aurait réduit le rendu à ~177px de haut sur 415 disponibles. Avec
+    l'estimation basée sur le rendu naturel, la console reste nettement
+    plus grande."""
+    from PySide6.QtGui import QPixmap
+
+    square_pixmap = QPixmap(500, 500)  # proportions de la vraie console.png
+    square_pixmap.fill()
+    stage = ConsoleStage(ConsoleArt(square_pixmap))
+
+    stage.resize(616, 415)  # proportions réelles du mode expert
+    stage.show()
+
+    rendered_height = stage._console_art.rendered_size().height()
+    assert rendered_height > 200  # nettement plus que les ~177px de la version buggée
+
+
+def test_console_stage_console_remains_clearly_visible_on_a_tall_square_box(qapp):
+    """(1) Sur une boîte plus haute que large (accueil du mode assisté),
+    la première version du correctif réservait tant de marge que la
+    console disparaissait entièrement."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    stage.resize(400, 400)
+    stage.show()
+
+    rendered = stage._console_art.rendered_size()
+    assert rendered.width() > 0
+    assert rendered.height() > 50  # visiblement affichée, pas un fragment
+
+
+def test_console_stage_repaint_moves_plate_by_the_same_float_offset_as_console(qapp):
+    """(3) Le socle doit suivre exactement le même décalage que la
+    console -- sinon l'un semble se détacher de l'autre pendant que
+    l'autre flotte."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.resize(400, 300)
+    base_pos = stage._plate_base_pos
+
+    stage._console_art.floatOffset = 4.0
+    stage._repaint_console_area()
+
+    assert stage._base_plate.pos() == base_pos + QPoint(0, 4)
+
+
+def test_console_stage_moving_the_plate_does_not_regenerate_its_cached_pixmap(qapp):
+    """`move()` ne doit jamais redéclencher `resizeEvent` (donc jamais
+    reconstruire le dégradé mis en cache, §5 correctif de performance) --
+    seule sa position change à chaque tick, jamais sa taille."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.resize(400, 300)
+    cached_pixmap = stage._base_plate._pixmap
+
+    stage._console_art.floatOffset = 4.0
+    stage._repaint_console_area()
+
+    assert stage._base_plate._pixmap is cached_pixmap
+
+
+def test_console_stage_repaint_invalidates_the_whole_widget(qapp):
+    """(3) Une sous-région calculée ne suivait pas exactement chaque
+    élément mobile -- invalide tout `self.rect()` à chaque tick plutôt."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.resize(400, 300)
+
+    with patch.object(QWidget, "update") as mock_update:
+        stage._repaint_console_area()
+
+    mock_update.assert_called_once_with()
+
+
+def test_console_stage_disabling_animations_resets_plate_to_its_base_position(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.resize(400, 300)
+    stage._console_art.floatOffset = 4.0
+    stage._repaint_console_area()
+
+    stage.set_animations_enabled(False)
+
+    assert stage._base_plate.pos() == stage._plate_base_pos
 
 
 def test_build_window_backdrop_returns_none_when_asset_missing(qapp):

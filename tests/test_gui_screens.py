@@ -21,6 +21,7 @@ from r36s_studio.gui.screens import (
     HomeScreen,
     LogPanel,
     MainView,
+    RocknixVariantDialog,
     WindowBackdrop,
     WizardStepPanel,
     _format_duration,
@@ -1167,6 +1168,65 @@ def test_file_dialog_set_mode_does_not_emit_firmware_changed_on_its_own(qapp):
     dialog.set_mode("flash", firmware="arkos")
 
     assert received == []
+
+
+# --- RocknixVariantDialog : choix entre plusieurs variantes ROCKNIX (§5) --
+
+
+def _rocknix_variant(name, sha=None):
+    from r36s_studio.identify.rocknix import RocknixAsset
+
+    return RocknixAsset(name=name, download_url=f"https://example.invalid/{name}", size_bytes=100), sha
+
+
+def test_rocknix_variant_dialog_lists_full_names(qapp):
+    variant_a = _rocknix_variant("ROCKNIX-RK3326.aarch64-20260801-a.img.gz")
+    variant_b = _rocknix_variant("ROCKNIX-RK3326.aarch64-20260801-b.img.gz")
+    dialog = RocknixVariantDialog()
+
+    dialog.set_variants([variant_a, variant_b])
+
+    assert dialog._list.count() == 2
+    assert dialog._list.item(0).text() == "ROCKNIX-RK3326.aarch64-20260801-a.img.gz"
+    assert dialog._list.item(1).text() == "ROCKNIX-RK3326.aarch64-20260801-b.img.gz"
+
+
+def test_rocknix_variant_dialog_next_disabled_until_selection(qapp):
+    dialog = RocknixVariantDialog()
+    dialog.set_variants([_rocknix_variant("a.img.gz"), _rocknix_variant("b.img.gz")])
+
+    assert dialog._next_button.isEnabled() is False
+
+    dialog._list.setCurrentRow(0)
+
+    assert dialog._next_button.isEnabled() is True
+
+
+def test_rocknix_variant_dialog_emits_chosen_asset_and_checksum(qapp):
+    variant_a = _rocknix_variant("a.img.gz", sha="cafebabe" * 8)
+    variant_b = _rocknix_variant("b.img.gz")
+    dialog = RocknixVariantDialog()
+    dialog.set_variants([variant_a, variant_b])
+    received = []
+    dialog.variant_chosen.connect(lambda asset, sha: received.append((asset, sha)))
+
+    dialog._list.setCurrentRow(1)
+    dialog._next_button.click()
+
+    assert received == [variant_b]
+
+
+def test_rocknix_variant_dialog_closes_without_emitting(qapp):
+    dialog = RocknixVariantDialog()
+    dialog.set_variants([_rocknix_variant("a.img.gz")])
+    dialog.show()
+    received = []
+    dialog.variant_chosen.connect(lambda asset, sha: received.append((asset, sha)))
+
+    dialog.close()
+
+    assert received == []
+    assert dialog.isVisible() is False
 
 
 # --- FileDialog : liste des archives existantes (étapes D/E, §4.4) --------

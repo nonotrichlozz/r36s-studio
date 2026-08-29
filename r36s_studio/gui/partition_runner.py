@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
 
@@ -21,11 +22,12 @@ from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, identify
 from r36s_studio.identify.rocknix import (
     ChecksumMismatchError,
     DownloadCancelledError,
+    RocknixAsset,
     RocknixAssetNotFoundError,
     RocknixReleaseError,
     default_firmware_downloads_dir,
     download_asset,
-    resolve_latest_r36s_asset,
+    resolve_latest_r36s_assets,
 )
 from r36s_studio.imaging.copy import PROGRESS_INTERVAL, OperationCancelled, ProgressEvent
 from r36s_studio.partitions import (
@@ -173,17 +175,54 @@ class WizardFingerprintRunner(QThread):
         self.finished_fingerprint.emit(compute_boot_fingerprint(self._device_path))
 
 
+class RocknixListRunner(QThread):
+    """Recherche des variantes ROCKNIX disponibles pour la R36S (§5, étape
+    de flash) -- sur un thread séparé comme les autres runners de ce
+    module : un aller-retour réseau bloquant sur le thread Qt principal se
+    lirait comme un gel de l'interface, même piège que le montage d'une
+    partition (§4.4). Une vraie release ROCKNIX peut publier plusieurs
+    images RK3326 à la fois (variantes `-a`/`-b`, dont la différence reste
+    à élucider, CLAUDE.md) -- ce runner ne tranche jamais entre elles, il
+    les remonte toutes à `MainWindow` pour que
+    `screens.RocknixVariantDialog` propose un choix explicite."""
+
+    finished_list = Signal(object)  # List[Tuple[RocknixAsset, Optional[str]]]
+    error = Signal(str, str)  # code, msg
+
+    def cancel(self) -> None:
+        """Rien à interrompre proprement pendant un simple aller-retour à
+        l'API GitHub (bien plus court qu'un téléchargement d'image) --
+        présent uniquement pour que le bouton Annuler du journal de bord
+        (§5) ne lève jamais d'exception s'il est cliqué pendant cette
+        étape, plutôt que pour une vraie annulation coopérative."""
+
+    def run(self) -> None:
+        try:
+            variants = resolve_latest_r36s_assets()
+        except RocknixAssetNotFoundError as exc:
+            self.error.emit("ROCKNIX_ASSET_NOT_FOUND", str(exc))
+            self.finished_list.emit([])
+            return
+        except RocknixReleaseError as exc:
+            self.error.emit("ROCKNIX_DOWNLOAD_FAILED", str(exc))
+            self.finished_list.emit([])
+            return
+        self.finished_list.emit(variants)
+
+
 class RocknixDownloadRunner(QThread):
-    """Téléchargement automatique du firmware ROCKNIX (§5, étape de flash)
-    -- contrairement à dArkOS, dont le bouton se contente d'ouvrir la page
-    des releases dans le navigateur (`identify/releases.py`, images sur
-    Mega/Google Drive/OneDrive), ROCKNIX publie ses images directement en
-    assets GitHub (`identify/rocknix.py`) : ce runner interroge l'API,
-    télécharge l'image RK3326 avec progression réelle, et vérifie sa
-    somme de contrôle quand le dépôt en publie une. Sur un thread séparé
-    comme les autres runners de ce module -- un téléchargement dure
-    largement plus qu'un aller-retour réseau instantané, et bloquerait le
-    thread Qt principal comme le montage d'une partition (§4.4)."""
+    """Téléchargement d'une variante ROCKNIX déjà choisie par l'utilisateur
+    (`RocknixListRunner`/`screens.RocknixVariantDialog` ci-dessus) -- ce
+    runner ne choisit plus rien lui-même, `asset`/`expected_sha256` sont
+    fournis au constructeur. Contrairement à dArkOS, dont le bouton se
+    contente d'ouvrir la page des releases dans le navigateur
+    (`identify/releases.py`, images sur Mega/Google Drive/OneDrive),
+    ROCKNIX publie ses images directement en assets GitHub
+    (`identify/rocknix.py`) : ce runner télécharge l'image choisie avec
+    progression réelle, et vérifie sa somme de contrôle si elle est
+    connue. Sur un thread séparé comme les autres runners de ce module --
+    un téléchargement dure largement plus qu'un aller-retour réseau
+    instantané."""
 
     # Mêmes types Qt que `PartitionJobRunner`/`WorkerRunner` -- voir la
     # note équivalente sur le débordement d'un `int` 32 bits au-delà de
@@ -192,8 +231,10 @@ class RocknixDownloadRunner(QThread):
     error = Signal(str, str)  # code, msg
     finished_download = Signal(bool, str)  # ok, chemin téléchargé ("" si échec)
 
-    def __init__(self, parent=None):
+    def __init__(self, asset: RocknixAsset, expected_sha256: Optional[str] = None, parent=None):
         super().__init__(parent)
+        self._asset = asset
+        self._expected_sha256 = expected_sha256
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -220,22 +261,17 @@ class RocknixDownloadRunner(QThread):
             speed = done / elapsed if elapsed > 0 else 0.0
             self.progress.emit(done, total, speed)
 
+        destination = default_firmware_downloads_dir() / self._asset.name
         try:
-            asset, expected_sha256 = resolve_latest_r36s_asset()
-            destination = default_firmware_downloads_dir() / asset.name
             download_asset(
-                asset,
+                self._asset,
                 destination,
-                expected_sha256=expected_sha256,
+                expected_sha256=self._expected_sha256,
                 on_progress=on_progress,
                 should_cancel=lambda: self._cancelled,
             )
         except DownloadCancelledError as exc:
             self.error.emit("CANCELLED", str(exc))
-            self.finished_download.emit(False, "")
-            return
-        except RocknixAssetNotFoundError as exc:
-            self.error.emit("ROCKNIX_ASSET_NOT_FOUND", str(exc))
             self.finished_download.emit(False, "")
             return
         except ChecksumMismatchError as exc:

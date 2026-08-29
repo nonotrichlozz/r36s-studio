@@ -26,13 +26,22 @@ ROCKNIX_RELEASES_API_URL = "https://api.github.com/repos/ROCKNIX/distribution/re
 ROCKNIX_RELEASES_PAGE_URL = "https://github.com/ROCKNIX/distribution/releases"
 
 # RK3326 est le SoC de la R36S -- ROCKNIX publie une image par SoC plutôt
-# que par modèle de console, partagée par les consoles de ce SoC. Extensions
-# dans l'ordre du plus spécifique au moins spécifique (§4.3, formats source
-# acceptés au flash) : `.endswith(".img.gz")` doit être tenté avant
-# `.endswith(".img")`, qui matcherait sinon n'importe quel des trois.
+# que par modèle de console, partagée par les consoles de ce SoC.
+#
+# Vérifié contre une vraie release ROCKNIX (2026-08-01, CLAUDE.md) : trois
+# fichiers contiennent "rk3326" dans leur nom --
+# `ROCKNIX-RK3326.aarch64-20260801-a.img.gz`,
+# `ROCKNIX-RK3326.aarch64-20260801-b.img.gz` (deux variantes, `-a`/`-b`,
+# dont la différence n'est pas encore connue -- jamais de sélection
+# automatique entre elles, §5) et
+# `ROCKNIX-RK3326.aarch64-20260801.tar` (une archive du système de
+# fichiers, pas une image disque flashable). Chaque image a un `.sha256`
+# associé du même nom. Seul `.img.gz` est donc une image exploitable ici
+# -- `.tar` et `.sha256` sont explicitement exclus plutôt que simplement
+# non reconnus, pour que l'intention soit claire à la lecture.
 _R36S_ASSET_KEYWORD = "rk3326"
-_IMAGE_EXTENSIONS = (".img.gz", ".img.xz", ".img.zip", ".img")
-_CHECKSUM_EXTENSIONS = (".sha256", ".sha256sum")
+_R36S_IMAGE_EXTENSION = ".img.gz"
+_R36S_EXCLUDED_EXTENSIONS = (".tar", ".sha256", ".sha256sum")
 _CHECKSUM_SUMS_FILENAMES = ("sha256sum.txt", "sha256sums.txt", "sha256sums", "checksums.txt")
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB, même convention que imaging/copy.py
@@ -81,26 +90,37 @@ def _default_opener(url: str):
 Opener = Callable[[str], object]
 
 
-def select_r36s_asset(assets: List[dict]) -> RocknixAsset:
+def select_r36s_assets(assets: List[dict]) -> List[RocknixAsset]:
     """Choisit, parmi les assets JSON d'une release GitHub (chacun avec au
-    moins `name`/`browser_download_url`/`size`), celui qui correspond à
-    l'image RK3326 (le SoC de la R36S) — jamais un fichier de somme de
-    contrôle, même s'il contient aussi "rk3326" dans son nom."""
+    moins `name`/`browser_download_url`/`size`), tous ceux qui
+    correspondent à une image RK3326 (le SoC de la R36S) flashable :
+    strictement les `.img.gz` -- jamais un `.tar` (archive du système de
+    fichiers, pas une image disque) ni un `.sha256` (somme de contrôle),
+    même s'ils contiennent aussi "rk3326" dans leur nom. Peut renvoyer
+    plusieurs résultats (variantes `-a`/`-b` observées en pratique, §5) --
+    ne tranche jamais entre elles, laisse l'appelant proposer un choix."""
+    matches = []
     for asset in assets:
         name = asset.get("name", "")
         lowered = name.lower()
         if _R36S_ASSET_KEYWORD not in lowered:
             continue
-        if not lowered.endswith(_IMAGE_EXTENSIONS):
+        if lowered.endswith(_R36S_EXCLUDED_EXTENSIONS):
             continue
-        return RocknixAsset(
-            name=name,
-            download_url=asset.get("browser_download_url", ""),
-            size_bytes=int(asset.get("size") or 0),
+        if not lowered.endswith(_R36S_IMAGE_EXTENSION):
+            continue
+        matches.append(
+            RocknixAsset(
+                name=name,
+                download_url=asset.get("browser_download_url", ""),
+                size_bytes=int(asset.get("size") or 0),
+            )
         )
-    raise RocknixAssetNotFoundError(
-        "Aucune image RK3326 (R36S) trouvée dans la dernière release ROCKNIX."
-    )
+    if not matches:
+        raise RocknixAssetNotFoundError(
+            "Aucune image RK3326 (R36S) trouvée dans la dernière release ROCKNIX."
+        )
+    return matches
 
 
 def find_checksum_asset(assets: List[dict], image_name: str) -> Optional[dict]:
@@ -164,27 +184,35 @@ def fetch_latest_release_assets(opener: Opener = _default_opener) -> List[dict]:
     return assets
 
 
-def resolve_latest_r36s_asset(opener: Opener = _default_opener) -> Tuple[RocknixAsset, Optional[str]]:
-    """Combine la recherche de la dernière release, la sélection de
-    l'image RK3326, et la somme de contrôle attendue si le dépôt en publie
-    une. Retourne `(asset, expected_sha256_ou_None)`."""
+def resolve_latest_r36s_assets(opener: Opener = _default_opener) -> List[Tuple[RocknixAsset, Optional[str]]]:
+    """Combine la recherche de la dernière release, la sélection des
+    images RK3326 disponibles (une ou plusieurs, §5), et la somme de
+    contrôle propre à chacune si le dépôt en publie une -- confirmé sur
+    une vraie release ROCKNIX (2026-08-01) : chaque image a son propre
+    `.sha256` du même nom, pas un fichier de sommes partagé. Retourne une
+    liste de `(asset, expected_sha256_ou_None)`, dans le même ordre que
+    `select_r36s_assets`."""
     assets = fetch_latest_release_assets(opener)
-    asset = select_r36s_asset(assets)
+    candidates = select_r36s_assets(assets)
 
-    checksum_asset = find_checksum_asset(assets, asset.name)
-    expected_sha256: Optional[str] = None
-    if checksum_asset is not None:
-        try:
-            with opener(checksum_asset["browser_download_url"]) as response:
-                text = response.read().decode("utf-8", errors="replace")
-        except OSError:
-            # Une somme de contrôle illisible ne doit jamais bloquer le
-            # téléchargement lui-même (§2 n°5 : progression réelle, pas de
-            # blocage sur une fonctionnalité annexe) -- simplement ignorée.
-            text = ""
-        expected_sha256 = parse_checksum(text, asset.name)
+    results: List[Tuple[RocknixAsset, Optional[str]]] = []
+    for candidate in candidates:
+        checksum_asset = find_checksum_asset(assets, candidate.name)
+        expected_sha256: Optional[str] = None
+        if checksum_asset is not None:
+            try:
+                with opener(checksum_asset["browser_download_url"]) as response:
+                    text = response.read().decode("utf-8", errors="replace")
+            except OSError:
+                # Une somme de contrôle illisible ne doit jamais bloquer le
+                # téléchargement lui-même (§2 n°5 : progression réelle, pas
+                # de blocage sur une fonctionnalité annexe) -- simplement
+                # ignorée pour cette image.
+                text = ""
+            expected_sha256 = parse_checksum(text, candidate.name)
+        results.append((candidate, expected_sha256))
 
-    return asset, expected_sha256
+    return results
 
 
 ProgressCallback = Callable[[int, int], None]
@@ -258,11 +286,11 @@ __all__ = [
     "RocknixAssetNotFoundError",
     "ChecksumMismatchError",
     "DownloadCancelledError",
-    "select_r36s_asset",
+    "select_r36s_assets",
     "find_checksum_asset",
     "parse_checksum",
     "fetch_latest_release_assets",
-    "resolve_latest_r36s_asset",
+    "resolve_latest_r36s_assets",
     "download_asset",
     "default_firmware_downloads_dir",
 ]

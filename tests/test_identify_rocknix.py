@@ -44,47 +44,68 @@ def _asset(name: str, url: str = "https://example.invalid/x", size: int = 1024) 
     return {"name": name, "browser_download_url": url, "size": size}
 
 
-# --- select_r36s_asset --------------------------------------------------
+# --- select_r36s_assets ---------------------------------------------------
+# Noms réels vérifiés contre la release ROCKNIX du 2026-08-01 (CLAUDE.md) :
+# deux variantes d'image (-a/-b, différence encore inconnue) plus un .tar
+# (archive du système de fichiers, pas une image disque) et un .sha256 par
+# image -- le filtre doit ignorer .tar et .sha256 même quand ils
+# contiennent "rk3326", et ne jamais choisir automatiquement entre -a/-b.
+
+_VARIANT_A = "ROCKNIX-RK3326.aarch64-20260801-a.img.gz"
+_VARIANT_B = "ROCKNIX-RK3326.aarch64-20260801-b.img.gz"
+_TAR_ASSET = "ROCKNIX-RK3326.aarch64-20260801.tar"
 
 
-def test_select_r36s_asset_picks_the_rk3326_image():
-    assets = [
-        _asset("ROCKNIX-RG351.img.gz"),
-        _asset("ROCKNIX-RK3326.img.gz", url="https://example.invalid/rk3326.img.gz", size=123456),
-        _asset("ROCKNIX-S922X.img.gz"),
+def _real_release_assets():
+    return [
+        _asset(_VARIANT_A, url="https://example.invalid/a.img.gz", size=111),
+        _asset(f"{_VARIANT_A}.sha256", url="https://example.invalid/a.sha256"),
+        _asset(_VARIANT_B, url="https://example.invalid/b.img.gz", size=222),
+        _asset(f"{_VARIANT_B}.sha256", url="https://example.invalid/b.sha256"),
+        _asset(_TAR_ASSET, url="https://example.invalid/all.tar"),
     ]
 
-    result = rocknix.select_r36s_asset(assets)
 
-    assert result.name == "ROCKNIX-RK3326.img.gz"
-    assert result.download_url == "https://example.invalid/rk3326.img.gz"
-    assert result.size_bytes == 123456
+def test_select_r36s_assets_returns_both_image_variants():
+    result = rocknix.select_r36s_assets(_real_release_assets())
 
-
-def test_select_r36s_asset_is_case_insensitive():
-    assets = [_asset("rocknix-rk3326.IMG.XZ")]
-
-    result = rocknix.select_r36s_asset(assets)
-
-    assert result.name == "rocknix-rk3326.IMG.XZ"
+    names = [asset.name for asset in result]
+    assert names == [_VARIANT_A, _VARIANT_B]
 
 
-def test_select_r36s_asset_skips_checksum_files_even_if_name_matches():
-    assets = [
-        _asset("ROCKNIX-RK3326.img.gz.sha256"),
-        _asset("ROCKNIX-RK3326.img.gz", size=999),
-    ]
+def test_select_r36s_assets_excludes_tar_and_sha256_even_though_names_match():
+    result = rocknix.select_r36s_assets(_real_release_assets())
 
-    result = rocknix.select_r36s_asset(assets)
-
-    assert result.name == "ROCKNIX-RK3326.img.gz"
+    names = [asset.name for asset in result]
+    assert _TAR_ASSET not in names
+    assert f"{_VARIANT_A}.sha256" not in names
+    assert f"{_VARIANT_B}.sha256" not in names
 
 
-def test_select_r36s_asset_raises_when_nothing_matches():
-    assets = [_asset("ROCKNIX-RG351.img.gz"), _asset("release-notes.txt")]
+def test_select_r36s_assets_is_case_insensitive():
+    assets = [_asset("rocknix-rk3326.aarch64-20260801-a.IMG.GZ")]
+
+    result = rocknix.select_r36s_assets(assets)
+
+    assert len(result) == 1
+    assert result[0].name == "rocknix-rk3326.aarch64-20260801-a.IMG.GZ"
+
+
+def test_select_r36s_assets_ignores_other_socs():
+    assets = [_asset("ROCKNIX-RG351.img.gz"), _asset("ROCKNIX-S922X.img.gz")]
 
     with pytest.raises(rocknix.RocknixAssetNotFoundError):
-        rocknix.select_r36s_asset(assets)
+        rocknix.select_r36s_assets(assets)
+
+
+def test_select_r36s_assets_raises_when_only_tar_and_checksum_match():
+    """.tar et .sha256 contiennent "rk3326" mais ne sont pas des images
+    flashables -- une release qui n'en publierait aucune ne doit pas
+    passer le .tar comme un faux positif."""
+    assets = [_asset(_TAR_ASSET), _asset(f"{_VARIANT_A}.sha256")]
+
+    with pytest.raises(rocknix.RocknixAssetNotFoundError):
+        rocknix.select_r36s_assets(assets)
 
 
 # --- find_checksum_asset -------------------------------------------------
@@ -186,35 +207,42 @@ def test_fetch_latest_release_assets_requires_assets_list_field():
         rocknix.fetch_latest_release_assets(opener=opener)
 
 
-# --- resolve_latest_r36s_asset --------------------------------------------
+# --- resolve_latest_r36s_assets -------------------------------------------
 
 
-def test_resolve_latest_r36s_asset_combines_selection_and_checksum():
-    image = _asset("ROCKNIX-RK3326.img.gz", url="https://example.invalid/image", size=42)
-    checksum_text = ("cafebabe" * 8 + "  ROCKNIX-RK3326.img.gz\n").encode("utf-8")
-    checksum = _asset("sha256sum.txt", url="https://example.invalid/sums")
-    release_payload = json.dumps({"assets": [image, checksum]}).encode("utf-8")
+def test_resolve_latest_r36s_assets_pairs_each_variant_with_its_own_checksum():
+    """Confirmé sur une vraie release ROCKNIX : chaque image a son propre
+    `.sha256` du même nom, pas un fichier de sommes partagé -- -a et -b
+    doivent chacune récupérer la leur, pas celle de l'autre."""
+    checksum_a = ("cafebabe" * 8 + f"  {_VARIANT_A}\n").encode("utf-8")
+    checksum_b = ("deadbeef" * 8 + f"  {_VARIANT_B}\n").encode("utf-8")
+    release_payload = json.dumps({"assets": _real_release_assets()}).encode("utf-8")
 
     responses = {
         rocknix.ROCKNIX_RELEASES_API_URL: _FakeResponse(release_payload),
-        "https://example.invalid/sums": _FakeResponse(checksum_text),
+        "https://example.invalid/a.sha256": _FakeResponse(checksum_a),
+        "https://example.invalid/b.sha256": _FakeResponse(checksum_b),
     }
     opener = MagicMock(side_effect=lambda url: responses[url])
 
-    asset, expected_sha256 = rocknix.resolve_latest_r36s_asset(opener=opener)
+    results = rocknix.resolve_latest_r36s_assets(opener=opener)
 
-    assert asset.name == "ROCKNIX-RK3326.img.gz"
-    assert expected_sha256 == "cafebabe" * 8
+    assert [(asset.name, checksum) for asset, checksum in results] == [
+        (_VARIANT_A, "cafebabe" * 8),
+        (_VARIANT_B, "deadbeef" * 8),
+    ]
 
 
-def test_resolve_latest_r36s_asset_returns_none_checksum_when_absent():
-    image = _asset("ROCKNIX-RK3326.img.gz")
+def test_resolve_latest_r36s_assets_returns_none_checksum_when_absent():
+    image = _asset("ROCKNIX-RK3326.aarch64-20260801-a.img.gz")
     release_payload = json.dumps({"assets": [image]}).encode("utf-8")
     opener = MagicMock(return_value=_FakeResponse(release_payload))
 
-    asset, expected_sha256 = rocknix.resolve_latest_r36s_asset(opener=opener)
+    results = rocknix.resolve_latest_r36s_assets(opener=opener)
 
-    assert asset.name == "ROCKNIX-RK3326.img.gz"
+    assert len(results) == 1
+    asset, expected_sha256 = results[0]
+    assert asset.name == "ROCKNIX-RK3326.aarch64-20260801-a.img.gz"
     assert expected_sha256 is None
 
 

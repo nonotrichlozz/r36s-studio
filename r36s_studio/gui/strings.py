@@ -118,6 +118,14 @@ STRINGS = {
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
     "file_rocknix_download_button": "Télécharger la dernière version",
+    # Fenêtre de choix entre plusieurs variantes ROCKNIX (§5, étape de
+    # flash) -- une vraie release peut en publier plusieurs (ex. -a/-b),
+    # jamais de sélection automatique entre elles.
+    "rocknix_variant_title": "Choisis une version de ROCKNIX",
+    "rocknix_variant_hint": (
+        "Plusieurs versions sont disponibles. Si tu ne sais pas laquelle choisir, "
+        "prends la première de la liste."
+    ),
     # Choix du périphérique
     "device_title": "Choisis ta carte SD",
     "device_refresh": "Rafraîchir",
@@ -152,6 +160,7 @@ STRINGS = {
     "execute_title_extract_easyroms": "Copie des jeux en cours…",
     "execute_title_inject_boot": "Remise en place de l'écran d'origine…",
     "execute_title_copy_games": "Copie des jeux en cours…",
+    "execute_title_list_rocknix": "Recherche des versions ROCKNIX en ligne…",
     "execute_title_download_rocknix": "Téléchargement de ROCKNIX en cours…",
     "rocknix_download_success": "La dernière version de ROCKNIX a été téléchargée : {path}",
     "execute_cancel": "Annuler",

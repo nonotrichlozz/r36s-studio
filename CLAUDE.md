@@ -502,14 +502,10 @@ sérieux d'un script.
 >   (`https://github.com/ROCKNIX/distribution/releases`) attache ses
 >   images directement à chaque release GitHub — le téléchargement
 >   automatique est donc possible. Le module interroge l'API GitHub
->   (`/releases/latest`), sélectionne l'asset dont le nom contient
+>   (`/releases/latest`), sélectionne les assets dont le nom contient
 >   `rk3326` (le SoC de la R36S — ROCKNIX publie une image par SoC,
 >   partagée par toutes les consoles qui l'utilisent, pas une image par
->   modèle de console) avec une extension d'image reconnue (§4.3), et
->   cherche une somme de contrôle associée (un sidecar `{image}.sha256`,
->   ou un fichier de sommes partagé par la release, ex. `SHA256SUMS`) —
->   absente, le téléchargement reste utilisable sans vérification plutôt
->   que d'échouer, comme pour dArkOS où aucune somme n'est jamais fournie.
+>   modèle de console), et cherche la somme de contrôle propre à chacun.
 >   Le téléchargement lui-même se fait par blocs avec progression réelle
 >   et annulation coopérative (même principe que `imaging/copy.py`), sur
 >   un thread séparé (`gui/partition_runner.py::RocknixDownloadRunner`) —
@@ -522,18 +518,36 @@ sérieux d'un script.
 >   (§5), exactement comme un fichier choisi manuellement — le pipeline de
 >   flash existant n'a pas besoin de distinguer les deux origines.
 >
-> ⚠️ **Sélection d'asset non vérifiée sur une vraie release ROCKNIX.**
-> Le nommage exact des assets (`rk3326` dans le nom, extension `.img.gz`/
-> `.img.xz`/`.img.zip`/`.img`) est une hypothèse construite à partir des
-> conventions habituelles de ROCKNIX, pas confirmée en interrogeant
-> l'API GitHub réelle au moment d'écrire ce module — contrairement au
-> reste du projet, où chaque hypothèse de ce genre a jusqu'ici été
-> vérifiée sur du vrai matériel ou une vraie release avant d'être tenue
-> pour acquise (voir les nombreux ⚠️ précédents de ce document). À
-> confirmer dès que possible contre une vraie réponse de
-> `https://api.github.com/repos/ROCKNIX/distribution/releases/latest` —
-> et `select_r36s_asset`/`find_checksum_asset` (`identify/rocknix.py`)
-> à ajuster en conséquence si le nommage réel diverge.
+> ✅ **Nommage des assets vérifié contre une vraie release ROCKNIX**
+> (2026-08-01), après une hypothèse initiale non confirmée (précédente
+> version de cette note). Pour le RK3326, trois fichiers : deux images
+> (`ROCKNIX-RK3326.aarch64-20260801-a.img.gz` et `...-b.img.gz`) et une
+> archive du système de fichiers plutôt qu'une image disque
+> (`ROCKNIX-RK3326.aarch64-20260801.tar`) — chaque image a son propre
+> `.sha256` du même nom (`{image}.sha256`), pas un fichier de sommes
+> partagé par la release comme envisagé initialement. **Corrigé en
+> conséquence** :
+> - `select_r36s_assets` (pluriel — remplace `select_r36s_asset`) ne
+>   retient que les `.img.gz` contenant `rk3326`, et exclut explicitement
+>   `.tar` et `.sha256`/`.sha256sum` même quand leur nom matche aussi —
+>   les extensions génériques `.img.xz`/`.img.zip`/`.img` de la première
+>   version n'ont jamais été observées sur une vraie release ROCKNIX et
+>   ont été retirées plutôt que laissées comme hypothèse invérifiée.
+> - Les deux variantes `-a`/`-b` sont **toutes les deux** remontées à la
+>   GUI — leur différence n'est pas connue, et rien n'indique laquelle
+>   serait la bonne par défaut. `select_r36s_assets` ne tranche donc
+>   jamais tout seul : `gui/partition_runner.py::RocknixListRunner`
+>   interroge l'API (thread séparé, même principe que
+>   `WizardIdentifyRunner`) puis `screens.py::RocknixVariantDialog`
+>   affiche le nom de fichier complet de chaque variante trouvée pour que
+>   l'utilisateur choisisse en connaissance de cause — `MainWindow`
+>   enchaîne alors sur `RocknixDownloadRunner` avec l'asset et la somme
+>   de contrôle correspondants à ce choix précis. **Idée future, pas
+>   implémentée** : élucider la différence entre `-a` et `-b` (à partir
+>   des notes de release ROCKNIX, ou en la demandant directement au
+>   projet) pour, si elle s'avère pertinente pour la R36S précisément,
+>   remplacer ce choix manuel par une sélection automatique ou une
+>   description plus parlante que le nom de fichier brut.
 >
 > **Idée future, pas implémentée** : ROCKNIX fournit un script
 > `importpanel.py` qui génère un `mipi-panel.dtbo` à partir d'un `.dtb`

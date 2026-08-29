@@ -237,13 +237,12 @@ def test_wizard_identify_runner_emits_mount_failed_when_mountpoint_is_empty(mock
     assert results == [IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED)]
 
 
-# --- RocknixDownloadRunner -------------------------------------------------
-# Téléchargement automatique du firmware ROCKNIX (§5, étape de flash) --
-# `resolve_latest_r36s_asset`/`download_asset` (identify/rocknix.py) sont
-# mockés ici : aucun accès réseau réel, comme pour les autres frontières
-# externes de ce module.
+# --- RocknixListRunner ------------------------------------------------------
+# Recherche des variantes ROCKNIX disponibles (§5, étape de flash) --
+# `resolve_latest_r36s_assets` (identify/rocknix.py) est mocké ici : aucun
+# accès réseau réel, comme pour les autres frontières externes de ce module.
 
-from r36s_studio.gui.partition_runner import RocknixDownloadRunner
+from r36s_studio.gui.partition_runner import RocknixDownloadRunner, RocknixListRunner
 from r36s_studio.identify.rocknix import (
     ChecksumMismatchError,
     DownloadCancelledError,
@@ -252,15 +251,69 @@ from r36s_studio.identify.rocknix import (
     RocknixReleaseError,
 )
 
+_VARIANT_A = RocknixAsset("ROCKNIX-RK3326.aarch64-20260801-a.img.gz", "https://example.invalid/a", 100)
+_VARIANT_B = RocknixAsset("ROCKNIX-RK3326.aarch64-20260801-b.img.gz", "https://example.invalid/b", 200)
+
+
+@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_assets")
+def test_rocknix_list_runner_forwards_all_variants_unchosen(mock_resolve, qapp):
+    mock_resolve.return_value = [(_VARIANT_A, "cafebabe" * 8), (_VARIANT_B, None)]
+
+    runner = RocknixListRunner()
+    results = []
+    runner.finished_list.connect(lambda variants: results.append(variants))
+
+    runner.run()
+
+    assert results == [[(_VARIANT_A, "cafebabe" * 8), (_VARIANT_B, None)]]
+
+
+@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_assets", side_effect=RocknixAssetNotFoundError("aucune image"))
+def test_rocknix_list_runner_maps_asset_not_found(mock_resolve, qapp):
+    runner = RocknixListRunner()
+    errors = []
+    results = []
+    runner.error.connect(lambda code, msg: errors.append(code))
+    runner.finished_list.connect(lambda variants: results.append(variants))
+
+    runner.run()
+
+    assert errors == ["ROCKNIX_ASSET_NOT_FOUND"]
+    assert results == [[]]
+
+
+@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_assets", side_effect=RocknixReleaseError("réseau indisponible"))
+def test_rocknix_list_runner_maps_generic_release_error(mock_resolve, qapp):
+    runner = RocknixListRunner()
+    errors = []
+    results = []
+    runner.error.connect(lambda code, msg: errors.append(code))
+    runner.finished_list.connect(lambda variants: results.append(variants))
+
+    runner.run()
+
+    assert errors == ["ROCKNIX_DOWNLOAD_FAILED"]
+    assert results == [[]]
+
+
+def test_rocknix_list_runner_cancel_does_not_raise(qapp):
+    """Rien à annuler proprement (aller-retour réseau bref) -- ce test
+    garantit seulement que le bouton Annuler du journal de bord (§5) ne
+    plante jamais s'il est cliqué pendant cette étape."""
+    runner = RocknixListRunner()
+
+    runner.cancel()  # ne doit pas lever
+
+
+# --- RocknixDownloadRunner ---------------------------------------------------
+# Téléchargement d'une variante déjà choisie (§5, étape de flash) --
+# `download_asset` (identify/rocknix.py) est mocké ici : aucun accès réseau
+# réel, comme pour les autres frontières externes de ce module.
+
 
 @patch("r36s_studio.gui.partition_runner.default_firmware_downloads_dir")
 @patch("r36s_studio.gui.partition_runner.download_asset")
-@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_asset")
-def test_rocknix_download_runner_success_emits_progress_and_final_path(
-    mock_resolve, mock_download, mock_dir, qapp, tmp_path
-):
-    asset = RocknixAsset(name="ROCKNIX-RK3326.img.gz", download_url="https://example.invalid/x", size_bytes=100)
-    mock_resolve.return_value = (asset, "cafebabe" * 8)
+def test_rocknix_download_runner_success_emits_progress_and_final_path(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
 
     def fake_download(asset_arg, destination, *, expected_sha256, on_progress, should_cancel):
@@ -269,7 +322,7 @@ def test_rocknix_download_runner_success_emits_progress_and_final_path(
 
     mock_download.side_effect = fake_download
 
-    runner = RocknixDownloadRunner()
+    runner = RocknixDownloadRunner(_VARIANT_A, "cafebabe" * 8)
     progress_events = []
     finished = []
     runner.progress.connect(lambda done, total, speed: progress_events.append((done, total)))
@@ -278,33 +331,18 @@ def test_rocknix_download_runner_success_emits_progress_and_final_path(
     runner.run()
 
     mock_download.assert_called_once()
+    assert mock_download.call_args.args[0] is _VARIANT_A
     assert mock_download.call_args.kwargs["expected_sha256"] == "cafebabe" * 8
     assert (100, 100) in progress_events
-    assert finished == [(True, str(tmp_path / "ROCKNIX-RK3326.img.gz"))]
-
-
-@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_asset", side_effect=RocknixAssetNotFoundError("aucune image"))
-def test_rocknix_download_runner_maps_asset_not_found(mock_resolve, qapp):
-    runner = RocknixDownloadRunner()
-    errors = []
-    finished = []
-    runner.error.connect(lambda code, msg: errors.append(code))
-    runner.finished_download.connect(lambda ok, path: finished.append((ok, path)))
-
-    runner.run()
-
-    assert errors == ["ROCKNIX_ASSET_NOT_FOUND"]
-    assert finished == [(False, "")]
+    assert finished == [(True, str(tmp_path / _VARIANT_A.name))]
 
 
 @patch("r36s_studio.gui.partition_runner.default_firmware_downloads_dir")
 @patch("r36s_studio.gui.partition_runner.download_asset", side_effect=ChecksumMismatchError("somme invalide"))
-@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_asset")
-def test_rocknix_download_runner_maps_checksum_mismatch(mock_resolve, mock_download, mock_dir, qapp, tmp_path):
-    mock_resolve.return_value = (RocknixAsset("x.img.gz", "https://example.invalid/x", 10), None)
+def test_rocknix_download_runner_maps_checksum_mismatch(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
 
-    runner = RocknixDownloadRunner()
+    runner = RocknixDownloadRunner(_VARIANT_A, None)
     errors = []
     finished = []
     runner.error.connect(lambda code, msg: errors.append(code))
@@ -318,12 +356,10 @@ def test_rocknix_download_runner_maps_checksum_mismatch(mock_resolve, mock_downl
 
 @patch("r36s_studio.gui.partition_runner.default_firmware_downloads_dir")
 @patch("r36s_studio.gui.partition_runner.download_asset", side_effect=RocknixReleaseError("réseau indisponible"))
-@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_asset")
-def test_rocknix_download_runner_maps_generic_release_error(mock_resolve, mock_download, mock_dir, qapp, tmp_path):
-    mock_resolve.return_value = (RocknixAsset("x.img.gz", "https://example.invalid/x", 10), None)
+def test_rocknix_download_runner_maps_generic_release_error(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
 
-    runner = RocknixDownloadRunner()
+    runner = RocknixDownloadRunner(_VARIANT_A, None)
     errors = []
     finished = []
     runner.error.connect(lambda code, msg: errors.append(code))
@@ -337,15 +373,11 @@ def test_rocknix_download_runner_maps_generic_release_error(mock_resolve, mock_d
 
 @patch("r36s_studio.gui.partition_runner.default_firmware_downloads_dir")
 @patch("r36s_studio.gui.partition_runner.download_asset")
-@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_asset")
-def test_rocknix_download_runner_cancel_passes_should_cancel_and_maps_to_cancelled(
-    mock_resolve, mock_download, mock_dir, qapp, tmp_path
-):
-    mock_resolve.return_value = (RocknixAsset("x.img.gz", "https://example.invalid/x", 10), None)
+def test_rocknix_download_runner_cancel_passes_should_cancel_and_maps_to_cancelled(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
     mock_download.side_effect = DownloadCancelledError("annulé après 5 octets")
 
-    runner = RocknixDownloadRunner()
+    runner = RocknixDownloadRunner(_VARIANT_A, None)
     runner.cancel()
     errors = []
     finished = []

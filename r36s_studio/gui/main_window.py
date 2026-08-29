@@ -29,7 +29,13 @@ from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card
 
-from .partition_runner import PartitionJobRunner, RocknixDownloadRunner, WizardFingerprintRunner, WizardIdentifyRunner
+from .partition_runner import (
+    PartitionJobRunner,
+    RocknixDownloadRunner,
+    RocknixListRunner,
+    WizardFingerprintRunner,
+    WizardIdentifyRunner,
+)
 from .reveal import reveal
 from .screens import (
     AssistedLandingScreen,
@@ -40,6 +46,7 @@ from .screens import (
     HomeScreen,
     LogPanel,
     MainView,
+    RocknixVariantDialog,
     WizardStepPanel,
     _OPERATION_TITLE_KEYS,
     _format_size,
@@ -168,6 +175,7 @@ class MainWindow(QMainWindow):
         self._file_dialog = FileDialog(self)
         self._confirm_dialog = ConfirmDialog(self)
         self._help_dialog = HelpDialog(self)
+        self._rocknix_variant_dialog = RocknixVariantDialog(self)
 
         self._wire_signals()
         self._refresh_home_state()
@@ -199,6 +207,7 @@ class MainWindow(QMainWindow):
         self._file_dialog.releases_requested.connect(self._on_releases_requested)
         self._file_dialog.firmware_changed.connect(self._on_firmware_changed)
         self._file_dialog.rocknix_download_requested.connect(self._on_rocknix_download_requested)
+        self._rocknix_variant_dialog.variant_chosen.connect(self._on_rocknix_variant_chosen)
 
         self._confirm_dialog.confirmed.connect(self._on_confirmed)
 
@@ -501,10 +510,44 @@ class MainWindow(QMainWindow):
         """Bouton « Télécharger la dernière version » de `FileDialog`
         (flash, firmware ROCKNIX uniquement) -- contrairement à dArkOS
         (`_on_releases_requested` ci-dessus), les images ROCKNIX sont
-        attachées directement aux releases GitHub (`identify/rocknix.py`) :
-        téléchargées ici avec progression réelle dans le journal de bord,
-        comme n'importe quelle autre opération longue (§5)."""
+        attachées directement aux releases GitHub (`identify/rocknix.py`).
+        Une vraie release peut en publier plusieurs variantes à la fois
+        (ex. `-a`/`-b`, CLAUDE.md) : recherche d'abord ce qui est
+        disponible (`_on_rocknix_list_finished` ouvre ensuite
+        `RocknixVariantDialog` pour que l'utilisateur choisisse) plutôt
+        que de télécharger directement."""
         self._file_dialog.close()
+        self._log_panel.start_operation(tr("execute_title_list_rocknix"))
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        if self._console_stage is not None:
+            self._console_stage.pause()
+        self._last_error_code = None
+        self._last_error_msg = None
+        self._runner = RocknixListRunner(parent=self)
+        self._runner.error.connect(self._on_worker_error)
+        self._runner.finished_list.connect(self._on_rocknix_list_finished)
+        self._runner.start()
+
+    def _on_rocknix_list_finished(self, variants) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        if self._console_stage is not None:
+            self._console_stage.resume()
+        if not variants:
+            friendly = friendly_error_message(self._last_error_code or "")
+            self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
+            return
+        self._log_panel.set_idle()
+        self._rocknix_variant_dialog.set_variants(variants)
+        self._rocknix_variant_dialog.open()
+
+    def _on_rocknix_variant_chosen(self, asset, expected_sha256) -> None:
+        """Variante choisie dans `RocknixVariantDialog` -- démarre le
+        téléchargement proprement dit, avec progression réelle dans le
+        journal de bord comme n'importe quelle autre opération longue
+        (§5)."""
+        self._rocknix_variant_dialog.close()
         self._log_panel.start_operation(tr("execute_title_download_rocknix"))
         self._home.set_busy(True)
         self._assisted_landing.set_busy(True)
@@ -512,7 +555,7 @@ class MainWindow(QMainWindow):
             self._console_stage.pause()
         self._last_error_code = None
         self._last_error_msg = None
-        self._runner = RocknixDownloadRunner(parent=self)
+        self._runner = RocknixDownloadRunner(asset, expected_sha256, parent=self)
         self._runner.progress.connect(self._on_progress)
         self._runner.error.connect(self._on_worker_error)
         self._runner.finished_download.connect(self._on_rocknix_download_finished)

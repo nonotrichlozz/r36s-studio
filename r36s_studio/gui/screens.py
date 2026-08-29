@@ -851,6 +851,67 @@ class DeviceDialog(Dialog):
             self.device_chosen.emit(items[0].data(Qt.UserRole))
 
 
+class RocknixVariantDialog(Dialog):
+    """Choix entre plusieurs variantes ROCKNIX pour la R36S (§5, étape de
+    flash) : une vraie release peut publier plusieurs images RK3326 à la
+    fois (suffixes `-a`/`-b` observés en pratique, dont la différence
+    reste à élucider, CLAUDE.md) — jamais de sélection automatique entre
+    elles, chaque variante est affichée avec son nom de fichier complet
+    pour que l'utilisateur choisisse en connaissance de cause."""
+
+    variant_chosen = Signal(object, object)  # RocknixAsset, Optional[str] (sha256 attendu)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("rocknix_variant_title"))
+        self._variants: List[Tuple[object, Optional[str]]] = []
+
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("rocknix_variant_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+
+        hint = QLabel(tr("rocknix_variant_hint"))
+        hint.setWordWrap(True)
+        hint.setProperty("role", "secondary")
+        layout.addWidget(hint)
+
+        self._list = QListWidget()
+        self._list.setSelectionMode(QListWidget.SingleSelection)
+        self._list.itemSelectionChanged.connect(self._update_next_enabled)
+        layout.addWidget(self._list)
+
+        buttons = QHBoxLayout()
+        back_button = QPushButton(tr("file_back"))
+        back_button.clicked.connect(self.close)
+        self._next_button = QPushButton(tr("file_rocknix_download_button"))
+        self._next_button.setEnabled(False)
+        self._next_button.clicked.connect(self._emit_chosen)
+        buttons.addWidget(back_button)
+        buttons.addStretch()
+        buttons.addWidget(self._next_button)
+        layout.addLayout(buttons)
+
+        self.resize(480, 340)
+
+    def set_variants(self, variants) -> None:
+        self._variants = list(variants)
+        self._list.clear()
+        for asset, _expected_sha256 in self._variants:
+            self._list.addItem(QListWidgetItem(asset.name))
+        self._update_next_enabled()
+
+    def _update_next_enabled(self) -> None:
+        self._next_button.setEnabled(bool(self._list.selectedItems()))
+
+    def _emit_chosen(self) -> None:
+        row = self._list.currentRow()
+        if row < 0:
+            return
+        asset, expected_sha256 = self._variants[row]
+        self.variant_chosen.emit(asset, expected_sha256)
+
+
 _FILE_TITLE_KEYS = {
     "backup": "file_title_backup",
     "flash": "file_title_flash",

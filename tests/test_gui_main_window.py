@@ -156,6 +156,58 @@ def test_flash_flow_requires_confirmation_before_worker_starts(mock_list, mock_f
     assert argv == ["flash", "--image", "/tmp/sd.img", "--device", "/dev/fake-disk-test-3"]
 
 
+# --- format d'image invalide (§5, imaging/image_source.py) : rejeté avant --
+# --- même la fenêtre Confirmation, sans jamais demander l'élévation --------
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_choosing_a_seven_zip_file_for_flash_blocks_confirm_dialog(
+    mock_list, mock_filter, mock_detect, mock_warning, qapp, tmp_path
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    seven_zip_path = tmp_path / "ArkOS.img"  # renommé -- détecté par octets d'en-tête
+    seven_zip_path.write_bytes(bytes.fromhex("377ABCAF271C") + b"\x00" * 20)
+
+    window = MainWindow()
+    window._home.flash_selected.emit()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
+    window._file_dialog.file_chosen.emit(str(seven_zip_path))
+
+    assert window._confirm_dialog.isVisible() is False
+    mock_warning.assert_called_once()
+    assert "archive 7-Zip" in mock_warning.call_args[0][2]
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_choosing_an_unsupported_format_for_flash_blocks_confirm_dialog(
+    mock_list, mock_filter, mock_detect, mock_warning, qapp, tmp_path
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    zip_path = tmp_path / "sd.img.zip"
+    zip_path.write_bytes(b"PK\x03\x04" + b"\x00" * 20)
+
+    window = MainWindow()
+    window._home.flash_selected.emit()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
+    window._file_dialog.file_chosen.emit(str(zip_path))
+
+    assert window._confirm_dialog.isVisible() is False
+    mock_warning.assert_called_once()
+    assert "pas une image utilisable" in mock_warning.call_args[0][2]
+
+
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")

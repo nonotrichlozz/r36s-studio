@@ -1006,6 +1006,16 @@ class FileDialog(Dialog):
         self._releases_button.clicked.connect(self.releases_requested.emit)
         layout.addWidget(self._releases_button)
 
+        # Les images ArkOS sont distribuées en .7z, que ce logiciel ne
+        # décompresse pas (imaging/image_source.py -- voir CLAUDE.md pour
+        # l'évaluation de py7zr) : annoncé ici, avant même le
+        # téléchargement, plutôt que de laisser un débutant découvrir le
+        # problème après coup avec un fichier que le flash refuse (§5).
+        self._arkos_download_hint = QLabel(tr("file_arkos_download_hint"))
+        self._arkos_download_hint.setWordWrap(True)
+        self._arkos_download_hint.setProperty("role", "secondary")
+        layout.addWidget(self._arkos_download_hint)
+
         # ROCKNIX -- images attachées directement aux releases GitHub
         # (identify/rocknix.py) : téléchargement automatique possible,
         # contrairement à ArkOS ci-dessus.
@@ -1083,6 +1093,7 @@ class FileDialog(Dialog):
         else:
             self._releases_button.setVisible(False)
             self._rocknix_download_button.setVisible(False)
+            self._arkos_download_hint.setVisible(False)
 
         is_archive_mode = mode in _ARCHIVE_MODES
         self._archive_list.clear()
@@ -1096,7 +1107,9 @@ class FileDialog(Dialog):
         self._destination_hint_label.setVisible(mode in _DESTINATION_MODES)
 
     def _update_firmware_buttons_visibility(self) -> None:
-        self._releases_button.setVisible(self._mode == "flash" and self._firmware == "arkos")
+        is_arkos = self._mode == "flash" and self._firmware == "arkos"
+        self._releases_button.setVisible(is_arkos)
+        self._arkos_download_hint.setVisible(is_arkos)
         self._rocknix_download_button.setVisible(self._mode == "flash" and self._firmware == "rocknix")
 
     def _on_firmware_toggled(self, checked: bool) -> None:

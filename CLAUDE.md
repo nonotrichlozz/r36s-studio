@@ -261,6 +261,83 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 **Formats source acceptés au flash :** `.img`, `.img.gz`, `.img.xz`, `.img.zip`
 (décompression en flux, sans fichier temporaire).
 
+> ⚠️ **Écart constaté en documentant la fonctionnalité ci-dessous** :
+> `.img.zip` n'a en réalité jamais été implémenté —
+> `image_source.SUPPORTED_EXTENSIONS` ne couvre que `.img`/`.img.gz`/
+> `.img.xz`. Un `.zip` choisi pour le flash échoue donc aujourd'hui avec le
+> message générique de format non supporté (ci-dessous), jamais avec une
+> décompression réussie. Non corrigé pour l'instant (pas demandé) — signalé
+> ici pour que la ligne ci-dessus ne serve pas de source de vérité erronée
+> à une future session.
+
+> **Détection du format par octets d'en-tête, pas seulement l'extension
+> (phase 8).** Les images ArkOS sont distribuées en `.7z` — jusqu'ici,
+> choisir ce fichier pour le flash échouait avec un message générique et
+> peu clair (`error_generic`, "Une erreur est survenue.", faute d'un code
+> d'erreur dédié). Pire : un `.7z` renommé en `.img` (une confusion facile
+> pour un néophyte) n'était même pas détecté — `open_image_source`
+> décidait uniquement sur l'extension et aurait écrit l'archive telle
+> quelle sur la carte, silencieusement incorrect (règle §2 n°5/n°6).
+>
+> `image_source._detect_format` lit désormais les premiers octets du
+> fichier (signatures gzip `1F 8B`, xz `FD 37 7A 58 5A 00`, zip
+> `50 4B 03 04`, 7z `37 7A BC AF 27 1C`) plutôt que de se fier à
+> l'extension ; `check_image_format` en tire `SevenZipArchiveError`
+> (message dédié) ou `UnsupportedImageFormatError` (générique, ex. `.zip`
+> ci-dessus). Appelé à **deux endroits** :
+> 1. **`imaging/flash.py::flash_device`**, en tout premier — avant
+>    `prepared_write_target` — pour ne jamais démonter/préparer la carte
+>    pour une source déjà connue comme inutilisable (règle §2 n°6). Couvre
+>    le CLI direct et sert de filet de sécurité si la GUI est contournée.
+> 2. **`gui/main_window.py::_on_file_chosen`**, juste après le choix du
+>    fichier pour le flash — *avant* même la fenêtre Confirmation, et donc
+>    avant toute élévation de privilèges (§3). Sans ce doublon côté GUI,
+>    un fichier invalide coûterait à l'utilisateur une demande de mot de
+>    passe administrateur pour un échec connu d'avance.
+>
+> Message affiché (`gui/strings.py`, §5 vocabulaire) : *« Ce fichier est
+> une archive 7-Zip. Décompresse-la d'abord — tu obtiendras un fichier
+> .img que tu pourras flasher directement. »* Le worker élevé (CLI) émet
+> les codes `SEVEN_ZIP_ARCHIVE`/`UNSUPPORTED_IMAGE_FORMAT` (`__main__.py`,
+> `protocol.py`) que `friendly_error_message` traduit côté GUI si jamais
+> ce chemin est atteint malgré la vérification préalable.
+>
+> **Prévenir avant même le téléchargement** : `FileDialog` (flash, firmware
+> ArkOS uniquement) affiche désormais en permanence, sous le bouton « Voir
+> les versions disponibles en ligne », un rappel — *« Le fichier téléchargé
+> sera une archive .7z : décompresse-la d'abord, puis choisis ici le
+> fichier .img qu'elle contient. »* — pour qu'un débutant sache quoi faire
+> avant de se retrouver bloqué avec un fichier que le logiciel refuse,
+> plutôt qu'après coup seulement via le message d'erreur ci-dessus.
+>
+> **Décompression native du `.7z` (py7zr) envisagée, non retenue.**
+> Deux obstacles, l'un architectural et l'autre de poids :
+> - **Streaming.** `open_image_source`/`copy_range` (§4.3 ci-dessus)
+>   décompressent `.gz`/`.xz` en flux, bloc par bloc, sans fichier
+>   temporaire — c'est ce qui permet de flasher une image de plusieurs Go
+>   sans espace disque supplémentaire. py7zr expose une API d'extraction
+>   (`SevenZipFile.read()`/`extractall()`) qui matérialise le contenu en
+>   mémoire ou sur disque plutôt qu'un flux lisible bloc par bloc comme
+>   `gzip.open`/`lzma.open` — l'intégrer proprement demanderait soit de
+>   charger l'image entière en mémoire (rédhibitoire pour 2-6 Go, §1),
+>   soit d'extraire vers un fichier temporaire (doublant l'espace disque
+>   nécessaire, et contraire au principe "sans fichier temporaire" déjà en
+>   place pour `.gz`/`.xz`).
+> - **Poids.** py7zr tire plusieurs dépendances C (`pyzstd`, `pyppmd`,
+>   `pycryptodomex`, `brotli`...) pour couvrir tous les filtres 7-Zip
+>   possibles, alors qu'un seul (LZMA2) est en jeu ici — poids ajouté au
+>   binaire empaqueté (§6) sur les trois OS, pour un problème qu'un
+>   message clair au bon moment résout déjà sans nouvelle dépendance.
+>
+> Ni l'un ni l'autre n'est bloquant en soi, mais combinés ils ne justifient
+> pas le coût face à la solution déjà en place (détection + message +
+> avertissement préalable, ci-dessus). À revisiter si l'utilisateur le
+> demande explicitement malgré ce compromis — l'évaluation n'a pas été
+> vérifiée en installant réellement py7zr dans ce dépôt (pas d'accès
+> réseau au moment d'écrire cette note) : le poids exact des dépendances
+> et les capacités précises de l'API de streaming restent à confirmer si
+> cette décision est reconsidérée.
+
 > ⚠️ **Bug corrigé, constaté en conditions réelles** (flash d'une image
 > `ArkOS_R35S-R36S_v2.0_11072025_MultiPanel.img.xz`) : la barre de
 > progression affichait 100 % et le temps restant 0 s dès le premier octet

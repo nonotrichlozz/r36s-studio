@@ -10,7 +10,13 @@ from __future__ import annotations
 from .backup import backup_device, compute_backup_size
 from .copy import BLOCK_SIZE, CancelCheck, OperationCancelled, ProgressCallback, ProgressEvent, copy_range
 from .flash import FlashResult, flash_device
-from .image_source import estimate_total_bytes, open_image_source
+from .image_source import (
+    SevenZipArchiveError,
+    UnsupportedImageFormatError,
+    check_image_format,
+    estimate_total_bytes,
+    open_image_source,
+)
 from .mbr import MbrPartition, is_gpt_protective, last_used_byte, parse_mbr
 from .source import prepared_source, raw_read_path
 from .write_target import prepared_write_target
@@ -28,6 +34,9 @@ __all__ = [
     "flash_device",
     "estimate_total_bytes",
     "open_image_source",
+    "check_image_format",
+    "UnsupportedImageFormatError",
+    "SevenZipArchiveError",
     "MbrPartition",
     "is_gpt_protective",
     "last_used_byte",

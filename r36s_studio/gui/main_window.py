@@ -24,6 +24,7 @@ from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL
+from r36s_studio.imaging import SevenZipArchiveError, UnsupportedImageFormatError, check_image_format
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
@@ -339,6 +340,20 @@ class MainWindow(QMainWindow):
         self._file_dialog.close()
 
         if self._mode == "flash":
+            # Vérifié ici, avant toute élévation de privilèges (§3) : un
+            # format invalide ne doit jamais coûter à l'utilisateur une
+            # demande de mot de passe administrateur pour rien. Détection
+            # par octets d'en-tête (`check_image_format`), pas seulement
+            # l'extension -- un fichier .7z renommé en .img serait sinon
+            # écrit tel quel sur la carte sans la moindre erreur.
+            try:
+                check_image_format(self._file_path)
+            except SevenZipArchiveError:
+                QMessageBox.warning(self, tr("app_title"), friendly_error_message("SEVEN_ZIP_ARCHIVE"))
+                return
+            except UnsupportedImageFormatError:
+                QMessageBox.warning(self, tr("app_title"), friendly_error_message("UNSUPPORTED_IMAGE_FORMAT"))
+                return
             # Le flash écrit sur le périphérique brut : confirmation
             # explicite obligatoire (règle §2 n°6). Les autres jobs
             # n'effacent rien (sauvegarde vers un fichier, ou copie de

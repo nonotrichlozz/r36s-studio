@@ -63,7 +63,14 @@ from typing import List, Optional, TextIO
 
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify import identify_from_boot_directory
-from r36s_studio.imaging import OperationCancelled, ProgressEvent, backup_device, flash_device
+from r36s_studio.imaging import (
+    OperationCancelled,
+    ProgressEvent,
+    SevenZipArchiveError,
+    UnsupportedImageFormatError,
+    backup_device,
+    flash_device,
+)
 from r36s_studio.partitions import (
     BOOT_LABEL,
     EASYROMS_LABEL,
@@ -309,6 +316,12 @@ def cmd_flash(args: argparse.Namespace) -> int:
         except OperationCancelled as exc:
             emit_error("CANCELLED", f"Écriture annulée après {exc.done} octets")
             emit_done(False)
+            return 1
+        except SevenZipArchiveError as exc:
+            emit_error("SEVEN_ZIP_ARCHIVE", str(exc))
+            return 1
+        except UnsupportedImageFormatError as exc:
+            emit_error("UNSUPPORTED_IMAGE_FORMAT", str(exc))
             return 1
         except (OSError, subprocess.CalledProcessError, ValueError) as exc:
             emit_error("IO_ERROR", str(exc))

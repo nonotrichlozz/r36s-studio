@@ -14,7 +14,7 @@ from typing import Optional
 from r36s_studio.devices import Device
 
 from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
-from .image_source import estimate_total_bytes, open_image_source
+from .image_source import check_image_format, estimate_total_bytes, open_image_source
 from .write_target import WINDOWS_SECTOR_SIZE, prepared_write_target, reunmount_before_verify
 
 HASH_CHUNK_SIZE = 4 * 1024 * 1024
@@ -86,7 +86,12 @@ def flash_device(
     pour laisser l'appelant décider quoi en faire. Lève `OperationCancelled`
     si `should_cancel` répond True en cours d'écriture — dans ce cas,
     aucune vérification SHA-256 n'est faite sur une carte partiellement
-    écrite."""
+    écrite. Lève `SevenZipArchiveError`/`UnsupportedImageFormatError`
+    (`check_image_format`, appelé en tout premier ici -- avant
+    `prepared_write_target`) si `image_path` n'est pas une image flashable :
+    ne jamais démonter/préparer la carte pour une source qu'on sait déjà
+    inutilisable (règle §2 n°6)."""
+    check_image_format(image_path)
     total_hint = estimate_total_bytes(image_path)
     if total_hint is None:
         # Pied d'archive illisible (fichier tronqué, format non standard) :

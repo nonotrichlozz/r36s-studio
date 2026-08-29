@@ -341,3 +341,48 @@ def test_flash_verification_hash_excludes_data_beyond_written_bytes(mock_prep, m
     assert result.bytes_written == len(FAKE_IMAGE_DATA)
     assert result.verified is True
     assert result.written_sha256 == hashlib.sha256(FAKE_IMAGE_DATA).hexdigest()
+
+
+# --- format invalide : rejeté avant toute préparation de la carte ---------
+# Règle §2 n°6 : ne jamais toucher au périphérique (démontage, verrouillage)
+# pour une source dont on sait déjà qu'elle est inutilisable.
+
+_SEVEN_ZIP_MAGIC = bytes.fromhex("377ABCAF271C")
+
+
+@patch("r36s_studio.imaging.flash.reunmount_before_verify")
+@patch("r36s_studio.imaging.flash.prepared_write_target", side_effect=_no_prep)
+def test_flash_rejects_seven_zip_image_before_touching_device(mock_prep, mock_reunmount, tmp_path):
+    from r36s_studio.imaging.image_source import SevenZipArchiveError
+
+    image_path = tmp_path / "ArkOS.img"  # renommé -- détecté par octets d'en-tête, pas l'extension
+    image_path.write_bytes(_SEVEN_ZIP_MAGIC + b"\x00" * 20)
+    target_path = _make_fake_target(tmp_path, 1000)
+    device = _make_device(target_path, 1000)
+
+    try:
+        flash_device(device, str(image_path))
+        assert False, "SevenZipArchiveError attendue"
+    except SevenZipArchiveError:
+        pass
+
+    mock_prep.assert_not_called()
+
+
+@patch("r36s_studio.imaging.flash.reunmount_before_verify")
+@patch("r36s_studio.imaging.flash.prepared_write_target", side_effect=_no_prep)
+def test_flash_rejects_unsupported_format_before_touching_device(mock_prep, mock_reunmount, tmp_path):
+    from r36s_studio.imaging.image_source import UnsupportedImageFormatError
+
+    image_path = tmp_path / "src.img.zip"
+    image_path.write_bytes(b"PK\x03\x04" + b"\x00" * 20)
+    target_path = _make_fake_target(tmp_path, 1000)
+    device = _make_device(target_path, 1000)
+
+    try:
+        flash_device(device, str(image_path))
+        assert False, "UnsupportedImageFormatError attendue"
+    except UnsupportedImageFormatError:
+        pass
+
+    mock_prep.assert_not_called()

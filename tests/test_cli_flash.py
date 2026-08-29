@@ -10,6 +10,7 @@ from unittest.mock import patch
 from r36s_studio import __main__ as cli
 from r36s_studio.devices import Device
 from r36s_studio.imaging.flash import FlashResult
+from r36s_studio.imaging.image_source import SevenZipArchiveError, UnsupportedImageFormatError
 
 
 def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000) -> Device:
@@ -140,3 +141,41 @@ def test_cmd_flash_verification_failure_returns_error(mock_list, mock_confirm, m
     assert code == 1
     out = capsys.readouterr().out
     assert "VERIFY_FAILED" in out
+
+
+# --- format d'image invalide (§5, image_source.py) -------------------------
+# `flash_device` valide le format avant même de toucher le périphérique
+# (règle §2 n°6) -- ici mocké pour lever directement l'exception
+# correspondante, comme il le ferait pour un vrai fichier .7z.
+
+
+@patch("r36s_studio.__main__.flash_device", side_effect=SevenZipArchiveError("archive 7-Zip"))
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_seven_zip_archive_emits_dedicated_code(mock_list, mock_confirm, mock_flash, tmp_path, capsys):
+    mock_list.return_value = [_make_device()]
+    image = tmp_path / "ArkOS.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    code = args.func(args)
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert '"code": "SEVEN_ZIP_ARCHIVE"' in out
+
+
+@patch("r36s_studio.__main__.flash_device", side_effect=UnsupportedImageFormatError("format non supporté"))
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_unsupported_format_emits_dedicated_code(mock_list, mock_confirm, mock_flash, tmp_path, capsys):
+    mock_list.return_value = [_make_device()]
+    image = tmp_path / "sd.img.zip"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    code = args.func(args)
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert '"code": "UNSUPPORTED_IMAGE_FORMAT"' in out

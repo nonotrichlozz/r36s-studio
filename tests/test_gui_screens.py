@@ -1144,6 +1144,30 @@ def test_file_dialog_selecting_arkos_back_swaps_buttons_and_emits_firmware_chang
     assert dialog._rocknix_download_button.isVisible() is False
 
 
+def test_file_dialog_arkos_hint_visible_only_for_arkos_flash(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash", firmware="arkos")
+    assert dialog._arkos_download_hint.isVisible() is True
+
+    dialog.set_mode("flash", firmware="rocknix")
+    assert dialog._arkos_download_hint.isVisible() is False
+
+    dialog.set_mode("backup")
+    assert dialog._arkos_download_hint.isVisible() is False
+
+
+def test_file_dialog_switching_back_to_arkos_shows_hint_again(qapp):
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("flash", firmware="rocknix")
+
+    dialog._arkos_radio.setChecked(True)
+
+    assert dialog._arkos_download_hint.isVisible() is True
+
+
 def test_file_dialog_rocknix_download_button_emits_signal(qapp):
     dialog = FileDialog()
     dialog.set_mode("flash", firmware="rocknix")

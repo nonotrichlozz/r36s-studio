@@ -12,10 +12,82 @@ from typing import BinaryIO, Optional
 
 SUPPORTED_EXTENSIONS = (".img", ".img.gz", ".img.xz")
 
+# Détection par octets d'en-tête (pas seulement l'extension, §5) : un
+# fichier renommé ou mal étiqueté doit être reconnu pour ce qu'il est
+# réellement -- sans ça, un `.img` qui serait en fait une archive .7z (cas
+# réel : les images ArkOS sont distribuées en .7z, quelqu'un peut renommer
+# le fichier en pensant que ça suffit) serait écrit tel quel sur la carte
+# sans la moindre erreur, silencieusement incorrect (règle §2 n°5/n°6).
+_GZIP_MAGIC = b"\x1f\x8b"
+_XZ_MAGIC = b"\xfd7zXZ\x00"
+_ZIP_MAGIC = b"PK\x03\x04"
+_SEVEN_ZIP_MAGIC = bytes.fromhex("377ABCAF271C")
+
+
+class UnsupportedImageFormatError(ValueError):
+    """Le fichier choisi n'est pas une image flashable (§4.3 : `.img`,
+    `.img.gz`, `.img.xz`). Le format réel est détecté par les octets
+    d'en-tête (`_detect_format`), pas seulement l'extension du nom de
+    fichier."""
+
+
+class SevenZipArchiveError(UnsupportedImageFormatError):
+    """Cas fréquent, signalé spécifiquement (§5) : les images ArkOS sont
+    distribuées en `.7z`, un format que ce module ne décompresse pas (voir
+    CLAUDE.md pour l'évaluation de py7zr et pourquoi ce choix n'a pas été
+    retenu) -- l'utilisateur doit décompresser lui-même avant de flasher."""
+
+
+def _detect_format(path: str) -> str:
+    """Retourne `"gz"`/`"xz"`/`"zip"`/`"7z"`/`"raw"` selon les octets
+    d'en-tête du fichier -- indépendamment de son extension. `"raw"`
+    signifie « aucune signature d'archive compressée reconnue », traité
+    comme une image disque brute (`.img`) : une image disque n'a pas de
+    signature universelle propre (elle commence par la table de
+    partitions ou le système de fichiers de son contenu), donc l'absence
+    de signature d'archive connue est le seul signal disponible."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(8)
+    except OSError:
+        return "raw"
+    if header.startswith(_GZIP_MAGIC):
+        return "gz"
+    if header.startswith(_XZ_MAGIC):
+        return "xz"
+    if header.startswith(_ZIP_MAGIC):
+        return "zip"
+    if header.startswith(_SEVEN_ZIP_MAGIC):
+        return "7z"
+    return "raw"
+
+
+def check_image_format(path: str) -> None:
+    """Valide que `path` est une image flashable *avant* toute
+    préparation de la carte (règle §2 n°6 : ne jamais toucher au
+    périphérique tant qu'on n'est pas sûr que la source est utilisable) --
+    `flash_device` l'appelle en tout premier, avant `prepared_write_target`.
+    Lève `SevenZipArchiveError` pour le cas fréquent des images ArkOS en
+    `.7z` (§5), `UnsupportedImageFormatError` pour tout autre format non
+    reconnu (ex. `.zip`, toujours non décompressé malgré son inclusion
+    historique dans les formats "acceptés", §4.3 -- voir CLAUDE.md).
+    Ne lève rien pour `"raw"`/`"gz"`/`"xz"` : `open_image_source` sait les
+    ouvrir."""
+    detected = _detect_format(path)
+    if detected == "7z":
+        raise SevenZipArchiveError(
+            f"{path} est une archive 7-Zip (.7z), pas une image flashable directement."
+        )
+    if detected == "zip":
+        raise UnsupportedImageFormatError(f"{path} est une archive ZIP, non prise en charge pour le flash.")
+
 
 def open_image_source(path: str) -> BinaryIO:
     """Retourne un flux binaire lisant l'image décompressée. À utiliser
-    comme gestionnaire de contexte (`with open_image_source(...) as f:`)."""
+    comme gestionnaire de contexte (`with open_image_source(...) as f:`).
+    Suppose `check_image_format(path)` déjà appelé (c'est le cas dans
+    `flash_device`) -- ce module se contente ici de rouvrir le fichier
+    selon son extension pour la décompression proprement dite."""
     lower = path.lower()
     if lower.endswith(".gz"):
         return gzip.open(path, "rb")
@@ -23,7 +95,7 @@ def open_image_source(path: str) -> BinaryIO:
         return lzma.open(path, "rb")
     if lower.endswith(".img"):
         return open(path, "rb")
-    raise ValueError(
+    raise UnsupportedImageFormatError(
         f"format d'image non supporté : {path} (formats acceptés : {', '.join(SUPPORTED_EXTENSIONS)})"
     )
 

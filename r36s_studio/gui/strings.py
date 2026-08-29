@@ -117,6 +117,10 @@ STRINGS = {
     "file_firmware_arkos_desc": "La configuration classique, la plus répandue sur R36S.",
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
+    "file_arkos_download_hint": (
+        "Le fichier téléchargé sera une archive .7z : décompresse-la d'abord, "
+        "puis choisis ici le fichier .img qu'elle contient."
+    ),
     "file_rocknix_download_button": "Télécharger la dernière version",
     # Fenêtre de choix entre plusieurs variantes ROCKNIX (§5, étape de
     # flash) -- une vraie release peut en publier plusieurs (ex. -a/-b),
@@ -233,6 +237,15 @@ STRINGS = {
         "Ton Mac bloque l'accès à ce fichier car il se trouve dans un dossier protégé "
         "(Téléchargements, Bureau ou Documents). Déplace-le ailleurs, puis réessaie."
     ),
+    # Format de l'image choisie pour le flash (§4.3/§5) -- détecté par les
+    # octets d'en-tête, pas seulement l'extension (imaging/image_source.py).
+    "error_seven_zip_archive": (
+        "Ce fichier est une archive 7-Zip. Décompresse-la d'abord — tu obtiendras "
+        "un fichier .img que tu pourras flasher directement."
+    ),
+    "error_unsupported_image_format": (
+        "Ce fichier n'est pas une image utilisable. Formats acceptés : .img, .img.gz, .img.xz."
+    ),
     # Téléchargement automatique ROCKNIX (§5, étape de flash, identify/rocknix.py).
     "error_rocknix_asset_not_found": (
         "Impossible de trouver la version ROCKNIX pour ta console en ligne. "
@@ -269,6 +282,8 @@ _ERROR_MESSAGE_KEYS = {
     "EJECT_FAILED": "error_eject_failed",
     "MACOS_TCC_BLOCKED": "error_macos_tcc_blocked",
     "MACOS_TCC_PROTECTED_FOLDER": "error_macos_tcc_protected_folder",
+    "SEVEN_ZIP_ARCHIVE": "error_seven_zip_archive",
+    "UNSUPPORTED_IMAGE_FORMAT": "error_unsupported_image_format",
     "ROCKNIX_ASSET_NOT_FOUND": "error_rocknix_asset_not_found",
     "ROCKNIX_CHECKSUM_MISMATCH": "error_rocknix_checksum_mismatch",
     "ROCKNIX_DOWNLOAD_FAILED": "error_rocknix_download_failed",

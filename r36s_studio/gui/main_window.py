@@ -11,7 +11,9 @@ permanent (`LogPanel`), pas dans des écrans Exécution/Résultat séparés
 
 from __future__ import annotations
 
+import platform
 import subprocess
+import sys
 import webbrowser
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -30,6 +32,7 @@ from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card
 
+from . import elevate
 from .partition_runner import (
     PartitionJobRunner,
     RocknixDownloadRunner,
@@ -127,6 +130,13 @@ class MainWindow(QMainWindow):
         self._last_error_code: Optional[str] = None
         self._last_error_msg: Optional[str] = None
         self._last_progress_bytes = 0  # taille de l'archive créée (étapes A/B, journal de bord)
+
+        # Une seule autorisation macOS pour toute l'application (§5 mode
+        # assisté), créée au premier besoin (`_macos_auth_session`) plutôt
+        # qu'ici : ne jamais demander l'invite mot de passe avant qu'une
+        # opération élevée ne soit réellement lancée. Voir
+        # `_get_or_create_macos_auth_session`.
+        self._macos_auth_session: Optional[elevate.MacosAuthorizationSession] = None
 
         # Mode assisté (§5 mode assisté) : `WizardFlow` (testable sans Qt,
         # gui/wizard_flow.py) séquence les 7 étapes ; l'état collecté au
@@ -420,12 +430,43 @@ class MainWindow(QMainWindow):
         else:
             argv = ["flash", "--image", self._file_path, "--device", self._device.path]
 
-        self._runner = WorkerRunner(argv, parent=self)
+        self._runner = WorkerRunner(argv, parent=self, macos_auth_session=self._get_or_create_macos_auth_session())
         self._runner.progress.connect(self._on_progress)
         self._runner.log.connect(lambda level, msg: self._log_panel.append_log(msg))
         self._runner.error.connect(self._on_worker_error)
         self._runner.finished.connect(self._on_worker_finished)
         self._runner.start()
+
+    def _get_or_create_macos_auth_session(self) -> Optional["elevate.MacosAuthorizationSession"]:
+        """Une seule `AuthorizationRef` pour toute l'application (§5 mode
+        assisté) -- correctif d'un comportement observé en usage réel : le
+        parcours guidé redemandait l'invite mot de passe à chaque étape
+        élevée (chaque `WorkerRunner.start()` créait sa propre référence).
+        Créée ici, au premier appel (jamais avant : ne jamais demander une
+        permission avant qu'elle ne soit réellement nécessaire), puis
+        réutilisée par tous les `WorkerRunner` suivants, expert comme
+        assisté, jusqu'à la fermeture de l'application (`closeEvent`).
+
+        Ne concerne que macOS packagé (`MacosAuthorizedProcess`,
+        `elevate.py`) -- sur les autres chemins (macOS en développement,
+        Linux, Windows), retourne `None` : `WorkerRunner`/`elevate.py` s'en
+        accommodent déjà (comportement d'origine, une élévation par
+        opération). Une session non créable (`OSError`, ex. Security.
+        framework indisponible) retombe silencieusement sur ce même
+        comportement d'origine plutôt que d'empêcher l'opération."""
+        if platform.system() != "Darwin" or not getattr(sys, "frozen", False):
+            return None
+        if self._macos_auth_session is None:
+            try:
+                self._macos_auth_session = elevate.MacosAuthorizationSession()
+            except OSError:
+                return None
+        return self._macos_auth_session
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
+        if self._macos_auth_session is not None:
+            self._macos_auth_session.close()
+        super().closeEvent(event)
 
     # `@Slot` explicite sur ces trois méthodes : ce sont les seules qui
     # reçoivent un signal pouvant traverser une frontière de thread réelle

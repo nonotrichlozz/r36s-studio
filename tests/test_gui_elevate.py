@@ -221,6 +221,132 @@ def _fake_security_cdll(*, create_status=0, execute_status=0, comm_pipe_value=1)
     return security
 
 
+# --- MacosAuthorizationSession : une seule AuthorizationRef pour toute --
+# --- une session, réutilisée entre workers élevés (§5 mode assisté) -----
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_authorization_session_creates_ref_once(mock_cdll):
+    security = _fake_security_cdll()
+    mock_cdll.return_value = security
+
+    session = elevate.MacosAuthorizationSession()
+
+    security.AuthorizationCreate.assert_called_once()
+    assert session.auth_ref.value == 99
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_authorization_session_close_frees_the_ref(mock_cdll):
+    security = _fake_security_cdll()
+    mock_cdll.return_value = security
+    session = elevate.MacosAuthorizationSession()
+
+    session.close()
+
+    security.AuthorizationFree.assert_called_once()
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_authorization_session_close_is_idempotent(mock_cdll):
+    """Appelable plusieurs fois (fermeture de l'application, filet de
+    sécurité `__del__`) sans libérer deux fois la même référence."""
+    security = _fake_security_cdll()
+    mock_cdll.return_value = security
+    session = elevate.MacosAuthorizationSession()
+
+    session.close()
+    session.close()
+
+    security.AuthorizationFree.assert_called_once()
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_authorization_session_raises_on_create_failure(mock_cdll):
+    mock_cdll.return_value = _fake_security_cdll(create_status=-60001)
+
+    with pytest.raises(OSError):
+        elevate.MacosAuthorizationSession()
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_run_authorized_reuses_provided_auth_ref_without_creating_or_freeing_one(mock_cdll):
+    """Cœur du correctif : avec un `auth_ref` fourni (session partagée),
+    `_run_authorized` ne doit ni créer ni libérer sa propre référence --
+    c'est justement la création répétée qui forçait l'invite mot de passe
+    à chaque étape élevée du parcours guidé."""
+    security = _fake_security_cdll()
+    mock_cdll.return_value = security
+    shared_ref = elevate.AuthorizationRef(42)
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+
+    with patch("r36s_studio.gui.elevate._comm_pipe_fd", return_value=read_fd):
+        elevate._run_authorized("/path/to/tool", ["--worker"], lambda chunk: None, auth_ref=shared_ref)
+
+    security.AuthorizationCreate.assert_not_called()
+    security.AuthorizationFree.assert_not_called()
+    # La référence partagée est bien celle transmise à ExecuteWithPrivileges.
+    execute_call = security.AuthorizationExecuteWithPrivileges.call_args
+    assert execute_call.args[0] == shared_ref
+
+
+@patch("r36s_studio.gui.elevate.ctypes.CDLL")
+def test_run_authorized_without_auth_ref_still_creates_and_frees_its_own(mock_cdll):
+    """Comportement d'origine préservé pour un usage ponctuel (aucune
+    session partagée fournie) : toujours une référence créée puis
+    libérée localement."""
+    security = _fake_security_cdll()
+    mock_cdll.return_value = security
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+
+    with patch("r36s_studio.gui.elevate._comm_pipe_fd", return_value=read_fd):
+        elevate._run_authorized("/path/to/tool", ["--worker"], lambda chunk: None)
+
+    security.AuthorizationCreate.assert_called_once()
+    security.AuthorizationFree.assert_called_once()
+
+
+def test_macos_authorized_process_passes_auth_ref_through():
+    shared_ref = elevate.AuthorizationRef(42)
+    with patch("r36s_studio.gui.elevate._run_authorized") as mock_run:
+        process = elevate.MacosAuthorizedProcess(["/path/to/tool"], stderr_log=None, auth_ref=shared_ref)
+        process.wait(timeout=5)
+
+    mock_run.assert_called_once()
+    assert mock_run.call_args.kwargs["auth_ref"] == shared_ref
+
+
+@patch("r36s_studio.gui.elevate.MacosAuthorizedProcess")
+@patch("r36s_studio.gui.elevate._macos_native_supported", return_value=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+def test_launch_macos_forwards_auth_ref_to_authorized_process(
+    mock_system, mock_supported, mock_process_class, monkeypatch
+):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    shared_ref = elevate.AuthorizationRef(42)
+
+    elevate.launch_elevated_worker(["backup"], macos_auth_ref=shared_ref)
+
+    mock_process_class.assert_called_once()
+    assert mock_process_class.call_args.kwargs["auth_ref"] == shared_ref
+
+
+@patch("r36s_studio.gui.elevate.subprocess.Popen")
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+def test_launch_macos_osascript_path_ignores_auth_ref(mock_system, mock_popen, monkeypatch):
+    """`osascript` (développement, ou repli si l'API native disparaît) ne
+    consomme aucune `AuthorizationRef` -- passer `macos_auth_ref` ne doit
+    ni lever ni changer le chemin emprunté."""
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+
+    elevate.launch_elevated_worker(["backup"], macos_auth_ref=elevate.AuthorizationRef(42))
+
+    call_args = mock_popen.call_args.args[0]
+    assert call_args[0] == "osascript"
+
+
 @patch("r36s_studio.gui.elevate.ctypes.CDLL")
 def test_run_authorized_streams_child_output_via_real_pipe(mock_cdll):
     mock_cdll.return_value = _fake_security_cdll()

@@ -58,9 +58,10 @@ def _mock_runner_class():
     `.connect()` fonctionne sans effet."""
     instances = []
 
-    def _factory(argv, parent=None):
+    def _factory(argv, parent=None, macos_auth_session=None):
         instance = MagicMock()
         instance.argv = argv
+        instance.macos_auth_session = macos_auth_session
         instances.append(instance)
         return instance
 
@@ -155,6 +156,137 @@ def test_flash_flow_requires_confirmation_before_worker_starts(mock_list, mock_f
 
     argv = runner_class.instances[0].argv
     assert argv == ["flash", "--image", "/tmp/sd.img", "--device", "/dev/fake-disk-test-3"]
+
+
+# --- une seule autorisation macOS pour tout le parcours (§5 mode assisté) --
+#
+# Correctif d'un comportement observé en usage réel : le parcours guidé
+# redemandait l'invite mot de passe à chaque étape élevée. `MainWindow`
+# possède désormais une seule `MacosAuthorizationSession`, créée au premier
+# besoin, réutilisée par tous les `WorkerRunner` suivants.
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.sys")
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Linux")
+def test_macos_auth_session_is_none_outside_macos(mock_system, mock_sys, mock_list, mock_filter, qapp):
+    mock_sys.frozen = True
+    window = MainWindow()
+
+    assert window._get_or_create_macos_auth_session() is None
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.sys")
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+def test_macos_auth_session_is_none_in_dev_mode(mock_system, mock_sys, mock_list, mock_filter, qapp):
+    """En développement (`sys.frozen` absent), le worker élevé passe par
+    `osascript`, qui ne consomme aucune `AuthorizationRef` -- pas la peine
+    d'en créer une (et ça éviterait une invite mot de passe superflue
+    pendant le développement)."""
+    del mock_sys.frozen  # simule l'attribut absent, comme en dev réel
+    window = MainWindow()
+
+    assert window._get_or_create_macos_auth_session() is None
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.elevate.MacosAuthorizationSession")
+@patch("r36s_studio.gui.main_window.sys")
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+def test_macos_auth_session_created_once_and_reused(mock_system, mock_sys, mock_session_class, mock_list, mock_filter, qapp):
+    mock_sys.frozen = True
+    window = MainWindow()
+
+    first = window._get_or_create_macos_auth_session()
+    second = window._get_or_create_macos_auth_session()
+
+    mock_session_class.assert_called_once()
+    assert first is second
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.elevate.MacosAuthorizationSession", side_effect=OSError("indisponible"))
+@patch("r36s_studio.gui.main_window.sys")
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+def test_macos_auth_session_falls_back_to_none_on_creation_failure(mock_system, mock_sys, mock_session_class, mock_list, mock_filter, qapp):
+    mock_sys.frozen = True
+    window = MainWindow()
+
+    assert window._get_or_create_macos_auth_session() is None
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.elevate.MacosAuthorizationSession")
+@patch("r36s_studio.gui.main_window.sys")
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+def test_close_event_closes_the_macos_auth_session(mock_system, mock_sys, mock_session_class, mock_list, mock_filter, qapp):
+    mock_sys.frozen = True
+    window = MainWindow()
+    session = window._get_or_create_macos_auth_session()
+
+    window.close()
+
+    session.close.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_close_event_without_a_macos_auth_session_does_not_raise(mock_list, mock_filter, qapp):
+    window = MainWindow()
+
+    window.close()  # ne doit pas lever, même sans session créée
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_two_worker_operations_share_the_same_macos_auth_session(mock_list, mock_filter, mock_detect, qapp):
+    """Enchaîne backup puis flash (deux opérations élevées séparées, comme
+    le ferait un utilisateur en mode expert) et vérifie que le second
+    `WorkerRunner` reçoit exactement la même session que le premier --
+    coeur du correctif : une seule invite mot de passe pour les deux."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class), patch(
+        "r36s_studio.gui.main_window.platform.system", return_value="Darwin"
+    ), patch("r36s_studio.gui.main_window.sys") as mock_sys, patch(
+        "r36s_studio.gui.main_window.elevate.MacosAuthorizationSession"
+    ) as mock_session_class:
+        mock_sys.frozen = True
+        window = MainWindow()
+
+        window._home.backup_selected.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+        with patch("r36s_studio.gui.screens.QFileDialog.getSaveFileName", return_value=("/tmp/out.img", "")):
+            window._file_dialog._browse()
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
+
+        window._home.flash_selected.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+        with patch("r36s_studio.gui.screens.QFileDialog.getOpenFileName", return_value=("/tmp/sd.img", "")):
+            window._file_dialog._browse()
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
+        window._confirm_dialog._checkbox.setChecked(True)
+        window._confirm_dialog.confirmed.emit()
+
+    mock_session_class.assert_called_once()  # une seule AuthorizationRef créée pour les deux
+    assert len(runner_class.instances) == 2
+    assert (
+        runner_class.instances[0].macos_auth_session
+        is runner_class.instances[1].macos_auth_session
+        is mock_session_class.return_value
+    )
 
 
 # --- format d'image invalide (§5, imaging/image_source.py) : rejeté avant --

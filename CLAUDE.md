@@ -189,6 +189,52 @@ testable en isolation, sans interface.
 > variable) : sur un vrai écran, sans `offscreen`, il a directement pointé
 > vers l'`OverflowError` réel.
 
+> ⚠️ **Bug corrigé, constaté en usage réel : l'invite mot de passe
+> administrateur était redemandée à chaque étape du parcours guidé
+> nécessitant l'élévation, plutôt qu'une seule fois pour tout le
+> parcours.** Cause : `WorkerRunner.start()` appelait `elevate.
+> launch_elevated_worker(...)` sans rien conserver d'un appel à l'autre —
+> sur macOS packagé (`MacosAuthorizedProcess`), ça revenait à créer puis
+> libérer une nouvelle `AuthorizationRef` (`AuthorizationCreate`/
+> `AuthorizationFree`, Security.framework) à chaque worker élevé, forçant
+> `AuthorizationExecuteWithPrivileges` à repasser par l'invite à chaque
+> fois plutôt que de profiter d'une autorisation déjà accordée.
+>
+> **Corrigé** en conservant une seule `AuthorizationRef` vivante pour
+> toute une session plutôt qu'une par opération :
+> `elevate.MacosAuthorizationSession` (nouvelle classe) l'obtient une
+> fois (`AuthorizationCreate`) et la libère à la fermeture de l'app
+> (`close()`, appelé depuis `MainWindow.closeEvent`) ; `_run_authorized`
+> accepte désormais un `auth_ref` optionnel et, quand il est fourni, ne
+> crée ni ne libère sa propre référence (délégué à l'appelant) —
+> `MacosAuthorizedProcess`/`_launch_macos`/`launch_elevated_worker` le
+> propagent tous jusqu'à `WorkerRunner`, qui l'extrait d'un
+> `macos_auth_session` optionnel passé à son constructeur.
+>
+> `MainWindow._get_or_create_macos_auth_session()` en possède une seule
+> pour toute l'application, créée **au premier besoin** plutôt qu'au
+> lancement de l'app ou du parcours guidé lui-même — jamais avant qu'une
+> opération élevée ne soit réellement lancée (principe déjà appliqué
+> ailleurs dans ce projet : ne jamais demander une permission avant d'en
+> avoir besoin). Elle est ensuite réutilisée par tout `WorkerRunner`
+> suivant, mode expert et mode assisté confondus — pas seulement au sein
+> d'un seul parcours guidé, mais pour toute la durée de vie de la
+> fenêtre : enchaîner par exemple une sauvegarde complète puis un flash
+> en mode expert ne redemande donc désormais qu'une seule fois l'invite,
+> pas deux.
+>
+> Portée volontairement limitée à macOS packagé
+> (`MacosAuthorizedProcess`) : `osascript` (macOS en développement, ou
+> repli si l'API historique disparaissait) ne consomme aucune
+> `AuthorizationRef` et n'est pas concerné ; `pkexec`/`sudo` (Linux) et
+> UAC (Windows) n'ont pas d'équivalent léger de ce genre dans ce
+> squelette — ce correctif ne change donc rien pour ces deux OS, qui
+> continuent de redemander l'élévation à chaque worker élevé comme
+> avant. Une `MacosAuthorizationSession` non créable (`OSError`, ex.
+> Security.framework indisponible) retombe silencieusement sur le
+> comportement d'origine (une référence par opération) plutôt que
+> d'empêcher l'opération.
+
 ---
 
 ## 4. Modules

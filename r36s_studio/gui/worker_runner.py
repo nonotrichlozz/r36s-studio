@@ -90,13 +90,23 @@ class WorkerRunner(QObject):
     error = Signal(str, str)  # code, msg
     finished = Signal(bool)  # ok
 
-    def __init__(self, argv: List[str], parent=None):
+    def __init__(self, argv: List[str], parent=None, macos_auth_session=None):
         """`argv` : la commande worker sans `--worker`/`--progress-file`/
         `--cancel-file`, ex. `["backup", "--device", "/dev/disk3",
         "--output", "x.img"]` — ces trois options sont ajoutées par
-        `start()`."""
+        `start()`.
+
+        `macos_auth_session` (`elevate.MacosAuthorizationSession`,
+        optionnel) : quand fournie, réutilise sa `AuthorizationRef` plutôt
+        que d'en créer une nouvelle propre à cette seule opération --
+        correctif d'un comportement observé en usage réel où le parcours
+        guidé (§5 mode assisté) redemandait l'invite mot de passe à chaque
+        étape élevée. `MainWindow` en possède une seule pour toute
+        l'application (créée au premier besoin), passée à chaque
+        `WorkerRunner` qu'elle construit. Ignoré hors macOS."""
         super().__init__(parent)
         self._argv = argv
+        self._macos_auth_session = macos_auth_session
         self._process = None
         self._progress_file: Optional[Path] = None
         self._cancel_file: Optional[Path] = None
@@ -119,7 +129,10 @@ class WorkerRunner(QObject):
             "--cancel-file",
             str(self._cancel_file),
         ]
-        self._process = elevate.launch_elevated_worker(full_argv, stderr_log=self._log_path)
+        macos_auth_ref = self._macos_auth_session.auth_ref if self._macos_auth_session is not None else None
+        self._process = elevate.launch_elevated_worker(
+            full_argv, stderr_log=self._log_path, macos_auth_ref=macos_auth_ref
+        )
         self._timer.start()
 
     def cancel(self) -> None:

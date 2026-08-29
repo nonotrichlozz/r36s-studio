@@ -144,7 +144,11 @@ def _worker_command(argv: List[str]) -> List[str]:
     return [sys.executable, "-c", bootstrap, *argv]
 
 
-def launch_elevated_worker(argv: List[str], stderr_log: Optional[Path] = None) -> object:
+def launch_elevated_worker(
+    argv: List[str],
+    stderr_log: Optional[Path] = None,
+    macos_auth_ref: Optional[AuthorizationRef] = None,
+) -> object:
     """Démarre le worker élevé pour `argv` et retourne un handle exposant
     au moins `.poll()` (un vrai `subprocess.Popen` sur macOS/Linux, un
     `WindowsElevatedProcess` sous Windows).
@@ -157,12 +161,18 @@ def launch_elevated_worker(argv: List[str], stderr_log: Optional[Path] = None) -
     `sudo` laissent passer directement le `stderr` du worker. Dans les deux
     cas, c'est ce fichier qui permet à `worker_runner.py` d'afficher
     l'erreur réelle plutôt qu'un message générique quand le processus
-    élevé s'arrête sans avoir émis le moindre événement `done`."""
+    élevé s'arrête sans avoir émis le moindre événement `done`.
+
+    `macos_auth_ref` (`MacosAuthorizationSession.auth_ref`) permet de
+    réutiliser une même autorisation entre plusieurs workers élevés sur
+    macOS -- ignoré sur les autres OS (pas d'équivalent léger de ce genre
+    pour `pkexec`/`sudo`/UAC dans ce squelette) et sans effet sur macOS en
+    développement (`osascript`, qui ne consomme aucune `AuthorizationRef`)."""
     command = _worker_command(argv)
 
     system = platform.system()
     if system == "Darwin":
-        return _launch_macos(command, stderr_log)
+        return _launch_macos(command, stderr_log, macos_auth_ref)
     if system == "Linux":
         return _launch_linux(command, stderr_log)
     if system == "Windows":
@@ -193,7 +203,9 @@ def _build_applescript(command: List[str], with_admin_privileges: bool = True) -
     return f'do shell script "{escaped}"{suffix}'
 
 
-def _launch_macos(command: List[str], stderr_log: Optional[Path]) -> object:
+def _launch_macos(
+    command: List[str], stderr_log: Optional[Path], auth_ref: Optional[AuthorizationRef] = None
+) -> object:
     """En développement, `command[0]` est un interpréteur `python3` nu, sans
     bundle : rien à hériter, `osascript` reste la seule option. Une fois
     empaquetée (`sys.frozen`), `command[0]` est CE binaire -- un enfant
@@ -203,9 +215,11 @@ def _launch_macos(command: List[str], stderr_log: Optional[Path]) -> object:
     `_macos_native_supported()` ne fait qu'une vérification statique (aucune
     invite) ; si elle échoue -- API disparue d'une future version de macOS --
     on retombe sur `osascript` plutôt que de risquer un appel qui bloquerait
-    sur une invite avant d'échouer."""
+    sur une invite avant d'échouer. `auth_ref`, quand fourni, n'a de sens que
+    pour ce chemin natif -- `osascript` n'en tient de toute façon aucun
+    compte."""
     if getattr(sys, "frozen", False) and _macos_native_supported():
-        return MacosAuthorizedProcess(command, stderr_log)
+        return MacosAuthorizedProcess(command, stderr_log, auth_ref=auth_ref)
     return _launch_macos_osascript(command, stderr_log)
 
 
@@ -253,17 +267,11 @@ def _comm_pipe_fd(comm_pipe: ctypes.c_void_p) -> int:
     return libc.fileno(comm_pipe)
 
 
-def _run_authorized(tool_path: str, args: List[str], on_output: Callable[[bytes], None]) -> None:
-    """Lance `tool_path` élevé via `AuthorizationExecuteWithPrivileges`
-    (Security.framework), en repassant tout ce qu'écrit l'enfant sur sa
-    sortie combinée à `on_output` au fur et à mesure. Bloque jusqu'à la fin
-    de l'enfant (fermeture de son tube de sortie) -- à appeler depuis un
-    thread, jamais depuis le thread d'interface (voir
-    `MacosAuthorizedProcess`). Lève `OSError` si `AuthorizationCreate` ou
-    `AuthorizationExecuteWithPrivileges` échoue (mot de passe refusé ou
-    invite annulée, la plupart du temps)."""
-    security = ctypes.CDLL(_SECURITY_FRAMEWORK_PATH)
-
+def _bind_security_functions(security) -> None:
+    """Déclare les signatures ctypes utilisées par `_run_authorized`/
+    `MacosAuthorizationSession` -- factorisé pour n'écrire ces
+    déclarations qu'une fois, que l'appelant crée son propre
+    `AuthorizationRef` ou en réutilise un existant."""
     security.AuthorizationCreate.restype = ctypes.c_int
     security.AuthorizationCreate.argtypes = [
         ctypes.c_void_p,
@@ -282,10 +290,85 @@ def _run_authorized(tool_path: str, args: List[str], on_output: Callable[[bytes]
     security.AuthorizationFree.restype = ctypes.c_int
     security.AuthorizationFree.argtypes = [AuthorizationRef, ctypes.c_uint32]
 
-    auth_ref = AuthorizationRef()
-    status = security.AuthorizationCreate(None, None, _AUTHORIZATION_FLAG_DEFAULTS, ctypes.byref(auth_ref))
-    if status != 0:
-        raise OSError(f"AuthorizationCreate a échoué (OSStatus {status})")
+
+class MacosAuthorizationSession:
+    """Conserve une seule `AuthorizationRef` vivante pour toute une
+    session plutôt que d'en créer une nouvelle par worker élevé --
+    correctif d'un comportement observé en usage réel : le parcours
+    guidé (§5 mode assisté) redemandait l'invite mot de passe à chaque
+    étape nécessitant l'élévation, alors qu'une seule autorisation pour
+    tout le parcours suffit. `MainWindow` en crée une seule, lors du
+    premier besoin d'élévation (jamais avant, §5 : ne jamais demander une
+    permission avant d'en avoir réellement besoin), et la réutilise pour
+    tous les workers élevés suivants (`MacosAuthorizedProcess`, via
+    `auth_ref`) jusqu'à la fermeture de l'application (`close()`).
+
+    Lève `OSError` si `AuthorizationCreate` échoue à la construction --
+    l'appelant retombe alors sur le comportement d'origine (une
+    `AuthorizationRef` par worker, voir `_run_authorized`)."""
+
+    def __init__(self) -> None:
+        self._security = ctypes.CDLL(_SECURITY_FRAMEWORK_PATH)
+        _bind_security_functions(self._security)
+        self._auth_ref = AuthorizationRef()
+        status = self._security.AuthorizationCreate(
+            None, None, _AUTHORIZATION_FLAG_DEFAULTS, ctypes.byref(self._auth_ref)
+        )
+        if status != 0:
+            raise OSError(f"AuthorizationCreate a échoué (OSStatus {status})")
+        self._closed = False
+
+    @property
+    def auth_ref(self) -> AuthorizationRef:
+        return self._auth_ref
+
+    def close(self) -> None:
+        """Idempotent -- appelable plusieurs fois (fermeture de
+        l'application, filet de sécurité `__del__` ci-dessous) sans
+        risque de libérer deux fois la même référence."""
+        if self._closed:
+            return
+        self._security.AuthorizationFree(self._auth_ref, _AUTHORIZATION_FLAG_DEFAULTS)
+        self._closed = True
+
+    def __del__(self) -> None:
+        # Filet de sécurité si `close()` n'a jamais été appelé
+        # explicitement -- ne doit jamais lever depuis un destructeur.
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
+def _run_authorized(
+    tool_path: str,
+    args: List[str],
+    on_output: Callable[[bytes], None],
+    auth_ref: Optional[AuthorizationRef] = None,
+) -> None:
+    """Lance `tool_path` élevé via `AuthorizationExecuteWithPrivileges`
+    (Security.framework), en repassant tout ce qu'écrit l'enfant sur sa
+    sortie combinée à `on_output` au fur et à mesure. Bloque jusqu'à la fin
+    de l'enfant (fermeture de son tube de sortie) -- à appeler depuis un
+    thread, jamais depuis le thread d'interface (voir
+    `MacosAuthorizedProcess`). Lève `OSError` si `AuthorizationCreate` ou
+    `AuthorizationExecuteWithPrivileges` échoue (mot de passe refusé ou
+    invite annulée, la plupart du temps).
+
+    Si `auth_ref` est fourni (`MacosAuthorizationSession.auth_ref`,
+    réutilisée entre plusieurs appels), aucune nouvelle référence n'est
+    créée ni libérée ici -- c'est l'appelant qui possède son cycle de vie.
+    Sans `auth_ref` (usage ponctuel, comportement d'origine), une
+    référence est créée puis libérée localement, comme avant."""
+    security = ctypes.CDLL(_SECURITY_FRAMEWORK_PATH)
+    _bind_security_functions(security)
+
+    owns_ref = auth_ref is None
+    if owns_ref:
+        auth_ref = AuthorizationRef()
+        status = security.AuthorizationCreate(None, None, _AUTHORIZATION_FLAG_DEFAULTS, ctypes.byref(auth_ref))
+        if status != 0:
+            raise OSError(f"AuthorizationCreate a échoué (OSStatus {status})")
 
     try:
         c_args = (ctypes.c_char_p * (len(args) + 1))()
@@ -312,7 +395,8 @@ def _run_authorized(tool_path: str, args: List[str], on_output: Callable[[bytes]
             for chunk in iter(lambda: f.read(65536), b""):
                 on_output(chunk)
     finally:
-        security.AuthorizationFree(auth_ref, _AUTHORIZATION_FLAG_DEFAULTS)
+        if owns_ref:
+            security.AuthorizationFree(auth_ref, _AUTHORIZATION_FLAG_DEFAULTS)
 
 
 class MacosAuthorizedProcess:
@@ -339,15 +423,21 @@ class MacosAuthorizedProcess:
     coopératif via le fichier d'annulation reste la seule voie d'arrêt
     fiable pour ce chemin."""
 
-    def __init__(self, command: List[str], stderr_log: Optional[Path]):
+    def __init__(
+        self,
+        command: List[str],
+        stderr_log: Optional[Path],
+        auth_ref: Optional[AuthorizationRef] = None,
+    ):
         self._stderr_log = stderr_log
+        self._auth_ref = auth_ref
         self._exited = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(command,), daemon=True)
         self._thread.start()
 
     def _run(self, command: List[str]) -> None:
         try:
-            _run_authorized(command[0], command[1:], self._on_output)
+            _run_authorized(command[0], command[1:], self._on_output, auth_ref=self._auth_ref)
         except Exception as exc:
             self._on_output(f"{exc}\n".encode())
         finally:

@@ -53,6 +53,49 @@ def test_start_passes_elevation_log_path_to_launch(mock_launch, mock_log_path, t
     runner._stop()
 
 
+# --- réutilisation d'une session d'autorisation macOS (§5 mode assisté) ----
+#
+# Correctif d'un comportement observé en usage réel : le parcours guidé
+# redemandait l'invite mot de passe à chaque étape élevée. `MainWindow`
+# possède désormais une seule `MacosAuthorizationSession` pour toute
+# l'application, passée à chaque `WorkerRunner` -- ce dernier doit en
+# extraire `auth_ref` et le transmettre à `launch_elevated_worker`.
+
+
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_start_forwards_macos_auth_ref_from_session(mock_launch, mock_log_path, tmp_path, qapp):
+    mock_log_path.return_value = tmp_path / "elevation.log"
+    mock_launch.return_value = _fake_process([None])
+    session = MagicMock()
+    session.auth_ref = "fake-auth-ref"
+    runner = WorkerRunner(
+        ["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"], macos_auth_session=session
+    )
+
+    runner.start()
+
+    assert mock_launch.call_args.kwargs["macos_auth_ref"] == "fake-auth-ref"
+    runner._stop()
+
+
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_start_passes_none_macos_auth_ref_without_a_session(mock_launch, mock_log_path, tmp_path, qapp):
+    """Comportement d'origine préservé sans session fournie (Linux/Windows,
+    ou macOS en développement) : `launch_elevated_worker` reçoit `None`,
+    chemin déjà géré (`osascript`/`pkexec`/UAC ne consomment aucun
+    `AuthorizationRef`)."""
+    mock_log_path.return_value = tmp_path / "elevation.log"
+    mock_launch.return_value = _fake_process([None])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
+
+    runner.start()
+
+    assert mock_launch.call_args.kwargs["macos_auth_ref"] is None
+    runner._stop()
+
+
 @patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
 def test_dispatches_progress_log_error_done_events(mock_launch, mock_log_path, tmp_path, qapp):

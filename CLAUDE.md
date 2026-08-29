@@ -576,6 +576,80 @@ les liste toutes.
 > prioritaire sur le calcul habituel. L'écran d'accueil l'affiche avec un badge
 > orange « PC ou Linux » plutôt que les badges vert/gris habituels.
 
+> **`CardSystem` (phase 8) : reconnaissance ROCKNIX, distincte du
+> `CardState` retiré ci-dessus.** Le mode assisté cherchait une structure
+> BOOT/EASYROMS façon ArkOS sur *toute* carte source, y compris une carte
+> déjà flashée avec ROCKNIX (dépôt alternatif proposé au choix du firmware,
+> §5 étape de flash) — ne la trouvant pas dans la forme attendue, le
+> parcours guidé échouait avec des messages pensés pour ArkOS
+> (« carte fraîchement flashée », erreur de partition introuvable...), sans
+> jamais expliquer ce qui avait réellement été trouvé.
+>
+> **Structure ROCKNIX relevée sur du vrai matériel** : schéma MBR, deux
+> partitions seulement — la première étiquetée `ROCKNIX` en FAT32
+> (~2,1 Go), la seconde Linux (~29,8 Go), opaque depuis macOS/Windows.
+> Aucune partition de jeux séparée : les ROMs vivent dans la partition
+> Linux. Conséquence directe : les quatre étapes A (extract_boot), B
+> (extract_easyroms), D (inject_boot) et E (copy_games) n'ont **aucun**
+> sens sur une carte ROCKNIX, pas seulement le BOOT comme envisagé dans une
+> première version de cette note — seuls le flash (C), la sauvegarde
+> complète de l'image disque (§4.6, en dehors des six étapes lettrées) et
+> l'éjection (F) restent pertinents.
+>
+> `CardSystem` (`ARKOS`/`ROCKNIX`/`UNKNOWN`) répond à une question plus
+> étroite que le `CardState` retiré (ci-dessus) : pas « quelle action
+> unique mettre en avant sur toute l'appli », mais « quel système est déjà
+> sur cette carte, pour adapter les étapes qui n'ont de sens que pour
+> ArkOS ». `detect_card_system(partitions)` reconnaît ROCKNIX par
+> l'étiquette de sa partition de démarrage (`ROCKNIX_BOOT_LABEL`, un signal
+> fort et gratuit — contrairement à ArkOS, dont la partition BOOT n'a
+> jamais d'étiquette, §4.4) ; ArkOS reste reconnu par `looks_like_arkos`
+> (vérifié après ROCKNIX, dont la structure ne recouvre de toute façon
+> jamais celle d'ArkOS). Ni l'un ni l'autre → `UNKNOWN`. Toujours en
+> lecture seule, jamais de montage — même garantie que le reste de ce
+> module.
+>
+> **Mode expert** : `detect_workflow_status` marque désormais les quatre
+> étapes A/B/D/E `StepStatus.SYSTEM_INCOMPATIBLE` (prioritaire sur le
+> calcul habituel, et sur `PLATFORM_LIMITED` pour `copy_games` — la vraie
+> raison sur une carte ROCKNIX est l'absence de partition de jeux, pas la
+> limitation NTFS de macOS, moins précise ici) quand la carte est ROCKNIX.
+> Badge violet visible « Non applicable — carte ROCKNIX », plutôt que
+> `NOT_RELEVANT` (qui n'affiche pas de badge visible, ci-dessus) : sur une
+> carte reconnue et un système *connu* qui ne convient pas, l'utilisateur
+> doit comprendre pourquoi, pas juste que « ce n'est pas pertinent
+> maintenant » comme s'il suffisait d'attendre.
+>
+> **Mode assisté** (`gui/main_window.py`) : le système de la carte source
+> est détecté une fois, à la fin de l'étape 1 (`detect_card_system_for_
+> device`, stocké dans `_wizard_source_system`), puis consulté à l'entrée
+> de l'étape 2 (`_enter_wizard_identify_step`) :
+> - **ROCKNIX** (cas certain, sans ambiguïté) : étapes 2/3 sautées
+>   automatiquement (`_skip_boot_easyroms_extraction`, marque IDENTIFY/
+>   EXTRACT_BOOT/EXTRACT_EASYROMS faits sans les exécuter), avec une
+>   explication dans le journal avant de sauter — jamais un saut
+>   silencieux. Le parcours continue directement à l'étape 4 (insertion de
+>   la carte neuve).
+> - **Système non reconnu** (`UNKNOWN`, ambigu — contrairement à ROCKNIX) :
+>   avertissement affiché (journal + statut de l'étape), et le bouton
+>   Continuer habituel devient « continuer sans sauvegarde » plutôt que de
+>   lancer l'identification (`_wizard_skip_extraction_on_continue`) —
+>   l'utilisateur choisit lui-même, l'application ne décide jamais à sa
+>   place de continuer sans qu'il l'ait demandé.
+> - **ArkOS** : parcours inchangé.
+>
+> Étape 6 (`_enter_wizard_inject_boot_step`) : si l'extraction a été
+> sautée (`_wizard_boot_archive is None`), l'injection n'a rien à
+> réinjecter — sautée de la même façon, avec sa propre ligne de journal,
+> plutôt que de tenter un job avec une source manquante.
+>
+> **Jamais un aller simple vers le mode expert** (règle explicitement
+> demandée) : dans les deux cas (ROCKNIX ou système non reconnu), le
+> parcours guidé continue jusqu'au bout (flash, éjection) — le bouton
+> Mode expert reste seulement disponible comme échappatoire volontaire,
+> jamais déclenché par l'application elle-même face à une structure
+> inattendue.
+
 ### 4.6 `jobs/` — les opérations du parcours
 
 > ⚠️ **Correction de conception** : cette table ne listait à l'origine que quatre

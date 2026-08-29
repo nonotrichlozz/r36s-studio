@@ -17,6 +17,7 @@ from r36s_studio.devices import Device
 from r36s_studio.gui.main_window import MainWindow
 from r36s_studio.gui.worker_runner import WorkerRunner
 from r36s_studio.imaging.copy import ProgressEvent
+from r36s_studio.partitions.locate import PartitionInfo
 
 # La plupart des tests de ce fichier portent sur le parcours à six étapes
 # (mode expert) -- `_EXPERT_MODE_CONFIG` démarre `MainWindow` directement
@@ -1417,13 +1418,14 @@ def test_wizard_step_one_poll_starts_fingerprint_runner_on_a_separate_thread(
     assert window._wizard_poll_timer.isActive() is False  # pas de deuxième calcul en parallèle
 
 
+@patch("r36s_studio.detect.list_partitions", return_value=[])
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_fingerprint_ready_for_detect_source_stores_device_and_enables_continue(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_partitions, qapp
 ):
     device = _make_device()
     window = MainWindow()
@@ -1436,13 +1438,21 @@ def test_wizard_fingerprint_ready_for_detect_source_stores_device_and_enables_co
     assert window._wizard_source_fingerprint == "fp-source"
 
 
+@patch(
+    "r36s_studio.detect.list_partitions",
+    return_value=[
+        PartitionInfo("/dev/fake-disk-test-3s1", "", "fat16", None),
+        PartitionInfo("/dev/fake-disk-test-3s2", "", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-3s3", "EASYROMS", "ntfs", None),
+    ],
+)
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_continue_on_step_one_advances_to_identify_and_starts_identify_runner(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_partitions, qapp
 ):
     device = _make_device()
     identify_runner_class = _mock_identify_runner_class()
@@ -1618,6 +1628,150 @@ def test_wizard_identify_logs_raw_detail_on_mount_failed(
 
     log_text = window._log_panel._log_view.toPlainText()
     assert "délai dépassé sur /dev/x" in log_text
+
+
+# --- étape 2 : adaptation au système détecté sur la carte source (§4.5) ----
+# ROCKNIX ne gère pas le BOOT/EASYROMS comme ArkOS (structure réelle relevée
+# sur du vrai matériel : MBR, 2 partitions -- ROCKNIX en FAT32 et une
+# partition Linux opaque, aucune partition de jeux séparée) : les étapes
+# 2/3 sont sautées automatiquement. Un système non reconnu, en revanche,
+# affiche un avertissement et laisse l'utilisateur choisir via Continuer --
+# jamais un aller simple vers le mode expert dans un cas comme dans l'autre.
+
+from r36s_studio.detect import CardSystem
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_rocknix_source_skips_identify_and_extraction_with_explanation(
+    mock_list, mock_filter, mock_load, qapp
+):
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+    window._wizard_source_system = CardSystem.ROCKNIX
+
+    window._enter_wizard_job(WizardJob.IDENTIFY)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "ROCKNIX" in log_text
+    assert window._wizard_flow.is_done(WizardJob.IDENTIFY) is True
+    assert window._wizard_flow.is_done(WizardJob.EXTRACT_BOOT) is True
+    assert window._wizard_flow.is_done(WizardJob.EXTRACT_EASYROMS) is True
+    assert window._wizard_flow.current_job() == WizardJob.DETECT_TARGET
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_unknown_source_shows_warning_and_waits_for_continue(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+    window._wizard_source_system = CardSystem.UNKNOWN
+
+    window._enter_wizard_job(WizardJob.IDENTIFY)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Impossible de reconnaître le système" in log_text
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    # Rien n'est encore sauté -- contrairement à ROCKNIX, l'utilisateur doit
+    # activement choisir de continuer.
+    assert window._wizard_flow.is_done(WizardJob.EXTRACT_BOOT) is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_continue_after_unknown_warning_skips_extraction(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+    window._wizard_source_system = CardSystem.UNKNOWN
+    window._enter_wizard_job(WizardJob.IDENTIFY)
+
+    window._wizard_panel.continue_requested.emit()
+
+    assert window._wizard_flow.is_done(WizardJob.IDENTIFY) is True
+    assert window._wizard_flow.is_done(WizardJob.EXTRACT_BOOT) is True
+    assert window._wizard_flow.is_done(WizardJob.EXTRACT_EASYROMS) is True
+    assert window._wizard_flow.current_job() == WizardJob.DETECT_TARGET
+    assert window._wizard_skip_extraction_on_continue is False  # remis à plat
+
+
+@patch("r36s_studio.detect.list_partitions", return_value=[PartitionInfo("/dev/x1", "ROCKNIX", "fat32", None)])
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_fingerprint_ready_stores_detected_rocknix_system(
+    mock_list, mock_filter, mock_load, mock_partitions, qapp
+):
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    window._on_wizard_fingerprint_ready(WizardJob.DETECT_SOURCE, _make_device(), "fp-source")
+
+    assert window._wizard_source_system == CardSystem.ROCKNIX
+
+
+# --- étape 6 : rien à réinjecter si l'extraction a été sautée ------------
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_inject_boot_skipped_when_no_boot_archive(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    device = _make_device()
+    window._wizard_target_device = device
+    window._wizard_boot_archive = None  # extraction sautée (ROCKNIX ou non reconnue)
+    window._wizard_flow.reset()
+    for job in (
+        WizardJob.DETECT_SOURCE,
+        WizardJob.IDENTIFY,
+        WizardJob.EXTRACT_BOOT,
+        WizardJob.EXTRACT_EASYROMS,
+        WizardJob.DETECT_TARGET,
+        WizardJob.FLASH,
+    ):
+        window._wizard_flow.mark_done(job)
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._enter_wizard_job(WizardJob.INJECT_BOOT)
+
+    runner_class.assert_not_called()
+    assert window._wizard_flow.is_done(WizardJob.INJECT_BOOT) is True
+    assert window._wizard_flow.current_job() == WizardJob.EJECT
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "ignorée" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_inject_boot_runs_normally_when_archive_present(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    device = _make_device()
+    window._wizard_target_device = device
+    window._wizard_boot_archive = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    window._wizard_flow.reset()
+    for job in (
+        WizardJob.DETECT_SOURCE,
+        WizardJob.IDENTIFY,
+        WizardJob.EXTRACT_BOOT,
+        WizardJob.EXTRACT_EASYROMS,
+        WizardJob.DETECT_TARGET,
+        WizardJob.FLASH,
+    ):
+        window._wizard_flow.mark_done(job)
+    runner_class = _mock_partition_runner_class()
+
+    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
+        window._enter_wizard_job(WizardJob.INJECT_BOOT)
+
+    runner_class.assert_called_once_with("inject_boot", device, window._wizard_boot_archive, parent=window)
 
 
 # --- étape 4 : garde-fou par empreinte de contenu, pas path/size_bytes -----

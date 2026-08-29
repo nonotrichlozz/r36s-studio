@@ -41,6 +41,7 @@ STRINGS = {
     "status_done": "Déjà faite",
     "status_not_relevant": "Non pertinente pour cette carte",
     "status_platform_limited": "PC ou Linux",
+    "status_system_incompatible": "Non applicable — carte ROCKNIX",
     # Bandeau carte détectée, en haut de l'accueil.
     "home_banner_line_device": "{display} — {size_go:.1f} Go",
     "home_banner_state_arkos": "Carte ArkOS reconnue",
@@ -59,6 +60,21 @@ STRINGS = {
     "wizard_status_waiting": "En attente de ta carte…",
     "wizard_status_device_found": "Carte reconnue : {display}",
     "wizard_status_same_card": "C'est la même carte — insère la carte neuve, pas l'ancienne.",
+    # Système détecté sur la carte source à l'étape 1 (§4.5 CardSystem) --
+    # adapte l'étape 2/3 sans jamais basculer vers le mode expert.
+    "wizard_source_rocknix_detected": (
+        "Carte ROCKNIX détectée. Ce système ne gère pas l'écran et les jeux de la "
+        "même façon qu'ArkOS : ces étapes ne s'appliquent pas ici. On passe "
+        "directement à l'insertion de ta carte neuve."
+    ),
+    "wizard_source_unknown_warning": (
+        "Impossible de reconnaître le système présent sur cette carte. Tu peux "
+        "continuer sans sauvegarder l'écran ni les jeux, ou débrancher cette carte "
+        "pour vérifier qu'il s'agit bien de la bonne avant de continuer."
+    ),
+    "wizard_inject_boot_skipped_no_archive": (
+        "Aucune sauvegarde de l'écran d'origine à réinjecter : cette étape est ignorée."
+    ),
     "wizard_status_multiple_candidates": "Plusieurs cartes détectées — choisis la bonne.",
     # Journal de bord (§5 vocabulaire : le détail technique n'apparaît
     # que là) -- combien de périphériques retenus/écartés à un sondage du

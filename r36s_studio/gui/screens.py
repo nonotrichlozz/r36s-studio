@@ -61,6 +61,7 @@ _STATUS_TEXT_KEYS = {
     StepStatus.DONE: "status_done",
     StepStatus.NOT_RELEVANT: "status_not_relevant",
     StepStatus.PLATFORM_LIMITED: "status_platform_limited",
+    StepStatus.SYSTEM_INCOMPATIBLE: "status_system_incompatible",
 }
 
 # Couleur du badge (theme.py, sélecteur QSS `QLabel[badgeKind="..."]`) pour
@@ -70,6 +71,7 @@ _BADGE_KIND_BY_STATUS = {
     StepStatus.DONE: "done",
     StepStatus.NOT_RELEVANT: "not_relevant",
     StepStatus.PLATFORM_LIMITED: "platform_limited",
+    StepStatus.SYSTEM_INCOMPATIBLE: "system_incompatible",
 }
 
 # Les six étapes chronologiques fixes du workflow à deux cartes (§4.4/§4.5),

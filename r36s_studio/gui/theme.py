@@ -44,6 +44,12 @@ STATUS_PLATFORM_LIMITED_BG = "#332310"
 STATUS_PLATFORM_LIMITED_FG = "#F0A94E"  # orange
 STATUS_NOT_RELEVANT_BG = "#18212A"
 STATUS_NOT_RELEVANT_FG = "#4C5D6B"
+# Distinct de PLATFORM_LIMITED (orange, limite de l'OS) : ici la raison est
+# la carte elle-même (un système qui ne gère pas cette étape du tout), pas
+# la plateforme -- teinte violette pour ne pas laisser croire que changer
+# d'OS résoudrait quoi que ce soit.
+STATUS_SYSTEM_INCOMPATIBLE_BG = "#241C33"
+STATUS_SYSTEM_INCOMPATIBLE_FG = "#B98CF0"  # violet
 
 DANGER_BG = "#2A1214"  # écran de confirmation (§5 point 4)
 DANGER_BORDER = "#5A2328"
@@ -198,6 +204,7 @@ QLabel[badgeKind="available"] {{ background-color: {STATUS_AVAILABLE_BG}; color:
 QLabel[badgeKind="done"] {{ background-color: {STATUS_DONE_BG}; color: {STATUS_DONE_FG}; }}
 QLabel[badgeKind="platform_limited"] {{ background-color: {STATUS_PLATFORM_LIMITED_BG}; color: {STATUS_PLATFORM_LIMITED_FG}; }}
 QLabel[badgeKind="not_relevant"] {{ background-color: {STATUS_NOT_RELEVANT_BG}; color: {STATUS_NOT_RELEVANT_FG}; }}
+QLabel[badgeKind="system_incompatible"] {{ background-color: {STATUS_SYSTEM_INCOMPATIBLE_BG}; color: {STATUS_SYSTEM_INCOMPATIBLE_FG}; }}
 
 QProgressBar {{
     background-color: {SURFACE};

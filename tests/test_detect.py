@@ -15,7 +15,10 @@ from r36s_studio.detect import (
     EXTRACT_EASYROMS,
     FLASH,
     INJECT_BOOT,
+    CardSystem,
     StepStatus,
+    detect_card_system,
+    detect_card_system_for_device,
     detect_workflow_status,
 )
 from r36s_studio.devices import Device
@@ -213,3 +216,103 @@ def test_copy_games_not_platform_limited_outside_macos(mock_list, mock_archives,
     status = detect_workflow_status(_make_device())
 
     assert status[COPY_GAMES] == StepStatus.AVAILABLE
+
+
+# --- CardSystem / detect_card_system : ArkOS vs ROCKNIX vs inconnu --------
+#
+# Structure ROCKNIX relevée sur du vrai matériel (§4.5) : schéma MBR, deux
+# partitions seulement -- première étiquetée ROCKNIX en FAT32 (~2,1 Go),
+# seconde Linux (~29,8 Go, opaque depuis macOS/Windows). Aucune partition
+# de jeux séparée.
+
+_ROCKNIX_PARTITIONS = [
+    PartitionInfo("/dev/fake-disk-test-3s1", "ROCKNIX", "fat32", "/Volumes/ROCKNIX"),
+    PartitionInfo("/dev/fake-disk-test-3s2", "", "ext4", None),
+]
+
+_ARKOS_PARTITIONS = [
+    PartitionInfo("/dev/fake-disk-test-3s1", "", "fat16", "/Volumes/NO NAME"),
+    PartitionInfo("/dev/fake-disk-test-3s2", "", "ext4", None),
+    PartitionInfo("/dev/fake-disk-test-3s3", "EASYROMS", "ntfs", "/Volumes/EASYROMS"),
+]
+
+
+def test_detect_card_system_recognizes_rocknix_by_boot_label():
+    assert detect_card_system(_ROCKNIX_PARTITIONS) == CardSystem.ROCKNIX
+
+
+def test_detect_card_system_label_check_is_case_insensitive():
+    partitions = [PartitionInfo("/dev/x1", "rocknix", "fat32", None)]
+
+    assert detect_card_system(partitions) == CardSystem.ROCKNIX
+
+
+def test_detect_card_system_recognizes_arkos():
+    assert detect_card_system(_ARKOS_PARTITIONS) == CardSystem.ARKOS
+
+
+def test_detect_card_system_unknown_for_blank_card():
+    assert detect_card_system([]) == CardSystem.UNKNOWN
+
+
+def test_detect_card_system_unknown_when_partitions_unreadable():
+    assert detect_card_system(None) == CardSystem.UNKNOWN
+
+
+def test_detect_card_system_unknown_for_unrecognized_structure():
+    partitions = [PartitionInfo("/dev/x1", "", "exfat", None)]
+
+    assert detect_card_system(partitions) == CardSystem.UNKNOWN
+
+
+@patch("r36s_studio.detect.list_partitions", return_value=_ROCKNIX_PARTITIONS)
+def test_detect_card_system_for_device_reads_the_device(mock_list):
+    assert detect_card_system_for_device(_make_device()) == CardSystem.ROCKNIX
+
+
+def test_detect_card_system_for_device_unknown_when_device_is_none():
+    assert detect_card_system_for_device(None) == CardSystem.UNKNOWN
+
+
+@patch("r36s_studio.detect.list_partitions", side_effect=OSError("carte débranchée"))
+def test_detect_card_system_for_device_unknown_on_read_error(mock_list):
+    assert detect_card_system_for_device(_make_device()) == CardSystem.UNKNOWN
+
+
+# --- detect_workflow_status : carte ROCKNIX -- A/B/D/E incompatibles ------
+#
+# Sur une carte ROCKNIX, seuls le flash et l'éjection ont du sens (le
+# module `detect` ne connaît pas la sauvegarde complète, hors des six
+# étapes lettrées, §4.6) -- les quatre autres étapes affichent un badge
+# visible expliquant pourquoi, plutôt qu'un `NOT_RELEVANT` sans badge.
+
+
+@patch("r36s_studio.detect.platform.system", return_value="Linux")
+@patch("r36s_studio.detect.list_partitions", return_value=_ROCKNIX_PARTITIONS)
+def test_rocknix_card_marks_boot_easyroms_inject_copy_as_system_incompatible(mock_list, mock_platform):
+    status = detect_workflow_status(_make_device())
+
+    assert status[EXTRACT_BOOT] == StepStatus.SYSTEM_INCOMPATIBLE
+    assert status[EXTRACT_EASYROMS] == StepStatus.SYSTEM_INCOMPATIBLE
+    assert status[INJECT_BOOT] == StepStatus.SYSTEM_INCOMPATIBLE
+    assert status[COPY_GAMES] == StepStatus.SYSTEM_INCOMPATIBLE
+
+
+@patch("r36s_studio.detect.platform.system", return_value="Linux")
+@patch("r36s_studio.detect.list_partitions", return_value=_ROCKNIX_PARTITIONS)
+def test_rocknix_card_flash_and_eject_remain_available(mock_list, mock_platform):
+    status = detect_workflow_status(_make_device())
+
+    assert status[FLASH] == StepStatus.AVAILABLE
+    assert status[EJECT] == StepStatus.AVAILABLE
+
+
+@patch("r36s_studio.detect.platform.system", return_value="Darwin")
+@patch("r36s_studio.detect.list_partitions", return_value=_ROCKNIX_PARTITIONS)
+def test_rocknix_card_copy_games_is_system_incompatible_even_on_macos(mock_list, mock_platform):
+    """La vraie raison est le système de la carte (pas de partition de
+    jeux séparée du tout), pas la limitation NTFS de macOS -- ne doit pas
+    régresser vers PLATFORM_LIMITED, moins précis ici."""
+    status = detect_workflow_status(_make_device())
+
+    assert status[COPY_GAMES] == StepStatus.SYSTEM_INCOMPATIBLE

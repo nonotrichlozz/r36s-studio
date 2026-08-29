@@ -51,6 +51,41 @@ class StepStatus(Enum):
     DONE = "done"  # déjà faite
     NOT_RELEVANT = "not_relevant"  # non pertinente pour la carte branchée
     PLATFORM_LIMITED = "platform_limited"  # possible en soi, mais bloqué par cet OS (badge « PC ou Linux »)
+    # Système présent sur la carte incompatible avec cette étape (badge visible,
+    # ex. « Non applicable — carte ROCKNIX »), distinct de NOT_RELEVANT (qui
+    # n'affiche pas de badge visible, §5) : ici l'utilisateur doit comprendre
+    # *pourquoi*, la raison ne changerait pas en branchant une autre carte du
+    # même système.
+    SYSTEM_INCOMPATIBLE = "system_incompatible"
+
+
+# Étiquette réelle observée sur une vraie partition de démarrage ROCKNIX
+# (§4.5, phase 8) : contrairement à ArkOS, dont la partition BOOT n'a
+# jamais d'étiquette (« NO NAME », voir partitions/locate.py), ROCKNIX
+# nomme la sienne explicitement -- un signal fort, sans avoir besoin de la
+# monter (règle de ce module : lecture seule stricte, jamais de montage).
+ROCKNIX_BOOT_LABEL = "ROCKNIX"
+
+
+class CardSystem(Enum):
+    """Système déjà présent sur la carte, à partir de ses partitions
+    seules (aucun montage, comme le reste de ce module) -- distinct du
+    `CardState` retiré plus haut dans l'historique de ce projet
+    (`NO_CARD`/`BLANK`/`ORIGINAL`/`ARKOS`/`UNKNOWN`) : celui-ci tentait de
+    résumer TOUTE la carte branchée en un état unique décidant d'UNE seule
+    action à mettre en avant sur l'accueil, ce qui ne correspondait pas au
+    vrai parcours à deux cartes et six étapes toujours visibles (§4.5).
+    `CardSystem` répond à une question plus étroite et complémentaire :
+    « quel système est déjà sur cette carte ? » -- pour adapter les
+    étapes qui n'ont de sens que pour un système donné (extraction/
+    injection du BOOT et d'EASYROMS, propres à ArkOS), sans jamais rien
+    masquer côté mode expert (toujours toutes les six étapes visibles,
+    juste annotées différemment) ni décider d'UNE action à la place de
+    l'utilisateur."""
+
+    ARKOS = "arkos"
+    ROCKNIX = "rocknix"
+    UNKNOWN = "unknown"
 
 
 def _list_partitions_safe(device: Optional[Device]) -> Optional[List[PartitionInfo]]:
@@ -65,6 +100,37 @@ def _list_partitions_safe(device: Optional[Device]) -> Optional[List[PartitionIn
         return None
 
 
+def detect_card_system(partitions: Optional[List[PartitionInfo]]) -> CardSystem:
+    """Système déjà présent sur la carte, à partir de `partitions` seules
+    (aucun montage). `partitions` à `None` (lecture impossible) ou vide
+    (carte vierge) retombe sur `UNKNOWN` — jamais une exception. ROCKNIX
+    reconnu par l'étiquette de sa partition de démarrage (`ROCKNIX_BOOT_
+    LABEL`, un signal fort et gratuit, sans montage) ; ArkOS par
+    `looks_like_arkos` (BOOT + EASYROMS identifiables par position/
+    système de fichiers, §4.4) — vérifié après ROCKNIX, dont la structure
+    réelle (MBR, 2 partitions seulement : ROCKNIX en FAT32 ~2,1 Go puis
+    une partition Linux ~29,8 Go, opaque depuis macOS/Windows, aucune
+    partition de jeux séparée) ne recouvre de toute façon jamais celle
+    d'ArkOS."""
+    if not partitions:
+        return CardSystem.UNKNOWN
+    if any(partition.label.upper() == ROCKNIX_BOOT_LABEL for partition in partitions):
+        return CardSystem.ROCKNIX
+    if looks_like_arkos(partitions):
+        return CardSystem.ARKOS
+    return CardSystem.UNKNOWN
+
+
+def detect_card_system_for_device(device: Optional[Device]) -> CardSystem:
+    """Symétrique de `detect_card_system`, à partir d'un `Device` plutôt
+    que d'une liste de partitions déjà lue — même robustesse que
+    `detect_workflow_status` (ne lève jamais). Utilisé par le mode
+    assisté (`gui/main_window.py`) pour adapter le parcours guidé à la
+    carte source détectée à l'étape 1, en plus de `detect_workflow_status`
+    (mode expert, six étapes, ci-dessous)."""
+    return detect_card_system(_list_partitions_safe(device))
+
+
 def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
     """Statut des six étapes du workflow (§4.5) pour la carte actuellement
     branchée (`device` à `None` si aucune carte, ou plusieurs candidates
@@ -74,11 +140,21 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
     main)."""
     partitions = _list_partitions_safe(device)
     has_card = device is not None
+    card_system = detect_card_system(partitions)
+    # ROCKNIX ne gère ni le BOOT ni l'EASYROMS à la façon d'ArkOS (§4.5,
+    # CardSystem) : les quatre étapes qui en dépendent sont incompatibles
+    # avec ce système, quel que soit le contenu détaillé des partitions --
+    # prioritaire sur le calcul habituel (can_boot/can_easyroms/is_arkos
+    # ci-dessous), qui resterait sinon trompeur (ex. la première partition
+    # ROCKNIX, en FAT32, passerait à tort le test structurel de BOOT).
+    is_rocknix = card_system == CardSystem.ROCKNIX
     can_boot = has_card and partitions is not None and has_boot_partition(partitions)
     can_easyroms = has_card and partitions is not None and has_easyroms_partition(partitions)
-    is_arkos = has_card and partitions is not None and looks_like_arkos(partitions)
+    is_arkos = card_system == CardSystem.ARKOS
 
     def _extraction_status(possible: bool, label: str) -> StepStatus:
+        if is_rocknix:
+            return StepStatus.SYSTEM_INCOMPATIBLE
         if not possible:
             return StepStatus.NOT_RELEVANT
         return StepStatus.DONE if archives.list_archives(label) else StepStatus.AVAILABLE
@@ -86,6 +162,8 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
     def _injection_status(possible: bool) -> StepStatus:
         # "déjà faite" n'a pas de signal fiable ici (rien à comparer sans
         # relire tout le contenu) -- seule la pertinence est indiquée.
+        if is_rocknix:
+            return StepStatus.SYSTEM_INCOMPATIBLE
         return StepStatus.AVAILABLE if possible else StepStatus.NOT_RELEVANT
 
     return {
@@ -97,15 +175,20 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
             else (StepStatus.DONE if is_arkos else StepStatus.AVAILABLE)
         ),
         INJECT_BOOT: _injection_status(is_arkos),
-        # EASYROMS est en NTFS sur une vraie carte R36S (§4.4) : macOS ne
-        # monte le NTFS qu'en lecture seule, donc cette étape échoue
-        # toujours sur cet OS, quelle que soit la carte branchée (ou même
-        # sans carte du tout) -- une limite de la plateforme, pas de la
-        # carte. Prioritaire sur `_injection_status` : contrairement à
-        # NOT_RELEVANT (qui dépend de la carte), ce statut ne changerait
-        # pas en branchant une autre carte.
+        # EASYROMS est en NTFS sur une vraie carte R36S ArkOS (§4.4) :
+        # macOS ne monte le NTFS qu'en lecture seule, donc cette étape
+        # échoue toujours sur cet OS pour une carte ArkOS -- une limite de
+        # la plateforme, pas de la carte. Vérifié après `is_rocknix` :
+        # une carte ROCKNIX n'a de toute façon aucune partition NTFS (sa
+        # seconde partition est Linux, opaque depuis tous les OS de bureau
+        # de la même façon) -- la vraie raison est alors le système de la
+        # carte, pas la plateforme, même sur macOS.
         COPY_GAMES: (
-            StepStatus.PLATFORM_LIMITED if platform.system() == "Darwin" else _injection_status(is_arkos)
+            StepStatus.SYSTEM_INCOMPATIBLE
+            if is_rocknix
+            else StepStatus.PLATFORM_LIMITED
+            if platform.system() == "Darwin"
+            else _injection_status(is_arkos)
         ),
         EJECT: StepStatus.AVAILABLE if has_card else StepStatus.NOT_RELEVANT,
     }
@@ -113,6 +196,10 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
 
 __all__ = [
     "StepStatus",
+    "CardSystem",
+    "ROCKNIX_BOOT_LABEL",
+    "detect_card_system",
+    "detect_card_system_for_device",
     "detect_workflow_status",
     "EXTRACT_BOOT",
     "EXTRACT_EASYROMS",

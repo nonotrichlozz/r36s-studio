@@ -20,7 +20,7 @@ from PySide6.QtCore import QTimer, Slot
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 
 from r36s_studio import config as app_config
-from r36s_studio.detect import detect_workflow_status
+from r36s_studio.detect import CardSystem, detect_card_system_for_device, detect_workflow_status
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL
@@ -140,6 +140,16 @@ class MainWindow(QMainWindow):
         self._wizard_poll_timer.timeout.connect(self._on_wizard_poll)
         self._wizard_source_device: Optional[Device] = None
         self._wizard_source_fingerprint: Optional[str] = None
+        # Système détecté sur la carte source à l'étape 1 (§4.5 CardSystem)
+        # -- adapte les étapes 2/3 (identification, extraction) : ROCKNIX
+        # les saute automatiquement (structure incompatible, expliquée
+        # dans le journal), un système non reconnu affiche un
+        # avertissement et laisse l'utilisateur choisir de continuer sans
+        # sauvegarde via le bouton Continuer habituel (`_wizard_skip_
+        # extraction_on_continue`) -- jamais un aller simple vers le mode
+        # expert, dans un cas comme dans l'autre.
+        self._wizard_source_system: CardSystem = CardSystem.UNKNOWN
+        self._wizard_skip_extraction_on_continue = False
         self._wizard_target_device: Optional[Device] = None
         self._wizard_boot_archive: Optional[str] = None
         self._wizard_easyroms_archive: Optional[str] = None
@@ -676,6 +686,8 @@ class MainWindow(QMainWindow):
         self._wizard_active = True
         self._wizard_source_device = None
         self._wizard_source_fingerprint = None
+        self._wizard_source_system = CardSystem.UNKNOWN
+        self._wizard_skip_extraction_on_continue = False
         self._wizard_target_device = None
         self._wizard_boot_archive = None
         self._wizard_easyroms_archive = None
@@ -711,20 +723,82 @@ class MainWindow(QMainWindow):
             self._wizard_panel.set_status(tr("wizard_status_waiting"))
             self._wizard_poll_timer.start()
         elif job == WizardJob.IDENTIFY:
-            self._run_wizard_identify()
+            self._enter_wizard_identify_step()
         elif job in (WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
             self._run_wizard_partition_job(job)
         elif job == WizardJob.FLASH:
             self._enter_wizard_flash()
         elif job == WizardJob.INJECT_BOOT:
-            self._run_wizard_partition_job(job)
+            self._enter_wizard_inject_boot_step()
         elif job == WizardJob.EJECT:
             self._run_wizard_eject()
+
+    def _enter_wizard_identify_step(self) -> None:
+        """Adapte l'étape 2 au système détecté sur la carte source à
+        l'étape 1 (§4.5 `CardSystem`) -- jamais un aller simple vers le
+        mode expert en cas de structure inattendue (§5) : toujours une
+        explication de ce qui a été trouvé et de ce que l'application
+        propose de faire.
+
+        - ArkOS : identification normale (`_run_wizard_identify`), le
+          parcours ne change pas.
+        - ROCKNIX : structure réelle relevée sur du vrai matériel --
+          schéma MBR, deux partitions seulement (ROCKNIX en FAT32,
+          ~2,1 Go, puis une partition Linux ~29,8 Go opaque depuis macOS/
+          Windows, aucune partition de jeux séparée). Ce système ne gère
+          ni l'écran ni les jeux à la façon d'ArkOS : les étapes 2/3
+          n'ont aucun sens ici, sautées automatiquement (cas certain,
+          pas d'ambiguïté) avec une explication dans le journal.
+        - Système non reconnu : contrairement au cas ROCKNIX, la
+          situation est ambiguë -- avertissement affiché, l'utilisateur
+          choisit lui-même de continuer sans sauvegarde via le bouton
+          Continuer habituel plutôt qu'un saut automatique."""
+        system = self._wizard_source_system
+        if system == CardSystem.ROCKNIX:
+            self._log_panel.append_log(tr("wizard_source_rocknix_detected"))
+            self._skip_boot_easyroms_extraction()
+            return
+        if system == CardSystem.UNKNOWN:
+            message = tr("wizard_source_unknown_warning")
+            self._log_panel.append_log(message)
+            self._wizard_panel.set_status(message)
+            self._wizard_skip_extraction_on_continue = True
+            self._wizard_panel.set_can_continue(True)
+            return
+        self._run_wizard_identify()
+
+    def _skip_boot_easyroms_extraction(self) -> None:
+        """Marque IDENTIFY/EXTRACT_BOOT/EXTRACT_EASYROMS faits sans les
+        exécuter, puis avance directement à l'étape 4 -- carte source
+        ROCKNIX (automatique) ou non reconnue (après confirmation de
+        l'utilisateur, `_wizard_skip_extraction_on_continue`)."""
+        for job in (WizardJob.IDENTIFY, WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
+            self._wizard_flow.mark_done(job)
+        self._enter_wizard_job(self._wizard_flow.current_job())
+
+    def _enter_wizard_inject_boot_step(self) -> None:
+        """Rien à réinjecter si l'extraction a été sautée ci-dessus (carte
+        source ROCKNIX ou non reconnue) -- cette étape n'a alors pas plus
+        de sens que les précédentes, sautée de la même façon plutôt que de
+        tenter un job sans source (§5)."""
+        if self._wizard_boot_archive is None:
+            self._log_panel.append_log(tr("wizard_inject_boot_skipped_no_archive"))
+            self._wizard_flow.mark_done(WizardJob.INJECT_BOOT)
+            self._enter_wizard_job(self._wizard_flow.current_job())
+            return
+        self._run_wizard_partition_job(WizardJob.INJECT_BOOT)
 
     def _on_wizard_continue(self) -> None:
         """Continuer ne concerne que les étapes qui l'activent elles-mêmes
         (détection de carte, identification) -- les jobs qui écrivent/
-        copient avancent d'eux-mêmes via `_on_wizard_job_finished`."""
+        copient avancent d'eux-mêmes via `_on_wizard_job_finished`. Cas
+        particulier : sur une carte source non reconnue, Continuer à
+        l'étape 2 signifie « continuer sans sauvegarde » plutôt que de
+        lancer l'identification (`_enter_wizard_identify_step` ci-dessus)."""
+        if self._wizard_skip_extraction_on_continue:
+            self._wizard_skip_extraction_on_continue = False
+            self._skip_boot_easyroms_extraction()
+            return
         job = self._wizard_flow.current_job()
         self._wizard_flow.mark_done(job)
         self._enter_wizard_job(self._wizard_flow.current_job())
@@ -839,6 +913,12 @@ class MainWindow(QMainWindow):
             self._wizard_poll_timer.stop()  # trouvé -> plus besoin de reinterroger
             self._wizard_source_device = candidate
             self._wizard_source_fingerprint = fingerprint
+            # Système présent sur la carte source (§4.5 CardSystem) --
+            # décide de la suite à l'étape 2 (`_enter_wizard_identify_step`) :
+            # lecture seule, jamais de montage (même garantie que le reste
+            # du module `detect`), donc rien à faire sur un thread séparé
+            # ici contrairement à l'empreinte ci-dessus.
+            self._wizard_source_system = detect_card_system_for_device(candidate)
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
             self._wizard_panel.set_can_continue(True)
         elif job == WizardJob.DETECT_TARGET:

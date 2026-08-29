@@ -163,6 +163,16 @@ def test_home_screen_status_sets_badge_text_and_kind(qapp):
         assert screen._badges[key].isVisible() is True
 
 
+def test_home_screen_status_shows_system_incompatible_badge_for_rocknix_card(qapp):
+    screen = HomeScreen()
+    screen.show()
+
+    screen.set_status({"extract_boot": StepStatus.SYSTEM_INCOMPATIBLE})
+
+    assert screen._badges["extract_boot"].text() == "Non applicable — carte ROCKNIX"
+    assert screen._badges["extract_boot"].property("badgeKind") == "system_incompatible"
+
+
 def test_home_screen_steps_appear_in_fixed_chronological_order(qapp):
     screen = HomeScreen()
 

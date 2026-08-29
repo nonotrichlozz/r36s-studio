@@ -29,6 +29,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QDialog,
     QFileDialog,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -891,26 +893,64 @@ class FileDialog(Dialog):
     BOOT/EASYROMS (§4.4, étapes A/B — un emplacement par défaut est
     proposé, jamais imposé), ou — pour l'injection sur la carte neuve
     (étapes D/E) — une sauvegarde parmi celles déjà extraites, avec un
-    repli « Parcourir… » pour une source manuelle."""
+    repli « Parcourir… » pour une source manuelle.
+
+    Pour le flash uniquement (étape C/5) : choix du firmware (ArkOS/dArkOS
+    ou ROCKNIX, §5) au-dessus du reste -- ArkOS garde le comportement
+    d'origine (bouton ouvrant la page des releases, images sur Mega/Google
+    Drive/OneDrive/torrent, jamais hébergées sur GitHub) ; ROCKNIX, dont
+    les images sont attachées directement aux releases GitHub, propose à
+    la place un téléchargement automatique (`rocknix_download_requested`,
+    `identify/rocknix.py`)."""
 
     file_chosen = Signal(str)
     releases_requested = Signal()
+    rocknix_download_requested = Signal()
+    firmware_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._mode = "backup"
+        self._firmware = "arkos"
 
         layout = QVBoxLayout(self)
         self._title = QLabel()
         self._title.setProperty("role", "title")
         layout.addWidget(self._title)
 
-        # Flash uniquement (§5 mode assisté, étape 5) -- l'image n'est pas
-        # hébergée sur GitHub (Mega/Google Drive/OneDrive/torrent), donc
-        # rien à automatiser au-delà de l'ouverture de cette page.
+        # Choix du firmware, flash uniquement (§5, étape de flash) --
+        # description courte sous chaque option plutôt qu'une info-bulle,
+        # pour rester visible sans interaction (§5 vocabulaire : pas de
+        # jargon, une phrase compréhensible par un néophyte).
+        self._arkos_radio = QRadioButton(tr("file_firmware_arkos_title"))
+        self._arkos_desc = QLabel(tr("file_firmware_arkos_desc"))
+        self._arkos_desc.setWordWrap(True)
+        self._arkos_desc.setProperty("role", "secondary")
+        self._rocknix_radio = QRadioButton(tr("file_firmware_rocknix_title"))
+        self._rocknix_desc = QLabel(tr("file_firmware_rocknix_desc"))
+        self._rocknix_desc.setWordWrap(True)
+        self._rocknix_desc.setProperty("role", "secondary")
+        self._firmware_group = QButtonGroup(self)
+        self._firmware_group.addButton(self._arkos_radio)
+        self._firmware_group.addButton(self._rocknix_radio)
+        self._arkos_radio.toggled.connect(self._on_firmware_toggled)
+        self._rocknix_radio.toggled.connect(self._on_firmware_toggled)
+        for widget in (self._arkos_radio, self._arkos_desc, self._rocknix_radio, self._rocknix_desc):
+            layout.addWidget(widget)
+
+        # ArkOS (§5 mode assisté, étape 5) -- l'image n'est pas hébergée
+        # sur GitHub (Mega/Google Drive/OneDrive/torrent), donc rien à
+        # automatiser au-delà de l'ouverture de cette page.
         self._releases_button = QPushButton(tr("file_releases_button"))
         self._releases_button.clicked.connect(self.releases_requested.emit)
         layout.addWidget(self._releases_button)
+
+        # ROCKNIX -- images attachées directement aux releases GitHub
+        # (identify/rocknix.py) : téléchargement automatique possible,
+        # contrairement à ArkOS ci-dessus.
+        self._rocknix_download_button = QPushButton(tr("file_rocknix_download_button"))
+        self._rocknix_download_button.clicked.connect(self.rocknix_download_requested.emit)
+        layout.addWidget(self._rocknix_download_button)
 
         self._archive_list = QListWidget()
         self._archive_list.setSelectionMode(QListWidget.SingleSelection)
@@ -949,20 +989,39 @@ class FileDialog(Dialog):
         self.resize(480, 420)
 
     def set_mode(
-        self, mode: str, archive_choices: Optional[List] = None, default_path: Optional[str] = None
+        self,
+        mode: str,
+        archive_choices: Optional[List] = None,
+        default_path: Optional[str] = None,
+        firmware: Optional[str] = None,
     ) -> None:
         """`mode` : "backup" (choisir où enregistrer), "flash" (choisir
         l'image source), "extract_boot"/"extract_easyroms" (choisir un
         dossier de destination — `default_path` le pré-remplit, toujours
         remplaçable via Parcourir), ou "inject_boot"/"copy_games" (choisir
         une sauvegarde parmi `archive_choices`, ou en désigner une autre
-        via Parcourir)."""
+        via Parcourir). `firmware` ("arkos" ou "rocknix", ignoré hors
+        flash) initialise le choix depuis la configuration persistée
+        (`config.py`) plutôt que de toujours repartir sur ArkOS."""
         self._mode = mode
         self._title.setText(tr(_FILE_TITLE_KEYS[mode]))
         self.setWindowTitle(tr(_FILE_TITLE_KEYS[mode]))
         self._path_label.setText(default_path or "")
         self._next_button.setEnabled(bool(default_path))
-        self._releases_button.setVisible(mode == "flash")
+
+        is_flash = mode == "flash"
+        for widget in (self._arkos_radio, self._arkos_desc, self._rocknix_radio, self._rocknix_desc):
+            widget.setVisible(is_flash)
+        if is_flash:
+            self._firmware = firmware or "arkos"
+            radio = self._rocknix_radio if self._firmware == "rocknix" else self._arkos_radio
+            radio.blockSignals(True)
+            radio.setChecked(True)
+            radio.blockSignals(False)
+            self._update_firmware_buttons_visibility()
+        else:
+            self._releases_button.setVisible(False)
+            self._rocknix_download_button.setVisible(False)
 
         is_archive_mode = mode in _ARCHIVE_MODES
         self._archive_list.clear()
@@ -974,6 +1033,17 @@ class FileDialog(Dialog):
         self._archive_list.setVisible(is_archive_mode)
         self._archive_empty_label.setVisible(is_archive_mode and not archive_choices)
         self._destination_hint_label.setVisible(mode in _DESTINATION_MODES)
+
+    def _update_firmware_buttons_visibility(self) -> None:
+        self._releases_button.setVisible(self._mode == "flash" and self._firmware == "arkos")
+        self._rocknix_download_button.setVisible(self._mode == "flash" and self._firmware == "rocknix")
+
+    def _on_firmware_toggled(self, checked: bool) -> None:
+        if not checked:
+            return
+        self._firmware = "rocknix" if self._rocknix_radio.isChecked() else "arkos"
+        self._update_firmware_buttons_visibility()
+        self.firmware_changed.emit(self._firmware)
 
     def _on_archive_selected(self) -> None:
         items = self._archive_list.selectedItems()

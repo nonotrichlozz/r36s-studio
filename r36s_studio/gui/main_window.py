@@ -29,7 +29,7 @@ from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card
 
-from .partition_runner import PartitionJobRunner, WizardFingerprintRunner, WizardIdentifyRunner
+from .partition_runner import PartitionJobRunner, RocknixDownloadRunner, WizardFingerprintRunner, WizardIdentifyRunner
 from .reveal import reveal
 from .screens import (
     AssistedLandingScreen,
@@ -197,6 +197,8 @@ class MainWindow(QMainWindow):
 
         self._file_dialog.file_chosen.connect(self._on_file_chosen)
         self._file_dialog.releases_requested.connect(self._on_releases_requested)
+        self._file_dialog.firmware_changed.connect(self._on_firmware_changed)
+        self._file_dialog.rocknix_download_requested.connect(self._on_rocknix_download_requested)
 
         self._confirm_dialog.confirmed.connect(self._on_confirmed)
 
@@ -308,7 +310,11 @@ class MainWindow(QMainWindow):
             # Étapes D/E : proposer les sauvegardes déjà extraites plutôt
             # que de redemander un dossier à chaque fois.
             archive_choices = archives.list_archives(_ARCHIVE_LABEL_BY_MODE[self._mode])
-        self._file_dialog.set_mode(self._mode, archive_choices=archive_choices)
+        # Flash uniquement : initialise le choix du firmware depuis la
+        # configuration persistée (`config.py`) plutôt que de toujours
+        # reproposer ArkOS par défaut.
+        firmware = self._app_config.firmware if self._mode == "flash" else None
+        self._file_dialog.set_mode(self._mode, archive_choices=archive_choices, firmware=firmware)
         self._file_dialog.open()
 
     # --- fichier choisi -> fenêtre Confirmation (flash) ou opération --------
@@ -483,6 +489,53 @@ class MainWindow(QMainWindow):
             webbrowser.open(DARKOS_R36S_RELEASES_URL)
         except Exception as exc:
             QMessageBox.warning(self, tr("app_title"), str(exc))
+
+    def _on_firmware_changed(self, firmware: str) -> None:
+        """Choix ArkOS/ROCKNIX (`FileDialog`, flash uniquement, §5) --
+        mémorisé comme `ui_mode` (`config.py`), pour ne pas reproposer
+        ArkOS par défaut au prochain flash."""
+        self._app_config.firmware = firmware
+        app_config.save_config(self._app_config)
+
+    def _on_rocknix_download_requested(self) -> None:
+        """Bouton « Télécharger la dernière version » de `FileDialog`
+        (flash, firmware ROCKNIX uniquement) -- contrairement à dArkOS
+        (`_on_releases_requested` ci-dessus), les images ROCKNIX sont
+        attachées directement aux releases GitHub (`identify/rocknix.py`) :
+        téléchargées ici avec progression réelle dans le journal de bord,
+        comme n'importe quelle autre opération longue (§5)."""
+        self._file_dialog.close()
+        self._log_panel.start_operation(tr("execute_title_download_rocknix"))
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        if self._console_stage is not None:
+            self._console_stage.pause()
+        self._last_error_code = None
+        self._last_error_msg = None
+        self._runner = RocknixDownloadRunner(parent=self)
+        self._runner.progress.connect(self._on_progress)
+        self._runner.error.connect(self._on_worker_error)
+        self._runner.finished_download.connect(self._on_rocknix_download_finished)
+        self._runner.start()
+
+    @Slot(bool, str)
+    def _on_rocknix_download_finished(self, ok: bool, path: str) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        if self._console_stage is not None:
+            self._console_stage.resume()
+        if not ok:
+            friendly = friendly_error_message(self._last_error_code or "")
+            self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
+            return
+        # Pas d'éjection proposée ici (`allow_eject=False`) : le
+        # téléchargement n'a encore rien écrit sur la carte -- seule la
+        # fenêtre Confirmation qui suit, puis le flash lui-même,
+        # écriront réellement (règle §2 n°6).
+        self._log_panel.finish_success(tr("rocknix_download_success", path=path), allow_eject=False, reveal_path=path)
+        self._file_path = path
+        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.open()
 
     # --- fenêtre Aide (macOS uniquement, §3) --------------------------------
 
@@ -796,13 +849,12 @@ class MainWindow(QMainWindow):
         self._wizard_flow.mark_done(job)
         self._enter_wizard_job(self._wizard_flow.current_job())
 
-    # --- étape 5 : flash -- fenêtre Fichier classique, en attendant le -------
-    # --- téléchargement guidé (module identify/releases, URL en attente) ----
+    # --- étape 5 : flash -- choix ArkOS/ROCKNIX, §5 --------------------------
 
     def _enter_wizard_flash(self) -> None:
         self._mode = "flash"
         self._device = self._wizard_target_device
-        self._file_dialog.set_mode("flash")
+        self._file_dialog.set_mode("flash", firmware=self._app_config.firmware)
         self._file_dialog.open()
 
     # --- étape 7 : éjection, synchrone comme _perform_eject ------------------

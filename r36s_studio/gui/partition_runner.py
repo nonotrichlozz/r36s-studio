@@ -12,12 +12,22 @@ privilège à franchir : on les appelle directement, dans ce process, sur un
 from __future__ import annotations
 
 import subprocess
+import time
 
 from PySide6.QtCore import QThread, Signal
 
 from r36s_studio.devices import Device
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, identify_from_boot_directory
-from r36s_studio.imaging.copy import OperationCancelled, ProgressEvent
+from r36s_studio.identify.rocknix import (
+    ChecksumMismatchError,
+    DownloadCancelledError,
+    RocknixAssetNotFoundError,
+    RocknixReleaseError,
+    default_firmware_downloads_dir,
+    download_asset,
+    resolve_latest_r36s_asset,
+)
+from r36s_studio.imaging.copy import PROGRESS_INTERVAL, OperationCancelled, ProgressEvent
 from r36s_studio.partitions import (
     BOOT_LABEL,
     MacosNtfsWriteUnsupported,
@@ -161,3 +171,80 @@ class WizardFingerprintRunner(QThread):
 
     def run(self) -> None:
         self.finished_fingerprint.emit(compute_boot_fingerprint(self._device_path))
+
+
+class RocknixDownloadRunner(QThread):
+    """Téléchargement automatique du firmware ROCKNIX (§5, étape de flash)
+    -- contrairement à dArkOS, dont le bouton se contente d'ouvrir la page
+    des releases dans le navigateur (`identify/releases.py`, images sur
+    Mega/Google Drive/OneDrive), ROCKNIX publie ses images directement en
+    assets GitHub (`identify/rocknix.py`) : ce runner interroge l'API,
+    télécharge l'image RK3326 avec progression réelle, et vérifie sa
+    somme de contrôle quand le dépôt en publie une. Sur un thread séparé
+    comme les autres runners de ce module -- un téléchargement dure
+    largement plus qu'un aller-retour réseau instantané, et bloquerait le
+    thread Qt principal comme le montage d'une partition (§4.4)."""
+
+    # Mêmes types Qt que `PartitionJobRunner`/`WorkerRunner` -- voir la
+    # note équivalente sur le débordement d'un `int` 32 bits au-delà de
+    # ~2 Go.
+    progress = Signal("qint64", "qint64", float)  # done, total, speed
+    error = Signal(str, str)  # code, msg
+    finished_download = Signal(bool, str)  # ok, chemin téléchargé ("" si échec)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Coopératif, comme `PartitionJobRunner.cancel()` : consulté par
+        `download_asset` avant chaque bloc -- le bouton Annuler du journal
+        de bord (§5) reste actif pendant un téléchargement, pas seulement
+        pendant une écriture disque."""
+        self._cancelled = True
+
+    def run(self) -> None:
+        start = time.monotonic()
+        last_emit = start
+
+        def on_progress(done: int, total: int) -> None:
+            nonlocal last_emit
+            now = time.monotonic()
+            # Même limitation qu'`imaging/copy.py::copy_range` (règle §2
+            # n°5) -- mais toujours le dernier événement, `done == total`,
+            # pour que la barre de progression finisse bien à 100 %.
+            if now - last_emit < PROGRESS_INTERVAL and done != total:
+                return
+            last_emit = now
+            elapsed = now - start
+            speed = done / elapsed if elapsed > 0 else 0.0
+            self.progress.emit(done, total, speed)
+
+        try:
+            asset, expected_sha256 = resolve_latest_r36s_asset()
+            destination = default_firmware_downloads_dir() / asset.name
+            download_asset(
+                asset,
+                destination,
+                expected_sha256=expected_sha256,
+                on_progress=on_progress,
+                should_cancel=lambda: self._cancelled,
+            )
+        except DownloadCancelledError as exc:
+            self.error.emit("CANCELLED", str(exc))
+            self.finished_download.emit(False, "")
+            return
+        except RocknixAssetNotFoundError as exc:
+            self.error.emit("ROCKNIX_ASSET_NOT_FOUND", str(exc))
+            self.finished_download.emit(False, "")
+            return
+        except ChecksumMismatchError as exc:
+            self.error.emit("ROCKNIX_CHECKSUM_MISMATCH", str(exc))
+            self.finished_download.emit(False, "")
+            return
+        except RocknixReleaseError as exc:
+            self.error.emit("ROCKNIX_DOWNLOAD_FAILED", str(exc))
+            self.finished_download.emit(False, "")
+            return
+
+        self.finished_download.emit(True, str(destination))

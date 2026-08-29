@@ -261,6 +261,23 @@ def test_download_asset_raises_and_removes_file_on_checksum_mismatch(tmp_path):
     assert not destination.exists()
 
 
+def test_download_asset_raises_and_removes_file_when_cancelled(tmp_path):
+    content = b"x" * (rocknix.BLOCK_SIZE + 10)
+    asset = rocknix.RocknixAsset(name="image.img.gz", download_url="https://example.invalid/image", size_bytes=len(content))
+    opener = MagicMock(return_value=_FakeResponse(content))
+    destination = tmp_path / "image.img.gz"
+    calls = {"n": 0}
+
+    def should_cancel():
+        calls["n"] += 1
+        return calls["n"] > 1  # laisse passer un bloc, annule avant le suivant
+
+    with pytest.raises(rocknix.DownloadCancelledError):
+        rocknix.download_asset(asset, destination, opener=opener, should_cancel=should_cancel)
+
+    assert not destination.exists()
+
+
 def test_download_asset_wraps_network_error_and_removes_partial_file(tmp_path):
     asset = rocknix.RocknixAsset(name="image.img.gz", download_url="https://example.invalid/image", size_bytes=100)
     destination = tmp_path / "image.img.gz"

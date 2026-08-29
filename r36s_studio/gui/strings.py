@@ -108,6 +108,16 @@ STRINGS = {
     # -- l'image n'est pas hébergée sur GitHub (Mega, Google Drive,
     # OneDrive, torrent), seul le lien vers la page des releases est ouvert.
     "file_releases_button": "Voir les versions disponibles en ligne",
+    # Choix du firmware, flash uniquement (§5, étape de flash) -- ArkOS
+    # garde le comportement d'origine (page ouverte dans le navigateur,
+    # file_releases_button ci-dessus) ; ROCKNIX, dont les images sont
+    # attachées directement aux releases GitHub, propose un téléchargement
+    # automatique (file_rocknix_download_button, identify/rocknix.py).
+    "file_firmware_arkos_title": "ArkOS / dArkOS",
+    "file_firmware_arkos_desc": "La configuration classique, la plus répandue sur R36S.",
+    "file_firmware_rocknix_title": "ROCKNIX",
+    "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
+    "file_rocknix_download_button": "Télécharger la dernière version",
     # Choix du périphérique
     "device_title": "Choisis ta carte SD",
     "device_refresh": "Rafraîchir",
@@ -142,6 +152,8 @@ STRINGS = {
     "execute_title_extract_easyroms": "Copie des jeux en cours…",
     "execute_title_inject_boot": "Remise en place de l'écran d'origine…",
     "execute_title_copy_games": "Copie des jeux en cours…",
+    "execute_title_download_rocknix": "Téléchargement de ROCKNIX en cours…",
+    "rocknix_download_success": "La dernière version de ROCKNIX a été téléchargée : {path}",
     "execute_cancel": "Annuler",
     "execute_speed": "{speed:.1f} Mo/s",
     "execute_eta": "Temps restant estimé : {eta}",
@@ -212,6 +224,17 @@ STRINGS = {
         "Ton Mac bloque l'accès à ce fichier car il se trouve dans un dossier protégé "
         "(Téléchargements, Bureau ou Documents). Déplace-le ailleurs, puis réessaie."
     ),
+    # Téléchargement automatique ROCKNIX (§5, étape de flash, identify/rocknix.py).
+    "error_rocknix_asset_not_found": (
+        "Impossible de trouver la version ROCKNIX pour ta console en ligne. "
+        "Réessaie plus tard, ou choisis un fichier déjà téléchargé."
+    ),
+    "error_rocknix_checksum_mismatch": (
+        "Le fichier téléchargé est corrompu ou incomplet. Réessaie."
+    ),
+    "error_rocknix_download_failed": (
+        "Le téléchargement a échoué. Vérifie ta connexion internet, puis réessaie."
+    ),
     "error_generic": "Une erreur est survenue.",
 }
 
@@ -237,6 +260,9 @@ _ERROR_MESSAGE_KEYS = {
     "EJECT_FAILED": "error_eject_failed",
     "MACOS_TCC_BLOCKED": "error_macos_tcc_blocked",
     "MACOS_TCC_PROTECTED_FOLDER": "error_macos_tcc_protected_folder",
+    "ROCKNIX_ASSET_NOT_FOUND": "error_rocknix_asset_not_found",
+    "ROCKNIX_CHECKSUM_MISMATCH": "error_rocknix_checksum_mismatch",
+    "ROCKNIX_DOWNLOAD_FAILED": "error_rocknix_download_failed",
 }
 
 

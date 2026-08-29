@@ -1670,3 +1670,121 @@ def test_releases_button_opens_darkos_r36s_releases_url(mock_list, mock_filter, 
     window._file_dialog.releases_requested.emit()
 
     mock_open.assert_called_once_with(DARKOS_R36S_RELEASES_URL)
+
+
+# --- choix du firmware (ArkOS/ROCKNIX) à l'étape de flash (§5) -------------
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_entering_flash_mode_initializes_file_dialog_firmware_from_config(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+    device = _make_device()
+    window._device = device
+    window._mode = "flash"
+
+    window._on_device_chosen(device)
+
+    assert window._file_dialog._firmware == "arkos"
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_choosing_rocknix_persists_firmware_to_config(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+
+    window._file_dialog.firmware_changed.emit("rocknix")
+
+    assert window._app_config.firmware == "rocknix"
+    mock_save.assert_called_once()
+    assert mock_save.call_args[0][0].firmware == "rocknix"
+
+
+# --- téléchargement automatique ROCKNIX (§5, étape de flash) ---------------
+#
+# `RocknixDownloadRunner` (partition_runner.py) est mocké ici -- aucun accès
+# réseau réel, même principe que `PartitionJobRunner`/`WorkerRunner` mockés
+# ailleurs dans ce fichier.
+
+
+def _mock_rocknix_runner_class():
+    instances = []
+
+    def _factory(parent=None):
+        instance = MagicMock()
+        instances.append(instance)
+        return instance
+
+    factory = MagicMock(side_effect=_factory)
+    factory.instances = instances
+    return factory
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_rocknix_download_requested_starts_runner_and_marks_busy(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window._device = _make_device()
+    window._mode = "flash"
+    runner_class = _mock_rocknix_runner_class()
+
+    with patch("r36s_studio.gui.main_window.RocknixDownloadRunner", runner_class):
+        window._file_dialog.rocknix_download_requested.emit()
+
+    runner_class.assert_called_once_with(parent=window)
+    assert window._home._tiles["flash"].isEnabled() is False  # occupé pendant le téléchargement
+    runner_class.instances[0].start.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_rocknix_download_success_opens_confirm_dialog_with_downloaded_path(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+    device = _make_device()
+    window._device = device
+    window._mode = "flash"
+    runner_class = _mock_rocknix_runner_class()
+
+    with patch("r36s_studio.gui.main_window.RocknixDownloadRunner", runner_class):
+        window._file_dialog.rocknix_download_requested.emit()
+
+    window._on_rocknix_download_finished(True, "/tmp/ROCKNIX-RK3326.img.gz")
+
+    assert window._file_path == "/tmp/ROCKNIX-RK3326.img.gz"
+    assert window._confirm_dialog.isVisible() is True
+    assert window._home._tiles["flash"].isEnabled() is True  # plus occupé, la fenêtre Confirmation prend le relais
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_rocknix_download_failure_shows_friendly_message_in_log_panel(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+    window._device = _make_device()
+    window._mode = "flash"
+    runner_class = _mock_rocknix_runner_class()
+
+    with patch("r36s_studio.gui.main_window.RocknixDownloadRunner", runner_class):
+        window._file_dialog.rocknix_download_requested.emit()
+
+    window._on_worker_error("ROCKNIX_ASSET_NOT_FOUND", "détail technique")
+    window._on_rocknix_download_finished(False, "")
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "trouver la version ROCKNIX" in log_text
+    assert window._confirm_dialog.isVisible() is False

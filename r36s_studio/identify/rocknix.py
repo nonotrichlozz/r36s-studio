@@ -58,6 +58,12 @@ class ChecksumMismatchError(RocknixReleaseError):
     jamais un résultat silencieusement invalide)."""
 
 
+class DownloadCancelledError(RocknixReleaseError):
+    """Levée par `download_asset` quand `should_cancel` répond True --
+    bouton Annuler du journal de bord (§5) pendant un téléchargement.
+    Fichier partiel supprimé, même principe que `ChecksumMismatchError`."""
+
+
 @dataclass
 class RocknixAsset:
     name: str
@@ -184,6 +190,9 @@ def resolve_latest_r36s_asset(opener: Opener = _default_opener) -> Tuple[Rocknix
 ProgressCallback = Callable[[int, int], None]
 
 
+CancelCheck = Callable[[], bool]
+
+
 def download_asset(
     asset: RocknixAsset,
     destination: Path,
@@ -192,11 +201,15 @@ def download_asset(
     on_progress: Optional[ProgressCallback] = None,
     opener: Opener = _default_opener,
     block_size: int = BLOCK_SIZE,
+    should_cancel: Optional[CancelCheck] = None,
 ) -> None:
     """Télécharge `asset` vers `destination`, par blocs (même principe que
     `imaging/copy.py`), en calculant la somme sha256 au fil de l'eau.
     Lève `ChecksumMismatchError` (fichier partiel supprimé) si
-    `expected_sha256` est fourni et ne correspond pas."""
+    `expected_sha256` est fourni et ne correspond pas, ou
+    `DownloadCancelledError` (même sort) si `should_cancel` répond True
+    avant la fin -- consulté avant chaque bloc, comme
+    `imaging/copy.py::copy_range`."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256()
     done = 0
@@ -205,6 +218,9 @@ def download_asset(
     try:
         with opener(asset.download_url) as response, open(destination, "wb") as out:
             while True:
+                if should_cancel is not None and should_cancel():
+                    destination.unlink(missing_ok=True)
+                    raise DownloadCancelledError(f"Téléchargement annulé après {done} octets.")
                 chunk = response.read(block_size)
                 if not chunk:
                     break
@@ -241,6 +257,7 @@ __all__ = [
     "RocknixReleaseError",
     "RocknixAssetNotFoundError",
     "ChecksumMismatchError",
+    "DownloadCancelledError",
     "select_r36s_asset",
     "find_checksum_asset",
     "parse_checksum",

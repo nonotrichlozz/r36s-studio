@@ -1080,6 +1080,95 @@ def test_file_dialog_releases_button_emits_signal(qapp):
     assert received == [True]
 
 
+# --- FileDialog : choix du firmware, flash uniquement (ArkOS/ROCKNIX) -----
+
+
+def test_file_dialog_firmware_choice_hidden_outside_flash_mode(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("backup")
+
+    assert dialog._arkos_radio.isVisible() is False
+    assert dialog._rocknix_radio.isVisible() is False
+
+
+def test_file_dialog_defaults_to_arkos_when_no_firmware_given(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash")
+
+    assert dialog._arkos_radio.isChecked() is True
+    assert dialog._releases_button.isVisible() is True
+    assert dialog._rocknix_download_button.isVisible() is False
+
+
+def test_file_dialog_set_mode_initializes_firmware_from_config(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash", firmware="rocknix")
+
+    assert dialog._rocknix_radio.isChecked() is True
+    assert dialog._releases_button.isVisible() is False
+    assert dialog._rocknix_download_button.isVisible() is True
+
+
+def test_file_dialog_selecting_rocknix_swaps_buttons_and_emits_firmware_changed(qapp):
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("flash")
+    received = []
+    dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
+
+    dialog._rocknix_radio.setChecked(True)
+
+    assert received == ["rocknix"]
+    assert dialog._rocknix_download_button.isVisible() is True
+    assert dialog._releases_button.isVisible() is False
+
+
+def test_file_dialog_selecting_arkos_back_swaps_buttons_and_emits_firmware_changed(qapp):
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("flash", firmware="rocknix")
+    received = []
+    dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
+
+    dialog._arkos_radio.setChecked(True)
+
+    assert received == ["arkos"]
+    assert dialog._releases_button.isVisible() is True
+    assert dialog._rocknix_download_button.isVisible() is False
+
+
+def test_file_dialog_rocknix_download_button_emits_signal(qapp):
+    dialog = FileDialog()
+    dialog.set_mode("flash", firmware="rocknix")
+    received = []
+    dialog.rocknix_download_requested.connect(lambda: received.append(True))
+
+    dialog._rocknix_download_button.click()
+
+    assert received == [True]
+
+
+def test_file_dialog_set_mode_does_not_emit_firmware_changed_on_its_own(qapp):
+    """Réinitialiser le mode reflète la configuration existante, ce n'est
+    pas un choix de l'utilisateur -- `main_window.py` ne doit persister
+    `firmware` que sur une vraie interaction (§5)."""
+    dialog = FileDialog()
+    dialog.show()
+    received = []
+    dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
+
+    dialog.set_mode("flash", firmware="rocknix")
+    dialog.set_mode("flash", firmware="arkos")
+
+    assert received == []
+
+
 # --- FileDialog : liste des archives existantes (étapes D/E, §4.4) --------
 
 

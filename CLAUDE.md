@@ -1339,6 +1339,37 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > jamais prise pour la carte d'origine — l'étape 4 refuse explicitement
 > de continuer tant que la carte détectée a la même empreinte que celle
 > de l'étape 1.
+
+> ⚠️ **Bug corrigé, signalé par un utilisateur : à l'étape 4, la consigne
+> de retirer la carte source s'affichait alors qu'elle était encore
+> montée** — la retirer ainsi risque de corrompre des données et
+> déclenche un avertissement système. La carte reste nécessairement
+> montée pendant les étapes 2 et 3 (lecture des `.dtb`, copie du BOOT et
+> d'EASYROMS s'y font depuis cette même carte) ; rien ne la démontait
+> ensuite avant d'inviter à la retirer.
+>
+> **Corrigé** : `MainWindow._enter_wizard_job` traite désormais
+> `WizardJob.DETECT_TARGET` à part, via `_run_wizard_source_eject` —
+> appelée en tout début de l'étape 4, avant même d'afficher sa consigne
+> d'insertion, jamais avant (la carte source doit rester exploitable
+> pendant les étapes 2/3, `test_source_card_stays_mounted_during_
+> identify_step`/`..._during_extraction_steps` le garantissent). Réutilise
+> `partitions/eject.py::eject` (même fonction que l'étape F, §4.4) pour
+> démonter toutes les partitions puis éjecter, avant de confirmer dans le
+> journal de bord *« Tu peux maintenant retirer ta carte d'origine en
+> toute sécurité »* — seulement ensuite la consigne d'insertion de la
+> carte neuve s'affiche et le sondage de détection démarre
+> (`_wizard_poll_timer.start()`), pour ne jamais risquer de détecter la
+> carte source comme si c'était la neuve pendant qu'elle est encore en
+> cours d'éjection.
+>
+> Un échec (volume occupé, partition verrouillée) affiche le message
+> explicite existant (`EJECT_FAILED`, déjà utilisé par l'étape F) plutôt
+> que de laisser deviner si le retrait est sûr, et bascule le panneau en
+> `show_error()` — ce qui fournit gratuitement le bouton Reprendre déjà
+> utilisé pour les autres échecs du parcours (§5) : le job DETECT_TARGET
+> n'est jamais marqué fait sur un échec d'éjection, donc Reprendre relance
+> exactement la même éjection plutôt qu'un nouveau mécanisme dédié.
 >
 > **Étape 2 (identification)** : `identify.identify_from_boot_directory`
 > (scanne les `.dtb` d'un dossier — mountpoint BOOT ici, ou une archive

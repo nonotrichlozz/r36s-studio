@@ -766,8 +766,17 @@ class MainWindow(QMainWindow):
             self._finish_wizard()
             return
 
+        if job == WizardJob.DETECT_TARGET:
+            # La carte source reste montée pendant les étapes 2/3 (lecture
+            # des .dtb, copie BOOT/EASYROMS -- c'est de là qu'elles sont
+            # lues) : ce n'est qu'en tout début de l'étape 4 qu'elle n'a
+            # plus d'usage et doit être éjectée, avant même d'inviter à la
+            # retirer (`_run_wizard_source_eject`).
+            self._run_wizard_source_eject()
+            return
+
         title_key, instruction_key = _WIZARD_STEP_STRINGS[job]
-        is_detect_step = job in (WizardJob.DETECT_SOURCE, WizardJob.DETECT_TARGET)
+        is_detect_step = job == WizardJob.DETECT_SOURCE
         self._wizard_panel.show_step(
             tr(title_key), tr(instruction_key), can_continue=False, show_refresh=is_detect_step
         )
@@ -785,6 +794,34 @@ class MainWindow(QMainWindow):
             self._enter_wizard_inject_boot_step()
         elif job == WizardJob.EJECT:
             self._run_wizard_eject()
+
+    def _run_wizard_source_eject(self) -> None:
+        """Démonte et éjecte la carte source avant d'afficher la consigne
+        d'insertion de la carte neuve (étape 4) -- la retirer alors
+        qu'elle est encore montée risquerait de corrompre des données et
+        déclenche un avertissement système. Le job DETECT_TARGET n'est
+        jamais marqué fait ici : un échec (volume occupé, partition
+        verrouillée) laisse `current_job()` sur DETECT_TARGET, donc
+        Reprendre (`_resume_wizard`) relance cette même éjection plutôt
+        que de laisser l'utilisateur retirer la carte sans savoir si
+        c'est sûr. Le sondage de la carte neuve (`_wizard_poll_timer`) ne
+        démarre qu'une fois l'éjection effectivement réussie, pour ne
+        jamais détecter la carte source comme si c'était la neuve."""
+        title_key, instruction_key = _WIZARD_STEP_STRINGS[WizardJob.DETECT_TARGET]
+        self._wizard_panel.show_step(tr(title_key), tr("wizard_ejecting_source"), can_continue=False)
+        self._log_panel.append_log(tr("wizard_ejecting_source"))
+        try:
+            eject_device(self._wizard_source_device.path)
+        except Exception as exc:
+            self._last_error_code = "EJECT_FAILED"
+            self._last_error_msg = str(exc)
+            self._log_panel.finish_error(friendly_error_message("EJECT_FAILED"), details=str(exc))
+            self._wizard_panel.show_error()
+            return
+        self._log_panel.append_log(tr("wizard_source_ejected"))
+        self._wizard_panel.show_step(tr(title_key), tr(instruction_key), can_continue=False, show_refresh=True)
+        self._wizard_panel.set_status(tr("wizard_status_waiting"))
+        self._wizard_poll_timer.start()
 
     def _enter_wizard_identify_step(self) -> None:
         """Adapte l'étape 2 au système détecté sur la carte source à

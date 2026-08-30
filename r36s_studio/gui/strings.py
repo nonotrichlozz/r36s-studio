@@ -112,7 +112,13 @@ STRINGS = {
     "wizard_step3_title": "3. Copie de l'écran et des jeux",
     "wizard_step3_instruction": "On enregistre l'écran, les réglages et les jeux de ta carte d'origine sur ton ordinateur.",
     "wizard_step4_title": "4. Insère ta carte neuve",
-    "wizard_step4_instruction": "Retire la carte d'origine et branche la carte neuve à préparer.",
+    "wizard_step4_instruction": "Branche maintenant la carte neuve à préparer.",
+    # Éjection de la carte source, en tout début de l'étape 4 -- avant même
+    # d'afficher la consigne d'insertion ci-dessus (§5 mode assisté,
+    # correctif : retirer la carte pendant qu'elle est encore montée
+    # risquait de corrompre des données).
+    "wizard_ejecting_source": "Éjection de ta carte d'origine…",
+    "wizard_source_ejected": "Tu peux maintenant retirer ta carte d'origine en toute sécurité.",
     "wizard_step5_title": "5. Installation d'ArkOS",
     "wizard_step5_instruction": "On installe le système sur ta carte neuve.",
     "wizard_step6_title": "6. Remise en place de ton écran",

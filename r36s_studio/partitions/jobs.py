@@ -20,7 +20,7 @@ from r36s_studio.devices import Device
 from r36s_studio.imaging.copy import CancelCheck, ProgressCallback
 
 from .copy import copy_tree
-from .locate import BOOT_LABEL, EASYROMS_LABEL, PartitionInfo, locate_mounted
+from .locate import BOOT_LABEL, EASYROMS_LABEL, PartitionInfo, locate_mounted, unmount_forced
 
 
 class MacosNtfsWriteUnsupported(Exception):
@@ -49,9 +49,11 @@ def inject_boot(
     """Copie `boot_source_dir` (dossier BOOT précédemment sauvegardé) sur
     la partition BOOT de `device`."""
     partition = locate_mounted(device.path, BOOT_LABEL)
-    return copy_tree(
+    copied = copy_tree(
         boot_source_dir, partition.mountpoint, on_progress=on_progress, should_cancel=should_cancel
     )
+    unmount_forced(partition)
+    return copied
 
 
 def copy_games(
@@ -66,9 +68,11 @@ def copy_games(
     réel, voir `locate.py`)."""
     partition = locate_mounted(device.path, EASYROMS_LABEL)
     _reject_macos_ntfs_write(partition)
-    return copy_tree(
+    copied = copy_tree(
         games_source_dir, partition.mountpoint, on_progress=on_progress, should_cancel=should_cancel
     )
+    unmount_forced(partition)
+    return copied
 
 
 def _reject_macos_ntfs_write(partition: PartitionInfo) -> None:
@@ -87,9 +91,11 @@ def extract_boot(
     plus tard sur la carte neuve (`dest_dir` est typiquement nommé par
     `archives.new_archive_path`)."""
     partition = locate_mounted(device.path, BOOT_LABEL)
-    return copy_tree(
+    copied = copy_tree(
         partition.mountpoint, dest_dir, on_progress=on_progress, should_cancel=should_cancel
     )
+    unmount_forced(partition)
+    return copied
 
 
 def extract_easyroms(
@@ -102,6 +108,8 @@ def extract_easyroms(
     à `copy_games`, ne lève jamais `MacosNtfsWriteUnsupported` : on ne fait
     que lire EASYROMS ici, jamais y écrire (voir note de module)."""
     partition = locate_mounted(device.path, EASYROMS_LABEL)
-    return copy_tree(
+    copied = copy_tree(
         partition.mountpoint, dest_dir, on_progress=on_progress, should_cancel=should_cancel
     )
+    unmount_forced(partition)
+    return copied

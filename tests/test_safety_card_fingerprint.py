@@ -75,6 +75,23 @@ def test_compute_boot_fingerprint_is_stable_for_identical_boot_contents(tmp_path
     assert fingerprint_1 == fingerprint_2
 
 
+@patch("r36s_studio.safety.card_fingerprint.unmount_forced")
+def test_compute_boot_fingerprint_unmounts_forced_mount_after_reading(mock_unmount, tmp_path):
+    """Démonte proprement un montage forcé (§4.4, carte GPT/EFI) une fois
+    l'empreinte calculée -- no-op pour un montage diskutil normal
+    (`unmount_forced`, locate.py)."""
+    boot_dir = tmp_path / "boot"
+    boot_dir.mkdir()
+    (boot_dir / "boot.ini").write_bytes(b"console=r36s panel=st7703")
+    partition = _boot_partition(str(boot_dir))
+
+    with patch("r36s_studio.safety.card_fingerprint.list_partitions", return_value=_FAKE_PARTITION_LIST):
+        with patch("r36s_studio.safety.card_fingerprint.locate_mounted", return_value=partition):
+            compute_boot_fingerprint("/dev/fake-disk-test-1")
+
+    mock_unmount.assert_called_once_with(partition)
+
+
 def test_is_same_card_true_when_both_fingerprints_present_and_equal():
     assert is_same_card("abc123", "abc123") is True
 

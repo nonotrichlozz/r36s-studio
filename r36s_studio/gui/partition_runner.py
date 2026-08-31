@@ -41,6 +41,7 @@ from r36s_studio.partitions import (
     extract_easyroms,
     inject_boot,
     locate_mounted,
+    unmount_forced,
 )
 from r36s_studio.safety.card_fingerprint import compute_boot_fingerprint
 
@@ -153,7 +154,9 @@ class WizardIdentifyRunner(QThread):
         if not boot.mountpoint:
             self.finished_identify.emit(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
             return
-        self.finished_identify.emit(identify_from_boot_directory(boot.mountpoint))
+        result = identify_from_boot_directory(boot.mountpoint)
+        unmount_forced(boot)
+        self.finished_identify.emit(result)
 
 
 class WizardFingerprintRunner(QThread):

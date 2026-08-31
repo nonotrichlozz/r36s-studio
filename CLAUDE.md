@@ -478,6 +478,54 @@ Après flash, la carte R36S expose trois partitions : `BOOT`, `root`, `EASYROMS`
 > étiquette en priorité, avec un repli sur la position (troisième partition,
 > NTFS ou FAT32) si l'étiquette est absente.
 
+> ⚠️ **Confirmé sur du vrai matériel** : sur certaines cartes R36S d'origine,
+> la partition de démarrage est dans un schéma **GPT** dont la première
+> partition est de **type EFI** (System Partition), avec malgré tout un
+> **FAT16 tout à fait valide** à l'intérieur — `Image`, `uInitrd`,
+> `extlinux/`, les `.bmp` de batterie et les `.dtb` (relevé exact :
+> `disk2s1` type EFI « NO NAME » 536,9 Mo FAT16, puis `disk2s2` Linux, puis
+> `disk2s3` Microsoft Basic Data « EASYROMS »). **macOS refuse de monter
+> cette partition automatiquement à cause de ce type** — `diskutil mount`
+> échoue — et son sondage de système de fichiers pour ce cas précis n'est
+> pas toujours fiable non plus (`_macos_filesystem` peut renvoyer une
+> chaîne vide, contrairement au cas NTFS ci-dessus où `FilesystemType` finit
+> toujours par contenir une variante exploitable). Un montage forcé, lui,
+> fonctionne : `sudo mount -t msdos /dev/diskNs1 /Volumes/POINT` donne accès
+> à tous les fichiers, .dtb compris.
+>
+> **Corrigé en deux temps**, tous deux dans `locate.py` :
+> 1. `PartitionInfo` porte désormais un champ `partition_type` (type de
+>    partition GPT/MBR, ex. `"efi"` — distinct du système de fichiers),
+>    renseigné sur macOS depuis `Content` (`_macos_partition_type`).
+>    `_select_boot` accepte la première partition dès que ce type vaut EFI
+>    et que le système de fichiers, quand il est connu, n'est pas
+>    explicitement autre chose qu'un FAT (`_looks_like_efi_boot`) — couvre
+>    aussi bien le cas où `_macos_filesystem` échoue à identifier le FAT
+>    (chaîne vide) que le cas où il y parvient malgré tout.
+> 2. `_mount_macos` retente, quand `diskutil mount` échoue, un montage
+>    forcé (`_force_mount_macos` : `mount -t msdos` sur un point de montage
+>    temporaire, `tempfile.mkdtemp`) — seulement si le système de fichiers,
+>    quand il est connu, est un FAT (jamais pour une NTFS/ext4 dont l'échec
+>    aurait une autre cause). `unmount_forced` démonte proprement ce
+>    montage temporaire et supprime son dossier une fois la partition
+>    exploitée — ne fait rien pour un montage `diskutil`/`udisksctl`
+>    normal, qui reste géré par le système jusqu'à l'éjection finale comme
+>    avant ce correctif. Appelé après chaque usage : `extract_boot`,
+>    `extract_easyroms`, `inject_boot`, `copy_games` (`jobs.py`),
+>    l'identification de l'étape 2 (`WizardIdentifyRunner`,
+>    `gui/partition_runner.py`) et le calcul d'empreinte des étapes 1/4
+>    (`compute_boot_fingerprint`, `safety/card_fingerprint.py`).
+>
+> Non vérifié : si le `mount -t msdos` forcé nécessite en pratique les
+> droits root dans le contexte non élevé où `partitions/` tourne (le
+> montage manuel de test, ci-dessus, utilisait `sudo`) — `partitions/` est
+> conçu pour ne jamais exiger d'élévation (§3/§4.4), et cette tentative
+> reste un simple appel non élevé, best-effort comme le reste de
+> `_mount_macos` : sur un échec (permission refusée y compris), `partition`
+> reste inchangée et `locate_mounted` retombe sur son comportement
+> précédent (`PartitionNotMounted` au bout du délai). À confirmer sur du
+> vrai matériel si ce cas se présente encore après ce correctif.
+
 Montage : attendre l'apparition automatique du volume (Windows/macOS le font seuls),
 avec une temporisation et un contrôle. Sur Linux, `udisksctl mount` évite d'avoir
 besoin des droits root pour cette étape.

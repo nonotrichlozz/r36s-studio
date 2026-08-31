@@ -11,6 +11,23 @@ vendeurs). BOOT est donc identifiée par sa **position** (première partition
 du disque) et son **système de fichiers** (FAT16 ou FAT32) — l'étiquette
 « BOOT », quand elle existe, ne sert que de repli.
 
+**BOOT en GPT/EFI (cas confirmé sur du vrai matériel)** : certaines cartes
+R36S d'origine utilisent un schéma GPT dont la première partition est de
+type EFI (System Partition), contenant malgré tout un FAT16 tout à fait
+valide (`Image`, `uInitrd`, `extlinux/`, les `.bmp` de batterie et les
+`.dtb`). macOS refuse de la monter automatiquement à cause de ce type —
+`diskutil mount` échoue, et son sondage de système de fichiers pour ce cas
+précis n'est pas toujours fiable (`_macos_filesystem` peut renvoyer une
+chaîne vide). `_select_boot` accepte donc aussi la première partition
+quand son type (`partition_type`, renseigné depuis `Content` sur macOS)
+vaut EFI et que son système de fichiers, quand il est connu, est un FAT ;
+`_mount_macos` retente en plus un montage forcé (`mount -t msdos` sur un
+point de montage temporaire, `_force_mount_macos`) quand `diskutil mount`
+échoue — confirmé fonctionner sur du vrai matériel là où `diskutil`
+échoue. `unmount_forced` démonte proprement ce montage temporaire une
+fois la partition exploitée (ne fait rien pour un montage `diskutil`
+normal).
+
 **Système de fichiers d'EASYROMS** : le brief initial (§4.4) prévoyait du
 FAT32, à vérifier sur une carte réelle. Test fait sur du vrai matériel :
 c'est en réalité du **NTFS**. Windows et Linux y écrivent nativement ; le
@@ -24,10 +41,12 @@ système de fichiers (NTFS ou FAT) si l'étiquette est absente."""
 from __future__ import annotations
 
 import json
+import os
 import plistlib
 import platform
 import re
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, replace
 from typing import Optional
@@ -53,6 +72,12 @@ class PartitionInfo:
     label: str
     filesystem: str  # "fat32", "ntfs", "ext4"... (toujours en minuscules)
     mountpoint: Optional[str]
+    # Type de partition (schéma GPT/MBR), pas le système de fichiers --
+    # seul macOS le renseigne pour l'instant (`Content` de `diskutil`, voir
+    # `_macos_partition_type`), pour reconnaître le cas confirmé sur du vrai
+    # matériel d'une première partition GPT de type EFI contenant malgré
+    # tout un FAT16 valide (note de module, `_looks_like_efi_boot`).
+    partition_type: str = ""
 
 
 class PartitionNotFound(Exception):
@@ -91,12 +116,26 @@ def _select_boot(partitions: list[PartitionInfo], device_path: str) -> Partition
     """Position + système de fichiers d'abord (voir note de module) ;
     l'étiquette « BOOT » n'est qu'un repli, pour le cas où la première
     partition ne serait pas FAT (carte non standard)."""
-    if partitions and _is_fat(partitions[BOOT_PARTITION_INDEX].filesystem):
-        return partitions[BOOT_PARTITION_INDEX]
+    if partitions:
+        first = partitions[BOOT_PARTITION_INDEX]
+        if _is_fat(first.filesystem) or _looks_like_efi_boot(first):
+            return first
     for partition in partitions:
         if partition.label.upper() == BOOT_LABEL:
             return partition
     raise PartitionNotFound(BOOT_LABEL, device_path)
+
+
+def _looks_like_efi_boot(partition: PartitionInfo) -> bool:
+    """Cas confirmé sur du vrai matériel (voir note de module) : une
+    première partition GPT de type EFI peut contenir un FAT16 tout à fait
+    valide que macOS ne sait pas toujours rapporter comme tel via
+    `_macos_filesystem`. Accepté quand le type est EFI et que le système
+    de fichiers, s'il est connu, n'est pas explicitement autre chose qu'un
+    FAT."""
+    if partition.partition_type != "efi":
+        return False
+    return not partition.filesystem or _is_fat(partition.filesystem)
 
 
 def _select_easyroms(partitions: list[PartitionInfo], device_path: str) -> PartitionInfo:
@@ -231,20 +270,73 @@ def _mount_macos(partition: PartitionInfo) -> PartitionInfo:
     (par un flash précédent, un `hdiutil detach`...) : attendre passivement
     un montage automatique qui n'aura jamais lieu échouerait à coup sûr sur
     `PartitionNotMounted` (bug confirmé sur du vrai matériel). Un échec
-    laisse `partition` inchangée ; l'appelant (`locate_mounted`)
-    revérifiera à la prochaine itération."""
+    laisse `partition` inchangée sauf repli forcé (`_force_mount_macos`,
+    note de module) ; l'appelant (`locate_mounted`) revérifiera à la
+    prochaine itération si les deux échouent."""
     result = subprocess.run(
         ["diskutil", "mount", partition.device_path],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        return partition
+        return _force_mount_macos(partition)
     partition_id = partition.device_path.rsplit("/", 1)[-1]
     mountpoint = _macos_info(partition_id).get("MountPoint") or None
     if mountpoint is None:
-        return partition
+        return _force_mount_macos(partition)
     return replace(partition, mountpoint=mountpoint)
+
+
+# Points de montage créés par `_force_mount_macos`, pour qu'`unmount_forced`
+# sache lesquels démonter/supprimer lui-même plutôt qu'un montage `diskutil`
+# normal (géré par le système jusqu'à l'éjection finale, §4.4).
+_FORCED_MOUNTPOINTS: set[str] = set()
+
+
+def _force_mount_macos(partition: PartitionInfo) -> PartitionInfo:
+    """Repli quand `diskutil mount` échoue -- confirmé sur du vrai matériel
+    pour une première partition GPT de type EFI contenant malgré tout un
+    FAT16 valide (note de module) : `diskutil mount` refuse ce type même
+    quand le contenu est un FAT parfaitement lisible, mais `mount -t
+    msdos` sur un point de montage temporaire y accède sans problème.
+    N'est tenté que si le système de fichiers, quand il est connu, est un
+    FAT (jamais pour une NTFS/ext4 dont l'échec `diskutil` a une autre
+    cause) -- sans quoi la tentative échouerait de toute façon, pour rien.
+    Best-effort comme `_mount_macos` : un échec laisse `partition`
+    inchangée après avoir nettoyé le point de montage temporaire créé."""
+    if partition.filesystem and not _is_fat(partition.filesystem):
+        return partition
+    mountpoint = tempfile.mkdtemp(prefix="r36s-studio-")
+    result = subprocess.run(
+        ["mount", "-t", "msdos", partition.device_path, mountpoint],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        os.rmdir(mountpoint)
+        return partition
+    _FORCED_MOUNTPOINTS.add(mountpoint)
+    return replace(partition, mountpoint=mountpoint)
+
+
+def unmount_forced(partition: PartitionInfo) -> None:
+    """Démonte proprement un montage forcé par `_force_mount_macos` et
+    supprime son point de montage temporaire, une fois la partition
+    exploitée (copie, identification...) -- ne fait rien pour un montage
+    `diskutil`/`udisksctl` normal, qui reste géré par le système jusqu'à
+    l'éjection finale (§4.4), comme avant ce correctif. Best-effort : un
+    échec de démontage n'empêche jamais l'appelant de continuer (le
+    résultat de l'opération précédente, ex. une copie déjà terminée,
+    n'est jamais remis en cause par un souci de nettoyage)."""
+    mountpoint = partition.mountpoint
+    if mountpoint is None or mountpoint not in _FORCED_MOUNTPOINTS:
+        return
+    subprocess.run(["umount", mountpoint], capture_output=True)
+    _FORCED_MOUNTPOINTS.discard(mountpoint)
+    try:
+        os.rmdir(mountpoint)
+    except OSError:
+        pass
 
 
 def _macos_filesystem(info: dict) -> str:
@@ -267,6 +359,15 @@ def _macos_filesystem(info: dict) -> str:
     return (info.get("FilesystemType") or "").lower()
 
 
+def _macos_partition_type(info: dict) -> str:
+    """Type de partition (schéma GPT/MBR, ex. "EFI", "Linux Filesystem",
+    "Microsoft Basic Data"), distinct du système de fichiers -- `Content`
+    est déjà utilisé par `_macos_filesystem` en repli pour deviner le
+    système de fichiers, mais garde ici sa valeur brute (normalisée en
+    minuscules) pour `_looks_like_efi_boot` (note de module)."""
+    return str(info.get("Content") or "").lower()
+
+
 def _list_macos(device_path: str) -> list[PartitionInfo]:
     partitions = []
     for partition_id in _macos_partition_ids(device_path):
@@ -277,6 +378,7 @@ def _list_macos(device_path: str) -> list[PartitionInfo]:
                 label=info.get("VolumeName") or "",
                 filesystem=_macos_filesystem(info),
                 mountpoint=info.get("MountPoint") or None,
+                partition_type=_macos_partition_type(info),
             )
         )
     return partitions

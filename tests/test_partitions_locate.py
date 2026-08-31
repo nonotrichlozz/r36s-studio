@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from r36s_studio.partitions import locate
 from r36s_studio.partitions.locate import (
     BOOT_LABEL,
     EASYROMS_LABEL,
@@ -29,12 +30,14 @@ from r36s_studio.partitions.locate import (
     _list_macos,
     _list_windows,
     _macos_filesystem,
+    _macos_partition_type,
     _mount_macos,
     _select_boot,
     _select_easyroms,
     find_partition,
     locate_mounted,
     looks_like_arkos,
+    unmount_forced,
 )
 
 
@@ -43,6 +46,16 @@ def _run_result(stdout=b"", returncode=0):
     result.stdout = stdout
     result.returncode = returncode
     return result
+
+
+@pytest.fixture(autouse=True)
+def _clear_forced_mountpoints():
+    """`_FORCED_MOUNTPOINTS` (locate.py) est un registre au niveau module --
+    évite qu'un montage forcé enregistré par un test fuite vers le
+    suivant."""
+    locate._FORCED_MOUNTPOINTS.clear()
+    yield
+    locate._FORCED_MOUNTPOINTS.clear()
 
 
 # --- _select_boot / _select_easyroms : le coeur du correctif ---------------
@@ -85,6 +98,43 @@ def test_select_boot_falls_back_to_label_when_first_partition_not_fat():
     boot = _select_boot(partitions, "/dev/fake-disk-test-4")
 
     assert boot.device_path == "/dev/fake-disk-test-4s2"
+
+
+def test_select_boot_accepts_efi_type_first_partition_when_filesystem_unknown():
+    """Cas confirmé sur du vrai matériel : certaines cartes R36S d'origine
+    ont un schéma GPT avec une première partition de type EFI contenant
+    malgré tout un FAT16 valide -- macOS ne rapporte pas toujours un
+    système de fichiers exploitable pour ce type précis (note de module),
+    ce que `_select_boot` doit accepter quand même via `partition_type`."""
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-2s1", "", "", None, partition_type="efi"),
+        PartitionInfo("/dev/fake-disk-test-2s2", "", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-2s3", "EASYROMS", "ntfs", "/Volumes/EASYROMS"),
+    ]
+
+    boot = _select_boot(partitions, "/dev/fake-disk-test-2")
+
+    assert boot.device_path == "/dev/fake-disk-test-2s1"
+
+
+def test_select_boot_accepts_efi_type_first_partition_with_known_fat_filesystem():
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-2s1", "", "fat16", None, partition_type="efi"),
+    ]
+
+    boot = _select_boot(partitions, "/dev/fake-disk-test-2")
+
+    assert boot.device_path == "/dev/fake-disk-test-2s1"
+
+
+def test_select_boot_rejects_efi_type_first_partition_with_non_fat_filesystem():
+    """Le type EFI seul ne suffit pas -- s'il est certain (et non pas
+    juste inconnu) que le système de fichiers n'est pas un FAT, ce n'est
+    pas le cas confirmé sur du vrai matériel qui justifie ce repli."""
+    partitions = [PartitionInfo("/dev/fake-disk-test-2s1", "", "hfs", None, partition_type="efi")]
+
+    with pytest.raises(PartitionNotFound):
+        _select_boot(partitions, "/dev/fake-disk-test-2")
 
 
 def test_select_boot_raises_when_no_criterion_matches():
@@ -282,6 +332,177 @@ def test_find_partition_easyroms_detected_as_ntfs_despite_windows_ntfs_field(moc
     partition = find_partition("/dev/fake-disk-test-4", EASYROMS_LABEL)
 
     assert partition.filesystem == "ntfs"
+
+
+# --- macOS : BOOT en GPT/EFI -- cas confirmé sur du vrai matériel ----------
+#
+# Structure relevée : disk2s1 type EFI « NO NAME » FAT16 (Image, uInitrd,
+# extlinux/, .bmp de batterie, deux .dtb), disk2s2 Linux, disk2s3
+# Microsoft Basic Data « EASYROMS ». macOS refuse `diskutil mount` sur
+# disk2s1 à cause de son type EFI, alors qu'un `mount -t msdos` forcé y
+# donne accès sans problème.
+
+
+def test_macos_partition_type_normalizes_content_to_lowercase():
+    assert _macos_partition_type({"Content": "EFI"}) == "efi"
+
+
+def test_macos_partition_type_empty_when_content_absent():
+    assert _macos_partition_type({}) == ""
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_macos_populates_partition_type_from_content(mock_run):
+    list_plist = plistlib.dumps(
+        {
+            "AllDisksAndPartitions": [
+                {
+                    "DeviceIdentifier": "fake-disk-test-2",
+                    "Partitions": [{"DeviceIdentifier": "fake-disk-test-2s1"}],
+                }
+            ]
+        }
+    )
+    info = plistlib.dumps({"VolumeName": "", "FilesystemType": "", "Content": "EFI"})
+    mock_run.side_effect = [_run_result(list_plist), _run_result(info)]
+
+    partitions = _list_macos("/dev/fake-disk-test-2")
+
+    assert partitions[0].partition_type == "efi"
+    assert partitions[0].filesystem == ""  # non fiable pour ce type précis (note de module)
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_find_partition_boot_on_real_gpt_efi_boot_card(mock_run):
+    """Reproduction bout en bout de la structure relevée sur du vrai
+    matériel : disk2s1 EFI/FAT16 sans étiquette et sans FilesystemType
+    exploitable, disk2s2 Linux, disk2s3 EASYROMS."""
+    list_plist = plistlib.dumps(
+        {
+            "AllDisksAndPartitions": [
+                {
+                    "DeviceIdentifier": "fake-disk-test-2",
+                    "Partitions": [
+                        {"DeviceIdentifier": "fake-disk-test-2s1"},
+                        {"DeviceIdentifier": "fake-disk-test-2s2"},
+                        {"DeviceIdentifier": "fake-disk-test-2s3"},
+                    ],
+                }
+            ]
+        }
+    )
+    info_boot = plistlib.dumps(
+        {"VolumeName": "", "FilesystemType": "", "Content": "EFI"}
+    )
+    info_linux = plistlib.dumps(
+        {"VolumeName": "", "FilesystemType": "", "Content": "Linux Filesystem"}
+    )
+    info_easyroms = plistlib.dumps(
+        {
+            "VolumeName": "EASYROMS",
+            "FilesystemType": "ntfs",
+            "Content": "Microsoft Basic Data",
+        }
+    )
+    mock_run.side_effect = [
+        _run_result(list_plist),
+        _run_result(info_boot),
+        _run_result(info_linux),
+        _run_result(info_easyroms),
+    ]
+
+    partitions = _list_macos("/dev/fake-disk-test-2")
+    boot = _select_boot(partitions, "/dev/fake-disk-test-2")
+    easyroms = _select_easyroms(partitions, "/dev/fake-disk-test-2")
+
+    assert boot.device_path == "/dev/fake-disk-test-2s1"
+    assert easyroms.device_path == "/dev/fake-disk-test-2s3"
+
+
+@patch("r36s_studio.partitions.locate.tempfile.mkdtemp", return_value="/tmp/r36s-studio-test")
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_mount_macos_falls_back_to_forced_mount_when_diskutil_mount_fails(mock_run, mock_mkdtemp):
+    """`diskutil mount` échoue sur ce type de partition -- confirmé sur du
+    vrai matériel -- alors qu'un `mount -t msdos` forcé sur un point de
+    montage temporaire y donne accès."""
+    mock_run.side_effect = [
+        _run_result(returncode=1),  # diskutil mount : échec
+        _run_result(returncode=0),  # mount -t msdos : réussit
+    ]
+    partition = PartitionInfo("/dev/fake-disk-test-2s1", "", "", None, partition_type="efi")
+
+    result = _mount_macos(partition)
+
+    assert result.mountpoint == "/tmp/r36s-studio-test"
+    assert mock_run.call_args_list[1].args[0] == [
+        "mount",
+        "-t",
+        "msdos",
+        "/dev/fake-disk-test-2s1",
+        "/tmp/r36s-studio-test",
+    ]
+
+
+@patch("r36s_studio.partitions.locate.os.rmdir")
+@patch("r36s_studio.partitions.locate.tempfile.mkdtemp", return_value="/tmp/r36s-studio-test")
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_mount_macos_forced_mount_failure_removes_temp_mountpoint_and_leaves_partition_unchanged(
+    mock_run, mock_mkdtemp, mock_rmdir
+):
+    mock_run.side_effect = [_run_result(returncode=1), _run_result(returncode=1)]
+    partition = PartitionInfo("/dev/fake-disk-test-2s1", "", "", None, partition_type="efi")
+
+    result = _mount_macos(partition)
+
+    assert result == partition
+    mock_rmdir.assert_called_once_with("/tmp/r36s-studio-test")
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_mount_macos_does_not_attempt_forced_mount_for_a_known_non_fat_filesystem(mock_run):
+    """Pas de tentative `mount -t msdos` pour une partition dont le
+    système de fichiers connu n'est de toute façon pas un FAT (ex. NTFS)
+    -- ça échouerait pour rien."""
+    mock_run.return_value = _run_result(returncode=1)
+    partition = PartitionInfo("/dev/fake-disk-test-2s3", "EASYROMS", "ntfs", None)
+
+    result = _mount_macos(partition)
+
+    assert result == partition
+    mock_run.assert_called_once()  # seulement diskutil mount, jamais mount -t msdos
+
+
+@patch("r36s_studio.partitions.locate.os.rmdir")
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_unmount_forced_unmounts_and_removes_temp_directory(mock_run, mock_rmdir):
+    partition = PartitionInfo(
+        "/dev/fake-disk-test-2s1", "", "", "/tmp/r36s-studio-test", partition_type="efi"
+    )
+    locate._FORCED_MOUNTPOINTS.add("/tmp/r36s-studio-test")
+
+    unmount_forced(partition)
+
+    mock_run.assert_called_once_with(["umount", "/tmp/r36s-studio-test"], capture_output=True)
+    mock_rmdir.assert_called_once_with("/tmp/r36s-studio-test")
+    assert "/tmp/r36s-studio-test" not in locate._FORCED_MOUNTPOINTS
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_unmount_forced_does_nothing_for_a_normal_diskutil_mount(mock_run):
+    partition = PartitionInfo("/dev/fake-disk-test-2s1", "BOOT", "msdos", "/Volumes/BOOT")
+
+    unmount_forced(partition)
+
+    mock_run.assert_not_called()
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_unmount_forced_does_nothing_when_not_mounted(mock_run):
+    partition = PartitionInfo("/dev/fake-disk-test-2s1", "", "", None, partition_type="efi")
+
+    unmount_forced(partition)
+
+    mock_run.assert_not_called()
 
 
 # --- macOS : _list_macos -----------------------------------------------

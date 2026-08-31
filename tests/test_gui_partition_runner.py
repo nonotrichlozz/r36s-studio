@@ -409,3 +409,25 @@ def test_wizard_identify_runner_delegates_to_identify_from_boot_directory_once_m
 
     mock_identify.assert_called_once_with("/Volumes/BOOT")
     assert results == [expected]
+
+
+@patch("r36s_studio.gui.partition_runner.unmount_forced")
+@patch("r36s_studio.gui.partition_runner.identify_from_boot_directory")
+@patch(
+    "r36s_studio.gui.partition_runner.locate_mounted",
+    return_value=PartitionInfo(
+        "/dev/fake-disk-test-5s1", "", "", "/tmp/r36s-studio-test", partition_type="efi"
+    ),
+)
+def test_wizard_identify_runner_unmounts_forced_mount_after_identifying(
+    mock_locate, mock_identify, mock_unmount, qapp
+):
+    """Démonte proprement un montage forcé (§4.4, carte GPT/EFI) une fois
+    l'identification terminée -- no-op pour un montage diskutil normal
+    (`unmount_forced`, locate.py)."""
+    partition = mock_locate.return_value
+    runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
+
+    runner.run()
+
+    mock_unmount.assert_called_once_with(partition)

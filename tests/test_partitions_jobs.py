@@ -170,3 +170,62 @@ def test_copy_games_end_to_end_rejects_real_world_windows_ntfs_field_value(
         copy_games(device, "/tmp/games")
 
     mock_copy.assert_not_called()
+
+
+# --- démontage propre d'un montage forcé après usage (§4.4, cartes GPT/ ----
+# --- EFI dont l'automontage macOS échoue) -- no-op pour un montage --------
+# --- diskutil/udisksctl normal (`unmount_forced`, locate.py). -------------
+
+
+@patch("r36s_studio.partitions.jobs.unmount_forced")
+@patch("r36s_studio.partitions.jobs.copy_tree", return_value=321)
+@patch("r36s_studio.partitions.jobs.locate_mounted")
+def test_extract_boot_unmounts_forced_mount_after_copying(mock_locate, mock_copy, mock_unmount):
+    partition = PartitionInfo("/dev/fake-disk-test-2s1", "", "", "/tmp/r36s-studio-test", partition_type="efi")
+    mock_locate.return_value = partition
+    device = _make_device()
+
+    extract_boot(device, "/tmp/R36S Studio/BOOT_2026-07-06_00-21")
+
+    mock_unmount.assert_called_once_with(partition)
+
+
+@patch("r36s_studio.partitions.jobs.platform.system", return_value="Darwin")
+@patch("r36s_studio.partitions.jobs.unmount_forced")
+@patch("r36s_studio.partitions.jobs.copy_tree", return_value=654)
+@patch("r36s_studio.partitions.jobs.locate_mounted")
+def test_extract_easyroms_unmounts_forced_mount_after_copying(mock_locate, mock_copy, mock_unmount, mock_platform):
+    partition = PartitionInfo("/dev/fake-disk-test-4s3", "EASYROMS", "ntfs", "/Volumes/EASYROMS")
+    mock_locate.return_value = partition
+    device = _make_device()
+
+    extract_easyroms(device, "/tmp/R36S Studio/EASYROMS_2026-07-06_00-21")
+
+    mock_unmount.assert_called_once_with(partition)
+
+
+@patch("r36s_studio.partitions.jobs.unmount_forced")
+@patch("r36s_studio.partitions.jobs.copy_tree", return_value=123)
+@patch("r36s_studio.partitions.jobs.locate_mounted")
+def test_inject_boot_unmounts_forced_mount_after_copying(mock_locate, mock_copy, mock_unmount):
+    partition = PartitionInfo("/dev/fake-disk-test-4s1", "BOOT", "msdos", "/Volumes/BOOT")
+    mock_locate.return_value = partition
+    device = _make_device()
+
+    inject_boot(device, "/tmp/boot_backup")
+
+    mock_unmount.assert_called_once_with(partition)
+
+
+@patch("r36s_studio.partitions.jobs.platform.system", return_value="Linux")
+@patch("r36s_studio.partitions.jobs.unmount_forced")
+@patch("r36s_studio.partitions.jobs.copy_tree", return_value=456)
+@patch("r36s_studio.partitions.jobs.locate_mounted")
+def test_copy_games_unmounts_forced_mount_after_copying(mock_locate, mock_copy, mock_unmount, mock_platform):
+    partition = PartitionInfo("/dev/fake-disk-test-sdb2", "EASYROMS", "ntfs", "/media/user/EASYROMS")
+    mock_locate.return_value = partition
+    device = _make_device()
+
+    copy_games(device, "/tmp/games")
+
+    mock_unmount.assert_called_once_with(partition)

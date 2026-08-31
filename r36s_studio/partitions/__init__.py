@@ -26,6 +26,7 @@ from .locate import (
     list_partitions,
     locate_mounted,
     looks_like_arkos,
+    unmount_forced,
 )
 
 __all__ = [
@@ -48,4 +49,5 @@ __all__ = [
     "list_partitions",
     "locate_mounted",
     "looks_like_arkos",
+    "unmount_forced",
 ]

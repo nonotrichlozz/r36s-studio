@@ -27,6 +27,7 @@ from r36s_studio.partitions.locate import (
     has_boot_partition,
     list_partitions,
     locate_mounted,
+    unmount_forced,
 )
 
 # Borne le volume lu par fichier (BOOT est FAT, ~100-120 Mo en pratique) --
@@ -76,6 +77,7 @@ def compute_boot_fingerprint(device_path: str) -> Optional[str]:
         except OSError:
             continue
 
+    unmount_forced(boot)
     return digest.hexdigest()
 
 

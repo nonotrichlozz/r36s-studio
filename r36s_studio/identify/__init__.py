@@ -1,5 +1,15 @@
 """Identification de la console à partir des `.dtb` du BOOT d'origine
-(§4.5/§4.6, enchaînement identification → téléchargement ArkOS)."""
+(§4.5/§4.6, enchaînement identification → téléchargement ArkOS).
+
+**Consoles clones** : critère validé par l'outil officiel ArkOS -- le
+*nom* du fichier `.dtb` présent sur la carte, pas son contenu. Confirmé
+sur du vrai matériel : `rk3326-evb-lp3-v12-linux.dtb` désigne un clone,
+tandis que `rk3326-r35s-linux.dtb`/`gameconsole-r36s.dtb` désignent une
+R36S/R35S standard -- y compris quand le clone a été relevé avec deux
+`.dtb` au contenu strictement identique (un seul portant ce nom). Les
+images ArkOS et ROCKNIX standard ne démarrent pas sur ce matériel ;
+EmuELEC, lui, fonctionne (`identify/releases.py::
+EMUELEC_R36S_RELEASES_URL`, §5)."""
 
 from __future__ import annotations
 
@@ -16,7 +26,15 @@ __all__ = [
     "InvalidDtbError",
     "IdentifyResult",
     "IdentifyFailureReason",
+    "CLONE_DTB_FILENAMES",
 ]
+
+# Noms de fichier `.dtb` connus pour désigner une console clone plutôt
+# qu'une R36S/R35S standard (voir note de module) -- en minuscules, la
+# comparaison se fait insensible à la casse. Un seul cas confirmé à ce
+# jour ; ensemble plutôt qu'une chaîne unique pour accueillir d'autres
+# clones sans changer la forme de ce module.
+CLONE_DTB_FILENAMES = {"rk3326-evb-lp3-v12-linux.dtb"}
 
 
 class IdentifyFailureReason(Enum):
@@ -41,6 +59,10 @@ class IdentifyResult:
     scanned_directory: Optional[str] = None
     examined_files: List[str] = field(default_factory=list)
     detail: Optional[str] = None
+    # Console clone (voir note de module) -- déterminé à partir du *nom*
+    # des `.dtb` trouvés, indépendamment de leur validité de parsing ou du
+    # `.dtb` retenu pour `info` (`identify_from_boot_directory`).
+    is_clone: bool = False
 
     @property
     def ok(self) -> bool:
@@ -67,12 +89,19 @@ def identify_from_boot_directory(directory: Union[str, Path]) -> IdentifyResult:
     except OSError:
         candidates = []
     examined_files = [str(candidate) for candidate in candidates]
+    # Sur le nom des fichiers trouvés, pas sur celui retenu pour `info`
+    # ci-dessous (note de module) : une carte clone relevée sur du vrai
+    # matériel porte deux `.dtb` au contenu identique, un seul portant le
+    # nom qui l'identifie comme clone -- l'autre pourrait très bien être
+    # celui choisi pour l'identification normale (tri alphabétique).
+    is_clone = any(candidate.name.lower() in CLONE_DTB_FILENAMES for candidate in candidates)
 
     if not candidates:
         return IdentifyResult(
             failure_reason=IdentifyFailureReason.NO_DTB_FOUND,
             scanned_directory=scanned_directory,
             examined_files=examined_files,
+            is_clone=is_clone,
         )
 
     for candidate in candidates:
@@ -82,10 +111,13 @@ def identify_from_boot_directory(directory: Union[str, Path]) -> IdentifyResult:
             continue
         if not info.board_compatible:
             continue
-        return IdentifyResult(info=info, scanned_directory=scanned_directory, examined_files=examined_files)
+        return IdentifyResult(
+            info=info, scanned_directory=scanned_directory, examined_files=examined_files, is_clone=is_clone
+        )
 
     return IdentifyResult(
         failure_reason=IdentifyFailureReason.ALL_DTB_INVALID,
         scanned_directory=scanned_directory,
         examined_files=examined_files,
+        is_clone=is_clone,
     )

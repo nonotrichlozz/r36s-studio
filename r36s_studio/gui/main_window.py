@@ -25,7 +25,7 @@ from r36s_studio import config as app_config
 from r36s_studio.detect import CardSystem, detect_card_system_for_device, detect_workflow_status
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
-from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL
+from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL, EMUELEC_R36S_RELEASES_URL
 from r36s_studio.imaging import SevenZipArchiveError, UnsupportedImageFormatError, check_image_format
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, set_privileged_mount_hook
 from r36s_studio.partitions.eject import eject as eject_device
@@ -173,6 +173,12 @@ class MainWindow(QMainWindow):
         # extraction_on_continue`) -- jamais un aller simple vers le mode
         # expert, dans un cas comme dans l'autre.
         self._wizard_source_system: CardSystem = CardSystem.UNKNOWN
+        # Console clone détectée à l'identification (étape 2, §5 mode
+        # assisté) -- critère validé par l'outil officiel ArkOS, sur le nom
+        # du .dtb (`identify/__init__.py::CLONE_DTB_FILENAMES`), pas sa
+        # présence/validité. Mémorisé jusqu'à l'étape de flash (5), qui
+        # oriente alors vers EmuELEC sans jamais imposer ce choix.
+        self._wizard_source_is_clone = False
         self._wizard_skip_extraction_on_continue = False
         self._wizard_target_device: Optional[Device] = None
         self._wizard_boot_archive: Optional[str] = None
@@ -600,13 +606,19 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, tr("app_title"), str(exc))
 
-    def _on_releases_requested(self) -> None:
+    def _on_releases_requested(self, firmware: str) -> None:
         """Bouton « Voir les versions disponibles » de `FileDialog` (flash
-        uniquement) -- l'image n'est pas hébergée sur GitHub (Mega/Google
-        Drive/OneDrive/torrent, §5 mode assisté), donc rien à automatiser
-        au-delà de l'ouverture de cette page dans le navigateur."""
+        uniquement, ArkOS ou EmuELEC -- ROCKNIX a son propre téléchargement
+        automatique, `_on_rocknix_download_requested`) -- ni l'un ni
+        l'autre n'a d'image hébergée directement sur GitHub, donc rien à
+        automatiser au-delà de l'ouverture de la page des releases dans le
+        navigateur. `firmware` est celui réellement sélectionné à
+        l'instant du clic (`FileDialog._firmware`), pas une copie
+        mémorisée séparément qui pourrait être périmée juste après une
+        présélection programmatique (console clone, §5)."""
+        url = EMUELEC_R36S_RELEASES_URL if firmware == "emuelec" else DARKOS_R36S_RELEASES_URL
         try:
-            webbrowser.open(DARKOS_R36S_RELEASES_URL)
+            webbrowser.open(url)
         except Exception as exc:
             QMessageBox.warning(self, tr("app_title"), str(exc))
 
@@ -766,6 +778,7 @@ class MainWindow(QMainWindow):
         self._wizard_source_device = None
         self._wizard_source_fingerprint = None
         self._wizard_source_system = CardSystem.UNKNOWN
+        self._wizard_source_is_clone = False
         self._wizard_skip_extraction_on_continue = False
         self._wizard_target_device = None
         self._wizard_boot_archive = None
@@ -1067,6 +1080,14 @@ class MainWindow(QMainWindow):
             message = tr(_IDENTIFY_FAILURE_MESSAGE_KEYS[result.failure_reason])
         self._log_panel.append_log(message)
 
+        # Console clone (§5 mode assisté, critère validé par l'outil
+        # officiel ArkOS sur le nom du .dtb, `identify/__init__.py`) --
+        # mémorisé pour l'étape de flash (5), qui oriente alors vers
+        # EmuELEC sans jamais imposer ce choix (`_enter_wizard_flash`).
+        self._wizard_source_is_clone = result.is_clone
+        if result.is_clone:
+            self._log_panel.append_log(tr("wizard_source_clone_detected"))
+
         # Diagnostic technique, dans tous les cas (§5 vocabulaire : jamais
         # dans le message principal, toujours en ligne supplémentaire du
         # journal) -- absent seulement quand le montage lui-même a échoué
@@ -1178,12 +1199,14 @@ class MainWindow(QMainWindow):
         self._wizard_flow.mark_done(job)
         self._enter_wizard_job(self._wizard_flow.current_job())
 
-    # --- étape 5 : flash -- choix ArkOS/ROCKNIX, §5 --------------------------
+    # --- étape 5 : flash -- choix ArkOS/ROCKNIX/EmuELEC, §5 ------------------
 
     def _enter_wizard_flash(self) -> None:
         self._mode = "flash"
         self._device = self._wizard_target_device
-        self._file_dialog.set_mode("flash", firmware=self._app_config.firmware)
+        self._file_dialog.set_mode(
+            "flash", firmware=self._app_config.firmware, is_clone_console=self._wizard_source_is_clone
+        )
         self._file_dialog.open()
 
     # --- étape 7 : éjection, synchrone comme _perform_eject ------------------

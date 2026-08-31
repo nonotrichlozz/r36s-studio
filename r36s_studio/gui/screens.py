@@ -1137,16 +1137,20 @@ class FileDialog(Dialog):
     (étapes D/E) — une sauvegarde parmi celles déjà extraites, avec un
     repli « Parcourir… » pour une source manuelle.
 
-    Pour le flash uniquement (étape C/5) : choix du firmware (ArkOS/dArkOS
-    ou ROCKNIX, §5) au-dessus du reste -- ArkOS garde le comportement
-    d'origine (bouton ouvrant la page des releases, images sur Mega/Google
-    Drive/OneDrive/torrent, jamais hébergées sur GitHub) ; ROCKNIX, dont
-    les images sont attachées directement aux releases GitHub, propose à
-    la place un téléchargement automatique (`rocknix_download_requested`,
-    `identify/rocknix.py`)."""
+    Pour le flash uniquement (étape C/5) : choix du firmware (ArkOS/dArkOS,
+    ROCKNIX, ou EmuELEC pour les consoles clones -- §5) au-dessus du reste.
+    ArkOS et EmuELEC gardent le même comportement (bouton ouvrant la page
+    des releases dans le navigateur, aucune image hébergée directement sur
+    GitHub) ; ROCKNIX, dont les images sont attachées directement aux
+    releases GitHub, propose à la place un téléchargement automatique
+    (`rocknix_download_requested`, `identify/rocknix.py`). Un avertissement
+    (`_clone_warning_label`) s'affiche au-dessus des trois choix quand la
+    carte source a été identifiée comme un clone à l'étape 2 -- EmuELEC est
+    alors présélectionné, sans jamais empêcher de revenir sur ArkOS/ROCKNIX
+    (jamais de choix imposé, §5)."""
 
     file_chosen = Signal(str)
-    releases_requested = Signal()
+    releases_requested = Signal(str)  # firmware sélectionné à l'instant du clic (arkos/emuelec)
     rocknix_download_requested = Signal()
     firmware_changed = Signal(str)
 
@@ -1160,6 +1164,15 @@ class FileDialog(Dialog):
         self._title.setProperty("role", "title")
         layout.addWidget(self._title)
 
+        # Avertissement console clone (§5 mode assisté, étape 2) --
+        # au-dessus des choix de firmware, jamais affiché sans raison
+        # (`set_mode(is_clone_console=...)`).
+        self._clone_warning_label = QLabel(tr("file_clone_warning"))
+        self._clone_warning_label.setWordWrap(True)
+        self._clone_warning_label.setProperty("role", "danger")
+        self._clone_warning_label.setVisible(False)
+        layout.addWidget(self._clone_warning_label)
+
         # Choix du firmware, flash uniquement (§5, étape de flash) --
         # description courte sous chaque option plutôt qu'une info-bulle,
         # pour rester visible sans interaction (§5 vocabulaire : pas de
@@ -1172,19 +1185,34 @@ class FileDialog(Dialog):
         self._rocknix_desc = QLabel(tr("file_firmware_rocknix_desc"))
         self._rocknix_desc.setWordWrap(True)
         self._rocknix_desc.setProperty("role", "secondary")
+        self._emuelec_radio = QRadioButton(tr("file_firmware_emuelec_title"))
+        self._emuelec_desc = QLabel(tr("file_firmware_emuelec_desc"))
+        self._emuelec_desc.setWordWrap(True)
+        self._emuelec_desc.setProperty("role", "secondary")
         self._firmware_group = QButtonGroup(self)
         self._firmware_group.addButton(self._arkos_radio)
         self._firmware_group.addButton(self._rocknix_radio)
+        self._firmware_group.addButton(self._emuelec_radio)
         self._arkos_radio.toggled.connect(self._on_firmware_toggled)
         self._rocknix_radio.toggled.connect(self._on_firmware_toggled)
-        for widget in (self._arkos_radio, self._arkos_desc, self._rocknix_radio, self._rocknix_desc):
+        self._emuelec_radio.toggled.connect(self._on_firmware_toggled)
+        for widget in (
+            self._arkos_radio,
+            self._arkos_desc,
+            self._rocknix_radio,
+            self._rocknix_desc,
+            self._emuelec_radio,
+            self._emuelec_desc,
+        ):
             layout.addWidget(widget)
 
-        # ArkOS (§5 mode assisté, étape 5) -- l'image n'est pas hébergée
-        # sur GitHub (Mega/Google Drive/OneDrive/torrent), donc rien à
-        # automatiser au-delà de l'ouverture de cette page.
+        # ArkOS/EmuELEC (§5 mode assisté, étape 5) -- l'image n'est pas
+        # hébergée sur GitHub (Mega/Google Drive/OneDrive/torrent pour
+        # ArkOS ; pas de correspondance d'assets par SoC vérifiée pour
+        # EmuELEC), donc rien à automatiser au-delà de l'ouverture de
+        # cette page, pour les deux.
         self._releases_button = QPushButton(tr("file_releases_button"))
-        self._releases_button.clicked.connect(self.releases_requested.emit)
+        self._releases_button.clicked.connect(lambda: self.releases_requested.emit(self._firmware))
         layout.addWidget(self._releases_button)
 
         # Les images ArkOS sont distribuées en .7z, que ce logiciel ne
@@ -1246,15 +1274,21 @@ class FileDialog(Dialog):
         archive_choices: Optional[List] = None,
         default_path: Optional[str] = None,
         firmware: Optional[str] = None,
+        is_clone_console: bool = False,
     ) -> None:
         """`mode` : "backup" (choisir où enregistrer), "flash" (choisir
         l'image source), "extract_boot"/"extract_easyroms" (choisir un
         dossier de destination — `default_path` le pré-remplit, toujours
         remplaçable via Parcourir), ou "inject_boot"/"copy_games" (choisir
         une sauvegarde parmi `archive_choices`, ou en désigner une autre
-        via Parcourir). `firmware` ("arkos" ou "rocknix", ignoré hors
-        flash) initialise le choix depuis la configuration persistée
-        (`config.py`) plutôt que de toujours repartir sur ArkOS."""
+        via Parcourir). `firmware` ("arkos", "rocknix" ou "emuelec", ignoré
+        hors flash) initialise le choix depuis la configuration persistée
+        (`config.py`) plutôt que de toujours repartir sur ArkOS.
+        `is_clone_console` (flash uniquement, §5 mode assisté étape 2) :
+        affiche un avertissement et présélectionne EmuELEC quand la carte
+        source a été identifiée comme un clone -- ArkOS/ROCKNIX restent
+        choisissables (jamais un choix imposé), mais partir sur ces
+        systèmes serait immédiatement infructueux sur ce matériel."""
         self._mode = mode
         self._title.setText(tr(_FILE_TITLE_KEYS[mode]))
         self.setWindowTitle(tr(_FILE_TITLE_KEYS[mode]))
@@ -1262,11 +1296,21 @@ class FileDialog(Dialog):
         self._next_button.setEnabled(bool(default_path))
 
         is_flash = mode == "flash"
-        for widget in (self._arkos_radio, self._arkos_desc, self._rocknix_radio, self._rocknix_desc):
+        for widget in (
+            self._arkos_radio,
+            self._arkos_desc,
+            self._rocknix_radio,
+            self._rocknix_desc,
+            self._emuelec_radio,
+            self._emuelec_desc,
+        ):
             widget.setVisible(is_flash)
+        self._clone_warning_label.setVisible(is_flash and is_clone_console)
         if is_flash:
-            self._firmware = firmware or "arkos"
-            radio = self._rocknix_radio if self._firmware == "rocknix" else self._arkos_radio
+            self._firmware = "emuelec" if is_clone_console else (firmware or "arkos")
+            radio = {"rocknix": self._rocknix_radio, "emuelec": self._emuelec_radio}.get(
+                self._firmware, self._arkos_radio
+            )
             radio.blockSignals(True)
             radio.setChecked(True)
             radio.blockSignals(False)
@@ -1288,15 +1332,21 @@ class FileDialog(Dialog):
         self._destination_hint_label.setVisible(mode in _DESTINATION_MODES)
 
     def _update_firmware_buttons_visibility(self) -> None:
-        is_arkos = self._mode == "flash" and self._firmware == "arkos"
-        self._releases_button.setVisible(is_arkos)
-        self._arkos_download_hint.setVisible(is_arkos)
-        self._rocknix_download_button.setVisible(self._mode == "flash" and self._firmware == "rocknix")
+        is_flash = self._mode == "flash"
+        manual_link_firmware = self._firmware in ("arkos", "emuelec")
+        self._releases_button.setVisible(is_flash and manual_link_firmware)
+        self._arkos_download_hint.setVisible(is_flash and self._firmware == "arkos")
+        self._rocknix_download_button.setVisible(is_flash and self._firmware == "rocknix")
 
     def _on_firmware_toggled(self, checked: bool) -> None:
         if not checked:
             return
-        self._firmware = "rocknix" if self._rocknix_radio.isChecked() else "arkos"
+        if self._rocknix_radio.isChecked():
+            self._firmware = "rocknix"
+        elif self._emuelec_radio.isChecked():
+            self._firmware = "emuelec"
+        else:
+            self._firmware = "arkos"
         self._update_firmware_buttons_visibility()
         self.firmware_changed.emit(self._firmware)
 

@@ -79,6 +79,15 @@ def test_save_then_load_roundtrips_firmware(tmp_path):
     assert loaded.firmware == "rocknix"
 
 
+def test_save_then_load_roundtrips_emuelec_firmware(tmp_path):
+    path = tmp_path / "config.json"
+    with patch("r36s_studio.config.config_path", return_value=path):
+        config.save_config(config.AppConfig(firmware="emuelec"))
+        loaded = config.load_config()
+
+    assert loaded.firmware == "emuelec"
+
+
 def test_load_config_falls_back_to_default_on_unknown_firmware_value(tmp_path):
     path = tmp_path / "config.json"
     path.write_text('{"firmware": "n\'importe quoi"}', encoding="utf-8")

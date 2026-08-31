@@ -903,6 +903,59 @@ sérieux d'un script.
 >   remplacer ce choix manuel par une sélection automatique ou une
 >   description plus parlante que le nom de fichier brut.
 >
+> **Consoles clones et EmuELEC (phase 9), critère validé par l'outil
+> officiel ArkOS.** Certaines cartes vendues comme R36S sont en réalité
+> des clones (matériel RK3326 différent) sur lesquels les images ArkOS et
+> ROCKNIX standard ne démarrent pas — EmuELEC, lui, fonctionne (structure
+> relevée sur du vrai matériel : partition de démarrage FAT32 étiquetée
+> EMUELEC de 1,1 Go contenant `KERNEL`/`SYSTEM`/`boot.ini`/`extlinux/`,
+> partition Linux de 5,4 Go, partition de jeux en FAT32 de 25,5 Go — donc
+> inscriptible depuis macOS, contrairement au NTFS d'ArkOS/§4.4).
+>
+> Le critère de détection est le **nom** du fichier `.dtb` présent sur le
+> BOOT, pas son contenu : `rk3326-evb-lp3-v12-linux.dtb` désigne un clone,
+> tandis que `rk3326-r35s-linux.dtb`/`gameconsole-r36s.dtb` désignent une
+> R36S/R35S standard — confirmé y compris pour une carte relevée avec deux
+> `.dtb` au contenu strictement identique (un seul portant le nom du
+> clone, §4.4 « BOOT en GPT/EFI » ci-dessus, la même carte). `identify/
+> __init__.py::CLONE_DTB_FILENAMES` (ensemble, pas une chaîne unique, pour
+> accueillir d'autres clones sans changer la forme du module) est comparé
+> à tous les `.dtb` trouvés par `identify_from_boot_directory` —
+> indépendamment du `.dtb` retenu pour l'identification normale (`info`,
+> premier `.dtb` valide en tri alphabétique, qui peut très bien ne pas
+> être celui qui nomme le clone) et indépendamment de la validité de
+> parsing (un `.dtb` illisible dont le nom correspond est quand même
+> détecté comme clone). `IdentifyResult.is_clone` porte ce signal.
+>
+> **EmuELEC comme troisième choix de firmware** (`config.py::
+> _VALID_FIRMWARES`, `gui/screens.py::FileDialog`) : même comportement
+> qu'ArkOS/dArkOS (bouton ouvrant `identify/releases.py::
+> EMUELEC_R36S_RELEASES_URL` dans le navigateur — aucune correspondance
+> d'assets par SoC vérifiée à ce jour pour EmuELEC, contrairement à
+> ROCKNIX, donc pas de téléchargement automatique). Choisissable à tout
+> moment, indépendamment d'une détection de clone.
+>
+> **Orientation à l'étape 2 (identification, §5 mode assisté)** :
+> `MainWindow._on_wizard_identify_finished` journalise un avertissement
+> clair (`wizard_source_clone_detected`) dès qu'un clone est détecté, et
+> mémorise `_wizard_source_is_clone` pour l'étape 5 (flash) qui suit.
+> `FileDialog.set_mode(is_clone_console=...)` y affiche un bandeau
+> d'avertissement rouge au-dessus des trois choix de firmware et
+> présélectionne EmuELEC — même si la configuration persistée pointait
+> vers un autre firmware, une console clone détectée l'emporte, ce n'est
+> pas qu'une préférence. ArkOS/ROCKNIX restent choisissables : jamais un
+> choix imposé, l'utilisateur garde toujours la main (§5). La
+> présélection automatique n'émet jamais `firmware_changed` (`blockSignals`,
+> même principe que l'initialisation normale du firmware) : elle
+> n'écrase donc jamais la préférence persistée tant que l'utilisateur n'a
+> pas lui-même interagi avec les boutons.
+>
+> La commande CLI de diagnostic `identify` (`__main__.py::cmd_identify`,
+> texte simple, pas le protocole JSON Lines) affiche aussi ce signal quand
+> présent. Le mode expert n'a pas de notion d'identification (pas
+> d'équivalent de l'étape 2) : cette orientation n'existe que dans le
+> parcours guidé.
+>
 > **Idée future, pas implémentée** : ROCKNIX fournit un script
 > `importpanel.py` qui génère un `mipi-panel.dtbo` à partir d'un `.dtb`
 > d'origine (le même type de fichier que celui déjà lu par

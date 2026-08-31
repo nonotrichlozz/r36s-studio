@@ -75,6 +75,15 @@ STRINGS = {
     "wizard_inject_boot_skipped_no_archive": (
         "Aucune sauvegarde de l'écran d'origine à réinjecter : cette étape est ignorée."
     ),
+    # Console clone détectée à l'identification (étape 2, §5 mode assisté) --
+    # critère validé par l'outil officiel ArkOS (identify/__init__.py::
+    # CLONE_DTB_FILENAMES). N'interrompt jamais le parcours : juste une
+    # orientation claire pour l'étape de flash qui suit.
+    "wizard_source_clone_detected": (
+        "Console clone détectée : ce n'est pas une R36S officielle. Les images "
+        "ArkOS et ROCKNIX standard ne démarrent pas sur ce matériel — EmuELEC "
+        "est recommandé à l'étape d'installation."
+    ),
     "wizard_status_multiple_candidates": "Plusieurs cartes détectées — choisis la bonne.",
     # Journal de bord (§5 vocabulaire : le détail technique n'apparaît
     # que là) -- combien de périphériques retenus/écartés à un sondage du
@@ -150,11 +159,27 @@ STRINGS = {
     "file_firmware_arkos_desc": "La configuration classique, la plus répandue sur R36S.",
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
+    # EmuELEC (§5, étape de flash) -- consoles clones uniquement : ArkOS et
+    # ROCKNIX standard ne démarrent pas sur ce matériel (identify/__init__.py
+    # ::CLONE_DTB_FILENAMES). Même comportement qu'ArkOS (page ouverte dans
+    # le navigateur, file_releases_button) -- pas de correspondance
+    # d'assets par SoC vérifiée à ce jour, contrairement à ROCKNIX.
+    "file_firmware_emuelec_title": "EmuELEC",
+    "file_firmware_emuelec_desc": "Pour les consoles clones : ArkOS et ROCKNIX n'y démarrent pas.",
     "file_arkos_download_hint": (
         "Le fichier téléchargé sera une archive .7z : décompresse-la d'abord, "
         "puis choisis ici le fichier .img qu'elle contient."
     ),
     "file_rocknix_download_button": "Télécharger la dernière version",
+    # Avertissement affiché à l'étape de choix du firmware quand la console
+    # source a été identifiée comme un clone (§5 mode assisté, étape 2) --
+    # jamais dans le cas contraire (mode expert direct, ou système non
+    # identifié).
+    "file_clone_warning": (
+        "Cette carte semble provenir d'une console clone, pas d'une R36S "
+        "officielle. Les images ArkOS et ROCKNIX standard ne démarrent pas "
+        "sur ce matériel — choisis EmuELEC ci-dessous."
+    ),
     # Fenêtre de choix entre plusieurs variantes ROCKNIX (§5, étape de
     # flash) -- une vraie release peut en publier plusieurs (ex. -a/-b),
     # jamais de sélection automatique entre elles.

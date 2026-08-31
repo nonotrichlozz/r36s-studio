@@ -1700,6 +1700,87 @@ def test_wizard_identify_success_enables_continue_and_logs_result(
     assert "rk3326-evb-lp3-v12" in log_text
 
 
+# --- console clone détectée à l'identification (§5 mode assisté, étape 2) --
+# --- critère validé par l'outil officiel ArkOS (identify/__init__.py) ------
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_clone_detected_logs_a_clear_warning(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyResult
+    from r36s_studio.identify.dtb import DtbInfo
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
+    window._on_wizard_identify_finished(IdentifyResult(info=info, is_clone=True))
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "clone" in log_text.lower()
+    assert "EmuELEC" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_clone_flag_remembered_for_the_flash_step(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyResult
+    from r36s_studio.identify.dtb import DtbInfo
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
+    window._on_wizard_identify_finished(IdentifyResult(info=info, is_clone=True))
+
+    assert window._wizard_source_is_clone is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_non_clone_does_not_set_clone_flag(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyResult
+    from r36s_studio.identify.dtb import DtbInfo
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    info = DtbInfo(board_compatible="rk3326-r35s", panel_compatible="sitronix,st7703", timings={})
+    window._on_wizard_identify_finished(IdentifyResult(info=info, is_clone=False))
+
+    assert window._wizard_source_is_clone is False
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "clone" not in log_text.lower()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_starting_a_new_wizard_resets_the_clone_flag(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window._wizard_source_is_clone = True
+
+    window._assisted_landing.prepare_requested.emit()
+
+    assert window._wizard_source_is_clone is False
+
+
 # --- échec d'identification : trois causes distinctes, trois messages -----
 
 
@@ -2497,12 +2578,26 @@ def test_releases_button_opens_darkos_r36s_releases_url(mock_list, mock_filter, 
 
     window = MainWindow()
 
-    window._file_dialog.releases_requested.emit()
+    window._file_dialog.releases_requested.emit("arkos")
 
     mock_open.assert_called_once_with(DARKOS_R36S_RELEASES_URL)
 
 
-# --- choix du firmware (ArkOS/ROCKNIX) à l'étape de flash (§5) -------------
+@patch("r36s_studio.gui.main_window.webbrowser.open")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_releases_button_opens_emuelec_r36s_releases_url(mock_list, mock_filter, mock_load, mock_open, qapp):
+    from r36s_studio.identify.releases import EMUELEC_R36S_RELEASES_URL
+
+    window = MainWindow()
+
+    window._file_dialog.releases_requested.emit("emuelec")
+
+    mock_open.assert_called_once_with(EMUELEC_R36S_RELEASES_URL)
+
+
+# --- choix du firmware (ArkOS/ROCKNIX/EmuELEC) à l'étape de flash (§5) -----
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
@@ -2520,6 +2615,33 @@ def test_entering_flash_mode_initializes_file_dialog_firmware_from_config(
     window._on_device_chosen(device)
 
     assert window._file_dialog._firmware == "arkos"
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_flash_step_passes_clone_flag_to_file_dialog(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._wizard_target_device = _make_device()
+    window._wizard_source_is_clone = True
+
+    window._enter_wizard_flash()
+
+    assert window._file_dialog._emuelec_radio.isChecked() is True
+    assert window._file_dialog._clone_warning_label.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_flash_step_no_clone_warning_when_not_a_clone(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._wizard_target_device = _make_device()
+    window._wizard_source_is_clone = False
+
+    window._enter_wizard_flash()
+
+    assert window._file_dialog._clone_warning_label.isVisible() is False
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")

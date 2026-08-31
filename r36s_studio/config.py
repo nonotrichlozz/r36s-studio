@@ -23,12 +23,14 @@ DEFAULT_UI_MODE = "assisted"
 _VALID_UI_MODES = {"assisted", "expert"}
 
 # Firmware choisi pour l'étape de flash (§4.6 étape C / §5 mode assisté
-# étape 5) : "arkos" (dArkOS, la configuration classique) ou "rocknix"
-# (système plus récent, transfert de jeux par USB intégré). Mémorisé d'un
-# lancement à l'autre comme `ui_mode`, avec le même principe de repli
+# étape 5) : "arkos" (dArkOS, la configuration classique), "rocknix"
+# (système plus récent, transfert de jeux par USB intégré), ou "emuelec"
+# (consoles clones -- ArkOS/ROCKNIX standard n'y démarrent pas, §5 mode
+# assisté étape 2, `identify/__init__.py::CLONE_DTB_FILENAMES`). Mémorisé
+# d'un lancement à l'autre comme `ui_mode`, avec le même principe de repli
 # silencieux sur la valeur par défaut.
 DEFAULT_FIRMWARE = "arkos"
-_VALID_FIRMWARES = {"arkos", "rocknix"}
+_VALID_FIRMWARES = {"arkos", "rocknix", "emuelec"}
 
 
 @dataclass

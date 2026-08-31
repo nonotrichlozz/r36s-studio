@@ -1275,11 +1275,27 @@ def test_file_dialog_releases_button_emits_signal(qapp):
     dialog = FileDialog()
     dialog.set_mode("flash")
     received = []
-    dialog.releases_requested.connect(lambda: received.append(True))
+    dialog.releases_requested.connect(lambda firmware: received.append(firmware))
 
     dialog._releases_button.click()
 
-    assert received == [True]
+    assert received == ["arkos"]
+
+
+def test_file_dialog_releases_button_emits_emuelec_when_selected(qapp):
+    """La page ouverte doit correspondre au firmware réellement
+    sélectionné à l'instant du clic, pas à une valeur mémorisée
+    séparément (bug potentiel : `set_mode` présélectionne le firmware
+    sans émettre `firmware_changed`, §5)."""
+    dialog = FileDialog()
+    dialog.set_mode("flash")
+    dialog._emuelec_radio.setChecked(True)
+    received = []
+    dialog.releases_requested.connect(lambda firmware: received.append(firmware))
+
+    dialog._releases_button.click()
+
+    assert received == ["emuelec"]
 
 
 # --- FileDialog : choix du firmware, flash uniquement (ArkOS/ROCKNIX) -----
@@ -1293,6 +1309,7 @@ def test_file_dialog_firmware_choice_hidden_outside_flash_mode(qapp):
 
     assert dialog._arkos_radio.isVisible() is False
     assert dialog._rocknix_radio.isVisible() is False
+    assert dialog._emuelec_radio.isVisible() is False
 
 
 def test_file_dialog_defaults_to_arkos_when_no_firmware_given(qapp):
@@ -1315,6 +1332,18 @@ def test_file_dialog_set_mode_initializes_firmware_from_config(qapp):
     assert dialog._rocknix_radio.isChecked() is True
     assert dialog._releases_button.isVisible() is False
     assert dialog._rocknix_download_button.isVisible() is True
+
+
+def test_file_dialog_set_mode_initializes_firmware_emuelec(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash", firmware="emuelec")
+
+    assert dialog._emuelec_radio.isChecked() is True
+    assert dialog._releases_button.isVisible() is True  # même comportement qu'ArkOS : lien manuel
+    assert dialog._rocknix_download_button.isVisible() is False
+    assert dialog._arkos_download_hint.isVisible() is False  # .7z propre à ArkOS, pas confirmé pour EmuELEC
 
 
 def test_file_dialog_selecting_rocknix_swaps_buttons_and_emits_firmware_changed(qapp):
@@ -1345,6 +1374,20 @@ def test_file_dialog_selecting_arkos_back_swaps_buttons_and_emits_firmware_chang
     assert dialog._rocknix_download_button.isVisible() is False
 
 
+def test_file_dialog_selecting_emuelec_swaps_buttons_and_emits_firmware_changed(qapp):
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("flash")
+    received = []
+    dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
+
+    dialog._emuelec_radio.setChecked(True)
+
+    assert received == ["emuelec"]
+    assert dialog._releases_button.isVisible() is True
+    assert dialog._rocknix_download_button.isVisible() is False
+
+
 def test_file_dialog_arkos_hint_visible_only_for_arkos_flash(qapp):
     dialog = FileDialog()
     dialog.show()
@@ -1367,6 +1410,65 @@ def test_file_dialog_switching_back_to_arkos_shows_hint_again(qapp):
     dialog._arkos_radio.setChecked(True)
 
     assert dialog._arkos_download_hint.isVisible() is True
+
+
+# --- FileDialog : avertissement console clone (§5 mode assisté, étape 2) --
+
+
+def test_file_dialog_clone_warning_hidden_by_default(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash")
+
+    assert dialog._clone_warning_label.isVisible() is False
+
+
+def test_file_dialog_shows_clone_warning_when_flagged(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash", is_clone_console=True)
+
+    assert dialog._clone_warning_label.isVisible() is True
+
+
+def test_file_dialog_clone_warning_hidden_outside_flash_mode(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("backup", is_clone_console=True)
+
+    assert dialog._clone_warning_label.isVisible() is False
+
+
+def test_file_dialog_clone_console_defaults_selection_to_emuelec(qapp):
+    """Même si la configuration persistée pointait vers un autre firmware
+    (choisi avant que cette carte ne soit identifiée comme clone), une
+    console clone détectée doit orienter par défaut vers EmuELEC -- ArkOS
+    et ROCKNIX ne démarrent pas dessus, ce n'est pas qu'une préférence."""
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash", firmware="rocknix", is_clone_console=True)
+
+    assert dialog._emuelec_radio.isChecked() is True
+
+
+def test_file_dialog_clone_flag_does_not_persist_firmware_change_on_its_own(qapp):
+    """La présélection automatique d'EmuELEC (ci-dessus) ne doit pas, à
+    elle seule, écraser la préférence persistée (`config.py`) -- seule une
+    vraie interaction de l'utilisateur (`firmware_changed`) doit le faire,
+    même principe que `test_file_dialog_set_mode_does_not_emit_firmware_
+    changed_on_its_own`."""
+    dialog = FileDialog()
+    dialog.show()
+    received = []
+    dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
+
+    dialog.set_mode("flash", firmware="rocknix", is_clone_console=True)
+
+    assert received == []
 
 
 def test_file_dialog_rocknix_download_button_emits_signal(qapp):

@@ -544,6 +544,10 @@ def cmd_identify(args: argparse.Namespace) -> int:
     else:
         print("Aucun fichier .dtb trouvé.")
 
+    if result.is_clone:
+        print("Console clone détectée (nom de .dtb, critère validé par l'outil officiel ArkOS) : "
+              "ArkOS et ROCKNIX standard ne démarrent pas sur ce matériel, EmuELEC est recommandé.")
+
     if result.info is not None:
         print(f"Carte identifiée : {result.info.board_compatible}")
         print(f"Écran : {result.info.panel_compatible or '(non trouvé)'}")

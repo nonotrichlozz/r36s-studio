@@ -27,7 +27,7 @@ from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL
 from r36s_studio.imaging import SevenZipArchiveError, UnsupportedImageFormatError, check_image_format
-from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives
+from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, set_privileged_mount_hook
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card
@@ -138,6 +138,19 @@ class MainWindow(QMainWindow):
         # opération élevée ne soit réellement lancée. Voir
         # `_get_or_create_macos_auth_session`.
         self._macos_auth_session: Optional[elevate.MacosAuthorizationSession] = None
+
+        # Repli élevé pour le montage forcé d'une carte GPT/EFI
+        # (`partitions/locate.py::_force_mount_macos`, §4.4) -- confirmé
+        # sur du vrai matériel nécessiter les droits administrateur.
+        # `locate.py` reste sans dépendance vers `gui/` (§3) : ce point
+        # d'extension réutilise `_get_or_create_macos_auth_session` (même
+        # autorisation qu'un `WorkerRunner`, jamais redemandée) sans que
+        # `locate.py` en sache quoi que ce soit. Autres OS : `pkexec`/
+        # `sudo` (Linux) et UAC (Windows) n'ont pas cet équivalent léger --
+        # ce point d'extension n'y est donc pas installé, `locate.py`
+        # retombe sur son comportement non élevé (comportement d'origine).
+        if platform.system() == "Darwin":
+            set_privileged_mount_hook(self._mount_boot_privileged)
 
         # Mode assisté (§5 mode assisté) : `WizardFlow` (testable sans Qt,
         # gui/wizard_flow.py) séquence les 7 étapes ; l'état collecté au
@@ -473,6 +486,20 @@ class MainWindow(QMainWindow):
             except OSError:
                 return None
         return self._macos_auth_session
+
+    def _mount_boot_privileged(self, device_path: str, mountpoint: str) -> bool:
+        """Repli élevé installé auprès de `partitions/locate.py` (§4.4,
+        cartes GPT/EFI) -- appelé uniquement quand le montage forcé non
+        élevé a déjà échoué, jamais avant (même principe que
+        `_get_or_create_macos_auth_session`, jamais d'invite tant qu'elle
+        n'est pas réellement nécessaire). Sans session macOS packagée
+        (développement, session non créable), `elevate.run_privileged_
+        mount` retombe sur `osascript` avec sa propre autorisation
+        ponctuelle -- `auth_ref=None` lui suffit, comme pour un
+        `WorkerRunner` sans session partagée."""
+        auth_session = self._get_or_create_macos_auth_session()
+        auth_ref = auth_session.auth_ref if auth_session is not None else None
+        return elevate.run_privileged_mount(device_path, mountpoint, auth_ref=auth_ref)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         if self._macos_auth_session is not None:

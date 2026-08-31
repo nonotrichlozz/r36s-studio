@@ -492,3 +492,43 @@ def _launch_windows(command: List[str]) -> WindowsElevatedProcess:
         raise OSError("ShellExecuteW (runas) a échoué : élévation refusée ou annulée")
 
     return WindowsElevatedProcess(info.hProcess)
+
+
+# --- montage forcé élevé (macOS, cartes GPT/EFI -- §4.4) -------------------
+#
+# Confirmé sur du vrai matériel : le montage forcé d'une première
+# partition GPT de type EFI (`mount -t msdos`, `partitions/locate.py::
+# _force_mount_macos`) échoue sans les droits administrateur, même quand
+# le contenu FAT16 est parfaitement valide -- le test manuel réussi
+# utilisait `sudo mount -t msdos ...`. `run_privileged_mount` réutilise le
+# même chemin d'élévation que `launch_elevated_worker` (`MacosAuthorized
+# Process`/`osascript` selon `sys.frozen`, y compris `auth_ref` pour
+# partager l'autorisation déjà accordée à la session plutôt que de
+# redemander le mot de passe, §3) -- mais de façon synchrone et sans le
+# protocole JSON Lines/fichier de progression : une commande aussi courte
+# n'en a pas besoin, contrairement à la relance du worker complet.
+
+
+def run_privileged_mount(
+    device_path: str, mountpoint: str, auth_ref: Optional[AuthorizationRef] = None
+) -> bool:
+    """Monte `device_path` sur `mountpoint` avec élévation (`mount -t
+    msdos`), macOS uniquement -- appelé par `partitions/locate.py` via un
+    point d'extension (`set_privileged_mount_hook`) quand un montage forcé
+    non élevé a déjà échoué. Ni `MacosAuthorizedProcess`/
+    `AuthorizationExecuteWithPrivileges` ni `osascript` ne remontent de
+    façon fiable le code de sortie de la commande élevée elle-même (le
+    premier ne relaie que sa sortie, `_run_authorized` ; le second
+    transforme un échec en erreur AppleScript qu'on ignore ici plutôt que
+    de la faire remonter) -- le succès est donc vérifié après coup via
+    `os.path.ismount`, jamais via un code de retour."""
+    command = ["/sbin/mount", "-t", "msdos", device_path, mountpoint]
+    if getattr(sys, "frozen", False) and _macos_native_supported():
+        try:
+            _run_authorized(command[0], command[1:], lambda _chunk: None, auth_ref=auth_ref)
+        except OSError:
+            pass
+    else:
+        applescript = _build_applescript(command)
+        subprocess.run(["osascript", "-e", applescript], capture_output=True)
+    return os.path.ismount(mountpoint)

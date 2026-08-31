@@ -28,6 +28,21 @@ point de montage temporaire, `_force_mount_macos`) quand `diskutil mount`
 fois la partition exploitée (ne fait rien pour un montage `diskutil`
 normal).
 
+**Montage forcé et droits administrateur (confirmé sur du vrai
+matériel).** Même le montage forcé non élevé ci-dessus échoue en
+pratique (`mount -t msdos` refuse pour la même raison qu'un utilisateur
+normal ne peut pas monter un périphérique brut sans passer par
+DiskArbitration, §3) : le test manuel réussi utilisait `sudo mount -t
+msdos ...`. Ce module reste volontairement sans dépendance vers `gui/` (il
+doit rester utilisable depuis le CLI et testable sans Qt, §3) : il expose
+donc `set_privileged_mount_hook`, un point d'extension optionnel que la
+GUI installe (`gui/main_window.py`, macOS uniquement) pour retenter le
+montage forcé avec élévation (`gui/elevate.py::run_privileged_mount`,
+même mécanisme que `backup`/`flash`) quand la tentative non élevée
+échoue. Sans hook installé (CLI, tests, autres OS), le comportement reste
+inchangé : `_force_mount_macos` échoue simplement, comme avant ce
+correctif.
+
 **Système de fichiers d'EASYROMS** : le brief initial (§4.4) prévoyait du
 FAT32, à vérifier sur une carte réelle. Test fait sur du vrai matériel :
 c'est en réalité du **NTFS**. Windows et Linux y écrivent nativement ; le
@@ -49,7 +64,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, replace
-from typing import Optional
+from typing import Callable, Optional
 
 BOOT_LABEL = "BOOT"
 EASYROMS_LABEL = "EASYROMS"
@@ -292,18 +307,36 @@ def _mount_macos(partition: PartitionInfo) -> PartitionInfo:
 # normal (géré par le système jusqu'à l'éjection finale, §4.4).
 _FORCED_MOUNTPOINTS: set[str] = set()
 
+# Point d'extension optionnel (note de module) : la GUI y installe un
+# repli avec élévation pour le montage forcé, sur macOS uniquement --
+# `None` par défaut (CLI, tests, autres OS), auquel cas `_force_mount_macos`
+# se contente de l'échec non élevé, comme avant ce point d'extension.
+_privileged_mount_hook: Optional[Callable[[str, str], bool]] = None
+
+
+def set_privileged_mount_hook(hook: Optional[Callable[[str, str], bool]]) -> None:
+    """Installe (ou retire, avec `None`) le repli élevé pour le montage
+    forcé -- `hook(device_path, mountpoint)` doit monter `device_path` sur
+    `mountpoint` avec élévation et retourner si le montage a réussi
+    (`gui/main_window.py` l'installe avec `gui/elevate.py::
+    run_privileged_mount`, macOS uniquement, note de module)."""
+    global _privileged_mount_hook
+    _privileged_mount_hook = hook
+
 
 def _force_mount_macos(partition: PartitionInfo) -> PartitionInfo:
     """Repli quand `diskutil mount` échoue -- confirmé sur du vrai matériel
     pour une première partition GPT de type EFI contenant malgré tout un
     FAT16 valide (note de module) : `diskutil mount` refuse ce type même
     quand le contenu est un FAT parfaitement lisible, mais `mount -t
-    msdos` sur un point de montage temporaire y accède sans problème.
-    N'est tenté que si le système de fichiers, quand il est connu, est un
-    FAT (jamais pour une NTFS/ext4 dont l'échec `diskutil` a une autre
-    cause) -- sans quoi la tentative échouerait de toute façon, pour rien.
-    Best-effort comme `_mount_macos` : un échec laisse `partition`
-    inchangée après avoir nettoyé le point de montage temporaire créé."""
+    msdos` sur un point de montage temporaire y accède, avec élévation
+    (confirmé nécessaire sur du vrai matériel -- voir `_privileged_mount_
+    hook` ci-dessus). N'est tenté que si le système de fichiers, quand il
+    est connu, est un FAT (jamais pour une NTFS/ext4 dont l'échec
+    `diskutil` a une autre cause) -- sans quoi la tentative échouerait de
+    toute façon, pour rien. Best-effort comme `_mount_macos` : un échec
+    laisse `partition` inchangée après avoir nettoyé le point de montage
+    temporaire créé."""
     if partition.filesystem and not _is_fat(partition.filesystem):
         return partition
     mountpoint = tempfile.mkdtemp(prefix="r36s-studio-")
@@ -312,11 +345,14 @@ def _force_mount_macos(partition: PartitionInfo) -> PartitionInfo:
         capture_output=True,
         text=True,
     )
-    if result.returncode != 0:
-        os.rmdir(mountpoint)
-        return partition
-    _FORCED_MOUNTPOINTS.add(mountpoint)
-    return replace(partition, mountpoint=mountpoint)
+    if result.returncode == 0:
+        _FORCED_MOUNTPOINTS.add(mountpoint)
+        return replace(partition, mountpoint=mountpoint)
+    if _privileged_mount_hook is not None and _privileged_mount_hook(partition.device_path, mountpoint):
+        _FORCED_MOUNTPOINTS.add(mountpoint)
+        return replace(partition, mountpoint=mountpoint)
+    os.rmdir(mountpoint)
+    return partition
 
 
 def unmount_forced(partition: PartitionInfo) -> None:

@@ -77,3 +77,19 @@ def _forbid_real_subprocess(request, monkeypatch):
     monkeypatch.setattr(subprocess, "run", _make_guard("run"))
     monkeypatch.setattr(subprocess, "Popen", _make_guard("Popen"))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_privileged_mount_hook():
+    """`partitions/locate.py::_privileged_mount_hook` est un point
+    d'extension au niveau module que `MainWindow.__init__` installe sur
+    macOS (§4.4, cartes GPT/EFI) -- sur une machine de dev réellement
+    macOS, chaque `MainWindow()` construit dans un test y installe une
+    méthode liée à cette instance, qui fuit sinon vers les tests suivants
+    (y compris dans d'autres fichiers) bien après que l'instance elle-même
+    ait cessé d'être utile."""
+    from r36s_studio.partitions import locate
+
+    locate.set_privileged_mount_hook(None)
+    yield
+    locate.set_privileged_mount_hook(None)

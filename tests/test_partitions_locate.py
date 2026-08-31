@@ -417,6 +417,34 @@ def test_find_partition_boot_on_real_gpt_efi_boot_card(mock_run):
 
     assert boot.device_path == "/dev/fake-disk-test-2s1"
     assert easyroms.device_path == "/dev/fake-disk-test-2s3"
+    assert easyroms.filesystem == "ntfs"
+    assert easyroms.partition_type == "microsoft basic data"
+
+
+def test_macos_filesystem_identifies_ntfs_for_microsoft_basic_data_gpt_content():
+    """`Content` vaut « Microsoft Basic Data » pour EASYROMS sur le schéma
+    GPT (confirmé sur du vrai matériel), pas « Windows_NTFS » comme sur les
+    cartes MBR -- `FilesystemType` (« ntfs », probé normalement par
+    diskutil pour ce type ordinaire, contrairement au cas EFI ci-dessus)
+    reste la source fiable de détection, indépendamment de `Content`."""
+    assert _macos_filesystem({"FilesystemType": "ntfs", "Content": "Microsoft Basic Data"}) == "ntfs"
+
+
+def test_select_easyroms_recognized_by_label_in_gpt_scheme_with_microsoft_basic_data_type():
+    """La reconnaissance d'EASYROMS ne dépend pas de `partition_type` --
+    elle reste retrouvée par étiquette, quel que soit le type de partition
+    GPT/MBR sous-jacent."""
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-2s1", "", "", None, partition_type="efi"),
+        PartitionInfo("/dev/fake-disk-test-2s2", "", "", None, partition_type="linux filesystem"),
+        PartitionInfo(
+            "/dev/fake-disk-test-2s3", "EASYROMS", "ntfs", None, partition_type="microsoft basic data"
+        ),
+    ]
+
+    easyroms = _select_easyroms(partitions, "/dev/fake-disk-test-2")
+
+    assert easyroms.device_path == "/dev/fake-disk-test-2s3"
 
 
 @patch("r36s_studio.partitions.locate.tempfile.mkdtemp", return_value="/tmp/r36s-studio-test")
@@ -470,6 +498,72 @@ def test_mount_macos_does_not_attempt_forced_mount_for_a_known_non_fat_filesyste
 
     assert result == partition
     mock_run.assert_called_once()  # seulement diskutil mount, jamais mount -t msdos
+
+
+# --- repli élevé (§4.4, confirmé nécessaire sur du vrai matériel) : la ------
+# --- GUI installe `set_privileged_mount_hook` (gui/main_window.py) quand ---
+# --- le montage forcé non élevé a aussi échoué. Sans hook installé (CLI, --
+# --- tests, autres OS), comportement inchangé -- déjà couvert ci-dessus. ---
+
+
+@patch("r36s_studio.partitions.locate.tempfile.mkdtemp", return_value="/tmp/r36s-studio-test")
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_mount_macos_uses_privileged_hook_when_forced_mount_also_fails(mock_run, mock_mkdtemp):
+    mock_run.side_effect = [
+        _run_result(returncode=1),  # diskutil mount : échec
+        _run_result(returncode=1),  # mount -t msdos non élevé : échec aussi
+    ]
+    partition = PartitionInfo("/dev/fake-disk-test-2s1", "", "", None, partition_type="efi")
+    hook = MagicMock(return_value=True)
+    locate.set_privileged_mount_hook(hook)
+
+    result = _mount_macos(partition)
+
+    hook.assert_called_once_with("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test")
+    assert result.mountpoint == "/tmp/r36s-studio-test"
+    assert "/tmp/r36s-studio-test" in locate._FORCED_MOUNTPOINTS
+
+
+@patch("r36s_studio.partitions.locate.os.rmdir")
+@patch("r36s_studio.partitions.locate.tempfile.mkdtemp", return_value="/tmp/r36s-studio-test")
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_mount_macos_hook_failure_removes_temp_mountpoint_and_leaves_partition_unchanged(
+    mock_run, mock_mkdtemp, mock_rmdir
+):
+    """Une invite refusée/annulée (le hook renvoie `False`) doit se
+    comporter exactement comme un hook absent -- jamais planter, jamais
+    laisser un point de montage temporaire orphelin."""
+    mock_run.side_effect = [_run_result(returncode=1), _run_result(returncode=1)]
+    partition = PartitionInfo("/dev/fake-disk-test-2s1", "", "", None, partition_type="efi")
+    locate.set_privileged_mount_hook(MagicMock(return_value=False))
+
+    result = _mount_macos(partition)
+
+    assert result == partition
+    mock_rmdir.assert_called_once_with("/tmp/r36s-studio-test")
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_mount_macos_does_not_invoke_hook_when_forced_mount_succeeds_unprivileged(mock_run):
+    """Le repli élevé n'est tenté qu'en tout dernier recours -- si le
+    montage forcé non élevé suffit déjà, jamais d'invite inutile."""
+    mock_run.side_effect = [_run_result(returncode=1), _run_result(returncode=0)]
+    partition = PartitionInfo("/dev/fake-disk-test-2s1", "", "", None, partition_type="efi")
+    hook = MagicMock(return_value=True)
+    locate.set_privileged_mount_hook(hook)
+
+    with patch("r36s_studio.partitions.locate.tempfile.mkdtemp", return_value="/tmp/r36s-studio-test"):
+        _mount_macos(partition)
+
+    hook.assert_not_called()
+
+
+def test_set_privileged_mount_hook_none_removes_a_previously_installed_hook():
+    locate.set_privileged_mount_hook(lambda device, mountpoint: True)
+
+    locate.set_privileged_mount_hook(None)
+
+    assert locate._privileged_mount_hook is None
 
 
 @patch("r36s_studio.partitions.locate.os.rmdir")

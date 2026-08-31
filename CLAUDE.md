@@ -516,15 +516,46 @@ Après flash, la carte R36S expose trois partitions : `BOOT`, `root`, `EASYROMS`
 >    `gui/partition_runner.py`) et le calcul d'empreinte des étapes 1/4
 >    (`compute_boot_fingerprint`, `safety/card_fingerprint.py`).
 >
-> Non vérifié : si le `mount -t msdos` forcé nécessite en pratique les
-> droits root dans le contexte non élevé où `partitions/` tourne (le
-> montage manuel de test, ci-dessus, utilisait `sudo`) — `partitions/` est
-> conçu pour ne jamais exiger d'élévation (§3/§4.4), et cette tentative
-> reste un simple appel non élevé, best-effort comme le reste de
-> `_mount_macos` : sur un échec (permission refusée y compris), `partition`
-> reste inchangée et `locate_mounted` retombe sur son comportement
-> précédent (`PartitionNotMounted` au bout du délai). À confirmer sur du
-> vrai matériel si ce cas se présente encore après ce correctif.
+> ⚠️ **Confirmé sur du vrai matériel : le montage forcé lui-même demande
+> les droits administrateur.** L'appel non élevé ci-dessus échoue en
+> pratique pour la même raison qu'un utilisateur normal ne peut pas monter
+> un périphérique brut sans passer par DiskArbitration (§3) — le test
+> manuel réussi utilisait `sudo mount -t msdos ...`. `partitions/` reste
+> volontairement sans dépendance vers `gui/` (utilisable depuis le CLI,
+> testable sans Qt) : `locate.py` expose donc `set_privileged_mount_hook`,
+> un point d'extension optionnel (`Callable[[device_path, mountpoint],
+> bool]`, `None` par défaut) plutôt qu'un import direct de `gui/elevate.py`.
+>
+> `gui/main_window.py` l'installe au constructeur, **macOS uniquement**
+> (`platform.system() == "Darwin"`, jamais Linux/Windows — `pkexec`/`sudo`
+> et UAC n'ont pas cet équivalent léger dans ce squelette, `locate.py`
+> retombe sur son comportement non élevé sur ces deux OS comme avant ce
+> correctif), avec `MainWindow._mount_boot_privileged` : réutilise
+> `_get_or_create_macos_auth_session()` (§3, la même session partagée
+> qu'un `WorkerRunner` de backup/flash — jamais une invite mot de passe
+> séparée pour ce cas précis) puis délègue à `gui/elevate.py::
+> run_privileged_mount`, un nouveau point d'entrée synchrone (contrairement
+> à `launch_elevated_worker`, asynchrone et pensé pour la relance du worker
+> complet avec son protocole JSON Lines/fichier de progression — une
+> commande aussi courte qu'un montage n'en a pas besoin). Réutilise le même
+> chemin bas niveau que le worker (`MacosAuthorizedProcess`/
+> `AuthorizationExecuteWithPrivileges` si `sys.frozen` et l'API historique
+> disponible, `osascript … with administrator privileges` sinon) ; ni l'un
+> ni l'autre ne remonte de façon fiable le code de sortie de la commande
+> élevée elle-même, donc le succès est vérifié après coup via
+> `os.path.ismount(mountpoint)`, jamais supposé du simple fait qu'aucune
+> exception n'a été levée. `_force_mount_macos` n'appelle ce repli qu'en
+> tout dernier recours, après l'échec du montage forcé non élevé — jamais
+> d'invite avant d'en avoir réellement besoin (§5).
+>
+> **Vérifié séparément** : la reconnaissance d'EASYROMS fonctionne aussi
+> sur ce schéma GPT, où son type de partition est « Microsoft Basic Data »
+> (confirmé sur du vrai matériel) plutôt que « Windows_NTFS » comme sur les
+> cartes MBR (bug déjà corrigé plus haut) — sans changement de code
+> nécessaire : `_select_easyroms` la retrouve par étiquette, indépendamment
+> de `partition_type`, et `FilesystemType` reste `"ntfs"` pour ce type de
+> partition ordinaire (contrairement au cas EFI ci-dessus, `diskutil` le
+> probe normalement).
 
 Montage : attendre l'apparition automatique du volume (Windows/macOS le font seuls),
 avec une temporisation et un contrôle. Sur Linux, `udisksctl mount` évite d'avoir

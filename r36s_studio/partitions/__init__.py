@@ -26,6 +26,7 @@ from .locate import (
     list_partitions,
     locate_mounted,
     looks_like_arkos,
+    set_privileged_mount_hook,
     unmount_forced,
 )
 
@@ -49,5 +50,6 @@ __all__ = [
     "list_partitions",
     "locate_mounted",
     "looks_like_arkos",
+    "set_privileged_mount_hook",
     "unmount_forced",
 ]

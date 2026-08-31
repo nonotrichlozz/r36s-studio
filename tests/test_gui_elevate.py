@@ -598,3 +598,103 @@ def test_windows_elevated_process_poll_reports_exit_code(mock_windll):
 
     process = elevate.WindowsElevatedProcess(h_process=123)
     assert process.poll() == 0
+
+
+# --- run_privileged_mount : montage forcé élevé (macOS, cartes GPT/EFI, ----
+# --- §4.4) -- confirmé sur du vrai matériel nécessiter les droits ---------
+# --- administrateur (`sudo mount -t msdos ...`), même chemin d'élévation --
+# --- que launch_elevated_worker mais synchrone, sans protocole JSON -------
+# --- Lines/fichier de progression. ------------------------------------------
+
+
+@patch("r36s_studio.gui.elevate.os.path.ismount", return_value=True)
+@patch("r36s_studio.gui.elevate.subprocess.run")
+def test_run_privileged_mount_dev_mode_uses_osascript_with_admin_privileges(mock_run, mock_ismount):
+    result = elevate.run_privileged_mount("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test")
+
+    call_args = mock_run.call_args.args[0]
+    assert call_args[0] == "osascript"
+    applescript = call_args[2]
+    assert "with administrator privileges" in applescript
+    assert "/sbin/mount" in applescript
+    assert "-t msdos" in applescript
+    assert "/dev/fake-disk-test-2s1" in applescript
+    assert "/tmp/r36s-studio-test" in applescript
+    assert result is True
+
+
+@patch("r36s_studio.gui.elevate.os.path.ismount", return_value=False)
+@patch("r36s_studio.gui.elevate.subprocess.run")
+def test_run_privileged_mount_returns_false_when_nothing_actually_mounted(mock_run, mock_ismount):
+    """Ni `osascript`/`do shell script` ni `AuthorizationExecuteWithPrivileges`
+    ne remontent de façon fiable le code de sortie de la commande élevée
+    elle-même -- le succès est vérifié après coup via `os.path.ismount`,
+    jamais supposé du simple fait qu'aucune exception n'a été levée."""
+    result = elevate.run_privileged_mount("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test")
+
+    assert result is False
+
+
+@patch("r36s_studio.gui.elevate.os.path.ismount", return_value=True)
+@patch("r36s_studio.gui.elevate._run_authorized")
+@patch("r36s_studio.gui.elevate._macos_native_supported", return_value=True)
+def test_run_privileged_mount_frozen_and_native_supported_skips_osascript(
+    mock_supported, mock_run_authorized, mock_ismount, monkeypatch
+):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    result = elevate.run_privileged_mount("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test")
+
+    mock_run_authorized.assert_called_once()
+    assert mock_run_authorized.call_args.args[0] == "/sbin/mount"
+    assert mock_run_authorized.call_args.args[1] == [
+        "-t",
+        "msdos",
+        "/dev/fake-disk-test-2s1",
+        "/tmp/r36s-studio-test",
+    ]
+    assert result is True
+
+
+@patch("r36s_studio.gui.elevate.os.path.ismount", return_value=True)
+@patch("r36s_studio.gui.elevate._run_authorized")
+@patch("r36s_studio.gui.elevate._macos_native_supported", return_value=True)
+def test_run_privileged_mount_forwards_auth_ref_to_shared_session(
+    mock_supported, mock_run_authorized, mock_ismount, monkeypatch
+):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    shared_ref = elevate.AuthorizationRef(42)
+
+    elevate.run_privileged_mount("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test", auth_ref=shared_ref)
+
+    assert mock_run_authorized.call_args.kwargs["auth_ref"] is shared_ref
+
+
+@patch("r36s_studio.gui.elevate.os.path.ismount", return_value=False)
+@patch("r36s_studio.gui.elevate._run_authorized", side_effect=OSError("invite refusée"))
+@patch("r36s_studio.gui.elevate._macos_native_supported", return_value=True)
+def test_run_privileged_mount_prompt_refused_returns_false_instead_of_raising(
+    mock_supported, mock_run_authorized, mock_ismount, monkeypatch
+):
+    """Une invite refusée/annulée (mot de passe incorrect...) ne doit
+    jamais faire planter l'appelant -- `_force_mount_macos` (locate.py)
+    retombe sur son comportement non élevé, comme un hook non installé."""
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    result = elevate.run_privileged_mount("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test")
+
+    assert result is False
+
+
+@patch("r36s_studio.gui.elevate.os.path.ismount", return_value=True)
+@patch("r36s_studio.gui.elevate.subprocess.run")
+@patch("r36s_studio.gui.elevate._macos_native_supported", return_value=False)
+def test_run_privileged_mount_frozen_but_native_unsupported_falls_back_to_osascript(
+    mock_supported, mock_run, mock_ismount, monkeypatch
+):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    elevate.run_privileged_mount("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test")
+
+    call_args = mock_run.call_args.args[0]
+    assert call_args[0] == "osascript"

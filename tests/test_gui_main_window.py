@@ -245,6 +245,78 @@ def test_close_event_without_a_macos_auth_session_does_not_raise(mock_list, mock
     window.close()  # ne doit pas lever, même sans session créée
 
 
+# --- repli élevé pour le montage forcé d'une carte GPT/EFI (§4.4) ----------
+#
+# Confirmé sur du vrai matériel : le montage forcé lui-même (`mount -t
+# msdos`, locate.py) nécessite les droits administrateur. `MainWindow`
+# installe un point d'extension auprès de `locate.py` (`set_privileged_
+# mount_hook`) qui réutilise le même mécanisme d'élévation que backup/flash.
+
+
+@patch("r36s_studio.gui.main_window.set_privileged_mount_hook")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+def test_installs_privileged_mount_hook_on_macos(mock_system, mock_list, mock_filter, mock_set_hook, qapp):
+    window = MainWindow()
+
+    mock_set_hook.assert_called_once_with(window._mount_boot_privileged)
+
+
+@patch("r36s_studio.gui.main_window.set_privileged_mount_hook")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Linux")
+def test_does_not_install_privileged_mount_hook_outside_macos(mock_system, mock_list, mock_filter, mock_set_hook, qapp):
+    """Linux (`pkexec`/`sudo`) et Windows (UAC) n'ont pas cet équivalent
+    léger dans ce squelette -- `locate.py` retombe sur son comportement
+    non élevé, comme avant ce correctif (§3)."""
+    MainWindow()
+
+    mock_set_hook.assert_not_called()
+
+
+@patch("r36s_studio.gui.main_window.elevate.run_privileged_mount", return_value=True)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.sys")
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+def test_mount_boot_privileged_delegates_to_elevate_without_a_session_in_dev_mode(
+    mock_system, mock_sys, mock_list, mock_filter, mock_run_mount, qapp
+):
+    del mock_sys.frozen  # simule l'attribut absent, comme en dev réel
+    window = MainWindow()
+
+    result = window._mount_boot_privileged("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test")
+
+    mock_run_mount.assert_called_once_with(
+        "/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test", auth_ref=None
+    )
+    assert result is True
+
+
+@patch("r36s_studio.gui.main_window.elevate.run_privileged_mount", return_value=True)
+@patch("r36s_studio.gui.main_window.elevate.MacosAuthorizationSession")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.sys")
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+def test_mount_boot_privileged_reuses_the_shared_macos_auth_session(
+    mock_system, mock_sys, mock_list, mock_filter, mock_session_class, mock_run_mount, qapp
+):
+    """Même autorisation qu'un `WorkerRunner` (backup/flash) -- jamais une
+    invite mot de passe séparée pour le montage forcé."""
+    mock_sys.frozen = True
+    window = MainWindow()
+    session = window._get_or_create_macos_auth_session()
+
+    window._mount_boot_privileged("/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test")
+
+    mock_run_mount.assert_called_once_with(
+        "/dev/fake-disk-test-2s1", "/tmp/r36s-studio-test", auth_ref=session.auth_ref
+    )
+
+
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")

@@ -31,7 +31,7 @@ from r36s_studio.identify.rocknix import (
     resolve_latest_r36s_assets,
 )
 from r36s_studio.imaging.copy import PROGRESS_INTERVAL, OperationCancelled, ProgressEvent
-from r36s_studio.imaging.system_backup import GamesPartitionNotFound, estimate_system_backup_size
+from r36s_studio.imaging.system_backup import GamesPartitionNotFound, estimate_system_backup_size_unprivileged
 from r36s_studio.partitions import (
     BOOT_LABEL,
     MacosNtfsWriteUnsupported,
@@ -293,20 +293,43 @@ class RocknixDownloadRunner(QThread):
 
 @dataclass
 class SystemBackupEstimate:
-    """Résultat de `SystemBackupEstimateRunner` -- soit `size_bytes`
-    (`error`/`detail` restent `None`), soit `error` (code du protocole,
-    §3) accompagné de `detail`, le message brut de l'exception d'origine
-    -- bug corrigé : sans lui, une erreur à cette étape n'affichait que le
+    """Résultat de `SystemBackupEstimateRunner` -- trois issues possibles :
+    `size_bytes` renseigné (succès, `error`/`needs_elevation` restent
+    respectivement `None`/`False`) ; `error` (code du protocole, §3)
+    accompagné de `detail`, le message brut de l'exception d'origine --
+    bug corrigé : sans lui, une erreur à cette étape n'affichait que le
     message générique « Une erreur est survenue », sans aucune cause
     exploitable, contrairement à toute autre opération de l'appli (§5 :
-    le détail brut suit toujours le message principal dans le journal).
-    `board_compatible` est un pur bonus, jamais requis pour un résultat
-    par ailleurs réussi."""
+    le détail brut suit toujours le message principal dans le journal) ;
+    ou `needs_elevation=True` (§4.3, confirmé sur du vrai matériel :
+    `list_partitions` -- non élevé -- n'a pas pu exposer la taille d'au
+    moins une partition à sommer) -- l'appelant relance alors un calcul
+    élevé plutôt que d'afficher une erreur, la carte n'étant pas en
+    cause. `board_compatible` est un pur bonus, jamais requis pour un
+    résultat par ailleurs réussi -- y compris avec `needs_elevation`,
+    déjà tenté à ce stade pour ne pas le refaire après coup."""
 
     size_bytes: Optional[int] = None
     error: Optional[str] = None
     detail: Optional[str] = None
     board_compatible: Optional[str] = None
+    needs_elevation: bool = False
+
+
+def _best_effort_board_compatible(device_path: str) -> Optional[str]:
+    """Identification de la console (pour suggérer un nom de fichier «
+    quand il est connu », §4.3), purement décorative : n'importe quel
+    échec (montage impossible, pas de `.dtb`, carte défaillante...) est
+    avalé silencieusement plutôt que de faire échouer l'estimation."""
+    try:
+        boot = locate_mounted(device_path, BOOT_LABEL)
+        if not boot.mountpoint:
+            return None
+        result = identify_from_boot_directory(boot.mountpoint)
+        unmount_forced(boot)
+        return result.info.board_compatible if result.info is not None else None
+    except Exception:
+        return None
 
 
 class SystemBackupEstimateRunner(QThread):
@@ -318,11 +341,15 @@ class SystemBackupEstimateRunner(QThread):
     un plantage (même piège que `WizardIdentifyRunner`/`WizardFingerprint
     Runner`).
 
-    L'identification de la console (`board_compatible`, pour suggérer un
-    nom de fichier "quand il est connu", §4.3) est purement décorative :
-    n'importe quel échec (montage impossible, pas de `.dtb`, carte
-    défaillante...) est avalé silencieusement plutôt que de faire échouer
-    l'estimation de taille elle-même, déjà calculée à ce stade."""
+    Utilise `estimate_system_backup_size_unprivileged` -- jamais un accès
+    brut au périphérique, confirmé exiger les droits administrateur sur
+    macOS (`[Errno 13] Permission denied: '/dev/diskN'`) pour ce qui n'est
+    qu'un calcul d'estimation avant de lancer l'opération réelle (celle-ci
+    reste élevée via le worker, §3, comme `backup`/`flash`). Émet
+    `needs_elevation=True` plutôt que de tenter elle-même un accès brut
+    quand cette estimation légère ne suffit pas -- c'est `MainWindow`
+    (pas ce thread) qui relance alors un calcul élevé, en réutilisant la
+    session d'autorisation déjà partagée avec `WorkerRunner`."""
 
     finished_estimate = Signal(object)  # SystemBackupEstimate
 
@@ -332,7 +359,7 @@ class SystemBackupEstimateRunner(QThread):
 
     def run(self) -> None:
         try:
-            size_bytes = estimate_system_backup_size(self._device_path)
+            size_bytes = estimate_system_backup_size_unprivileged(self._device_path)
         except GamesPartitionNotFound as exc:
             self.finished_estimate.emit(SystemBackupEstimate(error="GAMES_PARTITION_NOT_FOUND", detail=str(exc)))
             return
@@ -340,15 +367,10 @@ class SystemBackupEstimateRunner(QThread):
             self.finished_estimate.emit(SystemBackupEstimate(error="IO_ERROR", detail=str(exc)))
             return
 
-        board_compatible = None
-        try:
-            boot = locate_mounted(self._device_path, BOOT_LABEL)
-            if boot.mountpoint:
-                result = identify_from_boot_directory(boot.mountpoint)
-                if result.info is not None:
-                    board_compatible = result.info.board_compatible
-                unmount_forced(boot)
-        except Exception:
-            pass  # décoratif pour le nom de fichier seulement, voir la docstring
+        board_compatible = _best_effort_board_compatible(self._device_path)
+
+        if size_bytes is None:
+            self.finished_estimate.emit(SystemBackupEstimate(needs_elevation=True, board_compatible=board_compatible))
+            return
 
         self.finished_estimate.emit(SystemBackupEstimate(size_bytes=size_bytes, board_compatible=board_compatible))

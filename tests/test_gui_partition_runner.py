@@ -448,7 +448,7 @@ def test_wizard_identify_runner_unmounts_forced_mount_after_identifying(
     "r36s_studio.gui.partition_runner.locate_mounted",
     return_value=PartitionInfo("/dev/fake-disk-test-6s1", "", "fat16", "/Volumes/BOOT"),
 )
-@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", return_value=9_000_000_000)
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size_unprivileged", return_value=9_000_000_000)
 def test_system_backup_estimate_runner_reports_size_and_board(
     mock_estimate, mock_locate, mock_identify, mock_unmount, qapp
 ):
@@ -472,7 +472,7 @@ def test_system_backup_estimate_runner_reports_size_and_board(
     mock_unmount.assert_called_once_with(mock_locate.return_value)
 
 
-@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", side_effect=GamesPartitionNotFound("x"))
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size_unprivileged", side_effect=GamesPartitionNotFound("x"))
 def test_system_backup_estimate_runner_reports_games_partition_not_found(mock_estimate, qapp):
     runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
     results = []
@@ -490,7 +490,7 @@ def test_system_backup_estimate_runner_games_partition_not_found_keeps_the_real_
     porter le message de l'exception d'origine, comme pour toute autre
     opération (§5)."""
     with patch(
-        "r36s_studio.gui.partition_runner.estimate_system_backup_size",
+        "r36s_studio.gui.partition_runner.estimate_system_backup_size_unprivileged",
         side_effect=GamesPartitionNotFound("Aucune partition de jeux reconnue sur cette carte."),
     ):
         runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
@@ -502,7 +502,7 @@ def test_system_backup_estimate_runner_games_partition_not_found_keeps_the_real_
     assert results[0].detail == "Aucune partition de jeux reconnue sur cette carte."
 
 
-@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", side_effect=OSError("carte débranchée"))
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size_unprivileged", side_effect=OSError("carte débranchée"))
 def test_system_backup_estimate_runner_reports_io_error(mock_estimate, qapp):
     runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
     results = []
@@ -515,7 +515,7 @@ def test_system_backup_estimate_runner_reports_io_error(mock_estimate, qapp):
 
 
 @patch("r36s_studio.gui.partition_runner.locate_mounted", side_effect=PartitionNotMounted("BOOT", "/dev/x"))
-@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", return_value=9_000_000_000)
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size_unprivileged", return_value=9_000_000_000)
 def test_system_backup_estimate_runner_size_survives_identify_failure(mock_estimate, mock_locate, qapp):
     """L'identification échoue (carte défaillante, montage impossible...)
     -- purement décorative pour le nom de fichier suggéré, ne doit jamais
@@ -529,3 +529,37 @@ def test_system_backup_estimate_runner_size_survives_identify_failure(mock_estim
     assert results[0].size_bytes == 9_000_000_000
     assert results[0].error is None
     assert results[0].board_compatible is None
+
+
+@patch(
+    "r36s_studio.gui.partition_runner.locate_mounted",
+    return_value=PartitionInfo("/dev/fake-disk-test-6s1", "", "fat16", "/Volumes/BOOT"),
+)
+@patch("r36s_studio.gui.partition_runner.identify_from_boot_directory")
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size_unprivileged", return_value=None)
+def test_system_backup_estimate_runner_requests_elevation_when_light_estimate_unavailable(
+    mock_estimate, mock_identify, mock_locate, qapp
+):
+    """Bug rapporté : lire la table de partitions brute pour l'estimation
+    exige les droits administrateur sur macOS -- quand `list_partitions`
+    (non élevé) n'expose pas assez d'information (`estimate_system_
+    backup_size_unprivileged` renvoie `None`), le repli est demandé
+    plutôt qu'un accès brut tenté directement depuis ce thread."""
+    from r36s_studio.identify import IdentifyResult
+    from r36s_studio.identify.dtb import DtbInfo
+
+    mock_identify.return_value = IdentifyResult(
+        info=DtbInfo(board_compatible="rk3326-r35s", panel_compatible="sitronix,st7703", timings={})
+    )
+    runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
+    results = []
+    runner.finished_estimate.connect(lambda result: results.append(result))
+
+    runner.run()
+
+    assert results[0].needs_elevation is True
+    assert results[0].size_bytes is None
+    assert results[0].error is None
+    # Déjà tentée à ce stade -- l'appelant n'a pas besoin de la refaire
+    # après le repli élevé.
+    assert results[0].board_compatible == "rk3326-r35s"

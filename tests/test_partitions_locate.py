@@ -644,6 +644,53 @@ def test_list_macos_empty_when_disk_absent(mock_run):
     assert _list_macos("/dev/fake-disk-test-4") == []
 
 
+# --- taille de chaque partition, sans accès brut (§4.3, estimation de la --
+# --- sauvegarde système sans les jeux -- confirmé sur du vrai matériel : --
+# --- `/dev/diskN` exige les droits administrateur, contrairement à -------
+# --- `diskutil info -plist`/`lsblk`/`Get-Volume`, qui donnent déjà la ----
+# --- taille sans élévation). --------------------------------------------
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_macos_populates_size_bytes_from_diskutil(mock_run):
+    list_plist = plistlib.dumps(
+        {
+            "AllDisksAndPartitions": [
+                {
+                    "DeviceIdentifier": "fake-disk-test-4",
+                    "Partitions": [{"DeviceIdentifier": "fake-disk-test-4s1"}],
+                }
+            ]
+        }
+    )
+    info = plistlib.dumps({"VolumeName": "EASYROMS", "FilesystemType": "ntfs", "Size": 9_000_000_000})
+    mock_run.side_effect = [_run_result(list_plist), _run_result(info)]
+
+    partitions = _list_macos("/dev/fake-disk-test-4")
+
+    assert partitions[0].size_bytes == 9_000_000_000
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_macos_size_bytes_none_when_absent_from_diskutil(mock_run):
+    list_plist = plistlib.dumps(
+        {
+            "AllDisksAndPartitions": [
+                {
+                    "DeviceIdentifier": "fake-disk-test-4",
+                    "Partitions": [{"DeviceIdentifier": "fake-disk-test-4s1"}],
+                }
+            ]
+        }
+    )
+    info = plistlib.dumps({"VolumeName": "EASYROMS", "FilesystemType": "ntfs"})
+    mock_run.side_effect = [_run_result(list_plist), _run_result(info)]
+
+    partitions = _list_macos("/dev/fake-disk-test-4")
+
+    assert partitions[0].size_bytes is None
+
+
 # --- Linux : _list_linux -------------------------------------------------
 
 
@@ -681,6 +728,33 @@ def test_list_linux_returns_partitions_in_disk_order(mock_run):
     assert partitions[1].label == "EASYROMS"
 
 
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_linux_populates_size_bytes_from_lsblk(mock_run):
+    lsblk_output = json.dumps(
+        {
+            "blockdevices": [
+                {
+                    "path": "/dev/fake-disk-test-sdb",
+                    "children": [
+                        {
+                            "path": "/dev/fake-disk-test-sdb1",
+                            "label": "EASYROMS",
+                            "fstype": "ntfs",
+                            "mountpoints": [None],
+                            "size": 9_000_000_000,
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    mock_run.return_value = _run_result(lsblk_output)
+
+    partitions = _list_linux("/dev/fake-disk-test-sdb")
+
+    assert partitions[0].size_bytes == 9_000_000_000
+
+
 # --- Windows : _list_windows ---------------------------------------------
 
 
@@ -697,6 +771,16 @@ def test_list_windows_returns_partitions_with_drive_letters(mock_run):
     partitions = _list_windows(r"\\.\PhysicalDrive9903")
 
     assert [p.mountpoint for p in partitions] == ["E:\\", "F:\\"]
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_windows_populates_size_bytes_from_get_volume(mock_run):
+    volumes = json.dumps([{"FileSystemLabel": "EASYROMS", "FileSystem": "NTFS", "DriveLetter": "F", "Size": 9_000_000_000}])
+    mock_run.return_value = _run_result(volumes)
+
+    partitions = _list_windows(r"\\.\PhysicalDrive9903")
+
+    assert partitions[0].size_bytes == 9_000_000_000
 
 
 @patch("r36s_studio.partitions.locate.subprocess.run")

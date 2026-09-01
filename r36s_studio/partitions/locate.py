@@ -93,6 +93,14 @@ class PartitionInfo:
     # matériel d'une première partition GPT de type EFI contenant malgré
     # tout un FAT16 valide (note de module, `_looks_like_efi_boot`).
     partition_type: str = ""
+    # Taille en octets, quand l'OS la fournit sans accès brut au
+    # périphérique (§4.3, `imaging/system_backup.py::estimate_system_
+    # backup_size_unprivileged`) -- `None` sinon (jamais deviné). Confirmé
+    # sur du vrai matériel : lire la table de partitions brute (`/dev/
+    # diskN`) exige les droits administrateur sur macOS, contrairement à
+    # `diskutil info -plist`/`lsblk`/`Get-Volume`, qui exposent déjà la
+    # taille sans élévation.
+    size_bytes: Optional[int] = None
 
 
 class PartitionNotFound(Exception):
@@ -415,6 +423,7 @@ def _list_macos(device_path: str) -> list[PartitionInfo]:
                 filesystem=_macos_filesystem(info),
                 mountpoint=info.get("MountPoint") or None,
                 partition_type=_macos_partition_type(info),
+                size_bytes=info.get("Size"),
             )
         )
     return partitions
@@ -425,7 +434,7 @@ def _list_macos(device_path: str) -> list[PartitionInfo]:
 
 def _list_linux(device_path: str) -> list[PartitionInfo]:
     result = subprocess.run(
-        ["lsblk", "-J", "-b", "-o", "PATH,LABEL,FSTYPE,MOUNTPOINTS", device_path],
+        ["lsblk", "-J", "-b", "-o", "PATH,LABEL,FSTYPE,MOUNTPOINTS,SIZE", device_path],
         capture_output=True,
         text=True,
         check=True,
@@ -437,12 +446,18 @@ def _list_linux(device_path: str) -> list[PartitionInfo]:
     partitions = []
     for child in children:
         mountpoints = [m for m in (child.get("mountpoints") or []) if m]
+        size = child.get("size")
         partitions.append(
             PartitionInfo(
                 device_path=child.get("path", ""),
                 label=child.get("label") or "",
                 filesystem=(child.get("fstype") or "").lower(),
                 mountpoint=mountpoints[0] if mountpoints else None,
+                # `-b` (octets) déjà demandé ci-dessus, mais certaines
+                # versions de lsblk renvoient quand même `size` sous forme
+                # de chaîne dans le JSON -- converti explicitement plutôt
+                # que de propager un type incohérent selon la version.
+                size_bytes=int(size) if size is not None else None,
             )
         )
     return partitions
@@ -511,6 +526,7 @@ def _list_windows(device_path: str) -> list[PartitionInfo]:
                 label=volume.get("FileSystemLabel") or "",
                 filesystem=(volume.get("FileSystem") or "").lower(),
                 mountpoint=mountpoint,
+                size_bytes=volume.get("Size"),
             )
         )
     return partitions

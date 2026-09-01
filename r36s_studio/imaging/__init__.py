@@ -19,7 +19,12 @@ from .image_source import (
 )
 from .mbr import MbrPartition, is_gpt_protective, last_used_byte, parse_mbr
 from .source import prepared_source, raw_read_path
-from .system_backup import GamesPartitionNotFound, backup_system_only, estimate_system_backup_size
+from .system_backup import (
+    GamesPartitionNotFound,
+    backup_system_only,
+    estimate_system_backup_size,
+    estimate_system_backup_size_unprivileged,
+)
 from .write_target import prepared_write_target
 
 __all__ = [
@@ -47,5 +52,6 @@ __all__ = [
     "GamesPartitionNotFound",
     "backup_system_only",
     "estimate_system_backup_size",
+    "estimate_system_backup_size_unprivileged",
     "prepared_write_target",
 ]

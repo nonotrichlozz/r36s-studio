@@ -417,6 +417,15 @@ class MainWindow(QMainWindow):
         self._estimate_runner.start()
 
     def _on_system_backup_estimate_ready(self, estimate: SystemBackupEstimate) -> None:
+        if estimate.needs_elevation:
+            # Repli élevé (§4.3, confirmé sur du vrai matériel) : lire la
+            # table de partitions brute exige les droits administrateur
+            # sur macOS -- `list_partitions` (non élevé) n'a pas pu
+            # exposer la taille d'au moins une partition à sommer. Reste
+            # occupé (`set_busy` pas encore relâché) : l'opération n'est
+            # pas terminée, seulement son premier temps.
+            self._start_elevated_system_backup_estimate(estimate.board_compatible)
+            return
         self._home.set_busy(False)
         self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
@@ -437,10 +446,13 @@ class MainWindow(QMainWindow):
             # sur une détection périmée.
             self._refresh_home_state()
             return
-        size_text = _format_size(estimate.size_bytes)
+        self._finish_system_backup_estimate(estimate.size_bytes, estimate.board_compatible)
+
+    def _finish_system_backup_estimate(self, size_bytes: int, board_compatible: Optional[str]) -> None:
+        size_text = _format_size(size_bytes)
         self._log_panel.append_log(tr("system_backup_estimate_result", size=size_text))
         self._file_dialog.set_mode(
-            "backup_system", default_path=self._suggested_system_backup_path(estimate.board_compatible)
+            "backup_system", default_path=self._suggested_system_backup_path(board_compatible)
         )
         # Affichée directement sur la fenêtre (§4.3 : « affiche la taille
         # estimée et demande confirmation avant de lancer ») -- après
@@ -448,6 +460,41 @@ class MainWindow(QMainWindow):
         # `FileDialog.set_mode`).
         self._file_dialog.set_estimated_size(tr("file_system_backup_size", size=size_text))
         self._file_dialog.open()
+
+    def _start_elevated_system_backup_estimate(self, board_compatible: Optional[str]) -> None:
+        """Relance le calcul via le worker élevé (`backup --system-only
+        --estimate-only`) en réutilisant la même session d'autorisation
+        que `backup`/`flash` (`_get_or_create_macos_auth_session`) --
+        jamais une invite mot de passe séparée pour cette étape."""
+        self._pending_estimate_board_compatible = board_compatible
+        self._pending_estimate_size_bytes = None
+        argv = ["backup", "--device", self._device.path, "--system-only", "--estimate-only"]
+        self._estimate_worker = WorkerRunner(
+            argv, parent=self, macos_auth_session=self._get_or_create_macos_auth_session()
+        )
+        self._estimate_worker.estimate.connect(self._on_elevated_system_backup_estimate)
+        self._estimate_worker.error.connect(self._on_worker_error)
+        self._estimate_worker.finished.connect(self._on_elevated_system_backup_estimate_finished)
+        self._estimate_worker.start()
+
+    def _on_elevated_system_backup_estimate(self, size_bytes: int) -> None:
+        self._pending_estimate_size_bytes = size_bytes
+
+    def _on_elevated_system_backup_estimate_finished(self, ok: bool) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        if self._console_stage is not None:
+            self._console_stage.resume()
+        if not ok or self._pending_estimate_size_bytes is None:
+            message = friendly_error_message(self._last_error_code or "")
+            self._log_panel.append_log(message)
+            if self._last_error_msg and self._last_error_msg != message:
+                self._log_panel.append_log(self._last_error_msg)
+            self._refresh_home_state()
+            return
+        self._finish_system_backup_estimate(
+            self._pending_estimate_size_bytes, self._pending_estimate_board_compatible
+        )
 
     def _suggested_system_backup_path(self, board_compatible: Optional[str]) -> str:
         """Nom de fichier proposé (§4.3 : « propose un nom de fichier

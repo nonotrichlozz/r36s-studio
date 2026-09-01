@@ -19,6 +19,16 @@ les partitions dans le même ordre (position sur le disque), même
 hypothèse déjà faite ailleurs dans ce projet (`partitions/locate.py::
 BOOT_PARTITION_INDEX`/`EASYROMS_PARTITION_INDEX`).
 
+**Estimation sans accès brut** (`estimate_system_backup_size_unprivileged`,
+§4.3) : confirmé sur du vrai matériel, lire la table de partitions brute
+exige les droits administrateur sur macOS (`[Errno 13] Permission denied:
+'/dev/diskN'`) -- inutile pour une simple estimation avant de lancer
+l'opération, qui n'a pas besoin d'être exacte à l'octet près.
+`list_partitions` expose déjà la taille de chaque partition sans
+élévation ; sommer les partitions gardées suffit. Ne remplace pas
+`compute_system_boundary` (toujours utilisé par l'opération réelle,
+précise, élevée via le worker) — seulement l'affichage préalable.
+
 **Point critique, table GPT** : contrairement à MBR (une table unique en
 tête de disque, sans référence à la fin du disque), GPT porte une table
 secondaire en toute fin de disque, et l'en-tête primaire y pointe
@@ -127,6 +137,49 @@ def _resolve_games_partition_index(partitions: List[PartitionInfo], raw_sizes_by
     if index is not None:
         return index
     return _fallback_games_partition_index(partitions, raw_sizes_bytes)
+
+
+def estimate_system_backup_size_unprivileged(device_path: str) -> Optional[int]:
+    """Estime la taille sans jamais lire la table de partitions brute --
+    confirmé sur du vrai matériel : `/dev/diskN` exige les droits
+    administrateur sur macOS (`[Errno 13] Permission denied`), alors que
+    `partitions/locate.py::list_partitions` (déjà utilisé pour identifier
+    la partition de jeux) expose la taille de chaque partition sans
+    élévation (`diskutil info -plist`/`lsblk`/`Get-Volume`). Une
+    estimation n'a pas besoin d'être exacte à l'octet près, contrairement
+    à `compute_system_boundary` (utilisé par l'opération réelle,
+    `backup_system_only`, qui passe de toute façon par le worker élevé,
+    §3) -- ignore volontairement le supplément de la table secondaire GPT
+    (~16 Ko, négligeable face à des tailles de plusieurs Go) plutôt que
+    de lire la table brute juste pour distinguer MBR de GPT.
+
+    Retourne `None` quand cette estimation légère n'est pas possible
+    (taille manquante pour au moins une partition à sommer, ou pour la
+    dernière partition quand le repli sans étiquette doit être tenté) --
+    l'appelant retombe alors sur un calcul élevé plutôt que d'afficher un
+    chiffre inventé. Lève `GamesPartitionNotFound` (même exception, même
+    message) quand aucune partition de jeux n'est identifiable du tout :
+    ça resterait vrai après élévation aussi, pas la peine d'y retomber
+    pour rien."""
+    partitions = list_partitions(device_path)
+    sizes = [p.size_bytes for p in partitions]
+
+    games_index = _labeled_games_partition_index(partitions)
+    if games_index is None:
+        if any(size is None for size in sizes):
+            return None
+        games_index = _fallback_games_partition_index(partitions, sizes)
+
+    if games_index is None or games_index == 0:
+        raise GamesPartitionNotFound(
+            "Aucune partition de jeux reconnue (EASYROMS, STORAGE, ou dernière "
+            "partition FAT/NTFS de grande taille) sur cette carte."
+        )
+
+    kept_sizes = sizes[:games_index]
+    if any(size is None for size in kept_sizes):
+        return None
+    return sum(kept_sizes)
 
 
 def compute_system_boundary(device_path: str) -> SystemBoundary:

@@ -133,6 +133,25 @@ def test_dispatches_progress_log_error_done_events(mock_launch, mock_log_path, t
 
 @patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_dispatches_estimate_event(mock_launch, mock_log_path, tmp_path, qapp):
+    """Repli élevé pour l'estimation de la sauvegarde système sans les
+    jeux (§4.3, `backup --system-only --estimate-only`)."""
+    mock_log_path.return_value = tmp_path / "elevation.log"
+    mock_launch.return_value = _fake_process([None] * 5)
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--system-only", "--estimate-only"])
+    runner.start()
+
+    estimate_events = []
+    runner.estimate.connect(lambda size: estimate_events.append(size))
+
+    _write_events(runner._progress_file, [{"type": "estimate", "size_bytes": 9_000_000_000}])
+    runner._poll()
+
+    assert estimate_events == [9_000_000_000]
+
+
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
 def test_cancel_file_does_not_exist_until_cancel_is_called(mock_launch, mock_log_path, tmp_path, qapp):
     """Le fichier d'annulation ne doit PAS exister dès `start()` : le
     worker le détecte via `os.path.exists()` (voir `_make_should_cancel`

@@ -89,6 +89,10 @@ class WorkerRunner(QObject):
     log = Signal(str, str)  # level, msg
     error = Signal(str, str)  # code, msg
     finished = Signal(bool)  # ok
+    # Repli élevé pour l'estimation de la sauvegarde système sans les jeux
+    # (§4.3, `backup --system-only --estimate-only`) -- `"qint64"` pour la
+    # même raison que `progress` ci-dessus (une taille peut dépasser 2 Go).
+    estimate = Signal("qint64")  # size_bytes
 
     def __init__(self, argv: List[str], parent=None, macos_auth_session=None):
         """`argv` : la commande worker sans `--worker`/`--progress-file`/
@@ -220,6 +224,8 @@ class WorkerRunner(QObject):
             self.log.emit(event.get("level", "info"), event.get("msg", ""))
         elif etype == "error":
             self.error.emit(event.get("code", ""), event.get("msg", ""))
+        elif etype == "estimate":
+            self.estimate.emit(event.get("size_bytes", 0))
         elif etype == "done":
             self._done_emitted = True
             self.finished.emit(bool(event.get("ok")))

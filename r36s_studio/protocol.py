@@ -50,3 +50,11 @@ def emit_error(code: str, msg: str) -> None:
 
 def emit_done(ok: bool) -> None:
     emit({"type": "done", "ok": ok})
+
+
+def emit_estimate(size_bytes: int) -> None:
+    """Résultat d'un calcul de taille élevé (`backup --system-only
+    --estimate-only`, §4.3) -- repli quand `partitions/locate.py::
+    list_partitions` (non élevé) n'expose pas assez d'information pour
+    l'estimer sans lire la table de partitions brute."""
+    emit({"type": "estimate", "size_bytes": size_bytes})

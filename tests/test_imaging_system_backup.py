@@ -34,6 +34,7 @@ from r36s_studio.imaging.system_backup import (
     backup_system_only,
     compute_system_boundary,
     estimate_system_backup_size,
+    estimate_system_backup_size_unprivileged,
 )
 from r36s_studio.partitions.locate import PartitionInfo
 
@@ -251,6 +252,95 @@ def test_backup_system_only_mbr_output_table_is_consistent_with_real_file_size(m
     assert [p.start_lba for p in partitions] == [2048, 4096]  # jamais la partition de jeux
     for partition in partitions:
         assert partition.end_bytes <= len(output_bytes)
+
+
+# --- estimation sans accès brut (§4.3) -- confirmé sur du vrai matériel : --
+# --- lire la table de partitions brute (/dev/diskN) exige les droits -----
+# --- administrateur sur macOS, contrairement à `list_partitions` (déjà ---
+# --- non élevé). Une estimation n'a pas besoin d'être exacte à l'octet ---
+# --- près -- l'opération réelle, elle, passe par `compute_system_boundary` -
+# --- (table brute, précis), inchangé. --------------------------------------
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_estimate_unprivileged_sums_sizes_of_kept_partitions_by_label(mock_list):
+    mock_list.return_value = [
+        PartitionInfo("/dev/x1", "", "msdos", None, size_bytes=100_000_000),
+        PartitionInfo("/dev/x2", "", "ext4", None, size_bytes=500_000_000),
+        PartitionInfo("/dev/x3", "EASYROMS", "ntfs", None, size_bytes=9_000_000_000),
+    ]
+
+    estimate = estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1")
+
+    assert estimate == 600_000_000
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_estimate_unprivileged_uses_storage_label_too(mock_list):
+    mock_list.return_value = [
+        PartitionInfo("/dev/x1", "", "msdos", None, size_bytes=100_000_000),
+        PartitionInfo("/dev/x2", "STORAGE", "fat32", None, size_bytes=25_000_000_000),
+    ]
+
+    assert estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1") == 100_000_000
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_estimate_unprivileged_falls_back_to_large_unlabeled_last_fat_partition(mock_list):
+    mock_list.return_value = [
+        PartitionInfo("/dev/x1", "", "msdos", None, size_bytes=100_000_000),
+        PartitionInfo("/dev/x2", "", "ext4", None, size_bytes=500_000_000),
+        PartitionInfo("/dev/x3", "", "fat32", None, size_bytes=9_000_000_000),  # pas d'étiquette reconnue
+    ]
+
+    estimate = estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1")
+
+    assert estimate == 600_000_000
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_estimate_unprivileged_returns_none_when_a_kept_partition_has_no_size(mock_list):
+    """Repli élevé nécessaire (§4.3) -- au moins une taille manque parmi
+    les partitions à sommer, impossible de produire une estimation
+    fiable sans lecture brute."""
+    mock_list.return_value = [
+        PartitionInfo("/dev/x1", "", "msdos", None, size_bytes=None),
+        PartitionInfo("/dev/x2", "EASYROMS", "ntfs", None, size_bytes=9_000_000_000),
+    ]
+
+    assert estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1") is None
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_estimate_unprivileged_returns_none_when_fallback_needs_a_missing_size(mock_list):
+    """Aucune étiquette reconnue, et la taille de la dernière partition
+    (nécessaire pour vérifier le seuil de grande taille) manque -- pas
+    assez d'information pour même tenter le repli."""
+    mock_list.return_value = [
+        PartitionInfo("/dev/x1", "", "msdos", None, size_bytes=100_000_000),
+        PartitionInfo("/dev/x2", "", "fat32", None, size_bytes=None),
+    ]
+
+    assert estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1") is None
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_estimate_unprivileged_raises_when_no_games_partition_recognized(mock_list):
+    mock_list.return_value = [
+        PartitionInfo("/dev/x1", "ROCKNIX", "msdos", None, size_bytes=100_000_000),
+        PartitionInfo("/dev/x2", "", "ext4", None, size_bytes=30_000_000_000),
+    ]
+
+    with pytest.raises(GamesPartitionNotFound):
+        estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1")
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_estimate_unprivileged_raises_when_games_partition_is_first(mock_list):
+    mock_list.return_value = [PartitionInfo("/dev/x1", "EASYROMS", "ntfs", None, size_bytes=9_000_000_000)]
+
+    with pytest.raises(GamesPartitionNotFound):
+        estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1")
 
 
 # --- GPT ---------------------------------------------------------------

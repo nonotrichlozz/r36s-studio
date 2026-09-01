@@ -269,6 +269,100 @@ def test_estimate_ready_shows_the_size_directly_on_the_file_dialog(mock_list, mo
     assert "8.4 Go" in window._file_dialog._system_backup_size_label.text()
 
 
+# --- repli élevé (§4.3, confirmé sur du vrai matériel : lire la table de --
+# --- partitions brute exige les droits administrateur sur macOS) ----------
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_needs_elevation_starts_elevated_worker_and_stays_busy(mock_list, mock_filter, mock_detect, qapp):
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    device = _make_device()
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window = MainWindow()
+        window._mode = "backup_system"
+        window._device = device
+        window._home.set_busy(True)
+        window._assisted_landing.set_busy(True)
+
+        window._on_system_backup_estimate_ready(
+            SystemBackupEstimate(needs_elevation=True, board_compatible="rk3326-r35s")
+        )
+
+    runner_class.assert_called_once_with(
+        ["backup", "--device", device.path, "--system-only", "--estimate-only"],
+        parent=window,
+        macos_auth_session=None,
+    )
+    runner_class.instances[0].start.assert_called_once()
+    # Toujours occupé -- le premier temps de l'opération n'est pas terminé.
+    for tile in window._home._tiles.values():
+        assert tile.isEnabled() is False
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_elevated_estimate_success_opens_file_dialog_and_releases_busy(mock_list, mock_filter, mock_detect, qapp):
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+    window._home.set_busy(True)
+    window._pending_estimate_board_compatible = "rk3326-r35s"
+
+    window._on_elevated_system_backup_estimate(9_000_000_000)
+    window._on_elevated_system_backup_estimate_finished(True)
+
+    assert window._file_dialog.isVisible() is True
+    suggested = window._file_dialog._path_label.text()
+    assert "rk3326-r35s" in suggested
+    assert "8.4 Go" in window._file_dialog._system_backup_size_label.text()
+    for tile in window._home._tiles.values():
+        assert tile.isEnabled() is True
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_elevated_estimate_failure_logs_real_detail_and_releases_busy(mock_list, mock_filter, mock_detect, qapp):
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+    window._home.set_busy(True)
+    window._pending_estimate_board_compatible = None
+
+    window._on_worker_error("IO_ERROR", "[Errno 13] Permission denied: '/dev/disk2'")
+    window._on_elevated_system_backup_estimate_finished(False)
+
+    assert window._file_dialog.isVisible() is False
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Permission denied" in log_text
+    for tile in window._home._tiles.values():
+        assert tile.isEnabled() is True
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_elevated_estimate_finished_true_without_estimate_event_is_treated_as_failure(
+    mock_list, mock_filter, mock_detect, qapp
+):
+    """Défensif : `finished(True)` sans qu'aucun `estimate` n'ait jamais
+    été reçu ne doit jamais être traité comme un succès silencieux."""
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+    window._pending_estimate_size_bytes = None
+
+    window._on_elevated_system_backup_estimate_finished(True)
+
+    assert window._file_dialog.isVisible() is False
+
+
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
@@ -667,6 +761,56 @@ def test_two_worker_operations_share_the_same_macos_auth_session(mock_list, mock
 
     mock_session_class.assert_called_once()  # une seule AuthorizationRef créée pour les deux
     assert len(runner_class.instances) == 2
+    assert (
+        runner_class.instances[0].macos_auth_session
+        is runner_class.instances[1].macos_auth_session
+        is mock_session_class.return_value
+    )
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_system_backup_worker_shares_the_same_macos_auth_session_as_flash(mock_list, mock_filter, mock_detect, qapp):
+    """Vérifie que la sauvegarde système, une fois lancée (fichier choisi,
+    pas seulement l'estimation), s'élève exactement comme backup/flash --
+    même session d'autorisation, jamais une invite séparée (§4.3, point 3
+    du rapport : « vérifie que la sauvegarde elle-même... s'élève
+    correctement »)."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class), patch(
+        "r36s_studio.gui.main_window.platform.system", return_value="Darwin"
+    ), patch("r36s_studio.gui.main_window.sys") as mock_sys, patch(
+        "r36s_studio.gui.main_window.elevate.MacosAuthorizationSession"
+    ) as mock_session_class:
+        mock_sys.frozen = True
+        window = MainWindow()
+
+        # La sauvegarde système passe par l'estimation d'abord -- appelée
+        # directement ici (déjà couverte séparément ci-dessus), seul le
+        # lancement réel du worker nous intéresse pour ce test.
+        window._mode = "backup_system"
+        window._device = device
+        window._file_path = "/tmp/systeme.img"
+        window._start_worker()
+
+        window._home.flash_selected.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+        with patch("r36s_studio.gui.screens.QFileDialog.getOpenFileName", return_value=("/tmp/sd.img", "")):
+            window._file_dialog._browse()
+        window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
+        window._confirm_dialog._checkbox.setChecked(True)
+        window._confirm_dialog.confirmed.emit()
+
+    mock_session_class.assert_called_once()
+    assert len(runner_class.instances) == 2
+    assert runner_class.instances[0].argv[0] == "backup"
+    assert "--system-only" in runner_class.instances[0].argv
     assert (
         runner_class.instances[0].macos_auth_session
         is runner_class.instances[1].macos_auth_session

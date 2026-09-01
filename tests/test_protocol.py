@@ -66,6 +66,20 @@ def test_emit_error_and_emit_done_shapes():
     ]
 
 
+def test_emit_estimate_shape():
+    """Sauvegarde système sans les jeux (§4.3) : repli élevé pour
+    l'estimation de taille, quand `list_partitions` n'expose pas assez
+    d'information -- `--estimate-only` du worker élevé émet ce résultat
+    au lieu de copier quoi que ce soit."""
+    buffer = io.StringIO()
+    protocol.configure(buffer)
+
+    protocol.emit_estimate(9_000_000_000)
+
+    event = json.loads(buffer.getvalue().strip())
+    assert event == {"type": "estimate", "size_bytes": 9_000_000_000}
+
+
 def test_emit_error_also_writes_to_real_stderr_even_when_redirected(capsys):
     """Même quand `configure()` redirige les événements JSON vers le
     fichier de progression (mode worker élevé), l'erreur réelle doit aussi

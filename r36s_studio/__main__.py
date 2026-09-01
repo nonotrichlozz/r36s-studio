@@ -71,6 +71,7 @@ from r36s_studio.imaging import (
     UnsupportedImageFormatError,
     backup_device,
     backup_system_only,
+    estimate_system_backup_size,
     flash_device,
 )
 from r36s_studio.partitions import (
@@ -88,7 +89,7 @@ from r36s_studio.partitions import (
 )
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.protocol import configure as configure_protocol
-from r36s_studio.protocol import emit_done, emit_error, emit_log, emit_progress
+from r36s_studio.protocol import emit_done, emit_error, emit_estimate, emit_log, emit_progress
 from r36s_studio.safety import DEFAULT_MAX_SIZE_BYTES, SafetyConfig, filter_devices
 
 DEV_MODE_ENV_VAR = "R36S_STUDIO_DEV"
@@ -227,6 +228,32 @@ def cmd_backup(args: argparse.Namespace) -> int:
                 f"Périphérique introuvable ou refusé par la sécurité : {args.device} "
                 "(voir `python -m r36s_studio list`)",
             )
+            return 1
+
+        if args.estimate_only:
+            # Repli élevé pour l'estimation de la sauvegarde système sans
+            # les jeux (§4.3) -- appelé uniquement quand `partitions/
+            # locate.py::list_partitions` (non élevé) n'a pas pu produire
+            # d'estimation lui-même (taille manquante pour au moins une
+            # partition). N'écrit jamais rien, `--output` n'a pas de sens
+            # ici.
+            if not args.system_only:
+                emit_error("INVALID_ARGS", "--estimate-only n'est utilisable qu'avec --system-only")
+                return 1
+            try:
+                size_bytes = estimate_system_backup_size(device.path)
+            except GamesPartitionNotFound as exc:
+                emit_error("GAMES_PARTITION_NOT_FOUND", str(exc))
+                return 1
+            except (OSError, subprocess.CalledProcessError) as exc:
+                emit_error("IO_ERROR", str(exc))
+                return 1
+            emit_estimate(size_bytes)
+            emit_done(True)
+            return 0
+
+        if args.output is None:
+            emit_error("INVALID_ARGS", "--output est requis (sauf avec --estimate-only)")
             return 1
 
         if os.path.exists(args.output):
@@ -625,7 +652,9 @@ def build_parser() -> argparse.ArgumentParser:
     backup_parser.add_argument(
         "--device", required=True, help="Chemin du périphérique à sauvegarder (voir `list`)"
     )
-    backup_parser.add_argument("--output", required=True, help="Fichier image de destination")
+    backup_parser.add_argument(
+        "--output", help="Fichier image de destination (requis sauf avec --estimate-only)"
+    )
     backup_parser.add_argument(
         "--system-only",
         action="store_true",
@@ -633,6 +662,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Ne sauvegarde que les partitions système, jusqu'à la fin de la dernière "
             "partition avant la partition de jeux (EASYROMS ou STORAGE) -- exclut les "
             "jeux, typiquement 8-9 Go au lieu de 100 Go sur une carte R36S d'origine"
+        ),
+    )
+    backup_parser.add_argument(
+        "--estimate-only",
+        action="store_true",
+        help=(
+            "N'écrit rien : calcule et affiche seulement la taille estimée -- repli "
+            "élevé pour --system-only quand l'estimation non élevée échoue (§4.3)"
         ),
     )
     backup_parser.add_argument(

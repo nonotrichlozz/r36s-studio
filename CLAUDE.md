@@ -470,6 +470,52 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > `_on_worker_finished` le font déjà pour les opérations passant par le
 > worker élevé.
 
+> ⚠️ **Bug corrigé, signalé par un utilisateur : l'estimation échouait
+> avec `[Errno 13] Permission denied: '/dev/disk2'`.** Cause :
+> `SystemBackupEstimateRunner` tournait sur un `QThread` ordinaire, sans
+> élévation (§3 — seul le worker l'a), et appelait `compute_system_
+> boundary`, qui ouvre le périphérique brut (`open(device_path, "rb")`)
+> pour lire la table de partitions exacte — nécessaire à la copie réelle,
+> mais pas à une simple estimation.
+>
+> **Corrigé en deux temps, dans cet ordre de préférence (une estimation
+> ne devrait pas demander de mot de passe) :**
+> 1. **Estimation sans accès brut.** `partitions/locate.py::PartitionInfo`
+>    porte désormais un champ `size_bytes`, renseigné sans élévation par
+>    les outils déjà utilisés pour lister les partitions : `diskutil info
+>    -plist` (`Size`) sur macOS, `lsblk -o ...,SIZE` sous Linux,
+>    PowerShell `Get-Volume` (`Size`) sous Windows. `imaging/system_
+>    backup.py::estimate_system_backup_size_unprivileged` additionne les
+>    tailles des partitions gardées (même logique d'identification de la
+>    partition de jeux que `backup_system_only` — étiquette EASYROMS/
+>    STORAGE puis repli par position/système de fichiers/taille) ;
+>    approximatif (arrondi à la taille de partition déclarée par l'OS,
+>    pas l'octet exact de fin d'usage comme la copie réelle), mais
+>    suffisant pour une estimation affichée avant de lancer l'opération.
+> 2. **Repli élevé, seulement si une taille manque.** Si l'OS n'expose
+>    pas la taille d'une des partitions gardées (`size_bytes` absent),
+>    `estimate_system_backup_size_unprivileged` renvoie `None` plutôt que
+>    d'inventer une valeur ; `SystemBackupEstimateRunner` relance alors
+>    l'estimation via le worker élevé — un nouveau mode `backup --system-
+>    only --estimate-only` (`__main__.py::cmd_backup`, `--output` devient
+>    optionnel dans ce mode) qui calcule la taille exacte
+>    (`compute_system_boundary`, accès brut) sans rien écrire, et
+>    l'émet via un nouvel événement `estimate` du protocole JSON Lines
+>    (`protocol.py::emit_estimate`, `{"type": "estimate", "size_bytes":
+>    ...}`). Passe par la même `MacosAuthorizationSession` partagée que
+>    toute autre opération élevée (`MainWindow._get_or_create_macos_auth_
+>    session()`, §3) — jamais une invite mot de passe séparée pour ce
+>    repli. `WorkerRunner` gagne un signal `estimate = Signal("qint64")`
+>    (même raison `qint64` que `progress`, §3 — une taille peut dépasser
+>    2 Go) pour le relayer à la GUI.
+>
+> La sauvegarde réelle (`backup_system_only`/`compute_system_boundary`,
+> lancée une fois le fichier choisi) n'a pas changé : elle passait déjà
+> par le worker élevé comme toute écriture/lecture brute (§3), et continue
+> de partager la même session — vérifié par un test dédié qui enchaîne une
+> sauvegarde système puis un flash et contrôle qu'une seule
+> `AuthorizationRef` est créée pour les deux.
+
 **Formats source acceptés au flash :** `.img`, `.img.gz`, `.img.xz`, `.img.zip`
 (décompression en flux, sans fichier temporaire).
 

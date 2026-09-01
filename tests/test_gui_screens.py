@@ -18,6 +18,7 @@ from r36s_studio.gui.screens import (
     ConsoleStage,
     DeviceDialog,
     FileDialog,
+    FullDiskAccessScreen,
     HelpDialog,
     HomeScreen,
     LogPanel,
@@ -957,6 +958,48 @@ def test_main_view_show_home_and_show_wizard_panel_switch_the_left_column(qapp):
 
     view.show_home()
     assert view._left_stack.currentWidget() is home
+
+
+# --- FullDiskAccessScreen : bienvenue macOS, Accès complet au disque (§3) --
+
+
+def test_full_disk_access_screen_open_settings_button_emits_signal(qapp):
+    screen = FullDiskAccessScreen()
+    received = []
+    screen.open_settings_requested.connect(lambda: received.append(True))
+
+    screen._open_settings_button.click()
+
+    assert received == [True]
+
+
+def test_full_disk_access_screen_done_button_emits_recheck_signal(qapp):
+    screen = FullDiskAccessScreen()
+    received = []
+    screen.recheck_requested.connect(lambda: received.append(True))
+
+    screen._done_button.click()
+
+    assert received == [True]
+
+
+def test_full_disk_access_screen_still_not_detected_hidden_by_default(qapp):
+    screen = FullDiskAccessScreen()
+
+    assert screen._still_not_detected_label.isVisible() is False
+
+
+def test_full_disk_access_screen_set_still_not_detected_shows_label(qapp):
+    """Après un « J'ai terminé » qui ne détecte toujours pas l'autorisation
+    -- jamais un clic silencieusement ignoré (§5)."""
+    screen = FullDiskAccessScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    screen.set_still_not_detected(True)
+    assert screen._still_not_detected_label.isVisible() is True
+
+    screen.set_still_not_detected(False)
+    assert screen._still_not_detected_label.isVisible() is False
 
 
 # --- AssistedLandingScreen : accueil du mode assisté (§5 mode assisté) -----

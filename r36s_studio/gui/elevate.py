@@ -532,3 +532,31 @@ def run_privileged_mount(
         applescript = _build_applescript(command)
         subprocess.run(["osascript", "-e", applescript], capture_output=True)
     return os.path.ismount(mountpoint)
+
+
+# Dossier protégé par TCC (§3) : sa lecture échoue avec `PermissionError`
+# tant que ce processus n'a pas reçu l'autorisation Accès complet au
+# disque -- sonde utilisée par `has_full_disk_access` ci-dessous, réutilisée
+# telle quelle par l'écran de bienvenue macOS (`gui/screens.py::
+# FullDiskAccessScreen`) pour détecter l'autorisation sans tenter de
+# véritable écriture disque, ni demander d'élévation juste pour vérifier un
+# statut (même principe que `_get_or_create_macos_auth_session` : jamais
+# d'invite avant d'en avoir réellement besoin).
+_TCC_PROBE_PATH = Path.home() / "Library" / "Application Support" / "com.apple.TCC"
+
+
+def has_full_disk_access() -> bool:
+    """`True` dès que ce processus -- le binaire de l'app lui-même, sans
+    élévation : TCC s'applique à l'identité du processus, pas à ses
+    privilèges Unix, un `root` non autorisé reste bloqué (§3) -- peut
+    lister `_TCC_PROBE_PATH`. `False` par défaut (dossier absent, erreur
+    quelconque) : ne jamais affirmer l'autorisation sans preuve positive.
+    Toujours `True` hors macOS, sans même tenter de lire le système de
+    fichiers -- ce blocage est spécifique à macOS (§3)."""
+    if platform.system() != "Darwin":
+        return True
+    try:
+        os.listdir(_TCC_PROBE_PATH)
+        return True
+    except OSError:
+        return False

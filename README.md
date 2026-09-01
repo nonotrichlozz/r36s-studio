@@ -57,6 +57,13 @@ Chaque OS a son propre script de construction ([PyInstaller](https://pyinstaller
 | Windows | `packaging/build_windows.ps1` | `dist/R36S Studio/R36S Studio.exe` |
 | Linux | `packaging/build_linux.sh` | `dist/R36S Studio/R36S Studio` |
 
+`packaging/build_macos.sh dist` construit puis produit en plus
+`dist/R36S-Studio-macos.zip`, prêt à distribuer : l'app accompagnée de
+`packaging/LISEZ-MOI.txt` (marche à suivre pour un utilisateur final —
+autoriser l'app malgré Gatekeeper, puis lui accorder l'Accès complet au
+disque). C'est cette même commande qu'utilise la CI (ci-dessous) pour
+produire l'artefact macOS de chaque Release.
+
 Chaque script crée son propre `.venv/` s'il n'existe pas déjà, installe les
 dépendances, puis appelle le `.spec` PyInstaller correspondant
 (`packaging/r36s_studio.spec` pour macOS, `..._windows.spec`,

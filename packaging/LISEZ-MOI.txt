@@ -1,0 +1,43 @@
+R36S Studio — à lire avant de lancer l'application
+====================================================
+
+1. Premier lancement : autoriser l'application
+------------------------------------------------
+macOS bloque par défaut l'ouverture des applications qui ne viennent pas
+d'un développeur reconnu par Apple — c'est le cas de R36S Studio, une
+application gratuite et open source.
+
+Pour l'ouvrir la première fois :
+
+  1. Fais un clic droit (ou Ctrl-clic) sur « R36S Studio.app ».
+  2. Choisis « Ouvrir » dans le menu qui apparaît.
+  3. Une fenêtre d'avertissement s'affiche : clique à nouveau sur
+     « Ouvrir » pour confirmer.
+
+Cette étape n'est nécessaire qu'une seule fois. Les lancements suivants
+se font normalement, en double-cliquant sur l'application.
+
+2. Pour que la sauvegarde et le flash fonctionnent : Accès complet au disque
+------------------------------------------------------------------------------
+Écrire sur une carte SD demande une autorisation supplémentaire, propre à
+macOS. Sans elle, la sauvegarde et le flash échoueront avec un message
+d'erreur — R36S Studio te guide vers cette même explication dès le
+premier lancement, tant que l'autorisation manque.
+
+  1. Ouvre les Réglages Système (ou Préférences Système, selon ta version
+     de macOS).
+  2. Va dans Confidentialité et sécurité → Accès complet au disque.
+  3. Clique sur « + » et sélectionne « R36S Studio.app ».
+  4. Assure-toi que la case à côté de R36S Studio est cochée.
+
+3. Important : à refaire après chaque mise à jour
+----------------------------------------------------
+Chaque nouvelle version de R36S Studio invalide cette autorisation, même
+si tu remplaces l'ancienne application par la nouvelle au même endroit.
+Après avoir installé une mise à jour, retire l'ancienne entrée de la
+liste (bouton « - ») puis rajoute la nouvelle application (bouton « + »)
+— désactiver puis réactiver la case ne suffit pas toujours.
+
+Besoin d'aide ? L'application affiche un écran qui explique cette
+procédure et ouvre directement le bon panneau des Réglages Système, tant
+que l'autorisation n'est pas détectée.

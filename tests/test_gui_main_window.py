@@ -531,6 +531,113 @@ def test_backup_system_from_assisted_landing_does_not_persist_expert_mode(mock_l
     assert window._app_config.ui_mode == "assisted"
 
 
+# --- Écran de bienvenue macOS : Accès complet au disque (§3) ---------------
+# `elevate.has_full_disk_access` est forcée à `True` par l'autofixture
+# `_default_full_disk_access_granted` (tests/conftest.py) sauf ici, où
+# chaque test la repatche explicitement pour exercer les deux issues.
+
+
+@patch("r36s_studio.gui.main_window.elevate.has_full_disk_access", return_value=False)
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_startup_shows_fda_welcome_screen_when_not_granted_on_macos(
+    mock_list, mock_filter, mock_load, mock_system, mock_fda, qapp
+):
+    """Autorisation absente sur macOS : l'écran de bienvenue remplace
+    l'accueil habituel (assisté ou expert), quel que soit `ui_mode`."""
+    window = MainWindow()
+
+    assert window._root_stack.currentWidget() is window._fda_screen
+
+
+@patch("r36s_studio.gui.main_window.elevate.has_full_disk_access", return_value=True)
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_startup_skips_fda_welcome_screen_when_already_granted(
+    mock_list, mock_filter, mock_load, mock_system, mock_fda, qapp
+):
+    window = MainWindow()
+
+    assert window._root_stack.currentWidget() is window._assisted_landing
+
+
+@patch("r36s_studio.gui.main_window.elevate.has_full_disk_access", return_value=False)
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Windows")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_startup_ignores_fda_status_outside_macos(mock_list, mock_filter, mock_load, mock_system, mock_fda, qapp):
+    """Le blocage TCC est spécifique à macOS (§3) -- une valeur `False`
+    ailleurs (accident de mock, comportement futur imprévu...) ne doit
+    jamais faire apparaître cet écran sur Windows/Linux."""
+    window = MainWindow()
+
+    assert window._root_stack.currentWidget() is window._assisted_landing
+
+
+@patch("r36s_studio.gui.main_window.elevate.has_full_disk_access")
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_fda_recheck_success_switches_to_normal_startup_screen(
+    mock_list, mock_filter, mock_load, mock_system, mock_fda, qapp
+):
+    """Bouton « J'ai terminé » : une fois l'autorisation détectée, l'écran
+    de bienvenue ne réapparaît plus (§ demande utilisateur)."""
+    mock_fda.return_value = False
+    window = MainWindow()
+    assert window._root_stack.currentWidget() is window._fda_screen
+
+    mock_fda.return_value = True
+    window._fda_screen.recheck_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._assisted_landing
+
+
+@patch("r36s_studio.gui.main_window.elevate.has_full_disk_access", return_value=False)
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_fda_recheck_failure_stays_on_welcome_screen_and_warns(
+    mock_list, mock_filter, mock_load, mock_system, mock_fda, qapp
+):
+    """Toujours pas détectée : jamais un clic silencieusement ignoré (§5) --
+    reste sur l'écran de bienvenue et affiche le message dédié."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    window._fda_screen.recheck_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._fda_screen
+    assert window._fda_screen._still_not_detected_label.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.elevate.has_full_disk_access", return_value=False)
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.subprocess.run")
+def test_fda_welcome_screen_open_settings_opens_the_same_settings_pane(
+    mock_run, mock_list, mock_filter, mock_load, mock_system, mock_fda, qapp
+):
+    """Réutilise exactement le même lien profond que la fenêtre Aide
+    (`HelpDialog`, §3) -- une seule source de vérité pour ce panneau."""
+    from r36s_studio.gui.main_window import _MACOS_FULL_DISK_ACCESS_SETTINGS_URL
+
+    window = MainWindow()
+
+    window._fda_screen.open_settings_requested.emit()
+
+    mock_run.assert_called_once_with(["open", _MACOS_FULL_DISK_ACCESS_SETTINGS_URL], check=True)
+
+
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")

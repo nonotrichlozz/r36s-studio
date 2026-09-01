@@ -51,6 +51,7 @@ from .screens import (
     ConfirmDialog,
     DeviceDialog,
     FileDialog,
+    FullDiskAccessScreen,
     HelpDialog,
     HomeScreen,
     LogPanel,
@@ -213,10 +214,17 @@ class MainWindow(QMainWindow):
         self._wizard_panel = WizardStepPanel()
         self._main_view = MainView(self._home, self._console_stage, self._log_panel, wizard_panel=self._wizard_panel)
         self._assisted_landing = AssistedLandingScreen()
+        # Écran de bienvenue macOS uniquement (§3) : construit
+        # inconditionnellement (même principe que `_help_dialog`, dont le
+        # bouton déclencheur n'apparaît lui aussi que sur macOS), mais
+        # n'est choisi comme écran de démarrage que sur macOS sans Accès
+        # complet au disque -- voir plus bas.
+        self._fda_screen = FullDiskAccessScreen()
 
         self._root_stack = QStackedWidget()
         self._root_stack.addWidget(self._assisted_landing)
         self._root_stack.addWidget(self._main_view)
+        self._root_stack.addWidget(self._fda_screen)
         self.setCentralWidget(self._root_stack)
 
         # Fenêtres modales (§5, refonte navigation) : construites une fois,
@@ -232,6 +240,22 @@ class MainWindow(QMainWindow):
         self._wire_signals()
         self._refresh_home_state()
 
+        # Écran de bienvenue macOS (§3) : prioritaire sur `ui_mode`,
+        # affiché tant que l'Accès complet au disque n'est pas détecté --
+        # aucun des deux accueils habituels n'a de sens tant que cette
+        # autorisation manque, puisque toute opération élevée échouerait
+        # de toute façon. Jamais montré ailleurs que macOS (§3, ce
+        # blocage lui est spécifique).
+        if platform.system() == "Darwin" and not elevate.has_full_disk_access():
+            self._root_stack.setCurrentWidget(self._fda_screen)
+        else:
+            self._show_startup_screen()
+
+    def _show_startup_screen(self) -> None:
+        """Accueil habituel (mode expert ou assisté, selon `ui_mode`) --
+        factorisé pour être réutilisé aussi bien au démarrage qu'après un
+        « J'ai terminé » réussi sur l'écran de bienvenue macOS
+        (`_on_fda_recheck_requested`)."""
         if self._app_config.ui_mode == "expert":
             self._main_view.show_home()
             self._root_stack.setCurrentWidget(self._main_view)
@@ -252,6 +276,8 @@ class MainWindow(QMainWindow):
         self._home.assisted_mode_requested.connect(self._switch_to_assisted_mode)
 
         self._help_dialog.open_settings_requested.connect(self._on_open_settings_requested)
+        self._fda_screen.open_settings_requested.connect(self._on_open_settings_requested)
+        self._fda_screen.recheck_requested.connect(self._on_fda_recheck_requested)
 
         self._device_dialog.refresh_requested.connect(self._refresh_devices)
         self._device_dialog.device_chosen.connect(self._on_device_chosen)
@@ -851,6 +877,20 @@ class MainWindow(QMainWindow):
             subprocess.run(["open", _MACOS_FULL_DISK_ACCESS_SETTINGS_URL], check=True)
         except Exception as exc:
             QMessageBox.warning(self, tr("app_title"), str(exc))
+
+    # --- écran de bienvenue macOS (§3) ---------------------------------------
+
+    def _on_fda_recheck_requested(self) -> None:
+        """Bouton « J'ai terminé » de `FullDiskAccessScreen` -- revérifie
+        l'autorisation. Détectée : passe à l'accueil habituel, cet écran ne
+        réapparaît plus (jusqu'à la prochaine fois où l'autorisation
+        manquera, ex. après une mise à jour, §3). Toujours absente : jamais
+        un clic silencieusement ignoré (§5), le message dédié s'affiche."""
+        if elevate.has_full_disk_access():
+            self._fda_screen.set_still_not_detected(False)
+            self._show_startup_screen()
+        else:
+            self._fda_screen.set_still_not_detected(True)
 
     # --- étape F : éjection, immédiate ou depuis le journal -----------------
 

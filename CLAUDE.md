@@ -153,6 +153,66 @@ testable en isolation, sans interface.
 > utiliser `sudo`, qui ne changerait rien ici puisque le problème n'est pas le
 > périphérique brut mais l'un de ces trois dossiers précis.
 
+> **Écran de bienvenue macOS, détection proactive de l'Accès complet au
+> disque (phase 9).** Jusqu'ici, l'absence de cette autorisation n'était
+> détectée qu'*après coup* : l'utilisateur devait lancer une opération,
+> attendre l'échec (`MACOS_TCC_BLOCKED`), puis ouvrir l'Aide pour
+> comprendre pourquoi. `gui/elevate.py::has_full_disk_access` détecte
+> l'autorisation *avant* toute tentative d'écriture, sans élévation :
+> `~/Library/Application Support/com.apple.TCC` est un dossier protégé
+> par TCC dont la simple lecture (`os.listdir`) échoue avec
+> `PermissionError` tant que ce processus n'a pas reçu l'Accès complet au
+> disque — TCC s'applique à l'identité du processus, pas à ses privilèges
+> Unix, donc cette sonde n'a besoin d'aucun mot de passe administrateur
+> pour donner une réponse fiable. `True` par défaut hors macOS (ce
+> blocage lui est spécifique) et en cas d'erreur autre que la lecture
+> elle-même du dossier n'est jamais affirmé sans preuve positive.
+>
+> `gui/screens.py::FullDiskAccessScreen` (nouvel écran, ajouté à
+> `_root_stack` aux côtés de `MainView`/`AssistedLandingScreen`) remplace
+> l'accueil habituel — assisté ou expert, quel que soit `ui_mode` — tant
+> que `has_full_disk_access()` renvoie `False` au démarrage, macOS
+> uniquement. Explique la procédure (texte repris de `HelpDialog`, adapté
+> au premier lancement) avec un bouton « Ouvrir les réglages » (même lien
+> profond que `HelpDialog`, `_on_open_settings_requested` partagé) et un
+> bouton « J'ai terminé » qui revérifie : détectée, `MainWindow.
+> _show_startup_screen()` (factorisé depuis la logique de démarrage
+> existante) affiche l'accueil habituel et cet écran ne réapparaît plus
+> pour la session en cours ; toujours absente, un message dédié
+> s'affiche plutôt qu'un clic silencieusement ignoré (§5). Construit
+> inconditionnellement (même principe que `HelpDialog`, dont le bouton
+> déclencheur n'apparaît lui aussi que sur macOS) mais n'est choisi comme
+> écran de démarrage que sur macOS — un `has_full_disk_access` à `False`
+> sur un autre OS (accident de mock, comportement futur imprévu) ne fait
+> jamais apparaître cet écran ailleurs, testé explicitement.
+>
+> Tests (`tests/test_gui_elevate.py`, `tests/test_gui_screens.py`,
+> `tests/test_gui_main_window.py`) : `has_full_disk_access` lisant un vrai
+> dossier protégé par TCC, son résultat dépendrait sinon de l'autorisation
+> réelle du terminal qui lance la suite sur une machine de dev macOS,
+> rendant les tests non déterministes selon la machine. Une autofixture
+> (`tests/conftest.py::_default_full_disk_access_granted`) la stub à
+> `True` par défaut pour tous les tests (comportement historique, avant
+> cet écran) ; les tests dédiés à `FullDiskAccessScreen` la repatchent
+> explicitement, et les tests de `has_full_disk_access` elle-même se
+> marquent `@pytest.mark.real_fda_probe` pour laisser passer leur propre
+> implémentation — même principe que `real_subprocess` (§8).
+>
+> **`packaging/LISEZ-MOI.txt` et cible `dist` (§6, phase 9)** : la même
+> procédure (clic droit → Ouvrir pour Gatekeeper, puis Accès complet au
+> disque, à refaire après chaque mise à jour puisque la signature ad hoc
+> change à chaque reconstruction — ci-dessus) doit aussi atteindre un
+> utilisateur qui n'a pas encore ouvert l'app — l'écran de bienvenue
+> ci-dessus ne peut rien expliquer avant ce premier lancement bloqué par
+> Gatekeeper. `packaging/build_macos.sh dist` construit puis empaquette
+> directement `dist/R36S-Studio-macos.zip` (app + `LISEZ-MOI.txt`, mise
+> en scène dans un dossier temporaire puis `ditto`, jamais `zip -r` — même
+> raison que l'empaquetage CI ci-dessous : seul `ditto` préserve la
+> structure et les attributs étendus d'un vrai bundle `.app`) ; la CI
+> (`.github/workflows/build.yml`, job `macos`) appelle cette même cible
+> plutôt que de dupliquer la logique d'empaquetage — une seule source de
+> vérité sur le contenu de l'archive distribuée, locale comme CI.
+
 > ⚠️ **Bug corrigé, confirmé sur du vrai matériel : `AttributeError: Slot
 > 'MainWindow::_on_progress(int,int,double)' not found`, en continu pendant
 > un flash.** Cause réelle, trouvée via une capture `QT_FATAL_WARNINGS=1`

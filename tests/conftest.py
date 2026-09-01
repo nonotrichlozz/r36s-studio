@@ -80,6 +80,30 @@ def _forbid_real_subprocess(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _default_full_disk_access_granted(request, monkeypatch):
+    """`gui.elevate.has_full_disk_access` lit un vrai dossier protégé par
+    TCC (§3) -- sur une machine de dev réellement macOS, son résultat
+    dépendrait de l'autorisation réelle accordée (ou non) au terminal qui
+    lance la suite, rendant les tests non déterministes selon la machine.
+    Par défaut, tous les tests supposent l'autorisation déjà accordée --
+    comportement historique, avant l'écran de bienvenue macOS
+    (`gui/screens.py::FullDiskAccessScreen`) -- les tests dédiés à cet
+    écran (`tests/test_gui_main_window.py`) repatchent explicitement une
+    valeur différente. Les tests de `has_full_disk_access` elle-même
+    (`tests/test_gui_elevate.py`) se marquent `@pytest.mark.real_fda_probe`
+    pour laisser passer leur propre implémentation -- même principe que
+    `real_subprocess` ci-dessus."""
+    if request.node.get_closest_marker("real_fda_probe"):
+        yield
+        return
+
+    from r36s_studio.gui import elevate
+
+    monkeypatch.setattr(elevate, "has_full_disk_access", lambda: True)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_privileged_mount_hook():
     """`partitions/locate.py::_privileged_mount_hook` est un point
     d'extension au niveau module que `MainWindow.__init__` installe sur

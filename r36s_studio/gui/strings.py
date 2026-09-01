@@ -282,6 +282,34 @@ STRINGS = {
     ),
     "help_back": "Retour",
     "help_open_settings": "Ouvrir les réglages",
+    # Écran de bienvenue au premier lancement (macOS uniquement, §3) --
+    # affiché tant que l'Accès complet au disque n'est pas détecté
+    # (`elevate.has_full_disk_access`), à la place de l'accueil habituel.
+    "fda_welcome_title": "Bienvenue dans R36S Studio",
+    "fda_welcome_body": (
+        "Avant de commencer, ton Mac bloque deux choses par défaut : "
+        "ouvrir une application qui ne vient pas d'un développeur reconnu "
+        "par Apple, et laisser cette application accéder directement à une "
+        "carte SD.\n\n"
+        "1. Si ce n'est pas déjà fait : ferme cette fenêtre, fais un clic "
+        "droit sur R36S Studio dans le Finder, choisis « Ouvrir », puis "
+        "confirme — une seule fois.\n"
+        "2. Ouvre Réglages Système → Confidentialité et sécurité → Accès "
+        "complet au disque (utilise le bouton ci-dessous pour y aller "
+        "directement).\n"
+        "3. Clique sur « + », choisis R36S Studio dans la liste, puis "
+        "active le bouton à côté de son nom.\n"
+        "4. Reviens ici et clique sur « J'ai terminé ».\n\n"
+        "Cette autorisation ne se fait qu'une fois par version de "
+        "l'application : si elle est de nouveau bloquée après une mise à "
+        "jour, il faudra recommencer ces étapes."
+    ),
+    "fda_welcome_open_settings": "Ouvrir les réglages",
+    "fda_welcome_done": "J'ai terminé",
+    "fda_welcome_still_not_detected": (
+        "Autorisation pas encore détectée. Vérifie que R36S Studio est bien "
+        "coché dans la liste Accès complet au disque, puis réessaie."
+    ),
     # Version + horodatage de construction (footer de l'accueil) -- sans ça,
     # impossible de savoir si l'app testée contient les derniers correctifs.
     "about_version": "R36S Studio v{version} ({suffix})",

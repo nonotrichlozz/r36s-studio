@@ -1897,6 +1897,73 @@ class MainView(Screen):
             self._backdrop.setGeometry(self.rect())
 
 
+class FullDiskAccessScreen(Screen):
+    """Écran de bienvenue macOS uniquement, affiché tant que l'Accès
+    complet au disque n'est pas détecté (`elevate.has_full_disk_access`,
+    §3) -- à la place de l'accueil habituel (assisté ou expert), qui
+    n'apparaît qu'une fois l'autorisation confirmée. `MainWindow` décide
+    quand construire/afficher cet écran ; lui-même ne sait rien du reste
+    du parcours, seulement expliquer la procédure et laisser vérifier.
+
+    Contrairement au reste de l'interface (§5 : jamais de jargon), le
+    texte ici nomme volontairement les vrais réglages système -- même
+    principe que `HelpDialog`, dont ce texte reprend l'essentiel adapté au
+    premier lancement (§3, LISEZ-MOI.txt de l'archive de distribution)."""
+
+    open_settings_requested = Signal()
+    recheck_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self._backdrop = build_window_backdrop(self)
+        if self._backdrop is not None:
+            self._backdrop.lower()
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(48, 32, 48, 32)
+        root.addStretch(1)
+
+        title = QLabel(tr("fda_welcome_title"))
+        title.setProperty("role", "title")
+        root.addWidget(title)
+
+        body = QLabel(tr("fda_welcome_body"))
+        body.setWordWrap(True)
+        root.addWidget(body)
+
+        self._still_not_detected_label = QLabel(tr("fda_welcome_still_not_detected"))
+        self._still_not_detected_label.setProperty("role", "danger")
+        self._still_not_detected_label.setWordWrap(True)
+        self._still_not_detected_label.setVisible(False)
+        root.addWidget(self._still_not_detected_label)
+
+        root.addStretch(1)
+
+        buttons = QHBoxLayout()
+        self._open_settings_button = QPushButton(tr("fda_welcome_open_settings"))
+        self._open_settings_button.clicked.connect(self.open_settings_requested.emit)
+        buttons.addWidget(self._open_settings_button)
+        buttons.addStretch()
+        self._done_button = QPushButton(tr("fda_welcome_done"))
+        self._done_button.setProperty("role", "cta")
+        self._done_button.clicked.connect(self.recheck_requested.emit)
+        buttons.addWidget(self._done_button)
+        root.addLayout(buttons)
+
+    def set_still_not_detected(self, still_not_detected: bool) -> None:
+        """Après un clic sur « J'ai terminé » qui ne détecte toujours pas
+        l'autorisation -- jamais un échec silencieux (§5) : l'utilisateur
+        doit savoir que son clic a bien été pris en compte, pas seulement
+        que rien ne s'est passé."""
+        self._still_not_detected_label.setVisible(still_not_detected)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
+        super().resizeEvent(event)
+        if self._backdrop is not None:
+            self._backdrop.setGeometry(self.rect())
+
+
 class AssistedLandingScreen(Screen):
     """Écran d'accueil du mode assisté (§5 mode assisté) -- par défaut au
     lancement (`ui_mode` en configuration, §6). Sa propre `ConsoleStage`

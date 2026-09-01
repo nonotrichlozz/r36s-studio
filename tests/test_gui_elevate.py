@@ -698,3 +698,40 @@ def test_run_privileged_mount_frozen_but_native_unsupported_falls_back_to_osascr
 
     call_args = mock_run.call_args.args[0]
     assert call_args[0] == "osascript"
+
+
+@pytest.mark.real_fda_probe  # exercice l'implémentation réelle, pas le stub autouse (tests/conftest.py)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.elevate.os.listdir", return_value=["TCC.db"])
+def test_has_full_disk_access_true_when_tcc_directory_listable(mock_listdir, mock_system):
+    """Le dossier protégé par TCC (§3) n'est listable que si ce processus a
+    reçu l'autorisation Accès complet au disque -- une lecture réussie en
+    est donc une preuve positive."""
+    assert elevate.has_full_disk_access() is True
+    mock_listdir.assert_called_once_with(elevate._TCC_PROBE_PATH)
+
+
+@pytest.mark.real_fda_probe
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.elevate.os.listdir", side_effect=PermissionError())
+def test_has_full_disk_access_false_when_tcc_directory_permission_denied(mock_listdir, mock_system):
+    assert elevate.has_full_disk_access() is False
+
+
+@pytest.mark.real_fda_probe
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.elevate.os.listdir", side_effect=FileNotFoundError())
+def test_has_full_disk_access_false_when_tcc_directory_missing(mock_listdir, mock_system):
+    """Absence du dossier (macOS très ancien, profil inhabituel...) : ne
+    jamais affirmer l'autorisation sans preuve positive, §3."""
+    assert elevate.has_full_disk_access() is False
+
+
+@pytest.mark.real_fda_probe
+@patch("r36s_studio.gui.elevate.os.listdir")
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Linux")
+def test_has_full_disk_access_true_on_non_macos_without_filesystem_check(mock_system, mock_listdir):
+    """Ce blocage est spécifique à macOS (§3) -- sur les deux autres OS,
+    toujours `True`, sans même tenter de lire le système de fichiers."""
+    assert elevate.has_full_disk_access() is True
+    mock_listdir.assert_not_called()

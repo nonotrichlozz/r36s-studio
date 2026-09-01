@@ -38,6 +38,14 @@ source .venv/bin/activate
 pyinstaller --noconfirm packaging/r36s_studio.spec
 ```
 
+**Archive prête à distribuer** : `packaging/build_macos.sh dist` construit
+puis produit en plus `dist/R36S-Studio-macos.zip`, contenant l'app et
+`packaging/LISEZ-MOI.txt` (instructions pour un utilisateur final : clic
+droit → Ouvrir, puis Accès complet au disque). C'est cette même commande
+qu'utilise la CI (`.github/workflows/build.yml`) pour produire l'artefact
+de chaque Release — une seule source de vérité sur le contenu de
+l'archive distribuée.
+
 ## 2. Premier lancement
 
 L'app n'est ni signée avec un certificat Developer ID, ni notariée : au
@@ -76,7 +84,11 @@ touchant l'élévation) :
    disque** → clique sur `+` → sélectionne `R36S Studio.app` → active le
    bouton. (Dans l'app elle-même, l'écran Aide accessible depuis
    l'accueil sur macOS explique cette même procédure, avec un bouton qui
-   ouvre directement ce panneau.)
+   ouvre directement ce panneau. Tant que l'autorisation n'est pas
+   détectée, un écran de bienvenue -- `gui/screens.py::
+   FullDiskAccessScreen`, `elevate.has_full_disk_access` -- s'affiche
+   automatiquement à la place de l'accueil habituel et propose ce même
+   raccourci, sans qu'il soit nécessaire d'aller chercher l'écran Aide.)
 3. Lance l'app, branche une carte SD de test, lance une sauvegarde ou un
    flash jusqu'à l'écran d'exécution.
 4. La copie doit progresser normalement jusqu'au bout. Si le blocage

@@ -74,19 +74,17 @@ jobs:
       - name: Lancer la suite de tests
         run: python -m pytest
 
-      - name: Construire l'application (PyInstaller)
-        run: packaging/build_macos.sh
-
-      # `ditto`, pas `zip -r` : seul lui preserve correctement la structure
-      # et les attributs etendus d'un vrai bundle .app macOS (§6/§7,
-      # packaging/README.md).
-      - name: Empaqueter l'artefact
-        run: ditto -c -k --sequesterRsrc --keepParent "dist/R36S Studio.app" "R36S-Studio-macos.zip"
+      # Cible "dist" (packaging/build_macos.sh) : construit puis empaquette
+      # directement dist/R36S-Studio-macos.zip (app + LISEZ-MOI.txt) --
+      # seule source de vérité sur le contenu de l'archive distribuée,
+      # partagée avec la construction locale (packaging/README.md).
+      - name: Construire et empaqueter l'application (PyInstaller)
+        run: packaging/build_macos.sh dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: R36S-Studio-macos
-          path: R36S-Studio-macos.zip
+          path: dist/R36S-Studio-macos.zip
 
   linux:
     name: Linux

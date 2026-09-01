@@ -10,8 +10,9 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from r36s_studio.devices import Device
-from r36s_studio.gui.partition_runner import PartitionJobRunner
+from r36s_studio.gui.partition_runner import PartitionJobRunner, SystemBackupEstimateRunner
 from r36s_studio.imaging.copy import OperationCancelled, ProgressEvent
+from r36s_studio.imaging.system_backup import GamesPartitionNotFound
 from r36s_studio.partitions import (
     MacosNtfsWriteUnsupported,
     MountpointNotWritable,
@@ -431,3 +432,81 @@ def test_wizard_identify_runner_unmounts_forced_mount_after_identifying(
     runner.run()
 
     mock_unmount.assert_called_once_with(partition)
+
+
+# --- SystemBackupEstimateRunner (§4.3, sauvegarde système sans les jeux) --
+#
+# Calcule la taille estimée (rapide -- quelques secteurs, pas de montage)
+# puis tente, en best-effort, d'identifier la console pour suggérer un nom
+# de fichier (§4.3 : "quand il est connu") -- un échec d'identification ne
+# doit jamais empêcher l'estimation elle-même d'être remontée.
+
+
+@patch("r36s_studio.gui.partition_runner.unmount_forced")
+@patch("r36s_studio.gui.partition_runner.identify_from_boot_directory")
+@patch(
+    "r36s_studio.gui.partition_runner.locate_mounted",
+    return_value=PartitionInfo("/dev/fake-disk-test-6s1", "", "fat16", "/Volumes/BOOT"),
+)
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", return_value=9_000_000_000)
+def test_system_backup_estimate_runner_reports_size_and_board(
+    mock_estimate, mock_locate, mock_identify, mock_unmount, qapp
+):
+    from r36s_studio.identify import IdentifyResult
+    from r36s_studio.identify.dtb import DtbInfo
+
+    mock_identify.return_value = IdentifyResult(
+        info=DtbInfo(board_compatible="rk3326-r35s", panel_compatible="sitronix,st7703", timings={})
+    )
+    runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
+    results = []
+    runner.finished_estimate.connect(lambda result: results.append(result))
+
+    runner.run()
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.size_bytes == 9_000_000_000
+    assert result.error is None
+    assert result.board_compatible == "rk3326-r35s"
+    mock_unmount.assert_called_once_with(mock_locate.return_value)
+
+
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", side_effect=GamesPartitionNotFound("x"))
+def test_system_backup_estimate_runner_reports_games_partition_not_found(mock_estimate, qapp):
+    runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
+    results = []
+    runner.finished_estimate.connect(lambda result: results.append(result))
+
+    runner.run()
+
+    assert results[0].error == "GAMES_PARTITION_NOT_FOUND"
+    assert results[0].size_bytes is None
+
+
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", side_effect=OSError("carte débranchée"))
+def test_system_backup_estimate_runner_reports_io_error(mock_estimate, qapp):
+    runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
+    results = []
+    runner.finished_estimate.connect(lambda result: results.append(result))
+
+    runner.run()
+
+    assert results[0].error == "IO_ERROR"
+
+
+@patch("r36s_studio.gui.partition_runner.locate_mounted", side_effect=PartitionNotMounted("BOOT", "/dev/x"))
+@patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", return_value=9_000_000_000)
+def test_system_backup_estimate_runner_size_survives_identify_failure(mock_estimate, mock_locate, qapp):
+    """L'identification échoue (carte défaillante, montage impossible...)
+    -- purement décorative pour le nom de fichier suggéré, ne doit jamais
+    faire perdre l'estimation de taille déjà calculée."""
+    runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
+    results = []
+    runner.finished_estimate.connect(lambda result: results.append(result))
+
+    runner.run()
+
+    assert results[0].size_bytes == 9_000_000_000
+    assert results[0].error is None
+    assert results[0].board_compatible is None

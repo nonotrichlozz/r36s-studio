@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
@@ -30,6 +31,7 @@ from r36s_studio.identify.rocknix import (
     resolve_latest_r36s_assets,
 )
 from r36s_studio.imaging.copy import PROGRESS_INTERVAL, OperationCancelled, ProgressEvent
+from r36s_studio.imaging.system_backup import GamesPartitionNotFound, estimate_system_backup_size
 from r36s_studio.partitions import (
     BOOT_LABEL,
     MacosNtfsWriteUnsupported,
@@ -287,3 +289,60 @@ class RocknixDownloadRunner(QThread):
             return
 
         self.finished_download.emit(True, str(destination))
+
+
+@dataclass
+class SystemBackupEstimate:
+    """Résultat de `SystemBackupEstimateRunner` -- soit `size_bytes`
+    (`error` reste `None`), soit `error` (code du protocole, §3, `size_
+    bytes` reste `None`). `board_compatible` est un pur bonus, jamais
+    requis pour un résultat par ailleurs réussi."""
+
+    size_bytes: Optional[int] = None
+    error: Optional[str] = None
+    board_compatible: Optional[str] = None
+
+
+class SystemBackupEstimateRunner(QThread):
+    """Étape préalable à la sauvegarde système sans les jeux (§4.3) : sur
+    un thread séparé comme les autres runners de ce module, puisque lire
+    la table de partitions et, en best-effort, monter le BOOT pour
+    l'identification peut bloquer (`locate_mounted`, jusqu'à `MOUNT_WAIT_
+    SECONDS`) -- un gel de l'interface pendant ce calcul se lirait comme
+    un plantage (même piège que `WizardIdentifyRunner`/`WizardFingerprint
+    Runner`).
+
+    L'identification de la console (`board_compatible`, pour suggérer un
+    nom de fichier "quand il est connu", §4.3) est purement décorative :
+    n'importe quel échec (montage impossible, pas de `.dtb`, carte
+    défaillante...) est avalé silencieusement plutôt que de faire échouer
+    l'estimation de taille elle-même, déjà calculée à ce stade."""
+
+    finished_estimate = Signal(object)  # SystemBackupEstimate
+
+    def __init__(self, device_path: str, parent=None):
+        super().__init__(parent)
+        self._device_path = device_path
+
+    def run(self) -> None:
+        try:
+            size_bytes = estimate_system_backup_size(self._device_path)
+        except GamesPartitionNotFound:
+            self.finished_estimate.emit(SystemBackupEstimate(error="GAMES_PARTITION_NOT_FOUND"))
+            return
+        except (OSError, subprocess.CalledProcessError):
+            self.finished_estimate.emit(SystemBackupEstimate(error="IO_ERROR"))
+            return
+
+        board_compatible = None
+        try:
+            boot = locate_mounted(self._device_path, BOOT_LABEL)
+            if boot.mountpoint:
+                result = identify_from_boot_directory(boot.mountpoint)
+                if result.info is not None:
+                    board_compatible = result.info.board_compatible
+                unmount_forced(boot)
+        except Exception:
+            pass  # décoratif pour le nom de fichier seulement, voir la docstring
+
+        self.finished_estimate.emit(SystemBackupEstimate(size_bytes=size_bytes, board_compatible=board_compatible))

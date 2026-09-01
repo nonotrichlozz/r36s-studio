@@ -126,6 +126,145 @@ def test_backup_flow_reaches_worker_with_correct_argv(mock_list, mock_filter, mo
     assert window._home._backup_row.isEnabled() is False  # occupé pendant l'opération
 
 
+# --- sauvegarde système sans les jeux (§4.3) --------------------------------
+#
+# Contrairement à la sauvegarde complète ci-dessus, le choix de la carte
+# déclenche d'abord une estimation de taille (SystemBackupEstimateRunner,
+# sur un thread séparé -- lire la table de partitions et, en best-effort,
+# monter le BOOT pour suggérer un nom de fichier peut bloquer) avant
+# d'ouvrir la fenêtre Choix du fichier.
+
+
+def _mock_estimate_runner_class():
+    instances = []
+
+    def _factory(*args, **kwargs):
+        instance = MagicMock()
+        instance.init_args = args
+        instances.append(instance)
+        return instance
+
+    factory = MagicMock(side_effect=_factory)
+    factory.instances = instances
+    return factory
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_backup_system_device_chosen_starts_estimate_runner_not_file_dialog(
+    mock_list, mock_filter, mock_detect, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    estimate_runner_class = _mock_estimate_runner_class()
+
+    with patch("r36s_studio.gui.main_window.SystemBackupEstimateRunner", estimate_runner_class):
+        window = MainWindow()
+        window._home.backup_system_selected.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+
+    estimate_runner_class.assert_called_once_with(device.path, parent=window)
+    estimate_runner_class.instances[0].start.assert_called_once()
+    assert window._file_dialog.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_opens_file_dialog_with_model_in_suggested_filename(mock_list, mock_filter, mock_detect, qapp):
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+
+    window._on_system_backup_estimate_ready(
+        SystemBackupEstimate(size_bytes=9_000_000_000, board_compatible="rk3326-r35s")
+    )
+
+    assert window._file_dialog.isVisible() is True
+    suggested = window._file_dialog._path_label.text()
+    assert "rk3326-r35s" in suggested
+    assert suggested.endswith(".img")
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "9" in log_text  # taille estimée journalisée avant l'ouverture
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_suggests_a_filename_without_model_when_unknown(mock_list, mock_filter, mock_detect, qapp):
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+
+    window._on_system_backup_estimate_ready(SystemBackupEstimate(size_bytes=9_000_000_000, board_compatible=None))
+
+    assert window._file_dialog.isVisible() is True
+    assert window._file_dialog._path_label.text().endswith(".img")
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_shows_friendly_error_and_does_not_open_file_dialog(mock_list, mock_filter, mock_detect, qapp):
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+
+    window._on_system_backup_estimate_ready(SystemBackupEstimate(error="GAMES_PARTITION_NOT_FOUND"))
+
+    assert window._file_dialog.isVisible() is False
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "jeux" in log_text.lower()
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_backup_system_flow_reaches_worker_with_system_only_flag(mock_list, mock_filter, mock_detect, qapp):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    runner_class = _mock_runner_class()
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = device
+    window._file_path = "/tmp/systeme_rk3326-r35s_2026-07-06_00-21.img"
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    argv = runner_class.instances[0].argv
+    assert argv == [
+        "backup",
+        "--device",
+        device.path,
+        "--output",
+        "/tmp/systeme_rk3326-r35s_2026-07-06_00-21.img",
+        "--system-only",
+    ]
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_success_message_mentions_system(mock_list, mock_filter, qapp):
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+    window._file_path = "/tmp/out.img"
+
+    assert "système" in window._success_message().lower()
+
+
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")

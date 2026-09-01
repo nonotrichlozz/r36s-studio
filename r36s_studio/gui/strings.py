@@ -34,6 +34,14 @@ STRINGS = {
     "home_backup_separator": "Par sécurité",
     "home_tile_backup": "Sauvegarder l'image complète de ma carte",
     "home_tile_backup_desc": "Enregistre le contenu actuel de ta carte SD dans un fichier, au cas où.",
+    # Sauvegarde système sans les jeux (§4.3/§4.6) -- s'arrête juste avant
+    # la partition de jeux (EASYROMS ou STORAGE), un fichier bien plus
+    # petit qu'une image complète.
+    "home_tile_backup_system": "Sauvegarder mon système sans les jeux",
+    "home_tile_backup_system_desc": (
+        "Enregistre l'écran et les réglages de ta carte, sans tes jeux — "
+        "un fichier bien plus petit qu'une sauvegarde complète."
+    ),
     # Aide macOS uniquement (§3/§5 -- HomeScreen n'ajoute ce bouton que sur
     # macOS, seul OS concerné par cette autorisation).
     "home_help": "Aide : autoriser l'accès à la carte (Mac)",
@@ -196,6 +204,7 @@ STRINGS = {
     "device_back": "Retour",
     # Choix du fichier
     "file_title_backup": "Où enregistrer la sauvegarde ?",
+    "file_title_backup_system": "Où enregistrer la sauvegarde du système ?",
     "file_title_flash": "Choisis le fichier image",
     "file_title_extract_boot": "Où enregistrer la sauvegarde de l'écran d'origine ?",
     "file_title_extract_easyroms": "Où enregistrer la sauvegarde des jeux ?",
@@ -231,6 +240,7 @@ STRINGS = {
     "log_header_idle": "En attente",
     "log_header_active": "OPÉRATION ACTIVE — {title}",
     "execute_title_backup": "Sauvegarde en cours…",
+    "execute_title_backup_system": "Sauvegarde du système en cours…",
     "execute_title_flash": "Écriture en cours…",
     "execute_title_extract_boot": "Copie de l'écran d'origine en cours…",
     "execute_title_extract_easyroms": "Copie des jeux en cours…",
@@ -329,7 +339,15 @@ STRINGS = {
     "error_rocknix_download_failed": (
         "Le téléchargement a échoué. Vérifie ta connexion internet, puis réessaie."
     ),
+    "error_games_partition_not_found": (
+        "Impossible de reconnaître l'emplacement des jeux (EASYROMS ou STORAGE) sur "
+        "cette carte — la sauvegarde système sans les jeux ne sait pas où s'arrêter."
+    ),
     "error_generic": "Une erreur est survenue.",
+    # Estimation avant de lancer la sauvegarde système sans les jeux (§4.3)
+    # -- journal de bord, avant l'ouverture de la fenêtre Choix du fichier.
+    "system_backup_estimating": "Calcul de la taille estimée…",
+    "system_backup_estimate_result": "Taille estimée : environ {size} (sans les jeux).",
 }
 
 
@@ -359,6 +377,7 @@ _ERROR_MESSAGE_KEYS = {
     "ROCKNIX_ASSET_NOT_FOUND": "error_rocknix_asset_not_found",
     "ROCKNIX_CHECKSUM_MISMATCH": "error_rocknix_checksum_mismatch",
     "ROCKNIX_DOWNLOAD_FAILED": "error_rocknix_download_failed",
+    "GAMES_PARTITION_NOT_FOUND": "error_games_partition_not_found",
 }
 
 

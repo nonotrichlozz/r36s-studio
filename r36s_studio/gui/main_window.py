@@ -12,9 +12,11 @@ permanent (`LogPanel`), pas dans des écrans Exécution/Résultat séparés
 from __future__ import annotations
 
 import platform
+import re
 import subprocess
 import sys
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -37,6 +39,8 @@ from .partition_runner import (
     PartitionJobRunner,
     RocknixDownloadRunner,
     RocknixListRunner,
+    SystemBackupEstimate,
+    SystemBackupEstimateRunner,
     WizardFingerprintRunner,
     WizardIdentifyRunner,
 )
@@ -242,6 +246,7 @@ class MainWindow(QMainWindow):
         self._home.copy_games_selected.connect(lambda: self._start_flow("copy_games"))
         self._home.eject_selected.connect(lambda: self._start_flow("eject"))
         self._home.backup_selected.connect(lambda: self._start_flow("backup"))
+        self._home.backup_system_selected.connect(lambda: self._start_flow("backup_system"))
         self._home.refresh_requested.connect(self._refresh_home_state)
         self._home.help_requested.connect(self._help_dialog.open)
         self._home.assisted_mode_requested.connect(self._switch_to_assisted_mode)
@@ -354,6 +359,14 @@ class MainWindow(QMainWindow):
             self._perform_eject()
             return
 
+        if self._mode == "backup_system":
+            # Sauvegarde système sans les jeux (§4.3) : la fenêtre Choix du
+            # fichier n'ouvre qu'une fois la taille estimée (et, en
+            # best-effort, le modèle de console pour le nom suggéré) --
+            # jamais avant, `_start_system_backup_estimate` s'en charge.
+            self._start_system_backup_estimate(device)
+            return
+
         if self._mode in _EXTRACTION_MODES:
             # Étapes A/B : un emplacement par défaut est proposé
             # (~/Documents/R36S Studio), mais l'utilisateur choisit
@@ -376,6 +389,43 @@ class MainWindow(QMainWindow):
         firmware = self._app_config.firmware if self._mode == "flash" else None
         self._file_dialog.set_mode(self._mode, archive_choices=archive_choices, firmware=firmware)
         self._file_dialog.open()
+
+    # --- sauvegarde système sans les jeux (§4.3) -----------------------------
+
+    def _start_system_backup_estimate(self, device: Device) -> None:
+        """Calcule la taille estimée (et, en best-effort, le modèle de
+        console) sur un thread séparé -- lire la table de partitions est
+        rapide, mais le montage du BOOT pour l'identification peut
+        bloquer jusqu'à `MOUNT_WAIT_SECONDS` (§4.4), un gel de l'interface
+        à ce stade se lirait comme un plantage."""
+        self._log_panel.append_log(tr("system_backup_estimating"))
+        self._estimate_runner = SystemBackupEstimateRunner(device.path, parent=self)
+        self._estimate_runner.finished_estimate.connect(self._on_system_backup_estimate_ready)
+        self._estimate_runner.start()
+
+    def _on_system_backup_estimate_ready(self, estimate: SystemBackupEstimate) -> None:
+        if estimate.error:
+            self._log_panel.append_log(friendly_error_message(estimate.error))
+            return
+        self._log_panel.append_log(tr("system_backup_estimate_result", size=_format_size(estimate.size_bytes)))
+        self._file_dialog.set_mode(
+            "backup_system", default_path=self._suggested_system_backup_path(estimate.board_compatible)
+        )
+        self._file_dialog.open()
+
+    def _suggested_system_backup_path(self, board_compatible: Optional[str]) -> str:
+        """Nom de fichier proposé (§4.3 : « propose un nom de fichier
+        incluant le modèle de console identifié quand il est connu ») --
+        toujours remplaçable via Parcourir, jamais imposé (même principe
+        que le dossier proposé pour les archives BOOT/EASYROMS,
+        `archives.py`). `board_compatible` vient d'une lecture best-effort
+        du `.dtb` (`SystemBackupEstimateRunner`) : un identifiant de carte
+        brut (ex. `rk3326-r35s`), pas un nom convivial -- rien de tel
+        n'existe ailleurs dans ce projet pour ne pas en inventer un ici."""
+        timestamp = datetime.now().strftime(archives.TIMESTAMP_FORMAT)
+        model_part = f"_{re.sub(r'[^A-Za-z0-9_-]+', '-', board_compatible)}" if board_compatible else ""
+        filename = f"systeme{model_part}_{timestamp}.img"
+        return str(archives.default_archives_dir() / filename)
 
     # --- fichier choisi -> fenêtre Confirmation (flash) ou opération --------
 
@@ -457,6 +507,8 @@ class MainWindow(QMainWindow):
 
         if self._mode == "backup":
             argv = ["backup", "--device", self._device.path, "--output", self._file_path]
+        elif self._mode == "backup_system":
+            argv = ["backup", "--device", self._device.path, "--output", self._file_path, "--system-only"]
         else:
             argv = ["flash", "--image", self._file_path, "--device", self._device.path]
 
@@ -550,6 +602,8 @@ class MainWindow(QMainWindow):
     def _success_message(self) -> str:
         if self._mode == "backup":
             return f"{self._device.display} a été sauvegardée dans {self._file_path}."
+        if self._mode == "backup_system":
+            return f"Le système de {self._device.display} a été sauvegardé dans {self._file_path}."
         if self._mode == "extract_boot":
             return "L'écran et les réglages d'origine ont été copiés sur ton ordinateur."
         if self._mode == "extract_easyroms":

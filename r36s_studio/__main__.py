@@ -64,11 +64,13 @@ from typing import List, Optional, TextIO
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify import identify_from_boot_directory
 from r36s_studio.imaging import (
+    GamesPartitionNotFound,
     OperationCancelled,
     ProgressEvent,
     SevenZipArchiveError,
     UnsupportedImageFormatError,
     backup_device,
+    backup_system_only,
     flash_device,
 )
 from r36s_studio.partitions import (
@@ -231,18 +233,27 @@ def cmd_backup(args: argparse.Namespace) -> int:
             emit_error("OUTPUT_EXISTS", f"Le fichier de sortie existe déjà : {args.output}")
             return 1
 
-        emit_log(f"Sauvegarde de {device.display} ({device.path}) vers {args.output}")
+        if args.system_only:
+            emit_log(
+                f"Sauvegarde système (sans les jeux) de {device.display} ({device.path}) vers {args.output}"
+            )
+        else:
+            emit_log(f"Sauvegarde de {device.display} ({device.path}) vers {args.output}")
 
         def on_progress(event: ProgressEvent) -> None:
             emit_progress(event.done, event.total, event.speed)
 
+        backup_function = backup_system_only if args.system_only else backup_device
         try:
-            copied = backup_device(
+            copied = backup_function(
                 device,
                 args.output,
                 on_progress=on_progress,
                 should_cancel=_make_should_cancel(args),
             )
+        except GamesPartitionNotFound as exc:
+            emit_error("GAMES_PARTITION_NOT_FOUND", str(exc))
+            return 1
         except OperationCancelled as exc:
             emit_error("CANCELLED", f"Sauvegarde annulée après {exc.done} octets")
             emit_done(False)
@@ -615,6 +626,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--device", required=True, help="Chemin du périphérique à sauvegarder (voir `list`)"
     )
     backup_parser.add_argument("--output", required=True, help="Fichier image de destination")
+    backup_parser.add_argument(
+        "--system-only",
+        action="store_true",
+        help=(
+            "Ne sauvegarde que les partitions système, jusqu'à la fin de la dernière "
+            "partition avant la partition de jeux (EASYROMS ou STORAGE) -- exclut les "
+            "jeux, typiquement 8-9 Go au lieu de 100 Go sur une carte R36S d'origine"
+        ),
+    )
     backup_parser.add_argument(
         "--max-size",
         type=int,

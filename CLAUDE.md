@@ -304,6 +304,74 @@ flush + fsync
 utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` ou
 `.img.xz` à la volée.
 
+> **Sauvegarde système sans les jeux (phase 9), section « Par sécurité ».**
+> La sauvegarde intelligente ci-dessus s'arrête déjà à la fin de la
+> *dernière* partition utilisée — mais sur une carte R36S d'origine, cette
+> dernière partition est justement EASYROMS (ou STORAGE sur EmuELEC), qui
+> représente l'essentiel de l'espace (100 Go typiques contre 8-9 Go pour
+> le système seul). `imaging/system_backup.py::backup_system_only`
+> s'arrête plutôt à la fin de la *dernière partition système*, juste
+> avant celle des jeux — identifiée via `partitions/locate.py::
+> list_partitions` (étiquette EASYROMS/STORAGE, comme le reste du projet)
+> plutôt qu'en lisant la table brute pour ça, une table MBR n'ayant aucun
+> concept d'étiquette. La table brute (MBR ou GPT, schéma détecté
+> automatiquement comme pour la sauvegarde intelligente) ne sert qu'à
+> trouver l'octet exact où s'arrête la partition précédente, une fois
+> l'index de la partition de jeux connu — même hypothèse de correspondance
+> par position entre `list_partitions` et la table brute que celle déjà
+> faite ailleurs dans ce projet (`BOOT_PARTITION_INDEX`/`EASYROMS_
+> PARTITION_INDEX`). Lève `GamesPartitionNotFound` quand aucune partition
+> de jeux n'est reconnaissable (carte ROCKNIX, où les jeux vivent dans la
+> partition Linux plutôt qu'une partition séparée ; ou carte au système
+> non reconnu) — pas de frontière évidente où s'arrêter dans ce cas.
+>
+> **Point critique, table GPT** (`imaging/gpt.py`) : contrairement à MBR
+> (une table unique en tête de disque), GPT porte une table secondaire en
+> toute fin de disque, et l'en-tête primaire y pointe (`AlternateLBA`).
+> Une simple troncature laisserait cette table secondaire manquante et
+> l'en-tête primaire pointant hors du fichier — un outil de flashage
+> rejette alors l'image comme corrompue plutôt que de simplement accepter
+> une partition en moins. `backup_system_only` reconstruit donc une table
+> secondaire cohérente à la nouvelle fin de fichier (partition de jeux
+> retirée des deux tableaux d'entrées, primaire et secondaire), et met à
+> jour l'en-tête primaire en conséquence (`AlternateLBA`/`LastUsableLBA`,
+> CRC32 des deux recalculés dans le bon ordre imposé par la spec UEFI :
+> CRC32 du tableau d'entrées d'abord, puis CRC32 de l'en-tête lui-même
+> avec son propre champ à zéro pendant le calcul). CRC32 : l'algorithme
+> demandé par la spec UEFI (Annex D, ISO/IEC 13239:2002) est le CRC-32
+> IEEE 802.3 standard, le même que `zlib.crc32`/PNG — aucune inversion de
+> bits ni table personnalisée à gérer. Les GUID (type et identifiant de
+> partition) sont traités comme des blobs opaques de 16 octets, jamais
+> interprétés ni reconstruits, seulement recopiés tels quels. Vérifié par
+> des tests qui reconstruisent l'image complète et la reparsent bout en
+> bout (CRC32 des deux en-têtes et des deux tableaux d'entrées, contenu
+> des partitions gardées) — jamais testé sur une vraie carte clone GPT/EFI
+> réelle avec un vrai outil de flashage tiers (gdisk, Etcher...), faute
+> de matériel disponible ici.
+>
+> **Estimation avant de lancer, et nom de fichier suggéré** (§5) :
+> `gui/partition_runner.py::SystemBackupEstimateRunner`, un thread séparé
+> comme les autres runners de ce module (lire la table de partitions est
+> rapide, mais le montage du BOOT pour l'identification du modèle peut
+> bloquer jusqu'à `MOUNT_WAIT_SECONDS`, §4.4) — calcule la taille estimée
+> (`imaging/system_backup.py::estimate_system_backup_size`, journalisée
+> avant l'ouverture de la fenêtre Choix du fichier) et tente, en
+> best-effort, d'identifier la console (même mécanisme que l'étape 2 du
+> mode assisté, `identify_from_boot_directory` sur le BOOT monté) pour
+> suggérer un nom de fichier qui inclut le modèle *quand il est connu* —
+> un échec d'identification n'empêche jamais l'estimation d'aboutir, cette
+> partie est purement décorative. Nom suggéré : `systeme_{modèle}_
+> {AAAA-MM-JJ}_{HH-MM}.img` dans `~/Documents/R36S Studio/` (même
+> convention que `partitions/archives.py`, jamais `~/.config`, §6) —
+> `{modèle}` est l'identifiant brut du `.dtb` (ex. `rk3326-r35s`), pas un
+> nom convivial (rien de tel n'existe ailleurs dans ce projet). Comme pour
+> toute proposition de ce genre dans l'appli, toujours remplaçable en
+> entier via Parcourir, jamais imposé.
+>
+> Passe par le worker élevé comme la sauvegarde complète (`backup
+> --system-only`, `__main__.py::cmd_backup`) — c'est une lecture brute du
+> périphérique, §3.
+
 **Formats source acceptés au flash :** `.img`, `.img.gz`, `.img.xz`, `.img.zip`
 (décompression en flux, sans fichier temporaire).
 

@@ -68,6 +68,16 @@ def test_home_screen_backup_tile_emits_signal(qapp):
     assert received == [True]
 
 
+def test_home_screen_backup_system_tile_emits_signal(qapp):
+    screen = HomeScreen()
+    received = []
+    screen.backup_system_selected.connect(lambda: received.append(True))
+
+    screen.backup_system_selected.emit()
+
+    assert received == [True]
+
+
 def test_home_screen_shows_version_label(qapp):
     """À la demande explicite d'un utilisateur ayant perdu le fil entre
     plusieurs reconstructions locales de l'app -- sans repère visible,
@@ -246,6 +256,7 @@ def test_home_screen_set_busy_disables_steps_and_backup_row(qapp):
     for row in screen._tiles.values():
         assert row.isEnabled() is False
     assert screen._backup_row.isEnabled() is False
+    assert screen._backup_system_row.isEnabled() is False
 
 
 def test_home_screen_set_busy_false_reenables_steps_and_backup_row(qapp):
@@ -257,6 +268,7 @@ def test_home_screen_set_busy_false_reenables_steps_and_backup_row(qapp):
     for row in screen._tiles.values():
         assert row.isEnabled() is True
     assert screen._backup_row.isEnabled() is True
+    assert screen._backup_system_row.isEnabled() is True
 
 
 def test_home_screen_set_busy_also_disables_assisted_mode_button(qapp):
@@ -1249,6 +1261,31 @@ def test_file_dialog_back_button_closes_dialog(qapp):
     back_buttons[0].click()
 
     assert dialog.isVisible() is False
+
+
+# --- FileDialog : mode backup_system (§4.3, sauvegarde sans les jeux) -----
+
+
+def test_file_dialog_backup_system_prefills_suggested_path_and_enables_next(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("backup_system", default_path="/home/x/Documents/R36S Studio/systeme_2026-07-06_00-21.img")
+
+    assert dialog._path_label.text() == "/home/x/Documents/R36S Studio/systeme_2026-07-06_00-21.img"
+    assert dialog._next_button.isEnabled() is True
+
+
+def test_file_dialog_backup_system_hides_firmware_choice(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("backup_system", default_path="/tmp/systeme.img")
+
+    assert dialog._arkos_radio.isVisible() is False
+    assert dialog._rocknix_radio.isVisible() is False
+    assert dialog._emuelec_radio.isVisible() is False
+    assert dialog._releases_button.isVisible() is False
 
 
 # --- FileDialog : bouton releases, flash uniquement (§5 mode assisté) ------

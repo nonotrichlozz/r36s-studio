@@ -769,6 +769,7 @@ class HomeScreen(Screen):
     copy_games_selected = Signal()
     eject_selected = Signal()
     backup_selected = Signal()
+    backup_system_selected = Signal()
     refresh_requested = Signal()
     help_requested = Signal()
     assisted_mode_requested = Signal()
@@ -859,6 +860,14 @@ class HomeScreen(Screen):
         )
         backup_badge.setVisible(False)  # jamais de badge de statut pour la sauvegarde (§5)
         layout.addWidget(self._backup_row)
+        self._backup_system_row, backup_system_badge = self._build_row(
+            "◆",
+            tr("home_tile_backup_system"),
+            tr("home_tile_backup_system_desc"),
+            self.backup_system_selected,
+        )
+        backup_system_badge.setVisible(False)  # jamais de badge de statut pour la sauvegarde (§5)
+        layout.addWidget(self._backup_system_row)
 
         layout.addStretch()
 
@@ -884,6 +893,7 @@ class HomeScreen(Screen):
         for row in self._tiles.values():
             row.setEnabled(not busy)
         self._backup_row.setEnabled(not busy)
+        self._backup_system_row.setEnabled(not busy)
         # Changer de mode en plein flash ou en pleine copie laisserait un
         # job orphelin (§5 mode assisté) -- même garde que les étapes.
         self._assisted_mode_button.setEnabled(not busy)
@@ -1087,6 +1097,7 @@ class RocknixVariantDialog(Dialog):
 
 _FILE_TITLE_KEYS = {
     "backup": "file_title_backup",
+    "backup_system": "file_title_backup_system",
     "flash": "file_title_flash",
     "extract_boot": "file_title_extract_boot",
     "extract_easyroms": "file_title_extract_easyroms",
@@ -1360,6 +1371,10 @@ class FileDialog(Dialog):
         title = tr(_FILE_TITLE_KEYS[self._mode])
         if self._mode == "backup":
             path, _ = QFileDialog.getSaveFileName(self, title, "", "Image (*.img)")
+        elif self._mode == "backup_system":
+            # Démarre sur le nom de fichier proposé (§4.3) -- l'utilisateur
+            # peut le remplacer entièrement, y compris l'emplacement.
+            path, _ = QFileDialog.getSaveFileName(self, title, self._path_label.text(), "Image (*.img)")
         elif self._mode == "flash":
             path, _ = QFileDialog.getOpenFileName(self, title, "", "Image disque (*.img *.img.gz *.img.xz)")
         elif self._mode in _DESTINATION_MODES:
@@ -1507,6 +1522,7 @@ class ArchiveReuseDialog(Dialog):
 
 _OPERATION_TITLE_KEYS = {
     "backup": "execute_title_backup",
+    "backup_system": "execute_title_backup_system",
     "flash": "execute_title_flash",
     "extract_boot": "execute_title_extract_boot",
     "extract_easyroms": "execute_title_extract_easyroms",

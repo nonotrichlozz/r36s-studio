@@ -172,6 +172,65 @@ def test_backup_system_device_chosen_starts_estimate_runner_not_file_dialog(
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_backup_system_estimate_marks_home_busy_while_running(mock_list, mock_filter, mock_detect, qapp):
+    """Sans ceci, un clic sur une autre ligne (y compris Éjecter) pendant
+    le calcul de l'estimation lancerait une deuxième opération en même
+    temps -- scénario probable derrière le bug rapporté (carte éjectée
+    pendant que la sauvegarde système était censée être en cours)."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    estimate_runner_class = _mock_estimate_runner_class()
+
+    with patch("r36s_studio.gui.main_window.SystemBackupEstimateRunner", estimate_runner_class):
+        window = MainWindow()
+        window._home.backup_system_selected.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+
+    assert window._home._backup_row.isEnabled() is False
+    assert window._home._backup_system_row.isEnabled() is False
+    for tile in window._home._tiles.values():
+        assert tile.isEnabled() is False
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_releases_busy_state_on_success(mock_list, mock_filter, mock_detect, qapp):
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+    window._home.set_busy(True)
+
+    window._on_system_backup_estimate_ready(SystemBackupEstimate(size_bytes=9_000_000_000))
+
+    for tile in window._home._tiles.values():
+        assert tile.isEnabled() is True
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_releases_busy_state_on_error(mock_list, mock_filter, mock_detect, qapp):
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+    window._home.set_busy(True)
+
+    window._on_system_backup_estimate_ready(SystemBackupEstimate(error="IO_ERROR", detail="x"))
+
+    for tile in window._home._tiles.values():
+        assert tile.isEnabled() is True
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_opens_file_dialog_with_model_in_suggested_filename(mock_list, mock_filter, mock_detect, qapp):
@@ -264,6 +323,46 @@ def test_estimate_ready_shows_friendly_error_and_does_not_open_file_dialog(mock_
     assert window._file_dialog.isVisible() is False
     log_text = window._log_panel._log_view.toPlainText()
     assert "jeux" in log_text.lower()
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_logs_the_real_error_detail(mock_list, mock_filter, mock_detect, qapp):
+    """Bug rapporté : le journal n'affichait que « Une erreur est
+    survenue », sans la cause réelle -- doit apparaître comme ligne
+    supplémentaire, comme pour toute autre opération (§5)."""
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+
+    window._on_system_backup_estimate_ready(
+        SystemBackupEstimate(error="IO_ERROR", detail="[Errno 6] Device not configured")
+    )
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Device not configured" in log_text
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_refreshes_home_state_on_error(mock_list, mock_filter, mock_detect, qapp):
+    """La carte a pu disparaître entre le lancement et l'échec de
+    l'estimation (bug rapporté) -- le bandeau/les lignes « Par sécurité »
+    doivent refléter l'état réel, pas rester sur une détection périmée."""
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+    mock_detect.reset_mock()
+
+    window._on_system_backup_estimate_ready(SystemBackupEstimate(error="IO_ERROR", detail="carte débranchée"))
+
+    mock_detect.assert_called_once()
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
@@ -983,6 +1082,60 @@ def test_startup_with_no_card_still_shows_all_six_tiles(mock_list, mock_filter, 
     mock_detect.assert_called_once_with(None)
     for tile in window._home._tiles.values():
         assert tile.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.NOT_RELEVANT))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_no_card_disables_backup_rows_but_not_the_six_tiles(mock_list, mock_filter, mock_detect, mock_load, qapp):
+    """Bug rapporté : la sauvegarde système sans les jeux restait
+    lançable alors que la carte venait d'être éjectée (bandeau « Aucune
+    carte détectée »). « Par sécurité » exige une carte, contrairement
+    aux six étapes lettrées (toujours cliquables par principe, §4.5)."""
+    window = MainWindow()
+    window.show()
+
+    assert window._home._backup_row.isEnabled() is False
+    assert window._home._backup_system_row.isEnabled() is False
+    for tile in window._home._tiles.values():
+        assert tile.isEnabled() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_single_card_enables_backup_rows(mock_list, mock_filter, mock_detect, mock_load, qapp):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+
+    window = MainWindow()
+    window.show()
+
+    assert window._home._backup_row.isEnabled() is True
+    assert window._home._backup_system_row.isEnabled() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.NOT_RELEVANT))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_multiple_candidate_cards_keep_backup_rows_enabled(mock_list, mock_filter, mock_detect, mock_load, qapp):
+    """Plusieurs cartes candidates à la fois (§4.2) : ambigu quant à
+    laquelle, mais il y a bien au moins une carte -- choisir laquelle
+    reste possible via la fenêtre Choix de la carte, contrairement à
+    zéro carte du tout."""
+    devices = [_make_device(path="/dev/fake-disk-test-1"), _make_device(path="/dev/fake-disk-test-2")]
+    mock_list.return_value = devices
+    mock_filter.return_value = devices
+
+    window = MainWindow()
+    window.show()
+
+    assert window._home._backup_row.isEnabled() is True
+    assert window._home._backup_system_row.isEnabled() is True
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)

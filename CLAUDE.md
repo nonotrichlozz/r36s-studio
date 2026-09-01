@@ -426,6 +426,50 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > déjà présent sur l'écran expert, comme pour tout autre passage
 > temporaire par cet écran.
 
+> ⚠️ **Deux défauts rapportés en usage réel, corrigés.**
+>
+> **Erreur muette.** Un échec pendant l'estimation (ex. carte débranchée
+> entre-temps) n'affichait que « Une erreur est survenue », sans aucune
+> cause exploitable — contrairement à toute autre opération de l'appli
+> (§5 vocabulaire : le message brut du backend suit toujours le message
+> principal comme ligne supplémentaire du journal). Cause : `SystemBackup
+> Estimate` (`gui/partition_runner.py`) ne portait qu'un code d'erreur
+> (`error`), jamais le message de l'exception d'origine — contrairement
+> au couple `code`/`msg` que `WorkerRunner.error` fournit déjà pour
+> `backup`/`flash`. Corrigé par un nouveau champ `detail` (`str(exc)`,
+> capturé aux deux points où `SystemBackupEstimateRunner` attrapait déjà
+> l'exception sans la garder) ; `MainWindow._on_system_backup_estimate_
+> ready` journalise ce détail à la suite du message convivial, comme
+> `LogPanel.finish_error` le fait déjà pour le reste de l'appli.
+>
+> **Lançable sans carte.** Déclenchée alors que la carte venait d'être
+> éjectée et que le bandeau affichait « Aucune carte détectée ». Les six
+> étapes lettrées restent volontairement toujours cliquables, quelle que
+> soit la carte branchée (§4.5) — mais « Par sécurité » n'a, elle, jamais
+> de sens sans carte du tout (pas de notion de pertinence par carte comme
+> les six étapes, juste une carte présente ou non). `HomeScreen.set_
+> status` accepte désormais un paramètre `has_device` distinct de
+> `device` (`device` vaut déjà `None` aussi bien pour *aucune* carte que
+> pour *plusieurs* candidates ambiguës, §4.5 — insuffisant à lui seul
+> pour cette distinction ; `has_device` est `True` dès qu'au moins une
+> carte est branchée, y compris plusieurs candidates, choisir laquelle
+> restant possible). `_update_backup_rows_enabled` combine `has_device`
+> avec l'état occupé existant (`_busy`), ce dernier restant prioritaire
+> si une carte réapparaît pendant qu'une opération tourne déjà — le
+> bouton Rafraîchir n'étant pas désactivé par `set_busy` (§5), un
+> `set_status` peut survenir en plein milieu d'une opération.
+>
+> Cause probable du scénario observé (les deux défauts combinés) :
+> l'estimation (`SystemBackupEstimateRunner`) ne marquait pas l'écran
+> occupé pendant son calcul en arrière-plan — le bouton Éjecter (ou toute
+> autre ligne) restait donc cliquable pendant cette fenêtre, permettant
+> d'éjecter la carte en cours d'estimation. Corrigé au passage :
+> `_start_system_backup_estimate`/`_on_system_backup_estimate_ready`
+> encadrent maintenant le calcul d'un `set_busy(True)`/`set_busy(False)`
+> sur `HomeScreen` et `AssistedLandingScreen`, comme `_start_worker`/
+> `_on_worker_finished` le font déjà pour les opérations passant par le
+> worker élevé.
+
 **Formats source acceptés au flash :** `.img`, `.img.gz`, `.img.xz`, `.img.zip`
 (décompression en flux, sans fichier temporaire).
 

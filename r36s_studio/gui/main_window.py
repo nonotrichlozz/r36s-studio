@@ -321,7 +321,11 @@ class MainWindow(QMainWindow):
         cas vers le bon geste (brancher une carte, ou choisir laquelle)."""
         devices = self._list_safe_devices()
         device = devices[0] if len(devices) == 1 else None
-        self._home.set_status(detect_workflow_status(device), device)
+        # `device` seul ne distingue pas "aucune carte" de "plusieurs
+        # candidates" (les deux valent `None`, §4.5) -- `has_device`,
+        # séparément, sert justement à cette distinction pour « Par
+        # sécurité » (§4.3) : au moins une carte suffit, même ambiguë.
+        self._home.set_status(detect_workflow_status(device), device, has_device=bool(devices))
 
     # --- déclenchement d'une étape -> fenêtre Choix de la carte -------------
 
@@ -398,15 +402,40 @@ class MainWindow(QMainWindow):
         console) sur un thread séparé -- lire la table de partitions est
         rapide, mais le montage du BOOT pour l'identification peut
         bloquer jusqu'à `MOUNT_WAIT_SECONDS` (§4.4), un gel de l'interface
-        à ce stade se lirait comme un plantage."""
+        à ce stade se lirait comme un plantage. Marque aussi l'écran
+        occupé (bug corrigé : sans ceci, cliquer une autre ligne -- y
+        compris Éjecter -- pendant ce calcul pouvait démarrer une seconde
+        opération en même temps, un scénario plausible derrière le
+        rapport « la fonction est lançable sans carte »)."""
         self._log_panel.append_log(tr("system_backup_estimating"))
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        if self._console_stage is not None:
+            self._console_stage.pause()
         self._estimate_runner = SystemBackupEstimateRunner(device.path, parent=self)
         self._estimate_runner.finished_estimate.connect(self._on_system_backup_estimate_ready)
         self._estimate_runner.start()
 
     def _on_system_backup_estimate_ready(self, estimate: SystemBackupEstimate) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        if self._console_stage is not None:
+            self._console_stage.resume()
         if estimate.error:
-            self._log_panel.append_log(friendly_error_message(estimate.error))
+            # Le détail brut (message de l'exception d'origine) suit
+            # toujours le message principal, comme pour toute autre
+            # opération (§5 vocabulaire) -- bug corrigé : cette étape
+            # n'affichait auparavant que le message générique, sans
+            # aucune cause exploitable.
+            message = friendly_error_message(estimate.error)
+            self._log_panel.append_log(message)
+            if estimate.detail and estimate.detail != message:
+                self._log_panel.append_log(estimate.detail)
+            # La carte a pu disparaître entre le lancement et cet échec
+            # (bug rapporté) -- resynchronise le bandeau et les lignes
+            # « Par sécurité » sur l'état réel plutôt que de les laisser
+            # sur une détection périmée.
+            self._refresh_home_state()
             return
         size_text = _format_size(estimate.size_bytes)
         self._log_panel.append_log(tr("system_backup_estimate_result", size=size_text))

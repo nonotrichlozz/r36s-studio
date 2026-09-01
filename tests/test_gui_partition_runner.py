@@ -484,6 +484,24 @@ def test_system_backup_estimate_runner_reports_games_partition_not_found(mock_es
     assert results[0].size_bytes is None
 
 
+def test_system_backup_estimate_runner_games_partition_not_found_keeps_the_real_message(qapp):
+    """Bug rapporté : le journal n'affichait que le message générique
+    « Une erreur est survenue », sans la cause réelle -- `detail` doit
+    porter le message de l'exception d'origine, comme pour toute autre
+    opération (§5)."""
+    with patch(
+        "r36s_studio.gui.partition_runner.estimate_system_backup_size",
+        side_effect=GamesPartitionNotFound("Aucune partition de jeux reconnue sur cette carte."),
+    ):
+        runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
+        results = []
+        runner.finished_estimate.connect(lambda result: results.append(result))
+
+        runner.run()
+
+    assert results[0].detail == "Aucune partition de jeux reconnue sur cette carte."
+
+
 @patch("r36s_studio.gui.partition_runner.estimate_system_backup_size", side_effect=OSError("carte débranchée"))
 def test_system_backup_estimate_runner_reports_io_error(mock_estimate, qapp):
     runner = SystemBackupEstimateRunner("/dev/fake-disk-test-6")
@@ -493,6 +511,7 @@ def test_system_backup_estimate_runner_reports_io_error(mock_estimate, qapp):
     runner.run()
 
     assert results[0].error == "IO_ERROR"
+    assert results[0].detail == "carte débranchée"
 
 
 @patch("r36s_studio.gui.partition_runner.locate_mounted", side_effect=PartitionNotMounted("BOOT", "/dev/x"))

@@ -271,6 +271,59 @@ def test_home_screen_set_busy_false_reenables_steps_and_backup_row(qapp):
     assert screen._backup_system_row.isEnabled() is True
 
 
+def test_home_screen_set_status_disables_backup_rows_without_a_device(qapp):
+    """« Par sécurité » (sauvegarde complète et sauvegarde système sans
+    les jeux) exige une carte, contrairement aux six étapes lettrées
+    (toujours cliquables par principe, §4.5) -- désactivé dès qu'aucune
+    carte n'est détectée, pour ne jamais pouvoir être lancé dans le vide
+    (bug rapporté : carte éjectée entre-temps, opération quand même
+    déclenchable)."""
+    screen = HomeScreen()
+
+    screen.set_status({}, device=None, has_device=False)
+
+    assert screen._backup_row.isEnabled() is False
+    assert screen._backup_system_row.isEnabled() is False
+    for row in screen._tiles.values():
+        assert row.isEnabled() is True  # les six étapes, elles, restent cliquables
+
+
+def test_home_screen_set_status_enables_backup_rows_with_a_device(qapp):
+    screen = HomeScreen()
+    screen.set_status({}, device=None, has_device=False)
+
+    screen.set_status({}, device=_make_device(), has_device=True)
+
+    assert screen._backup_row.isEnabled() is True
+    assert screen._backup_system_row.isEnabled() is True
+
+
+def test_home_screen_set_status_without_has_device_argument_leaves_backup_rows_enabled(qapp):
+    """Sans information explicite sur la présence d'une carte (avant tout
+    premier `_refresh_home_state`, ou un appel qui ne la précise pas), les
+    lignes restent activées -- jamais désactivées par défaut sans raison."""
+    screen = HomeScreen()
+
+    screen.set_status({})
+
+    assert screen._backup_row.isEnabled() is True
+    assert screen._backup_system_row.isEnabled() is True
+
+
+def test_home_screen_busy_state_overrides_device_presence_for_backup_rows(qapp):
+    """Une opération en cours doit rester prioritaire : `set_status`
+    (ex. rafraîchi entre-temps, le bouton Rafraîchir n'est pas désactivé
+    par `set_busy`) ne doit jamais réactiver les lignes pendant qu'une
+    opération tourne."""
+    screen = HomeScreen()
+    screen.set_busy(True)
+
+    screen.set_status({}, device=_make_device(), has_device=True)
+
+    assert screen._backup_row.isEnabled() is False
+    assert screen._backup_system_row.isEnabled() is False
+
+
 def test_home_screen_set_busy_also_disables_assisted_mode_button(qapp):
     """Changer de mode en plein flash ou en pleine copie laisserait un job
     orphelin (§5 mode assisté) -- le bouton de bascule doit être désactivé

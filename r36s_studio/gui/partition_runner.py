@@ -294,12 +294,18 @@ class RocknixDownloadRunner(QThread):
 @dataclass
 class SystemBackupEstimate:
     """Résultat de `SystemBackupEstimateRunner` -- soit `size_bytes`
-    (`error` reste `None`), soit `error` (code du protocole, §3, `size_
-    bytes` reste `None`). `board_compatible` est un pur bonus, jamais
-    requis pour un résultat par ailleurs réussi."""
+    (`error`/`detail` restent `None`), soit `error` (code du protocole,
+    §3) accompagné de `detail`, le message brut de l'exception d'origine
+    -- bug corrigé : sans lui, une erreur à cette étape n'affichait que le
+    message générique « Une erreur est survenue », sans aucune cause
+    exploitable, contrairement à toute autre opération de l'appli (§5 :
+    le détail brut suit toujours le message principal dans le journal).
+    `board_compatible` est un pur bonus, jamais requis pour un résultat
+    par ailleurs réussi."""
 
     size_bytes: Optional[int] = None
     error: Optional[str] = None
+    detail: Optional[str] = None
     board_compatible: Optional[str] = None
 
 
@@ -327,11 +333,11 @@ class SystemBackupEstimateRunner(QThread):
     def run(self) -> None:
         try:
             size_bytes = estimate_system_backup_size(self._device_path)
-        except GamesPartitionNotFound:
-            self.finished_estimate.emit(SystemBackupEstimate(error="GAMES_PARTITION_NOT_FOUND"))
+        except GamesPartitionNotFound as exc:
+            self.finished_estimate.emit(SystemBackupEstimate(error="GAMES_PARTITION_NOT_FOUND", detail=str(exc)))
             return
-        except (OSError, subprocess.CalledProcessError):
-            self.finished_estimate.emit(SystemBackupEstimate(error="IO_ERROR"))
+        except (OSError, subprocess.CalledProcessError) as exc:
+            self.finished_estimate.emit(SystemBackupEstimate(error="IO_ERROR", detail=str(exc)))
             return
 
         board_compatible = None

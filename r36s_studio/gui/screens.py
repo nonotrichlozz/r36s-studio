@@ -777,6 +777,14 @@ class HomeScreen(Screen):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+        # Combinés par `_update_backup_rows_enabled` : « Par sécurité »
+        # (sauvegarde complète et sauvegarde système sans les jeux, §4.3)
+        # exige une carte, contrairement aux six étapes lettrées -- jamais
+        # désactivé avant le premier `set_status(has_device=...)` (`True`
+        # par défaut, pas de fausse alerte avant que la détection n'ait
+        # tourné une première fois).
+        self._busy = False
+        self._has_device = True
 
         # Titre à gauche, bouton « Mode assisté » en haut à droite (§5
         # mode assisté) -- symétrique du bouton « Mode expert » de
@@ -890,13 +898,27 @@ class HomeScreen(Screen):
         deuxième n'aurait pas de sens tant que la première ne s'est pas
         terminée. `setEnabled(False)` empêche aussi Qt de délivrer les
         clics, pas seulement l'apparence."""
+        self._busy = busy
         for row in self._tiles.values():
             row.setEnabled(not busy)
-        self._backup_row.setEnabled(not busy)
-        self._backup_system_row.setEnabled(not busy)
+        self._update_backup_rows_enabled()
         # Changer de mode en plein flash ou en pleine copie laisserait un
         # job orphelin (§5 mode assisté) -- même garde que les étapes.
         self._assisted_mode_button.setEnabled(not busy)
+
+    def _update_backup_rows_enabled(self) -> None:
+        """« Par sécurité » (§4.3) exige une carte -- contrairement aux
+        six étapes lettrées, toujours cliquables par principe (§4.5) : la
+        fenêtre Choix de la carte guide même sans carte branchée, alors
+        qu'une sauvegarde sans carte n'a tout simplement rien à faire.
+        Bug rapporté : lançable alors que la carte venait d'être éjectée
+        (bandeau « Aucune carte détectée ») -- combine avec `_busy`, une
+        opération en cours restant prioritaire sur une carte qui
+        réapparaîtrait entre-temps (le bouton Rafraîchir n'est pas
+        désactivé par `set_busy`, contrairement aux lignes elles-mêmes)."""
+        enabled = self._has_device and not self._busy
+        self._backup_row.setEnabled(enabled)
+        self._backup_system_row.setEnabled(enabled)
 
     def _build_row(self, letter: str, title: str, desc: str, signal: Signal) -> Tuple[ClickableFrame, QLabel]:
         """Une ligne d'étape : icône (lettre) à gauche, titre + description
@@ -933,14 +955,24 @@ class HomeScreen(Screen):
 
         return row, badge
 
-    def set_status(self, status: Dict[str, StepStatus], device: Optional[Device] = None) -> None:
+    def set_status(
+        self, status: Dict[str, StepStatus], device: Optional[Device] = None, has_device: Optional[bool] = None
+    ) -> None:
         """`status` (voir `detect.detect_workflow_status`) annote chaque
         ligne d'un badge de statut — jamais de ligne masquée ni désactivée
-        par ceci (voir `set_busy` pour la seule désactivation prévue) :
-        une étape absente du dict (détection pas encore lancée) n'affiche
-        simplement aucun badge. `device`, quand fourni, alimente le
-        bandeau carte détectée en haut de la colonne (modèle, taille,
-        état reconnu)."""
+        par ceci pour les six étapes (voir `set_busy` pour leur seule
+        désactivation prévue) : une étape absente du dict (détection pas
+        encore lancée) n'affiche simplement aucun badge. `device`, quand
+        fourni, alimente le bandeau carte détectée en haut de la colonne
+        (modèle, taille, état reconnu) -- `None` aussi bien quand aucune
+        carte n'est branchée que quand plusieurs candidates le sont à la
+        fois (§4.5), donc jamais fiable à lui seul pour distinguer ces
+        deux cas. `has_device`, quand fourni, sert précisément cette
+        distinction pour « Par sécurité » (§4.3, `_update_backup_rows_
+        enabled`) : `True` dès qu'au moins une carte est branchée, y
+        compris plusieurs candidates ambiguës (choisir laquelle reste
+        possible) -- seul `False` (aucune carte du tout) désactive ces
+        lignes. `None` (non précisé) laisse leur état inchangé."""
         for key, badge in self._badges.items():
             step_status = status.get(key)
             if step_status is None:
@@ -951,6 +983,10 @@ class HomeScreen(Screen):
             badge.setProperty("badgeKind", _BADGE_KIND_BY_STATUS[step_status])
             theme.repolish(badge)
             badge.setVisible(True)
+
+        if has_device is not None:
+            self._has_device = has_device
+            self._update_backup_rows_enabled()
 
         self._update_banner(status, device)
 

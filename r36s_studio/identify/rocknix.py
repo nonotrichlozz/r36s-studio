@@ -247,7 +247,6 @@ def download_asset(
         with opener(asset.download_url) as response, open(destination, "wb") as out:
             while True:
                 if should_cancel is not None and should_cancel():
-                    destination.unlink(missing_ok=True)
                     raise DownloadCancelledError(f"Téléchargement annulé après {done} octets.")
                 chunk = response.read(block_size)
                 if not chunk:
@@ -257,6 +256,16 @@ def download_asset(
                 done += len(chunk)
                 if on_progress is not None:
                     on_progress(done, total)
+    except DownloadCancelledError:
+        # Supprimé une fois seulement le `with` ci-dessus refermé (donc le
+        # fichier fermé) -- sur Windows, contrairement à macOS/Linux,
+        # supprimer un fichier encore ouvert lève `[WinError 32]` (§
+        # diagnostic CI Windows). L'appeler *pendant* la boucle, comme
+        # avant ce correctif, fonctionnait par accident sur macOS/Linux
+        # (sémantique POSIX : un fichier peut être unlink() alors qu'un
+        # descripteur y est encore ouvert) mais jamais sur Windows.
+        destination.unlink(missing_ok=True)
+        raise
     except OSError as exc:
         destination.unlink(missing_ok=True)
         raise RocknixReleaseError(f"Échec du téléchargement : {exc}") from exc

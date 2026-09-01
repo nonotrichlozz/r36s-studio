@@ -27,7 +27,13 @@ def test_build_timestamp_is_none_when_frozen_without_meipass(monkeypatch):
 
 
 def test_build_timestamp_reads_embedded_file_when_frozen(tmp_path, monkeypatch):
-    (tmp_path / "build_timestamp.txt").write_text("27/08/2026 à 16:28\n")
+    # encoding="utf-8" explicite : sans lui, l'encodage par défaut de
+    # write_text() dépend de la locale de l'OS -- l'ANSI de Windows n'est
+    # pas UTF-8, ce que build_info.build_timestamp() lit pourtant en UTF-8
+    # explicite (même problème que la production, jamais implicite). Sans
+    # ça, ce test écrivait "à" en cp1252 sur Windows, faisant échouer la
+    # lecture avec UnicodeDecodeError plutôt que de tester le bon comportement.
+    (tmp_path / "build_timestamp.txt").write_text("27/08/2026 à 16:28\n", encoding="utf-8")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
 
@@ -51,7 +57,7 @@ def test_version_label_shows_dev_marker_without_build_timestamp(monkeypatch):
 
 
 def test_version_label_shows_build_timestamp_when_frozen(tmp_path, monkeypatch):
-    (tmp_path / "build_timestamp.txt").write_text("27/08/2026 à 16:28")
+    (tmp_path / "build_timestamp.txt").write_text("27/08/2026 à 16:28", encoding="utf-8")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
 

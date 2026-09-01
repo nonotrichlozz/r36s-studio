@@ -49,6 +49,16 @@ def test_worker_command_is_independent_of_current_working_directory(tmp_path, mo
 
 
 @pytest.mark.real_subprocess
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "exécute pour de vrai `list_devices()` (aucun mock ici) -- sous "
+        "Windows, l'énumération réelle passe par PowerShell et peut échouer "
+        "pour des raisons de politique d'exécution/droits propres au runner "
+        "CI, sans rapport avec ce que ce test vérifie réellement (la "
+        "résolution du module depuis un répertoire de travail quelconque)."
+    ),
+)
 def test_worker_command_actually_resolves_module_from_unrelated_cwd(tmp_path):
     """Reproduit le bug tel quel : execute la commande construite depuis un
     répertoire de travail qui ne contient pas le projet, en vrai
@@ -467,6 +477,10 @@ def test_linux_stderr_log_is_opened_and_passed_to_popen(mock_system, mock_popen,
 
 
 @pytest.mark.real_subprocess
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="script shebang #!/bin/sh + bit exécutable réels -- Linux uniquement (absents sous Windows).",
+)
 def test_linux_exit_code_propagates_through_pkexec_unaltered(tmp_path):
     """`pkexec` (et `sudo`) doivent se contenter de relayer tel quel le
     code de sortie du worker — jamais un maillon intermédiaire qui le
@@ -494,6 +508,7 @@ def test_linux_exit_code_propagates_through_pkexec_unaltered(tmp_path):
 
 
 @pytest.mark.real_subprocess
+@pytest.mark.skipif(sys.platform != "darwin", reason="binaire `osascript` réel -- macOS uniquement.")
 def test_macos_do_shell_script_reports_real_stderr_not_incidental_stdout(tmp_path):
     """Reproduit le bug tel quel via `osascript` réel (mais SANS `with
     administrator privileges` : aucun mot de passe demandé, `do shell

@@ -18,8 +18,10 @@ réelle. Les rares tests qui doivent vraiment lancer un sous-processus (voir
 
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
+from typing import List
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -41,8 +43,33 @@ class UnmockedSubprocessError(RuntimeError):
     qu'il tentait d'exécuter."""
 
 
-def _make_guard(function_name: str):
+def _make_guard(function_name: str, real_function, passthrough_depth: List[int]):
     def _raise_instead_of_running(*args, **kwargs):
+        # Diagnostic CI Windows (202 échecs) : `platform.system()` invoque en
+        # interne `subprocess.run('ver')` sous Windows (`platform.
+        # _syscmd_ver`) -- ni macOS ni Linux ne le font, jamais observé avant
+        # que la suite tourne pour de vrai sur ce runner. Un appel dont le
+        # module appelant immédiat est `platform` lui-même est un détail
+        # d'implémentation de la bibliothèque standard, jamais du code
+        # applicatif -- laissé passer vers le vrai `subprocess.run`/`Popen`.
+        #
+        # `passthrough_depth` (partagé entre les deux guards `run`/`Popen`)
+        # couvre le cas où le vrai `subprocess.run` invoque lui-même `Popen`
+        # en interne : ce deuxième appel, une fois qu'on a déjà décidé de
+        # laisser passer le premier, doit l'être aussi -- sans pour autant
+        # faire confiance à *tout* appel dont le module appelant serait
+        # `subprocess` (un `subprocess.call`/`check_output` non mocké
+        # resterait ainsi bloqué comme avant, s'il apparaissait un jour dans
+        # le code applicatif).
+        caller_globals = inspect.currentframe().f_back.f_globals
+        allowed = caller_globals.get("__name__") == "platform" or passthrough_depth[0] > 0
+        if allowed:
+            passthrough_depth[0] += 1
+            try:
+                return real_function(*args, **kwargs)
+            finally:
+                passthrough_depth[0] -= 1
+
         attempted = args[0] if args else kwargs.get("args")
         raise UnmockedSubprocessError(
             f"subprocess.{function_name}({attempted!r}) appelé sans mock dans un "
@@ -74,8 +101,9 @@ def _forbid_real_subprocess(request, monkeypatch):
         yield
         return
 
-    monkeypatch.setattr(subprocess, "run", _make_guard("run"))
-    monkeypatch.setattr(subprocess, "Popen", _make_guard("Popen"))
+    passthrough_depth = [0]  # partagé entre les deux guards, voir _make_guard
+    monkeypatch.setattr(subprocess, "run", _make_guard("run", subprocess.run, passthrough_depth))
+    monkeypatch.setattr(subprocess, "Popen", _make_guard("Popen", subprocess.Popen, passthrough_depth))
     yield
 
 

@@ -1467,11 +1467,22 @@ def test_home_help_requested_opens_help_dialog(mock_platform, mock_list, mock_fi
     assert window._help_dialog.isVisible() is True
 
 
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
 @patch("r36s_studio.gui.main_window.subprocess.run")
 @patch("r36s_studio.gui.main_window.detect_workflow_status")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_help_dialog_open_settings_opens_full_disk_access_pane(mock_list, mock_filter, mock_detect, mock_run, qapp):
+def test_help_dialog_open_settings_opens_full_disk_access_pane(
+    mock_list, mock_filter, mock_detect, mock_run, mock_system, qapp
+):
+    """`platform.system` doit être mocké ici comme ailleurs (§ diagnostic CI
+    Windows) : ce test mocke aussi `subprocess.run` (même référence de
+    module partout, tests/conftest.py) pour vérifier l'appel `open` --
+    laissé non mocké, `platform.system()` non mocké appellerait pour de
+    vrai `subprocess.run('ver', ...)` sous Windows, qui recevrait alors ce
+    même mock et lui renverrait un `MagicMock` là où l'implémentation
+    interne de `platform` attend une vraie chaîne à analyser par regex :
+    `TypeError: expected string or bytes-like object, got 'MagicMock'`."""
     mock_list.return_value = []
     mock_filter.return_value = []
     mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)

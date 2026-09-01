@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -38,6 +38,25 @@ class _FakeResponse:
         chunk = self._data[self._offset : self._offset + size]
         self._offset += len(chunk)
         return chunk
+
+
+class _FakeOutFile:
+    """Fichier de sortie factice pour `download_asset` -- expose `closed`
+    comme un vrai objet fichier, pour vérifier que la fermeture précède
+    bien la suppression (§ diagnostic CI Windows, [WinError 32])."""
+
+    def __init__(self):
+        self.closed = False
+
+    def write(self, data):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.closed = True
+        return False
 
 
 def _asset(name: str, url: str = "https://example.invalid/x", size: int = 1024) -> dict:
@@ -304,6 +323,39 @@ def test_download_asset_raises_and_removes_file_when_cancelled(tmp_path):
         rocknix.download_asset(asset, destination, opener=opener, should_cancel=should_cancel)
 
     assert not destination.exists()
+
+
+@patch("r36s_studio.identify.rocknix.open")
+def test_download_asset_closes_file_before_removing_it_when_cancelled(mock_open, tmp_path):
+    """Diagnostic CI Windows : `[WinError 32] The process cannot access the
+    file because it is being used by another process`. Sur Windows,
+    contrairement à macOS/Linux, un fichier encore ouvert ne peut pas être
+    supprimé -- `destination.unlink(...)` doit donc s'exécuter après la
+    fermeture du fichier, jamais pendant. Vérifié ici indépendamment de
+    tout comportement d'OS réel : l'ordre des deux événements est ce qui
+    compte, pas la plateforme sur laquelle le test tourne."""
+    content = b"x" * (rocknix.BLOCK_SIZE + 10)
+    asset = rocknix.RocknixAsset(name="image.img.gz", download_url="https://example.invalid/image", size_bytes=len(content))
+    opener = MagicMock(return_value=_FakeResponse(content))
+    destination = tmp_path / "image.img.gz"
+    out_file = _FakeOutFile()
+    mock_open.return_value = out_file
+    calls = {"n": 0}
+
+    def should_cancel():
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    events = []
+
+    def _tracked_unlink(self, *args, **kwargs):
+        events.append(out_file.closed)
+
+    with patch("pathlib.Path.unlink", _tracked_unlink):
+        with pytest.raises(rocknix.DownloadCancelledError):
+            rocknix.download_asset(asset, destination, opener=opener, should_cancel=should_cancel)
+
+    assert events == [True]
 
 
 def test_download_asset_wraps_network_error_and_removes_partial_file(tmp_path):

@@ -304,11 +304,20 @@ def test_macos_filesystem_passes_through_unrecognized_filesystem():
     assert _macos_filesystem({"FilesystemType": "hfs"}) == "hfs"
 
 
+@patch("r36s_studio.partitions.locate.platform.system", return_value="Darwin")
 @patch("r36s_studio.partitions.locate.subprocess.run")
-def test_find_partition_easyroms_detected_as_ntfs_despite_windows_ntfs_field(mock_run):
+def test_find_partition_easyroms_detected_as_ntfs_despite_windows_ntfs_field(mock_run, mock_system):
     """Bout en bout, via `_list_macos`/`find_partition` : la valeur de
     champ suspectée par le rapport de bug ne doit plus faire échapper la
-    partition à la détection NTFS."""
+    partition à la détection NTFS.
+
+    `platform.system` mocké explicitement (diagnostic CI Windows) :
+    `find_partition`/`list_partitions` dispatchent sur le vrai
+    `platform.system()`, jamais mocké ici avant -- sur un runner Linux/
+    Windows, ça appelait pour de vrai `_list_linux`/`_list_windows` sur des
+    données mockées au format plist macOS (`JSONDecodeError`/`TypeError`
+    selon l'OS), plutôt que `_list_macos` comme le nom et le docstring du
+    test l'annoncent."""
     list_plist = plistlib.dumps(
         {
             "AllDisksAndPartitions": [

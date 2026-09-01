@@ -1184,6 +1184,19 @@ class FileDialog(Dialog):
         self._clone_warning_label.setVisible(False)
         layout.addWidget(self._clone_warning_label)
 
+        # Taille estimée, sauvegarde système sans les jeux uniquement
+        # (§4.3 : « affiche la taille estimée et demande confirmation
+        # avant de lancer ») -- affichée directement sur cette fenêtre
+        # plutôt que seulement dans le journal de bord, pour qu'un
+        # débutant la voie avant de cliquer Suivant. `set_estimated_size`
+        # la renseigne une fois l'estimation prête (calcul en arrière-plan,
+        # §4.4) ; masquée par défaut et à chaque changement de mode.
+        self._system_backup_size_label = QLabel()
+        self._system_backup_size_label.setWordWrap(True)
+        self._system_backup_size_label.setProperty("role", "secondary")
+        self._system_backup_size_label.setVisible(False)
+        layout.addWidget(self._system_backup_size_label)
+
         # Choix du firmware, flash uniquement (§5, étape de flash) --
         # description courte sous chaque option plutôt qu'une info-bulle,
         # pour rester visible sans interaction (§5 vocabulaire : pas de
@@ -1305,6 +1318,11 @@ class FileDialog(Dialog):
         self.setWindowTitle(tr(_FILE_TITLE_KEYS[mode]))
         self._path_label.setText(default_path or "")
         self._next_button.setEnabled(bool(default_path))
+        # Toujours repartie à zéro : une estimation affichée reste propre
+        # à l'ouverture qui l'a produite, jamais reportée d'un mode/appel
+        # au suivant (`set_estimated_size` la renseigne à nouveau une fois
+        # prête, §4.3).
+        self._system_backup_size_label.setVisible(False)
 
         is_flash = mode == "flash"
         for widget in (
@@ -1341,6 +1359,15 @@ class FileDialog(Dialog):
         self._archive_list.setVisible(is_archive_mode)
         self._archive_empty_label.setVisible(is_archive_mode and not archive_choices)
         self._destination_hint_label.setVisible(mode in _DESTINATION_MODES)
+
+    def set_estimated_size(self, text: str) -> None:
+        """Affiche `text` (déjà formaté, ex. « Taille estimée : environ
+        8,4 Go ») directement sur cette fenêtre -- sauvegarde système sans
+        les jeux uniquement (§4.3), une fois l'estimation prête. Visible
+        tant que `set_mode` n'a pas été rappelé depuis (qui la masque
+        systématiquement, voir plus haut)."""
+        self._system_backup_size_label.setText(text)
+        self._system_backup_size_label.setVisible(bool(text))
 
     def _update_firmware_buttons_visibility(self) -> None:
         is_flash = self._mode == "flash"
@@ -1844,6 +1871,7 @@ class AssistedLandingScreen(Screen):
 
     prepare_requested = Signal()
     expert_mode_requested = Signal()
+    backup_system_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1878,6 +1906,19 @@ class AssistedLandingScreen(Screen):
         button_row.addStretch()
         root.addLayout(button_row)
 
+        # Sauvegarde système sans les jeux (§4.3), aussi proposée comme
+        # option du mode assisté -- discrète (rôle "flat", comme le bouton
+        # Mode expert), en dessous du bouton principal, pour ne jamais
+        # rivaliser avec le parcours guidé qui reste l'action mise en avant.
+        self._backup_system_button = QPushButton(tr("assisted_backup_system_button"))
+        self._backup_system_button.setProperty("role", "flat")
+        self._backup_system_button.clicked.connect(self.backup_system_requested.emit)
+        backup_system_row = QHBoxLayout()
+        backup_system_row.addStretch()
+        backup_system_row.addWidget(self._backup_system_button)
+        backup_system_row.addStretch()
+        root.addLayout(backup_system_row)
+
         root.addStretch(3)
 
     def set_busy(self, busy: bool) -> None:
@@ -1889,6 +1930,7 @@ class AssistedLandingScreen(Screen):
         gardé défensivement -- notamment la brève fenêtre entre une
         annulation coopérative et l'arrêt effectif du job."""
         self._expert_button.setEnabled(not busy)
+        self._backup_system_button.setEnabled(not busy)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)

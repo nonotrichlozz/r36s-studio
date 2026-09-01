@@ -28,6 +28,7 @@ from r36s_studio.imaging.gpt import (
     parse_gpt_entries,
     parse_gpt_header,
 )
+from r36s_studio.imaging.mbr import parse_mbr
 from r36s_studio.imaging.system_backup import (
     GamesPartitionNotFound,
     backup_system_only,
@@ -55,20 +56,35 @@ def _make_device(path: str, size_bytes: int) -> Device:
 # --- MBR -------------------------------------------------------------------
 
 
-def _build_fake_mbr_image(tmp_path, *, boot=(2048, 4095), root=(4096, 6143), games=(6144, 8191), trailing=4096):
+def _build_fake_mbr_image(
+    tmp_path, *, boot=(2048, 4095), root=(4096, 6143), games=(6144, 8191), trailing=4096, sparse=False
+):
     """BOOT/root/EASYROMS, une carte ArkOS-like en miniature -- tuples
-    (start_lba, end_lba inclusif)."""
+    (start_lba, end_lba inclusif). `sparse=True` n'écrit que le premier
+    secteur (la table de partitions) puis étend le fichier par `seek` --
+    un vrai fichier creux sur un système de fichiers qui le permet, bien
+    plus rapide pour les images de test volumineuses (seuil de grande
+    taille, § note de module) dont le contenu au-delà de l'en-tête n'est
+    de toute façon jamais lu par `compute_system_boundary`."""
     total_sectors = games[1] + 1 + trailing
-    data = bytearray(os.urandom(total_sectors * SECTOR_SIZE))
-    data[PARTITION_TABLE_OFFSET : PARTITION_TABLE_OFFSET + 4 * 16] = bytes(4 * 16)
+    first_sector = bytearray(SECTOR_SIZE)
     for i, (ptype, (start, end)) in enumerate([(0x0E, boot), (0x83, root), (0x0B, games)]):
         offset = PARTITION_TABLE_OFFSET + i * 16
-        data[offset + 4] = ptype
-        data[offset + 8 : offset + 12] = struct.pack("<I", start)
-        data[offset + 12 : offset + 16] = struct.pack("<I", end - start + 1)
-    data[510:512] = b"\x55\xaa"
+        first_sector[offset + 4] = ptype
+        first_sector[offset + 8 : offset + 12] = struct.pack("<I", start)
+        first_sector[offset + 12 : offset + 16] = struct.pack("<I", end - start + 1)
+    first_sector[510:512] = b"\x55\xaa"
+
     path = tmp_path / "fake_mbr_sd.img"
-    path.write_bytes(bytes(data))
+    if sparse:
+        with open(path, "wb") as f:
+            f.write(bytes(first_sector))
+            f.seek(total_sectors * SECTOR_SIZE - 1)
+            f.write(b"\x00")
+    else:
+        data = bytearray(os.urandom(total_sectors * SECTOR_SIZE))
+        data[0:SECTOR_SIZE] = bytes(first_sector)
+        path.write_bytes(bytes(data))
     return str(path), total_sectors
 
 
@@ -106,8 +122,12 @@ def test_backup_system_only_mbr_copies_only_up_to_boundary(mock_prep, mock_list,
     assert output_path.stat().st_size == expected_end
     assert output_path.stat().st_size < total_sectors * SECTOR_SIZE  # bien plus petit que le disque entier
     with open(source_path, "rb") as f:
-        expected_data = f.read(expected_end)
-    assert output_path.read_bytes() == expected_data
+        expected_data = bytearray(f.read(expected_end))
+    # Le créneau MBR de la partition de jeux (retirée) est mis à zéro dans
+    # l'image produite (§ point critique de module) -- seul le premier
+    # secteur diffère de la source, le reste est une copie à l'identique.
+    expected_data[PARTITION_TABLE_OFFSET + 2 * 16 : PARTITION_TABLE_OFFSET + 3 * 16] = bytes(16)
+    assert output_path.read_bytes() == bytes(expected_data)
 
 
 @patch("r36s_studio.imaging.system_backup.list_partitions")
@@ -144,6 +164,95 @@ def test_compute_system_boundary_raises_when_games_partition_is_first(mock_list,
         compute_system_boundary(source_path)
 
 
+# --- repli sans étiquette reconnue : dernière partition FAT/NTFS de -------
+# --- grande taille (§ note de module) -------------------------------------
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_compute_system_boundary_falls_back_to_large_unlabeled_last_fat_partition(mock_list, tmp_path):
+    """Aucune étiquette EASYROMS/STORAGE -- mais la dernière partition est
+    un grand FAT32, un signal suffisant pour la traiter comme la
+    partition de jeux."""
+    source_path, _ = _build_fake_mbr_image(tmp_path)  # games : secteurs 6144-8191, ~1 Mo -> trop petit pour ce test
+    mock_list.return_value = [
+        PartitionInfo(f"{source_path}s1", "", "msdos", None),
+        PartitionInfo(f"{source_path}s2", "", "ext4", None),
+        PartitionInfo(f"{source_path}s3", "", "fat32", None),  # pas d'étiquette reconnue
+    ]
+
+    with pytest.raises(GamesPartitionNotFound):
+        # La partition factice ne fait que ~1 Mo ici : sous le seuil de
+        # « grande taille » -- confirme que le repli ne se déclenche pas
+        # sur n'importe quelle dernière partition FAT, voir le test dédié
+        # au seuil ci-dessous pour le cas qui doit réussir.
+        compute_system_boundary(source_path)
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_compute_system_boundary_fallback_requires_large_size(mock_list, tmp_path):
+    """Repli déclenché avec succès quand la dernière partition FAT/NTFS
+    dépasse le seuil de grande taille (`_LARGE_PARTITION_THRESHOLD_BYTES`,
+    1 Go) -- construit une image dédiée dont la partition de jeux dépasse
+    ce seuil, sans étiquette EASYROMS/STORAGE."""
+    boot = (2048, 4095)
+    root = (4096, 6143)
+    games = (6144, 6144 + 2_100_000 - 1)  # ~1,05 Go, au-dessus du seuil
+    source_path, _ = _build_fake_mbr_image(tmp_path, boot=boot, root=root, games=games, trailing=16, sparse=True)
+    mock_list.return_value = [
+        PartitionInfo(f"{source_path}s1", "", "msdos", None),
+        PartitionInfo(f"{source_path}s2", "", "ext4", None),
+        PartitionInfo(f"{source_path}s3", "", "fat32", None),  # pas d'étiquette reconnue
+    ]
+
+    boundary = compute_system_boundary(source_path)
+
+    assert boundary.end_bytes == 6144 * SECTOR_SIZE  # fin de root, juste avant la partition de jeux
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_compute_system_boundary_fallback_ignores_non_fat_ntfs_last_partition(mock_list, tmp_path):
+    """Une dernière partition volumineuse mais pas FAT/NTFS (ext4, par
+    exemple) ne doit jamais être prise pour la partition de jeux --
+    signal insuffisant sans le bon système de fichiers."""
+    boot = (2048, 4095)
+    root = (4096, 6143)
+    games = (6144, 6144 + 2_100_000 - 1)
+    source_path, _ = _build_fake_mbr_image(tmp_path, boot=boot, root=root, games=games, trailing=16, sparse=True)
+    mock_list.return_value = [
+        PartitionInfo(f"{source_path}s1", "", "msdos", None),
+        PartitionInfo(f"{source_path}s2", "", "ext4", None),
+        PartitionInfo(f"{source_path}s3", "", "ext4", None),  # grande mais pas FAT/NTFS
+    ]
+
+    with pytest.raises(GamesPartitionNotFound):
+        compute_system_boundary(source_path)
+
+
+# --- réparation de la table MBR de l'image produite (§ point critique) ----
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+@patch("r36s_studio.imaging.system_backup.prepared_source", side_effect=_no_prep)
+def test_backup_system_only_mbr_output_table_is_consistent_with_real_file_size(mock_prep, mock_list, tmp_path):
+    """Le point critique côté MBR : la table de l'image produite ne doit
+    plus contenir d'entrée décrivant un espace au-delà de la taille
+    réelle du fichier -- exactement ce qui rendrait l'image incohérente
+    pour un outil de partitionnement, confirmé sur du vrai matériel côté
+    GPT (voir le test équivalent plus bas)."""
+    source_path, total_sectors = _build_fake_mbr_image(tmp_path)
+    mock_list.return_value = _mbr_partition_labels(source_path)
+    device = _make_device(source_path, total_sectors * SECTOR_SIZE)
+    output_path = tmp_path / "system_backup.img"
+
+    backup_system_only(device, str(output_path))
+    output_bytes = output_path.read_bytes()
+
+    partitions = parse_mbr(output_bytes[:SECTOR_SIZE])
+    assert [p.start_lba for p in partitions] == [2048, 4096]  # jamais la partition de jeux
+    for partition in partitions:
+        assert partition.end_bytes <= len(output_bytes)
+
+
 # --- GPT ---------------------------------------------------------------
 
 
@@ -159,18 +268,20 @@ def _gpt_entry(bounds, name):
     )
 
 
-def _build_fake_gpt_image(tmp_path, *, boot=(34, 133), root=(134, 233), games=(234, 333), trailing=200):
+def _build_fake_gpt_image(tmp_path, *, boot=(34, 133), root=(134, 233), games=(234, 333), trailing=200, sparse=False):
+    """`sparse=True` : voir `_build_fake_mbr_image` -- même principe, un
+    vrai fichier creux au-delà de la tête (MBR protecteur + en-tête GPT +
+    tableau d'entrées, LBA0-33), jamais lue par `compute_system_boundary`."""
     total_sectors = games[1] + 1 + trailing
-    data = bytearray(os.urandom(total_sectors * SECTOR_SIZE))
+    head = bytearray(34 * SECTOR_SIZE)  # LBA0 (MBR protecteur) à LBA33 (fin du tableau d'entrées)
 
-    # MBR protecteur, LBA0.
-    data[PARTITION_TABLE_OFFSET : PARTITION_TABLE_OFFSET + 4 * 16] = bytes(4 * 16)
-    data[PARTITION_TABLE_OFFSET + 4] = 0xEE
-    data[PARTITION_TABLE_OFFSET + 8 : PARTITION_TABLE_OFFSET + 12] = struct.pack("<I", 1)
-    data[PARTITION_TABLE_OFFSET + 12 : PARTITION_TABLE_OFFSET + 16] = struct.pack(
+    head[PARTITION_TABLE_OFFSET : PARTITION_TABLE_OFFSET + 4 * 16] = bytes(4 * 16)
+    head[PARTITION_TABLE_OFFSET + 4] = 0xEE
+    head[PARTITION_TABLE_OFFSET + 8 : PARTITION_TABLE_OFFSET + 12] = struct.pack("<I", 1)
+    head[PARTITION_TABLE_OFFSET + 12 : PARTITION_TABLE_OFFSET + 16] = struct.pack(
         "<I", min(total_sectors - 1, 0xFFFFFFFF)
     )
-    data[510:512] = b"\x55\xaa"
+    head[510:512] = b"\x55\xaa"
 
     entries = [_gpt_entry(boot, "BOOT"), _gpt_entry(root, "root"), _gpt_entry(games, "EASYROMS")]
     entries_bytes = build_gpt_entries(entries, num_entries=128, entry_size=GPT_ENTRY_SIZE)
@@ -186,11 +297,19 @@ def _build_fake_gpt_image(tmp_path, *, boot=(34, 133), root=(134, 233), games=(2
         entry_size=GPT_ENTRY_SIZE,
         entries_bytes=entries_bytes,
     )
-    data[1 * SECTOR_SIZE : 2 * SECTOR_SIZE] = header_sector
-    data[2 * SECTOR_SIZE : 2 * SECTOR_SIZE + len(entries_bytes)] = entries_bytes
+    head[1 * SECTOR_SIZE : 2 * SECTOR_SIZE] = header_sector
+    head[2 * SECTOR_SIZE : 2 * SECTOR_SIZE + len(entries_bytes)] = entries_bytes
 
     path = tmp_path / "fake_gpt_sd.img"
-    path.write_bytes(bytes(data))
+    if sparse:
+        with open(path, "wb") as f:
+            f.write(bytes(head))
+            f.seek(total_sectors * SECTOR_SIZE - 1)
+            f.write(b"\x00")
+    else:
+        data = bytearray(os.urandom(total_sectors * SECTOR_SIZE))
+        data[0 : len(head)] = bytes(head)
+        path.write_bytes(bytes(data))
     return str(path), total_sectors
 
 
@@ -212,6 +331,21 @@ def test_compute_system_boundary_gpt_stops_before_games_partition(mock_list, tmp
     assert boundary.is_gpt is True
     assert boundary.end_bytes == 234 * SECTOR_SIZE  # fin de root (secteur 233 inclus)
     assert [e.start_lba for e in boundary.kept_gpt_entries] == [34, 134]
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_compute_system_boundary_gpt_falls_back_to_large_unlabeled_last_fat_partition(mock_list, tmp_path):
+    games = (234, 234 + 2_100_000 - 1)  # ~1,05 Go, au-dessus du seuil de grande taille
+    source_path, _ = _build_fake_gpt_image(tmp_path, games=games, trailing=16, sparse=True)
+    mock_list.return_value = [
+        PartitionInfo(f"{source_path}s1", "BOOT", "msdos", None),
+        PartitionInfo(f"{source_path}s2", "", "ext4", None),
+        PartitionInfo(f"{source_path}s3", "", "fat32", None),  # pas d'étiquette reconnue
+    ]
+
+    boundary = compute_system_boundary(source_path)
+
+    assert boundary.end_bytes == 234 * SECTOR_SIZE
 
 
 @patch("r36s_studio.imaging.system_backup.list_partitions")
@@ -288,6 +422,12 @@ def test_backup_system_only_gpt_output_has_a_consistent_partition_table(mock_pre
     assert [e.start_lba for e in primary_entries] == [34, 134]  # jamais la partition de jeux (234)
     assert _verify_header_crc32(output_bytes, 1 * SECTOR_SIZE)
     assert _verify_entry_array_crc32(primary_header, primary_entries_bytes)
+    # Aucune entrée gardée ne doit décrire un espace au-delà de la taille
+    # réelle du fichier -- exactement ce qui rend une image GPT tronquée
+    # incohérente pour un outil de partitionnement (confirmé sur du vrai
+    # matériel, CLAUDE.md).
+    for entry in primary_entries:
+        assert (entry.end_lba + 1) * SECTOR_SIZE <= len(output_bytes)
 
     secondary_header_lba = primary_header.alternate_lba
     secondary_header = parse_gpt_header(

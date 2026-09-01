@@ -189,6 +189,46 @@ def test_estimate_ready_opens_file_dialog_with_model_in_suggested_filename(mock_
     suggested = window._file_dialog._path_label.text()
     assert "rk3326-r35s" in suggested
     assert suggested.endswith(".img")
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_shows_the_size_directly_on_the_file_dialog(mock_list, mock_filter, mock_detect, qapp):
+    """§4.3 : « affiche la taille estimée et demande confirmation avant de
+    lancer » -- visible sur la fenêtre elle-même, pas seulement dans le
+    journal de bord."""
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+
+    window._on_system_backup_estimate_ready(SystemBackupEstimate(size_bytes=9_000_000_000, board_compatible=None))
+
+    assert window._file_dialog._system_backup_size_label.isVisible() is True
+    assert "8.4 Go" in window._file_dialog._system_backup_size_label.text()
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_estimate_ready_suggested_filename_preserves_periods_in_model(mock_list, mock_filter, mock_detect, qapp):
+    """Un identifiant de carte réel peut contenir un point (ex. un numéro
+    de révision de carte, `G80CA-MB-V1.2`) -- ne doit pas être défiguré
+    par la mise en sécurité du nom de fichier."""
+    from r36s_studio.gui.partition_runner import SystemBackupEstimate
+
+    window = MainWindow()
+    window._mode = "backup_system"
+    window._device = _make_device()
+
+    window._on_system_backup_estimate_ready(
+        SystemBackupEstimate(size_bytes=9_000_000_000, board_compatible="G80CA-MB-V1.2")
+    )
+
+    suggested = window._file_dialog._path_label.text()
+    assert "G80CA-MB-V1.2" in suggested
     log_text = window._log_panel._log_view.toPlainText()
     assert "8.4 Go" in log_text  # taille estimée journalisée avant l'ouverture
 
@@ -263,6 +303,39 @@ def test_backup_system_success_message_mentions_system(mock_list, mock_filter, q
     window._file_path = "/tmp/out.img"
 
     assert "système" in window._success_message().lower()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_reachable_from_assisted_landing(mock_list, mock_filter, mock_load, qapp):
+    """§4.3 : proposée comme option du mode assisté, pas seulement depuis
+    l'écran expert -- réutilise HomeScreen/MainView le temps de
+    l'opération (journal de bord, états occupé) sans en faire un vrai
+    changement de mode persisté."""
+    window = MainWindow()
+    assert window._root_stack.currentWidget() is window._assisted_landing
+
+    window._assisted_landing.backup_system_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._main_view
+    assert window._main_view._left_stack.currentWidget() is window._home
+    assert window._device_dialog.isVisible() is True  # _start_flow("backup_system") a démarré
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_from_assisted_landing_does_not_persist_expert_mode(mock_list, mock_filter, mock_load, qapp):
+    """Contrairement au bouton « Mode expert » -- ce n'est qu'un passage
+    temporaire par l'écran expert, pas un vrai changement de mode : rien
+    à retrouver en mode expert au prochain lancement."""
+    with patch("r36s_studio.gui.main_window.app_config.save_config") as mock_save:
+        window = MainWindow()
+        window._assisted_landing.backup_system_requested.emit()
+
+    mock_save.assert_not_called()
+    assert window._app_config.ui_mode == "assisted"
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))

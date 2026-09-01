@@ -28,12 +28,33 @@ fichier -- un outil de flashage la rejette alors comme incohérente/
 corrompue plutôt que de simplement ignorer l'absence. `backup_system_only`
 reconstruit donc une table secondaire cohérente à la nouvelle fin de
 fichier (partition de jeux retirée), et met à jour l'en-tête primaire en
-conséquence (`imaging/gpt.py`)."""
+conséquence (`imaging/gpt.py`). Confirmé sur du vrai matériel : sans cette
+réparation, `gdisk` signale « Disk size is smaller than the main header
+indicates » et « Backup header: ERROR », Linux ne voit aucune partition,
+et la console ne démarre pas.
+
+**Point critique, table MBR aussi** : moins visible que le cas GPT
+ci-dessus (pas de table secondaire à reconstruire), mais tout aussi
+nécessaire -- une simple troncature laisserait, dans l'image produite,
+l'entrée de la partition de jeux décrivant un espace qui s'étend bien
+au-delà de la fin réelle du fichier. `backup_system_only` retire donc
+cette entrée (et toute entrée après elle) du premier secteur de l'image
+produite -- une simple mise à zéro des 16 octets du créneau concerné,
+MBR n'ayant ni CRC ni table secondaire à recalculer.
+
+**Identification de la partition de jeux** : par étiquette d'abord
+(EASYROMS ou STORAGE, comme le reste du projet, via `partitions/
+locate.py::list_partitions`) ; à défaut d'étiquette reconnue, repli sur
+la dernière partition du disque si son système de fichiers est FAT ou
+NTFS et si elle dépasse `_LARGE_PARTITION_THRESHOLD_BYTES` -- une carte
+dont la partition de jeux ne porte aucune des deux étiquettes connues
+reste ainsi couverte, sans risquer de prendre une petite partition FAT
+(BOOT, par exemple) pour la partition de jeux."""
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from r36s_studio.devices import Device
@@ -41,12 +62,19 @@ from r36s_studio.partitions.locate import PartitionInfo, list_partitions
 
 from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
 from .gpt import GptHeader, GptPartitionEntry, build_gpt_entries, build_gpt_header, parse_gpt_entries, parse_gpt_header
-from .mbr import SECTOR_SIZE, is_gpt_protective, parse_mbr
+from .mbr import PARTITION_TABLE_OFFSET, SECTOR_SIZE, is_gpt_protective, parse_mbr
 from .source import prepared_source
 
 # Étiquettes reconnues pour la partition de jeux (§4.4) -- EASYROMS sur
 # ArkOS/dArkOS/ROCKNIX-avec-jeux-séparés, STORAGE sur EmuELEC.
 GAMES_PARTITION_LABELS = {"EASYROMS", "STORAGE"}
+
+# Repli quand aucune étiquette ne correspond (§ note de module) -- systèmes
+# de fichiers plausibles pour une partition de jeux, et seuil de taille
+# (1 Go) en dessous duquel une dernière partition FAT/NTFS a plus de
+# chances d'être une partition système méconnue qu'une partition de jeux.
+GAMES_PARTITION_FALLBACK_FILESYSTEMS = {"ntfs", "msdos", "vfat", "fat", "fat16", "fat32"}
+_LARGE_PARTITION_THRESHOLD_BYTES = 1_000_000_000
 
 
 class GamesPartitionNotFound(Exception):
@@ -65,13 +93,40 @@ class SystemBoundary:
     # table secondaire une fois la copie tronquée effectuée.
     gpt_header: Optional[GptHeader] = None
     kept_gpt_entries: Optional[List[GptPartitionEntry]] = None
+    # Renseigné seulement si `not is_gpt` -- créneaux (0-3) de la table MBR
+    # à mettre à zéro dans l'image produite (§ point critique de module).
+    removed_mbr_slot_indices: List[int] = field(default_factory=list)
 
 
-def _games_partition_index(partitions: List[PartitionInfo]) -> Optional[int]:
+def _labeled_games_partition_index(partitions: List[PartitionInfo]) -> Optional[int]:
     for index, partition in enumerate(partitions):
         if partition.label.upper() in GAMES_PARTITION_LABELS:
             return index
     return None
+
+
+def _fallback_games_partition_index(partitions: List[PartitionInfo], raw_sizes_bytes: List[int]) -> Optional[int]:
+    """Repli sans étiquette reconnue (§ note de module) : dernière
+    partition, système de fichiers FAT/NTFS, de grande taille. `raw_sizes_
+    bytes` doit être dans le même ordre (position sur le disque) que
+    `partitions` -- la taille vient de la table brute, `list_partitions`
+    n'exposant aucune taille."""
+    if not partitions or len(raw_sizes_bytes) != len(partitions):
+        return None
+    last_index = len(partitions) - 1
+    last = partitions[last_index]
+    if last.filesystem.lower() not in GAMES_PARTITION_FALLBACK_FILESYSTEMS:
+        return None
+    if raw_sizes_bytes[last_index] < _LARGE_PARTITION_THRESHOLD_BYTES:
+        return None
+    return last_index
+
+
+def _resolve_games_partition_index(partitions: List[PartitionInfo], raw_sizes_bytes: List[int]) -> Optional[int]:
+    index = _labeled_games_partition_index(partitions)
+    if index is not None:
+        return index
+    return _fallback_games_partition_index(partitions, raw_sizes_bytes)
 
 
 def compute_system_boundary(device_path: str) -> SystemBoundary:
@@ -82,11 +137,6 @@ def compute_system_boundary(device_path: str) -> SystemBoundary:
     identifiable sur cette carte, ou si elle est la toute première
     partition (rien à garder avant elle)."""
     partitions = list_partitions(device_path)
-    games_index = _games_partition_index(partitions)
-    if games_index is None or games_index == 0:
-        raise GamesPartitionNotFound(
-            "Aucune partition de jeux reconnue (EASYROMS ou STORAGE) sur cette carte."
-        )
 
     with open(device_path, "rb") as f:
         first_sector = f.read(SECTOR_SIZE)
@@ -94,12 +144,16 @@ def compute_system_boundary(device_path: str) -> SystemBoundary:
 
         if not is_gpt_protective(mbr_partitions):
             mbr_sorted = sorted(mbr_partitions, key=lambda p: p.start_lba)
-            if games_index >= len(mbr_sorted):
+            raw_sizes = [p.sector_count * SECTOR_SIZE for p in mbr_sorted]
+            games_index = _resolve_games_partition_index(partitions, raw_sizes)
+            if games_index is None or games_index == 0 or games_index >= len(mbr_sorted):
                 raise GamesPartitionNotFound(
-                    "La partition de jeux détectée ne correspond à aucune entrée de la table MBR."
+                    "Aucune partition de jeux reconnue (EASYROMS, STORAGE, ou dernière "
+                    "partition FAT/NTFS de grande taille) sur cette carte."
                 )
             boundary = mbr_sorted[games_index - 1]
-            return SystemBoundary(end_bytes=boundary.end_bytes, is_gpt=False)
+            removed_slots = [p.index for p in mbr_sorted[games_index:]]
+            return SystemBoundary(end_bytes=boundary.end_bytes, is_gpt=False, removed_mbr_slot_indices=removed_slots)
 
         header_sector = f.read(SECTOR_SIZE)  # LBA1, juste après LBA0 déjà lu
         header = parse_gpt_header(header_sector)
@@ -108,9 +162,12 @@ def compute_system_boundary(device_path: str) -> SystemBoundary:
         entries = parse_gpt_entries(entries_bytes, header)
 
     entries_sorted = sorted(entries, key=lambda e: e.start_lba)
-    if games_index >= len(entries_sorted):
+    raw_sizes = [(e.end_lba - e.start_lba + 1) * SECTOR_SIZE for e in entries_sorted]
+    games_index = _resolve_games_partition_index(partitions, raw_sizes)
+    if games_index is None or games_index == 0 or games_index >= len(entries_sorted):
         raise GamesPartitionNotFound(
-            "La partition de jeux détectée ne correspond à aucune entrée de la table GPT."
+            "Aucune partition de jeux reconnue (EASYROMS, STORAGE, ou dernière "
+            "partition FAT/NTFS de grande taille) sur cette carte."
         )
     boundary_entry = entries_sorted[games_index - 1]
     kept_entries = entries_sorted[:games_index]
@@ -178,6 +235,29 @@ def _rewrite_gpt_tables_after_truncation(destination, boundary: SystemBoundary) 
     destination.seek(end_of_file)
 
 
+def _repair_mbr_table_after_truncation(source, destination, boundary: SystemBoundary) -> None:
+    """Appelé juste après avoir tronqué la copie MBR à `boundary.
+    end_bytes` -- met à zéro, dans le premier secteur de l'image produite,
+    les créneaux de la partition de jeux (et de toute partition après
+    elle) retirés de l'image (§ point critique de module). Reconstruit le
+    secteur à partir de `source` (lisible) plutôt que de relire
+    `destination` (ouvert en écriture seule) : les deux ont le même
+    premier secteur à ce stade, `copy_range` venant de le copier tel
+    quel. Repositionne `destination` là où `copy_range` l'avait laissé."""
+    if not boundary.removed_mbr_slot_indices:
+        return
+    source.seek(0)
+    first_sector = bytearray(source.read(SECTOR_SIZE))
+    for slot_index in boundary.removed_mbr_slot_indices:
+        offset = PARTITION_TABLE_OFFSET + slot_index * 16
+        first_sector[offset : offset + 16] = bytes(16)
+
+    end_of_file = destination.tell()
+    destination.seek(0)
+    destination.write(bytes(first_sector))
+    destination.seek(end_of_file)
+
+
 def estimate_system_backup_size(device_path: str) -> int:
     """Taille (en octets) qu'occupera la sauvegarde -- copie tronquée plus,
     pour une carte GPT, la table secondaire reconstruite (§ point critique
@@ -219,6 +299,8 @@ def backup_system_only(
             )
             if boundary.is_gpt:
                 _rewrite_gpt_tables_after_truncation(destination, boundary)
+            else:
+                _repair_mbr_table_after_truncation(source, destination, boundary)
             destination.flush()
             os.fsync(destination.fileno())
 

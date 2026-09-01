@@ -966,6 +966,27 @@ def test_assisted_landing_screen_set_busy_disables_expert_button(qapp):
     screen.set_busy(True)
     assert screen._expert_button.isEnabled() is False
 
+
+def test_assisted_landing_screen_backup_system_button_emits_signal(qapp):
+    """Sauvegarde système sans les jeux, aussi proposée comme option du
+    mode assisté (§4.3), pas seulement depuis l'écran expert."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    received = []
+    screen.backup_system_requested.connect(lambda: received.append(True))
+
+    screen._backup_system_button.click()
+
+    assert received == [True]
+
+
+def test_assisted_landing_screen_set_busy_disables_backup_system_button(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+
+    screen.set_busy(True)
+    assert screen._backup_system_button.isEnabled() is False
+
     screen.set_busy(False)
     assert screen._expert_button.isEnabled() is True
 
@@ -1286,6 +1307,41 @@ def test_file_dialog_backup_system_hides_firmware_choice(qapp):
     assert dialog._rocknix_radio.isVisible() is False
     assert dialog._emuelec_radio.isVisible() is False
     assert dialog._releases_button.isVisible() is False
+
+
+def test_file_dialog_estimated_size_label_hidden_by_default(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("backup_system", default_path="/tmp/systeme.img")
+
+    assert dialog._system_backup_size_label.isVisible() is False
+
+
+def test_file_dialog_set_estimated_size_shows_the_label(qapp):
+    """Taille affichée directement sur la fenêtre de confirmation (§4.3 :
+    « affiche la taille estimée et demande confirmation avant de lancer »)
+    -- pas seulement dans le journal de bord, qu'un débutant pourrait ne
+    pas remarquer."""
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("backup_system", default_path="/tmp/systeme.img")
+
+    dialog.set_estimated_size("environ 8,4 Go (sans les jeux)")
+
+    assert dialog._system_backup_size_label.isVisible() is True
+    assert "8,4 Go" in dialog._system_backup_size_label.text()
+
+
+def test_file_dialog_set_mode_clears_estimated_size_label(qapp):
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("backup_system", default_path="/tmp/systeme.img")
+    dialog.set_estimated_size("environ 8,4 Go (sans les jeux)")
+
+    dialog.set_mode("backup")
+
+    assert dialog._system_backup_size_label.isVisible() is False
 
 
 # --- FileDialog : bouton releases, flash uniquement (§5 mode assisté) ------

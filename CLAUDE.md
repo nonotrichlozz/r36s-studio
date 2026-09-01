@@ -347,15 +347,39 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > bout (CRC32 des deux en-têtes et des deux tableaux d'entrées, contenu
 > des partitions gardées).
 >
-> ✅ **Confirmé sur du vrai matériel** : sans cette réparation (entrée de
-> la partition de jeux retirée du tableau, table secondaire reconstruite
-> à la bonne position), l'image produite est illisible sous Linux et la
-> console ne démarre pas à partir d'elle — la simple troncature ne
-> suffit pas, exactement le risque anticipé ci-dessus. Validé
-> manuellement en flashant l'image produite ; non vérifié avec un outil
-> de partitionnement tiers dédié (gdisk...) en plus de ce test direct.
+> ✅ **Confirmé sur du vrai matériel, avec le détail exact de l'échec**
+> (§5, ce qui a motivé la validation manuelle) : sans cette réparation,
+> `gdisk` signale « Disk size is smaller than the main header indicates »
+> et « Backup header: ERROR », Linux ne voit aucune partition, et la
+> console ne démarre pas à partir de l'image — la simple troncature ne
+> suffit pas, exactement le risque anticipé ci-dessus. Le correctif
+> manuel effectué pour confirmer (supprimer l'entrée de la partition 3
+> puis réécrire la table) est exactement ce qu'automatise `backup_
+> system_only`.
 >
-> **Estimation avant de lancer, et nom de fichier suggéré** (§5) :
+> **Identification de la partition de jeux, repli sans étiquette
+> reconnue** (`_fallback_games_partition_index`) : une carte qui ne nomme
+> ni EASYROMS ni STORAGE reste couverte — dernière partition du disque,
+> système de fichiers FAT ou NTFS, et taille au-dessus de `_LARGE_
+> PARTITION_THRESHOLD_BYTES` (1 Go, un seuil qui évite de prendre une
+> petite partition système FAT — BOOT, par exemple — pour la partition de
+> jeux). La taille vient de la table brute (MBR/GPT), `list_partitions`
+> n'exposant aucune taille ; le système de fichiers et la position («
+> dernière partition ») viennent de `list_partitions`, comme pour
+> l'identification par étiquette.
+>
+> **Réparation de la table MBR aussi, pas seulement GPT.** Moins visible
+> que le cas GPT ci-dessus (pas de table secondaire à reconstruire), mais
+> tout aussi nécessaire : une simple troncature laisserait, dans l'image
+> MBR produite, l'entrée de la partition de jeux décrivant un espace qui
+> s'étend bien au-delà de la fin réelle du fichier. `backup_system_only`
+> met donc à zéro, dans le premier secteur de l'image produite, le
+> créneau de cette entrée (et de toute entrée après elle) — une simple
+> reconstruction en mémoire à partir du premier secteur déjà lu côté
+> source (`destination` étant ouvert en écriture seule, jamais relu),
+> MBR n'ayant ni CRC ni table secondaire à recalculer contrairement à GPT.
+>
+> **Estimation avant de lancer, et confirmation explicite** (§5) :
 > `gui/partition_runner.py::SystemBackupEstimateRunner`, un thread séparé
 > comme les autres runners de ce module (lire la table de partitions est
 > rapide, mais le montage du BOOT pour l'identification du modèle peut
@@ -369,14 +393,38 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > partie est purement décorative. Nom suggéré : `systeme_{modèle}_
 > {AAAA-MM-JJ}_{HH-MM}.img` dans `~/Documents/R36S Studio/` (même
 > convention que `partitions/archives.py`, jamais `~/.config`, §6) —
-> `{modèle}` est l'identifiant brut du `.dtb` (ex. `rk3326-r35s`), pas un
-> nom convivial (rien de tel n'existe ailleurs dans ce projet). Comme pour
-> toute proposition de ce genre dans l'appli, toujours remplaçable en
-> entier via Parcourir, jamais imposé.
+> `{modèle}` est l'identifiant brut du `.dtb` (ex. `rk3326-r35s`, ou
+> `G80CA-MB-V1.2` avec un point, préservé par la mise en sécurité du nom
+> de fichier plutôt que défiguré), pas un nom convivial (rien de tel
+> n'existe ailleurs dans ce projet). Comme pour toute proposition de ce
+> genre dans l'appli, toujours remplaçable en entier via Parcourir,
+> jamais imposé.
+>
+> La taille estimée est affichée deux fois : dans le journal de bord, et
+> directement sur la fenêtre Choix du fichier (`FileDialog.
+> set_estimated_size`, sauvegarde système uniquement) — un débutant
+> pourrait ne pas remarquer une ligne de journal qui défile. Cliquer
+> Suivant sur cette fenêtre (taille visible, fichier choisi) sert de
+> confirmation explicite avant de lancer la copie ; contrairement au
+> flash, rien n'est effacé ici (lecture seule du périphérique, écriture
+> seulement dans un fichier), donc pas de fenêtre rouge de type
+> `ConfirmDialog` — celle-ci reste réservée aux opérations destructrices
+> (§2 règle 6).
 >
 > Passe par le worker élevé comme la sauvegarde complète (`backup
 > --system-only`, `__main__.py::cmd_backup`) — c'est une lecture brute du
 > périphérique, §3.
+>
+> **Proposée aussi comme option du mode assisté**, pas seulement depuis
+> l'écran expert (`gui/screens.py::AssistedLandingScreen`, bouton discret
+> sous le bouton principal) : `MainWindow._start_backup_system_from_
+> assisted_landing` réutilise l'écran expert (`HomeScreen`/`MainView`) le
+> temps de l'opération, pour bénéficier du journal de bord et des états
+> occupé déjà en place, sans en faire un vrai changement de mode —
+> contrairement au bouton « Mode expert », `ui_mode` n'est ni modifié ni
+> persisté ici. Retour à l'accueil assisté via le bouton « Mode assisté »
+> déjà présent sur l'écran expert, comme pour tout autre passage
+> temporaire par cet écran.
 
 **Formats source acceptés au flash :** `.img`, `.img.gz`, `.img.xz`, `.img.zip`
 (décompression en flux, sans fichier temporaire).

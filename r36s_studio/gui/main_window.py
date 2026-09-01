@@ -273,6 +273,7 @@ class MainWindow(QMainWindow):
 
         self._assisted_landing.prepare_requested.connect(self._start_wizard)
         self._assisted_landing.expert_mode_requested.connect(self._switch_to_expert_mode)
+        self._assisted_landing.backup_system_requested.connect(self._start_backup_system_from_assisted_landing)
 
         self._wizard_panel.continue_requested.connect(self._on_wizard_continue)
         self._wizard_panel.cancel_requested.connect(self._cancel_wizard)
@@ -407,10 +408,16 @@ class MainWindow(QMainWindow):
         if estimate.error:
             self._log_panel.append_log(friendly_error_message(estimate.error))
             return
-        self._log_panel.append_log(tr("system_backup_estimate_result", size=_format_size(estimate.size_bytes)))
+        size_text = _format_size(estimate.size_bytes)
+        self._log_panel.append_log(tr("system_backup_estimate_result", size=size_text))
         self._file_dialog.set_mode(
             "backup_system", default_path=self._suggested_system_backup_path(estimate.board_compatible)
         )
+        # Affichée directement sur la fenêtre (§4.3 : « affiche la taille
+        # estimée et demande confirmation avant de lancer ») -- après
+        # `set_mode`, qui masque systématiquement cette étiquette (§5,
+        # `FileDialog.set_mode`).
+        self._file_dialog.set_estimated_size(tr("file_system_backup_size", size=size_text))
         self._file_dialog.open()
 
     def _suggested_system_backup_path(self, board_compatible: Optional[str]) -> str:
@@ -423,7 +430,7 @@ class MainWindow(QMainWindow):
         brut (ex. `rk3326-r35s`), pas un nom convivial -- rien de tel
         n'existe ailleurs dans ce projet pour ne pas en inventer un ici."""
         timestamp = datetime.now().strftime(archives.TIMESTAMP_FORMAT)
-        model_part = f"_{re.sub(r'[^A-Za-z0-9_-]+', '-', board_compatible)}" if board_compatible else ""
+        model_part = f"_{re.sub(r'[^A-Za-z0-9_.-]+', '-', board_compatible)}" if board_compatible else ""
         filename = f"systeme{model_part}_{timestamp}.img"
         return str(archives.default_archives_dir() / filename)
 
@@ -812,6 +819,19 @@ class MainWindow(QMainWindow):
         self._main_view.show_home()
         self._root_stack.setCurrentWidget(self._main_view)
         self._refresh_home_state()
+
+    def _start_backup_system_from_assisted_landing(self) -> None:
+        """Bouton « Sauvegarder mon système sans les jeux » de l'accueil
+        assisté (§4.3) -- réutilise l'écran expert (`HomeScreen`) le temps
+        de l'opération, pour bénéficier du journal de bord et des états
+        occupé déjà en place, sans en faire un vrai changement de mode :
+        contrairement à `_switch_to_expert_mode`, `ui_mode` n'est jamais
+        modifié ni persisté ici. L'utilisateur revient à l'accueil assisté
+        via le bouton « Mode assisté » déjà présent sur l'écran expert,
+        comme pour tout autre passage temporaire par cet écran."""
+        self._main_view.show_home()
+        self._root_stack.setCurrentWidget(self._main_view)
+        self._start_flow("backup_system")
 
     def _switch_to_assisted_mode(self) -> None:
         """Bouton « Mode assisté », symétrique de `_switch_to_expert_mode`

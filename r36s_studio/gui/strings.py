@@ -60,6 +60,9 @@ STRINGS = {
     # lancement, remplacé par le mode expert (six étapes) sur demande.
     "assisted_prepare_button": "Préparer ma carte automatiquement",
     "assisted_expert_mode_button": "Mode expert",
+    # Sauvegarde système sans les jeux (§4.3), aussi proposée comme option
+    # du mode assisté -- discrète, sous le bouton principal.
+    "assisted_backup_system_button": "Sauvegarder mon système sans les jeux",
     # Panneau d'étape du mode assisté (WizardStepPanel) -- une étape à la
     # fois, consigne claire + bouton pour continuer (§5 mode assisté).
     "wizard_continue": "Continuer",
@@ -348,6 +351,9 @@ STRINGS = {
     # -- journal de bord, avant l'ouverture de la fenêtre Choix du fichier.
     "system_backup_estimating": "Calcul de la taille estimée…",
     "system_backup_estimate_result": "Taille estimée : environ {size} (sans les jeux).",
+    # Même information, affichée directement sur la fenêtre Choix du
+    # fichier plutôt que seulement dans le journal de bord (§4.3).
+    "file_system_backup_size": "Taille estimée : environ {size} (sans les jeux).",
 }
 
 

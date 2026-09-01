@@ -345,9 +345,15 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > interprétés ni reconstruits, seulement recopiés tels quels. Vérifié par
 > des tests qui reconstruisent l'image complète et la reparsent bout en
 > bout (CRC32 des deux en-têtes et des deux tableaux d'entrées, contenu
-> des partitions gardées) — jamais testé sur une vraie carte clone GPT/EFI
-> réelle avec un vrai outil de flashage tiers (gdisk, Etcher...), faute
-> de matériel disponible ici.
+> des partitions gardées).
+>
+> ✅ **Confirmé sur du vrai matériel** : sans cette réparation (entrée de
+> la partition de jeux retirée du tableau, table secondaire reconstruite
+> à la bonne position), l'image produite est illisible sous Linux et la
+> console ne démarre pas à partir d'elle — la simple troncature ne
+> suffit pas, exactement le risque anticipé ci-dessus. Validé
+> manuellement en flashant l'image produite ; non vérifié avec un outil
+> de partitionnement tiers dédié (gdisk...) en plus de ce test direct.
 >
 > **Estimation avant de lancer, et nom de fichier suggéré** (§5) :
 > `gui/partition_runner.py::SystemBackupEstimateRunner`, un thread séparé

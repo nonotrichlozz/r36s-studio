@@ -190,7 +190,7 @@ def test_estimate_ready_opens_file_dialog_with_model_in_suggested_filename(mock_
     assert "rk3326-r35s" in suggested
     assert suggested.endswith(".img")
     log_text = window._log_panel._log_view.toPlainText()
-    assert "9" in log_text  # taille estimée journalisée avant l'ouverture
+    assert "8.4 Go" in log_text  # taille estimée journalisée avant l'ouverture
 
 
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))

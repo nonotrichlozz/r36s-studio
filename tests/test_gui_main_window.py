@@ -3151,7 +3151,10 @@ def test_wizard_finish_shows_archives_summary_with_reveal_button(mock_list, mock
     assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
     assert "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25" in log_text
     assert window._log_panel._reveal_button.isVisible() is True
-    assert window._log_panel._reveal_path == "/home/x/Documents/R36S Studio"
+    # str(mock_dir.return_value), pas un littéral codé en dur : Path("/home/x/...")
+    # se sérialise avec des antislashs sous Windows (WindowsPath) -- comparer aux
+    # deux côtés la même conversion évite de supposer une convention Unix.
+    assert window._log_panel._reveal_path == str(mock_dir.return_value)
 
 
 @patch("r36s_studio.gui.main_window.reveal")

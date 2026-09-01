@@ -1,0 +1,154 @@
+name: Tests et construction
+
+# Suite de tests sur les trois OS a chaque push/PR (§7 de CLAUDE.md :
+# "la phase 1 est la plus importante du projet", et plus generalement
+# aucune ligne d'ecriture disque ne doit regresser sans que la suite le
+# detecte). Construction PyInstaller (§6) sur les memes trois OS a chaque
+# push -- verifie que le paquetage lui-meme ne casse pas, pas seulement le
+# code source -- et publication en Release GitHub uniquement sur un tag
+# "v*" (ex. v0.2.0).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Trois jobs distincts (et non une seule matrice anonyme) pour que les
+  # noms affiches par GitHub Actions restent explicites dans l'onglet
+  # Actions et dans les checks de PR -- chacun reutilise le meme squelette
+  # via un job "modele" (YAML anchors ne sont pas supportes nativement par
+  # GitHub Actions ; la duplication ci-dessous est volontaire plutot que de
+  # forcer une matrice moins lisible).
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Installer les dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install --upgrade pyinstaller
+
+      - name: Lancer la suite de tests
+        run: python -m pytest
+
+      - name: Construire l'application (PyInstaller)
+        shell: pwsh
+        run: packaging/build_windows.ps1
+
+      - name: Empaqueter l'artefact
+        shell: pwsh
+        run: Compress-Archive -Path "dist/R36S Studio/*" -DestinationPath "R36S-Studio-windows.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R36S-Studio-windows
+          path: R36S-Studio-windows.zip
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Installer les dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install --upgrade pyinstaller
+
+      - name: Lancer la suite de tests
+        run: python -m pytest
+
+      - name: Construire l'application (PyInstaller)
+        run: packaging/build_macos.sh
+
+      # `ditto`, pas `zip -r` : seul lui preserve correctement la structure
+      # et les attributs etendus d'un vrai bundle .app macOS (§6/§7,
+      # packaging/README.md).
+      - name: Empaqueter l'artefact
+        run: ditto -c -k --sequesterRsrc --keepParent "dist/R36S Studio.app" "R36S-Studio-macos.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R36S-Studio-macos
+          path: R36S-Studio-macos.zip
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # PySide6/Qt a besoin de ces bibliotheques partagees meme en mode
+      # "offscreen" (utilise par la suite de tests, tests/conftest.py) --
+      # un runner ubuntu-22.04 nu ne les fournit pas par defaut. Sans ca,
+      # l'import de PySide6 echoue des le premier test GUI avec une erreur
+      # de bibliotheque partagee manquante, pas une erreur Qt explicite.
+      - name: Installer les dependances systeme Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libopengl0 libxkbcommon0 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+            libxcb-xfixes0 libdbus-1-3 libnss3 libxcomposite1 libxdamage1 \
+            libxrandr2 libasound2 libfontconfig1
+
+      - name: Installer les dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install --upgrade pyinstaller
+
+      - name: Lancer la suite de tests
+        run: python -m pytest
+
+      - name: Construire l'application (PyInstaller)
+        run: packaging/build_linux.sh
+
+      - name: Empaqueter l'artefact
+        run: tar -C dist -czf R36S-Studio-linux.tar.gz "R36S Studio"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R36S-Studio-linux
+          path: R36S-Studio-linux.tar.gz
+
+  release:
+    name: Publier la Release
+    needs: [windows, macos, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publier les trois artefacts en Release GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

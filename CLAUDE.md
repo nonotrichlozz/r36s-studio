@@ -1839,6 +1839,51 @@ chaque tag. C'est gratuit pour un dépôt public et ça règle le problème déf
 > même approche (spec PyInstaller dédié par OS) s'étendra à Windows/Linux
 > une fois ce point tranché.
 
+> ✅ **CI en place (phase 7)**, le point ci-dessus étant désormais tranché
+> (blocage TCC résolu et confirmé sur du vrai matériel, §3). `packaging/
+> r36s_studio_windows.spec`/`r36s_studio_linux.spec` reprennent le même
+> squelette que le spec macOS (mêmes `datas` : horodatage de construction,
+> illustrations optionnelles) mais sans les éléments propres au bundle
+> macOS (`BUNDLE`, `Info.plist`, identifiant de paquet) — inutiles ici,
+> l'élévation Windows (UAC/`ShellExecuteW`) et Linux (`pkexec`/`sudo`)
+> relance directement le binaire lui-même (`sys.executable`, §3) sans
+> identité de paquet à obtenir au préalable, contrairement à macOS.
+> `packaging/build_windows.ps1`/`build_linux.sh` sont les scripts de
+> construction correspondants, symétriques de `build_macos.sh`.
+>
+> `.github/workflows/build.yml` : trois jobs (`windows`, `macos`, `linux`)
+> lancent `python -m pytest` puis construisent et empaquettent leur
+> binaire (`.zip` Windows/macOS via `Compress-Archive`/`ditto`, `.tar.gz`
+> Linux) sur **chaque push sur `main` et chaque pull request** — pas
+> seulement au moment de taguer une version, pour détecter une régression
+> ou une construction cassée avant qu'elle n'atteigne un tag. Un quatrième
+> job (`release`) ne se déclenche que sur un tag `v*` et seulement si les
+> trois autres ont réussi (`needs:`), télécharge les trois artefacts et
+> publie une Release GitHub (`softprops/action-gh-release`). Procédure de
+> publication documentée dans `README.md`.
+>
+> **Linux, dépendances Qt système** : un runner `ubuntu-22.04` nu ne
+> fournit pas les bibliothèques partagées dont PySide6/Qt a besoin même en
+> mode `offscreen` (celui qu'utilise la suite de tests, `tests/
+> conftest.py`) — sans elles, l'import de PySide6 échoue dès le premier
+> test GUI avec une erreur de bibliothèque manquante, pas une erreur Qt
+> explicite. Le job `linux` installe donc un jeu de paquets `apt`
+> (`libegl1`, `libxkbcommon0`, `libxcb-cursor0`...) avant `pip install`,
+> non vérifié sur un vrai runner GitHub au moment d'écrire cette note
+> (liste dérivée des dépendances Qt6/PySide6 headless documentées par la
+> communauté, pas d'accès à un runner Linux pour confirmer en conditions
+> réelles ici) — à corriger au premier échec CI si la liste s'avère
+> incomplète.
+>
+> **Linux, `.tar.gz` plutôt qu'AppImage** : le brief (§6 ci-dessous)
+> évoque un AppImage pour Linux, mais un AppImage complet demande au
+> minimum une icône dédiée et un fichier `.desktop` — ni l'un ni l'autre
+> n'existe encore dans ce dépôt (`icon=None` aussi côté macOS/Windows). Un
+> simple dossier PyInstaller onedir compressé en `.tar.gz` couvre le besoin
+> immédiat (un artefact téléchargeable et exécutable par OS) sans
+> introduire un outil de packaging supplémentaire non vérifiable ici. Idée
+> future, pas implémentée : un vrai AppImage une fois une icône disponible.
+
 **Signature :**
 
 - **Windows** — sans certificat, SmartScreen affichera un avertissement. Il s'atténue

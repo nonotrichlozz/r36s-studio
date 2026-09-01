@@ -90,6 +90,16 @@ def test_worker_command_when_frozen_skips_module_bootstrap(monkeypatch):
 # --- macOS -------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason=(
+        "compare sys.executable (le vrai chemin de CE runner, jamais mocké) au "
+        "script AppleScript échappé -- sur un chemin Windows (backslashes, lettre "
+        "de lecteur), l'échappement de _build_applescript peut ne plus contenir la "
+        "sous-chaîne brute non échappée, sans rapport avec le comportement macOS "
+        "réellement testé ici."
+    ),
+)
 @patch("r36s_studio.gui.elevate.subprocess.Popen")
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Darwin")
 def test_macos_uses_osascript_with_administrator_privileges(mock_system, mock_popen):

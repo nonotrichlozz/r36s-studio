@@ -503,16 +503,18 @@ def test_backup_system_success_message_mentions_system(mock_list, mock_filter, q
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_backup_system_reachable_from_assisted_landing(mock_list, mock_filter, mock_load, qapp):
     """§4.3 : proposée comme option du mode assisté, pas seulement depuis
-    l'écran expert -- réutilise HomeScreen/MainView le temps de
-    l'opération (journal de bord, états occupé) sans en faire un vrai
-    changement de mode persisté."""
+    l'écran expert -- réutilise `MainView`/`_log_panel` le temps de
+    l'opération (journal de bord, états occupé), mais reste dans
+    l'habillage assisté (`WizardStepPanel`), jamais l'écran expert
+    (`HomeScreen`) -- correctif d'un défaut de parcours signalé (bascule
+    vers le mode expert pendant l'opération)."""
     window = MainWindow()
     assert window._root_stack.currentWidget() is window._assisted_landing
 
     window._assisted_landing.backup_system_requested.emit()
 
     assert window._root_stack.currentWidget() is window._main_view
-    assert window._main_view._left_stack.currentWidget() is window._home
+    assert window._main_view._left_stack.currentWidget() is window._wizard_panel
     assert window._device_dialog.isVisible() is True  # _start_flow("backup_system") a démarré
 
 
@@ -529,6 +531,125 @@ def test_backup_system_from_assisted_landing_does_not_persist_expert_mode(mock_l
 
     mock_save.assert_not_called()
     assert window._app_config.ui_mode == "assisted"
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_success_offers_prepare_card_and_return_home(mock_list, mock_filter, mock_load, qapp):
+    """Correctif d'un défaut de parcours signalé : une fois la sauvegarde
+    terminée, l'utilisateur ne doit jamais se retrouver sans proposition
+    de suite -- deux choix explicites sur le panneau assisté."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+
+    window._on_worker_finished(True)
+
+    assert window._root_stack.currentWidget() is window._main_view
+    assert window._wizard_panel._prepare_card_button.isVisible() is True
+    assert window._wizard_panel._return_home_button.isVisible() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "/tmp/systeme.img" in log_text  # chemin du fichier créé, affiché
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_failure_only_offers_return_home(mock_list, mock_filter, mock_load, qapp):
+    """Un échec n'a rien produit à préparer -- seul le retour a du sens,
+    jamais un choix qui n'en a pas."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._last_error_code = "IO_ERROR"
+    window._last_error_msg = "disque plein"
+
+    window._on_worker_finished(False)
+
+    assert window._wizard_panel._prepare_card_button.isVisible() is False
+    assert window._wizard_panel._return_home_button.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_return_home_switches_to_assisted_landing(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+
+    window._wizard_panel.return_to_home_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._assisted_landing
+    assert window._assisted_ad_hoc_active is False
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_backup_system_prepare_card_starts_flash_with_existing_file(
+    mock_list, mock_filter, mock_load, mock_detect, qapp
+):
+    """« Préparer une carte avec cette sauvegarde » réutilise le fichier
+    déjà créé comme source du flash -- jamais un aller vers l'écran expert
+    (§5 mode assisté) : reste sur MainView/WizardStepPanel, la fenêtre
+    Choix du fichier est inutile puisque le fichier est déjà connu."""
+    new_device = _make_device(path="/dev/fake-disk-test-9", display="Carte neuve")
+    mock_list.return_value = [new_device]
+    mock_filter.return_value = [new_device]
+    window = MainWindow()
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+
+    window._wizard_panel.prepare_card_requested.emit()
+
+    assert window._mode == "flash"
+    assert window._file_path == "/tmp/systeme.img"
+    assert window._device_dialog.isVisible() is True
+    assert window._root_stack.currentWidget() is window._main_view
+
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
+
+    # Fichier déjà connu : la fenêtre Choix du fichier est sautée, direct
+    # à la fenêtre Confirmation (obligatoire pour un flash, §2 n°6).
+    assert window._file_dialog.isVisible() is False
+    assert window._confirm_dialog.isVisible() is True
+    assert window._device is new_device
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_prepare_card_flash_finished_only_offers_return_home(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Une fois la carte préparée (succès ou échec), plus rien à préparer
+    -- seul le retour à l'accueil reste proposé."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+    window._wizard_panel.prepare_card_requested.emit()
+    window._device = _make_device()
+
+    window._on_worker_finished(True)
+
+    assert window._mode == "flash"
+    assert window._wizard_panel._prepare_card_button.isVisible() is False
+    assert window._wizard_panel._return_home_button.isVisible() is True
 
 
 # --- Écran de bienvenue macOS : Accès complet au disque (§3) ---------------

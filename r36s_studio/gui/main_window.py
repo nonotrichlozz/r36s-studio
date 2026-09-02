@@ -137,6 +137,23 @@ class MainWindow(QMainWindow):
         self._last_error_msg: Optional[str] = None
         self._last_progress_bytes = 0  # taille de l'archive créée (étapes A/B, journal de bord)
 
+        # Sauvegarde système lancée depuis l'accueil assisté (§4.3), puis
+        # éventuellement le flash qui la réutilise (« Préparer une carte
+        # avec cette sauvegarde ») -- vrai tant que ce parcours ponctuel
+        # (hors vrai parcours guidé, `_wizard_active`) est en cours,
+        # jusqu'à ce que l'utilisateur revienne explicitement à l'accueil.
+        # Décide, dans `_on_worker_finished`, d'afficher la proposition de
+        # suite (`WizardStepPanel.show_next_step_choice`) plutôt que de
+        # laisser l'utilisateur sur un écran sans issue (défaut de
+        # parcours signalé -- correctif).
+        self._assisted_ad_hoc_active = False
+        # « Préparer une carte avec cette sauvegarde » : le fichier est
+        # déjà connu (celui qu'on vient de créer), inutile de repasser par
+        # la fenêtre Choix du fichier -- seule la carte cible reste à
+        # choisir. Consommé (remis à False) dès que `_on_device_chosen` en
+        # tient compte.
+        self._skip_file_dialog_for_flash = False
+
         # Une seule autorisation macOS pour toute l'application (§5 mode
         # assisté), créée au premier besoin (`_macos_auth_session`) plutôt
         # qu'ici : ne jamais demander l'invite mot de passe avant qu'une
@@ -306,6 +323,12 @@ class MainWindow(QMainWindow):
         self._wizard_panel.resume_requested.connect(self._resume_wizard)
         self._wizard_panel.expert_mode_requested.connect(self._switch_to_expert_mode)
         self._wizard_panel.refresh_requested.connect(self._on_wizard_refresh_requested)
+        # Sauvegarde système depuis l'accueil assisté (§4.3) : signaux
+        # dédiés, jamais continue_requested/cancel_requested (déjà câblés
+        # ci-dessus à des gestionnaires qui supposent un parcours guidé
+        # réellement actif).
+        self._wizard_panel.prepare_card_requested.connect(self._on_prepare_card_requested)
+        self._wizard_panel.return_to_home_requested.connect(self._on_assisted_ad_hoc_return_home)
 
     # --- colonne gauche, annotée par detect.detect_workflow_status (§4.5) --
 
@@ -383,6 +406,15 @@ class MainWindow(QMainWindow):
 
         self._device = device
         self._device_dialog.close()
+
+        if self._mode == "flash" and self._skip_file_dialog_for_flash:
+            # « Préparer une carte avec cette sauvegarde » (§4.3) : le
+            # fichier est déjà connu, inutile de repasser par la fenêtre
+            # Choix du fichier -- seule la fenêtre Confirmation habituelle
+            # reste obligatoire avant d'écrire pour de vrai (§2 n°6).
+            self._skip_file_dialog_for_flash = False
+            self._proceed_to_flash_confirmation()
+            return
 
         if self._mode == "eject":
             # Étape F : ni fichier ni opération suivie de progression,
@@ -549,29 +581,36 @@ class MainWindow(QMainWindow):
         self._file_dialog.close()
 
         if self._mode == "flash":
-            # Vérifié ici, avant toute élévation de privilèges (§3) : un
-            # format invalide ne doit jamais coûter à l'utilisateur une
-            # demande de mot de passe administrateur pour rien. Détection
-            # par octets d'en-tête (`check_image_format`), pas seulement
-            # l'extension -- un fichier .7z renommé en .img serait sinon
-            # écrit tel quel sur la carte sans la moindre erreur.
-            try:
-                check_image_format(self._file_path)
-            except SevenZipArchiveError:
-                QMessageBox.warning(self, tr("app_title"), friendly_error_message("SEVEN_ZIP_ARCHIVE"))
-                return
-            except UnsupportedImageFormatError:
-                QMessageBox.warning(self, tr("app_title"), friendly_error_message("UNSUPPORTED_IMAGE_FORMAT"))
-                return
-            # Le flash écrit sur le périphérique brut : confirmation
-            # explicite obligatoire (règle §2 n°6). Les autres jobs
-            # n'effacent rien (sauvegarde vers un fichier, ou copie de
-            # fichiers sur une partition déjà en usage) — pas de fenêtre
-            # rouge.
-            self._confirm_dialog.set_device(self._device)
-            self._confirm_dialog.open()
+            self._proceed_to_flash_confirmation()
         else:
             self._start_worker()
+
+    def _proceed_to_flash_confirmation(self) -> None:
+        """Validation du format puis fenêtre Confirmation -- partagé entre
+        le choix normal de fichier (`_on_file_chosen`) et « Préparer une
+        carte avec cette sauvegarde » (`_on_prepare_card_requested`, §4.3),
+        qui connaît déjà `self._file_path` et n'a donc pas besoin de
+        repasser par la fenêtre Choix du fichier."""
+        # Vérifié ici, avant toute élévation de privilèges (§3) : un
+        # format invalide ne doit jamais coûter à l'utilisateur une
+        # demande de mot de passe administrateur pour rien. Détection par
+        # octets d'en-tête (`check_image_format`), pas seulement
+        # l'extension -- un fichier .7z renommé en .img serait sinon
+        # écrit tel quel sur la carte sans la moindre erreur.
+        try:
+            check_image_format(self._file_path)
+        except SevenZipArchiveError:
+            QMessageBox.warning(self, tr("app_title"), friendly_error_message("SEVEN_ZIP_ARCHIVE"))
+            return
+        except UnsupportedImageFormatError:
+            QMessageBox.warning(self, tr("app_title"), friendly_error_message("UNSUPPORTED_IMAGE_FORMAT"))
+            return
+        # Le flash écrit sur le périphérique brut : confirmation explicite
+        # obligatoire (règle §2 n°6). Les autres jobs n'effacent rien
+        # (sauvegarde vers un fichier, ou copie de fichiers sur une
+        # partition déjà en usage) — pas de fenêtre rouge.
+        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.open()
 
     def _on_confirmed(self) -> None:
         self._confirm_dialog.close()
@@ -746,6 +785,14 @@ class MainWindow(QMainWindow):
             # d'arrivée des runners (`_start_worker`), réutilisé tel quel.
             self._on_wizard_job_finished(ok)
             return
+        if self._assisted_ad_hoc_active:
+            # Sauvegarde système depuis l'accueil assisté (§4.3), puis
+            # éventuellement le flash qui la réutilise -- même point
+            # d'arrivée que le mode expert ci-dessous, mais propose
+            # toujours une suite explicite plutôt que de laisser
+            # l'utilisateur sans issue (défaut de parcours signalé).
+            self._on_assisted_ad_hoc_worker_finished(ok)
+            return
         if ok:
             allow_eject = self._mode in _ALLOW_EJECT_AFTER_MODES
             archive_info = self._archive_info()
@@ -762,6 +809,66 @@ class MainWindow(QMainWindow):
             friendly = friendly_error_message(self._last_error_code or "")
             self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
         self._refresh_home_state()
+
+    def _on_assisted_ad_hoc_worker_finished(self, ok: bool) -> None:
+        """Point d'arrivée dédié à la sauvegarde système lancée depuis
+        l'accueil assisté (§4.3) et, le cas échéant, au flash qui la
+        réutilise -- distinct de la version mode expert ci-dessus pour
+        toujours proposer une suite sur `_wizard_panel`
+        (`show_next_step_choice`) plutôt que de laisser l'utilisateur sur
+        un écran sans issue une fois l'opération terminée (défaut de
+        parcours signalé -- correctif). `_home` n'étant jamais visible ici,
+        pas de `_refresh_home_state()`."""
+        if ok:
+            allow_eject = self._mode in _ALLOW_EJECT_AFTER_MODES
+            reveal_path = self._file_path if self._mode in (_EXTRACTION_MODES | _INJECTION_MODES) else None
+            self._log_panel.finish_success(self._success_message(), allow_eject=allow_eject, reveal_path=reveal_path)
+        else:
+            friendly = friendly_error_message(self._last_error_code or "")
+            self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
+
+        if self._mode == "backup_system":
+            self._wizard_panel.show_next_step_choice(
+                tr("assisted_backup_system_done_title"),
+                tr("assisted_backup_system_done_instruction"),
+                show_prepare_card=ok,
+            )
+        else:
+            # Étape « Préparer une carte » (flash) : plus rien à proposer
+            # que revenir à l'accueil, succès ou échec.
+            self._wizard_panel.show_next_step_choice(
+                tr("assisted_prepare_card_done_title"),
+                tr("assisted_prepare_card_done_instruction"),
+                show_prepare_card=False,
+            )
+
+    def _on_prepare_card_requested(self) -> None:
+        """« Préparer une carte avec cette sauvegarde » (§4.3) -- réutilise
+        le fichier fraîchement créé comme source du flash, toujours dans
+        le contexte assisté (jamais l'écran expert) : seule la carte
+        cible reste à choisir (`_skip_file_dialog_for_flash`), puis la
+        fenêtre Confirmation habituelle (§2 n°6, jamais sautée)."""
+        backup_path = self._file_path
+        self._mode = "flash"
+        self._device = None
+        self._file_path = backup_path
+        self._skip_file_dialog_for_flash = True
+        self._wizard_panel.show_step(
+            tr("assisted_prepare_card_choose_device_title"),
+            tr("assisted_prepare_card_choose_device_instruction"),
+            can_continue=False,
+        )
+        self._refresh_devices()
+        self._device_dialog.open()
+
+    def _on_assisted_ad_hoc_return_home(self) -> None:
+        """« Revenir à l'accueil », proposé après la sauvegarde système
+        (ou la préparation de carte qui la réutilise) -- jamais un
+        changement de mode persisté (§4.3), même principe que
+        `_start_backup_system_from_assisted_landing`."""
+        self._assisted_ad_hoc_active = False
+        self._log_panel.set_idle()
+        self._root_stack.setCurrentWidget(self._assisted_landing)
 
     def _on_reveal_requested(self, path: str) -> None:
         try:
@@ -938,14 +1045,25 @@ class MainWindow(QMainWindow):
 
     def _start_backup_system_from_assisted_landing(self) -> None:
         """Bouton « Sauvegarder mon système sans les jeux » de l'accueil
-        assisté (§4.3) -- réutilise l'écran expert (`HomeScreen`) le temps
-        de l'opération, pour bénéficier du journal de bord et des états
+        assisté (§4.3) -- réutilise `MainView`/`_log_panel` le temps de
+        l'opération, pour bénéficier du journal de bord et des états
         occupé déjà en place, sans en faire un vrai changement de mode :
         contrairement à `_switch_to_expert_mode`, `ui_mode` n'est jamais
-        modifié ni persisté ici. L'utilisateur revient à l'accueil assisté
-        via le bouton « Mode assisté » déjà présent sur l'écran expert,
-        comme pour tout autre passage temporaire par cet écran."""
-        self._main_view.show_home()
+        modifié ni persisté ici. Reste dans l'habillage assisté
+        (`WizardStepPanel`), jamais l'écran expert (`HomeScreen`) --
+        correctif d'un défaut de parcours signalé : la version précédente
+        montrait l'écran expert pendant l'opération et n'offrait ensuite
+        aucune suite. `_on_worker_finished` consulte
+        `_assisted_ad_hoc_active` pour proposer explicitement la suite
+        (`WizardStepPanel.show_next_step_choice`) plutôt que de laisser
+        l'utilisateur sans issue une fois l'opération terminée."""
+        self._assisted_ad_hoc_active = True
+        self._main_view.show_wizard_panel()
+        self._wizard_panel.show_step(
+            tr("assisted_backup_system_running_title"),
+            tr("assisted_backup_system_running_instruction"),
+            can_continue=False,
+        )
         self._root_stack.setCurrentWidget(self._main_view)
         self._start_flow("backup_system")
 
@@ -983,12 +1101,17 @@ class MainWindow(QMainWindow):
     def _cancel_wizard(self) -> None:
         """Annule le job en cours s'il y en a un, puis retour direct à
         l'accueil assisté (§5) -- aucune opération déjà terminée n'est
-        défaite, seul le parcours guidé s'arrête."""
+        défaite, seul le parcours guidé s'arrête. Câblé au même bouton
+        Annuler du `WizardStepPanel` que la sauvegarde système lancée
+        depuis l'accueil assisté (§4.3, `show_step` pendant l'opération) :
+        fonctionne correctement dans les deux cas, `self._runner` étant le
+        même mécanisme sous-jacent quel que soit le contexte."""
         if self._wizard_poll_timer.isActive():
             self._wizard_poll_timer.stop()
         if self._runner is not None:
             self._runner.cancel()
         self._wizard_active = False
+        self._assisted_ad_hoc_active = False
         self._root_stack.setCurrentWidget(self._assisted_landing)
 
     def _enter_wizard_job(self, job: Optional[WizardJob]) -> None:

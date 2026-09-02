@@ -1210,6 +1210,95 @@ def test_wizard_step_panel_show_error_reveals_resume_and_expert_buttons(qapp):
     assert panel._expert_button.isVisible() is True
 
 
+# --- show_next_step_choice : sauvegarde système depuis l'accueil assisté ---
+# --- (§4.3) -- jamais un écran sans issue une fois l'opération terminée ----
+
+
+def test_wizard_step_panel_show_next_step_choice_sets_title_and_instruction(qapp):
+    panel = WizardStepPanel()
+
+    panel.show_next_step_choice("Titre", "Consigne")
+
+    assert panel._title_label.text() == "Titre"
+    assert panel._instruction_label.text() == "Consigne"
+
+
+def test_wizard_step_panel_show_next_step_choice_hides_wizard_specific_buttons(qapp):
+    """Jamais les boutons Continuer/Reprendre/Mode expert/Actualiser/Annuler
+    du vrai parcours guidé -- déjà câblés à des gestionnaires qui supposent
+    un parcours actif (`_on_wizard_continue`/`_cancel_wizard`), qu'il ne
+    faut jamais déclencher par accident depuis cet état."""
+    panel = WizardStepPanel()
+    panel.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    panel.show_step("Titre", "Consigne", can_continue=True, show_refresh=True)
+
+    panel.show_next_step_choice("Titre", "Consigne")
+
+    assert panel._continue_button.isVisible() is False
+    assert panel._resume_button.isVisible() is False
+    assert panel._expert_button.isVisible() is False
+    assert panel._refresh_button.isVisible() is False
+    assert panel._cancel_button.isVisible() is False
+
+
+def test_wizard_step_panel_show_next_step_choice_shows_both_buttons_by_default(qapp):
+    panel = WizardStepPanel()
+    panel.show()
+
+    panel.show_next_step_choice("Titre", "Consigne")
+
+    assert panel._prepare_card_button.isVisible() is True
+    assert panel._return_home_button.isVisible() is True
+
+
+def test_wizard_step_panel_show_next_step_choice_can_hide_prepare_card_button(qapp):
+    """Après un échec (rien à préparer), seule l'option retour reste
+    proposée -- jamais un choix qui n'a pas de sens."""
+    panel = WizardStepPanel()
+    panel.show()
+
+    panel.show_next_step_choice("Titre", "Consigne", show_prepare_card=False)
+
+    assert panel._prepare_card_button.isVisible() is False
+    assert panel._return_home_button.isVisible() is True
+
+
+def test_wizard_step_panel_prepare_card_button_emits_signal(qapp):
+    panel = WizardStepPanel()
+    panel.show_next_step_choice("Titre", "Consigne")
+    received = []
+    panel.prepare_card_requested.connect(lambda: received.append(True))
+
+    panel._prepare_card_button.click()
+
+    assert received == [True]
+
+
+def test_wizard_step_panel_return_home_button_emits_signal(qapp):
+    panel = WizardStepPanel()
+    panel.show_next_step_choice("Titre", "Consigne")
+    received = []
+    panel.return_to_home_requested.connect(lambda: received.append(True))
+
+    panel._return_home_button.click()
+
+    assert received == [True]
+
+
+def test_wizard_step_panel_show_step_hides_next_step_choice_buttons(qapp):
+    """Défensif : un vrai pas du parcours guidé, montré après un passage
+    par `show_next_step_choice`, ne doit jamais laisser les boutons de
+    l'état précédent visibles par accident."""
+    panel = WizardStepPanel()
+    panel.show()
+    panel.show_next_step_choice("Titre", "Consigne")
+
+    panel.show_step("Titre", "Consigne")
+
+    assert panel._prepare_card_button.isVisible() is False
+    assert panel._return_home_button.isVisible() is False
+
+
 def test_wizard_step_panel_resume_button_emits_signal(qapp):
     panel = WizardStepPanel()
     panel.show_error()

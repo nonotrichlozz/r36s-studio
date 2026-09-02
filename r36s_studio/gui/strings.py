@@ -63,6 +63,23 @@ STRINGS = {
     # Sauvegarde système sans les jeux (§4.3), aussi proposée comme option
     # du mode assisté -- discrète, sous le bouton principal.
     "assisted_backup_system_button": "Sauvegarder mon système sans les jeux",
+    # Sauvegarde système lancée depuis l'accueil assisté (§4.3) : reste
+    # entièrement dans l'habillage assisté (WizardStepPanel), jamais
+    # l'écran expert -- correctif d'un défaut de parcours signalé (bascule
+    # vers le mode expert pendant l'opération, sans proposition de suite
+    # une fois terminée).
+    "assisted_backup_system_running_title": "Sauvegarde du système en cours",
+    "assisted_backup_system_running_instruction": "Ne débranche pas ta carte pendant la sauvegarde.",
+    "assisted_backup_system_done_title": "Sauvegarde terminée",
+    "assisted_backup_system_done_instruction": "Que veux-tu faire maintenant ?",
+    "assisted_prepare_card_button": "Préparer une carte avec cette sauvegarde",
+    "assisted_return_home_button": "Revenir à l'accueil",
+    "assisted_prepare_card_choose_device_title": "Choisis la carte à préparer",
+    "assisted_prepare_card_choose_device_instruction": (
+        "Branche la carte SD neuve que tu veux préparer avec cette sauvegarde."
+    ),
+    "assisted_prepare_card_done_title": "Carte préparée",
+    "assisted_prepare_card_done_instruction": "Que veux-tu faire maintenant ?",
     # Panneau d'étape du mode assisté (WizardStepPanel) -- une étape à la
     # fois, consigne claire + bouton pour continuer (§5 mode assisté).
     "wizard_continue": "Continuer",

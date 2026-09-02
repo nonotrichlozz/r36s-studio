@@ -2057,6 +2057,14 @@ class WizardStepPanel(Screen):
     resume_requested = Signal()
     expert_mode_requested = Signal()
     refresh_requested = Signal()
+    # État « opération terminée, propose la suite » (§4.3, sauvegarde
+    # système depuis l'accueil assisté) -- signaux dédiés, jamais
+    # continue_requested/cancel_requested : ceux-ci restent câblés à des
+    # gestionnaires qui supposent un parcours guidé réellement actif
+    # (`_on_wizard_continue`/`_cancel_wizard`), à ne jamais déclencher pour
+    # une opération ponctuelle hors parcours.
+    prepare_card_requested = Signal()
+    return_to_home_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2107,6 +2115,19 @@ class WizardStepPanel(Screen):
         self._cancel_button.clicked.connect(self.cancel_requested.emit)
         layout.addWidget(self._cancel_button)
 
+        # État « opération terminée, propose la suite » (§4.3) -- boutons
+        # dédiés, masqués par défaut (voir show_next_step_choice).
+        self._prepare_card_button = QPushButton(tr("assisted_prepare_card_button"))
+        self._prepare_card_button.setProperty("role", "primary")
+        self._prepare_card_button.setVisible(False)
+        self._prepare_card_button.clicked.connect(self.prepare_card_requested.emit)
+        layout.addWidget(self._prepare_card_button)
+
+        self._return_home_button = QPushButton(tr("assisted_return_home_button"))
+        self._return_home_button.setVisible(False)
+        self._return_home_button.clicked.connect(self.return_to_home_requested.emit)
+        layout.addWidget(self._return_home_button)
+
     def show_step(
         self,
         title: str,
@@ -2128,6 +2149,8 @@ class WizardStepPanel(Screen):
         self._resume_button.setVisible(False)
         self._expert_button.setVisible(False)
         self._refresh_button.setVisible(show_refresh)
+        self._prepare_card_button.setVisible(False)
+        self._return_home_button.setVisible(False)
 
     def set_status(self, status: str) -> None:
         self._status_label.setText(status)
@@ -2143,3 +2166,25 @@ class WizardStepPanel(Screen):
         self._continue_button.setVisible(False)
         self._resume_button.setVisible(True)
         self._expert_button.setVisible(True)
+        self._prepare_card_button.setVisible(False)
+        self._return_home_button.setVisible(False)
+
+    def show_next_step_choice(self, title: str, instruction: str, *, show_prepare_card: bool = True) -> None:
+        """État « opération terminée, propose la suite » (§4.3, sauvegarde
+        système lancée depuis l'accueil assisté) -- jamais un écran sans
+        issue une fois l'opération terminée. Aucun des boutons du vrai
+        parcours guidé (Continuer/Reprendre/Mode expert/Actualiser/Annuler)
+        n'est affiché : ceux-ci restent câblés à des gestionnaires qui
+        supposent un parcours réellement actif, jamais à déclencher pour
+        une opération ponctuelle hors parcours. `show_prepare_card=False`
+        après un échec -- rien à préparer, seul le retour a du sens."""
+        self._title_label.setText(title)
+        self._instruction_label.setText(instruction)
+        self._status_label.setVisible(False)
+        self._continue_button.setVisible(False)
+        self._resume_button.setVisible(False)
+        self._expert_button.setVisible(False)
+        self._refresh_button.setVisible(False)
+        self._cancel_button.setVisible(False)
+        self._prepare_card_button.setVisible(show_prepare_card)
+        self._return_home_button.setVisible(True)

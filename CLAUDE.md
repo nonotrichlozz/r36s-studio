@@ -478,13 +478,58 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > **Proposée aussi comme option du mode assisté**, pas seulement depuis
 > l'écran expert (`gui/screens.py::AssistedLandingScreen`, bouton discret
 > sous le bouton principal) : `MainWindow._start_backup_system_from_
-> assisted_landing` réutilise l'écran expert (`HomeScreen`/`MainView`) le
-> temps de l'opération, pour bénéficier du journal de bord et des états
-> occupé déjà en place, sans en faire un vrai changement de mode —
-> contrairement au bouton « Mode expert », `ui_mode` n'est ni modifié ni
-> persisté ici. Retour à l'accueil assisté via le bouton « Mode assisté »
-> déjà présent sur l'écran expert, comme pour tout autre passage
-> temporaire par cet écran.
+> assisted_landing` réutilise `MainView`/`_log_panel` le temps de
+> l'opération, pour bénéficier du journal de bord et des états occupé
+> déjà en place, sans en faire un vrai changement de mode — contrairement
+> au bouton « Mode expert », `ui_mode` n'est ni modifié ni persisté ici.
+>
+> ⚠️ **Défaut de parcours rapporté en usage réel, corrigé** : la première
+> version montrait l'écran expert (`HomeScreen`, les six étapes) pendant
+> toute l'opération — un changement de mode visuel non demandé, contraire
+> au principe « jamais un aller simple vers le mode expert » déjà énoncé
+> ailleurs (§4.5, ROCKNIX/système non reconnu) — et n'offrait ensuite
+> *aucune* suite : une fois la sauvegarde terminée, l'utilisateur restait
+> sur cet écran expert sans le moindre bouton pertinent. **Corrigé** :
+> `_start_backup_system_from_assisted_landing` affiche désormais
+> `WizardStepPanel` (déjà utilisé pour le parcours guidé lui-même) plutôt
+> que `HomeScreen` — l'infrastructure du journal de bord (`_log_panel`,
+> `_start_worker`) reste réutilisée en interne, mais rien d'expert n'est
+> jamais rendu visible. À la fin de l'opération (`_on_assisted_ad_hoc_
+> worker_finished`, point d'arrivée dédié dans `_on_worker_finished`, au
+> même niveau que le `if self._wizard_active:` du vrai parcours guidé),
+> le chemin du fichier créé apparaît dans le journal (déjà inclus dans
+> `_success_message()`) et `WizardStepPanel.show_next_step_choice` propose
+> explicitement la suite : « Préparer une carte avec cette sauvegarde »
+> (réussite uniquement — `show_prepare_card=ok`) ou « Revenir à
+> l'accueil » (toujours) — jamais un écran sans issue.
+>
+> Deux nouveaux signaux dédiés sur `WizardStepPanel`
+> (`prepare_card_requested`/`return_to_home_requested`), jamais les
+> `continue_requested`/`cancel_requested` déjà câblés au vrai parcours
+> guidé (`_on_wizard_continue`/`_cancel_wizard`, qui opèrent sur
+> `self._wizard_flow` sans jamais vérifier `self._wizard_active` en
+> premier lieu) — les réutiliser pour cette opération ponctuelle aurait
+> avancé/corrompu l'état interne du parcours guidé pour de vrai. Un
+> nouveau drapeau d'instance, `_assisted_ad_hoc_active` (distinct de
+> `_wizard_active`), signale ce contexte à `_on_worker_finished`.
+>
+> « Préparer une carte avec cette sauvegarde »
+> (`_on_prepare_card_requested`) réutilise le fichier fraîchement créé
+> comme source du flash — la fenêtre Choix du fichier est inutile
+> puisqu'il est déjà connu (`_skip_file_dialog_for_flash`, consommé par
+> `_on_device_chosen` avant son embranchement habituel) — mais la fenêtre
+> Confirmation reste obligatoire avant d'écrire pour de vrai (§2 règle 6,
+> jamais sautée) ; `_proceed_to_flash_confirmation` factorise cette
+> validation+confirmation, partagée avec le choix de fichier normal
+> (`_on_file_chosen`). Reste tout du long dans l'habillage assisté — même
+> le bouton Annuler de `WizardStepPanel`, déjà câblé à `_cancel_wizard`,
+> fonctionne correctement ici sans changement (annule `self._runner` s'il
+> y en a un, revient à l'accueil assisté), aucun gestionnaire dédié
+> nécessaire pour ce cas. Vérifié plus largement (`grep show_home()`) :
+> c'était la seule bascule non sollicitée vers l'écran expert dans tout
+> le mode assisté — les autres opérations (téléchargement ROCKNIX, chaque
+> étape du parcours guidé) restent déjà correctement dans `MainView`/
+> `WizardStepPanel` ou `AssistedLandingScreen`.
 
 > ⚠️ **Deux défauts rapportés en usage réel, corrigés.**
 >

@@ -1072,6 +1072,41 @@ besoin des droits root pour cette étape.
 Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, puis
 `fsync` et démontage propre à la fin.
 
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : une copie EASYROMS
+> restait bloquée, CPU à fond, sans jamais rien lire ni écrire.** Rapporté
+> pendant un test réel de l'étape 3 (copie de l'écran et des jeux) : 392 s
+> de temps CPU consommées, `ReadTransferCount` à 0 Mo, processus toujours
+> « Responding ». Hypothèse initiale (chemin GUID de volume, ci-dessus,
+> ajouté par un correctif récent et validé seulement sur `BOOT` — 47 Mo,
+> arborescence plate) écartée après investigation : la même lenteur
+> apparaît **identiquement** via une lettre de lecteur classique (`D:\`)
+> que via le chemin GUID — rien à voir avec ce correctif.
+>
+> **Cause réelle, isolée sur la carte en cause** : un seul dossier
+> (`ports/bigboy/tiles`, les tuiles d'un port de jeu) contient **40 964
+> fichiers**. `partitions/copy.py::_list_files` énumérait via `Path.
+> rglob("*")` puis filtrait avec `Path.is_file()` (un appel), et `copy_
+> tree` recalculait ensuite `Path.stat().st_size` (un second appel) pour
+> chaque fichier — deux recherches par nom, chacune reprenant l'exploration
+> du dossier depuis le début sur un système de fichiers FAT/exFAT (pas
+> d'index par nom, seulement une table de répertoire parcourue
+> linéairement) : un coût en O(n) par fichier, donc O(n²) pour vider un tel
+> dossier. Confirmé isolément sur ce dossier réel : plus de 120 s sans même
+> terminer la première passe (`Path.is_file()` seul).
+>
+> **Corrigé** : `_list_files` est remplacée par `_walk_files`
+> (`os.scandir()`, récursif), qui réutilise directement les attributs déjà
+> obtenus par l'énumération elle-même (`FindNextFileW` sous Windows, via
+> `DirEntry.is_file()`/`DirEntry.stat()`, tous deux mis en cache) plutôt
+> que de redemander l'information par une recherche par nom séparée —
+> O(n) au total, un seul passage. `copy_tree` ne fait donc plus non plus
+> le second passage `Path.stat()` : `_walk_files` retourne directement les
+> couples `(chemin, taille)`. **Confirmé sur le dossier réel en cause** :
+> les mêmes 40 964 fichiers traités en 0,26 s (repli lettre de lecteur ou
+> GUID, indifféremment) ; l'arborescence EASYROMS complète de cette carte
+> (46 092 fichiers, ~3,9 Go) traitée en 0,53 s, contre un blocage qui ne
+> se serait jamais terminé auparavant.
+
 > ⚠️ **Correction de conception** : la première version de ce brief ne décrivait que
 > l'*injection* (BOOT/EASYROMS sauvegardés → carte neuve), en supposant à tort que
 > l'utilisateur disposait déjà de ces fichiers. Le vrai parcours enchaîne **deux

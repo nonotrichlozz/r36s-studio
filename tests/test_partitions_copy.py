@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from r36s_studio.imaging.copy import OperationCancelled
-from r36s_studio.partitions.copy import MountpointNotWritable, _check_writable, copy_tree
+from r36s_studio.partitions.copy import MountpointNotWritable, _check_writable, _walk_files, copy_tree
 
 
 def _write(path, content: bytes = b"") -> None:
@@ -68,6 +68,48 @@ def test_copy_tree_returns_zero_for_empty_source(tmp_path):
     copied = copy_tree(str(source), str(dest))
 
     assert copied == 0
+
+
+# --- _walk_files : os.scandir plutôt que Path.rglob()+is_file()+stat() -----
+#
+# Bug corrigé, confirmé sur du vrai matériel : une copie EASYROMS restait
+# bloquée (des centaines de secondes de CPU, zéro octet lu) sur une carte
+# dont un dossier (assets d'un port de jeu) contient 40 964 fichiers --
+# Path.is_file()/Path.stat() recherchent chacun le fichier par son nom
+# depuis le début du dossier (O(n) par fichier sur FAT/exFAT, O(n²) au
+# total). os.scandir() réutilise les attributs déjà obtenus lors de
+# l'énumération elle-même (O(n) au total) -- confirmé isolément : les mêmes
+# 40 964 fichiers traités en 0,18 s contre plus de 120 s (jamais terminé).
+
+
+def test_walk_files_finds_files_at_top_level_and_nested(tmp_path):
+    source = tmp_path / "source"
+    _write(source / "a.txt", b"aaaa")
+    _write(source / "sub" / "b.txt", b"bb")
+    _write(source / "sub" / "deeper" / "c.txt", b"c")
+
+    # Comparaison indépendante du séparateur de chemin (Windows/POSIX).
+    found = {str(path.relative_to(source)).replace("\\", "/"): size for path, size in _walk_files(str(source))}
+
+    assert found == {"a.txt": 4, "sub/b.txt": 2, "sub/deeper/c.txt": 1}
+
+
+def test_walk_files_returns_empty_list_for_empty_directory(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+
+    assert _walk_files(str(source)) == []
+
+
+def test_walk_files_does_not_include_directories_themselves(tmp_path):
+    source = tmp_path / "source"
+    (source / "empty_subdir").mkdir(parents=True)
+    _write(source / "a.txt", b"x")
+
+    found = _walk_files(str(source))
+
+    assert len(found) == 1
+    assert found[0][0].name == "a.txt"
 
 
 # --- _check_writable / MountpointNotWritable -------------------------------

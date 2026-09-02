@@ -65,8 +65,35 @@ def _check_writable(mountpoint: str) -> None:
             pass
 
 
-def _list_files(source_dir: str) -> list[Path]:
-    return [p for p in Path(source_dir).rglob("*") if p.is_file()]
+def _walk_files(source_dir: str) -> list[tuple[Path, int]]:
+    r"""Parcourt récursivement `source_dir`, retournant `(chemin, taille)`
+    par fichier -- `os.scandir` plutôt que `Path.rglob()` + `Path.is_file()`
+    + `Path.stat()`.
+
+    Bug corrigé, confirmé sur du vrai matériel : une copie EASYROMS restait
+    bloquée (des centaines de secondes de CPU, zéro octet lu) sur une carte
+    dont un seul dossier (`ports/bigboy/tiles`, des tuiles d'un port de jeu)
+    contient 40 964 fichiers. `Path.is_file()`/`Path.stat()` recherchent
+    chacun le fichier par son nom depuis le début du dossier -- un coût en
+    O(n) par fichier sur un système de fichiers FAT/exFAT (recherche
+    linéaire dans la table de répertoire), donc O(n²) au total pour vider un
+    tel dossier ; confirmé isolément : plus de 120 s (jamais terminé) pour
+    cette seule approche sur ce dossier réel. `os.scandir()` met en cache
+    les attributs (type, taille) déjà obtenus lors de l'énumération
+    elle-même (`FindNextFileW` sous Windows) -- un seul passage, O(n) au
+    total ; confirmé : les mêmes 40 964 fichiers traités en 0,18 s. Rien à
+    voir avec le chemin GUID de volume (`\\?\Volume{...}\`, §4.4) utilisé en
+    repli sans lettre de lecteur sous Windows -- vérifié : la même lenteur
+    apparaît identiquement via une lettre de lecteur classique, seul le
+    nombre de fichiers dans ce dossier précis est en cause."""
+    entries: list[tuple[Path, int]] = []
+    with os.scandir(source_dir) as it:
+        for entry in it:
+            if entry.is_dir():
+                entries.extend(_walk_files(entry.path))
+            elif entry.is_file():
+                entries.append((Path(entry.path), entry.stat().st_size))
+    return entries
 
 
 def _copy_file(src: Path, dst: Path, block_size: int) -> int:
@@ -100,8 +127,8 @@ def copy_tree(
     si l'appelant répond True. Lève `MountpointNotWritable` avant tout
     déplacement de fichier si `dest_dir` s'avère en lecture seule."""
     _check_writable(dest_dir)
-    files = _list_files(source_dir)
-    total = sum(f.stat().st_size for f in files)
+    files = _walk_files(source_dir)
+    total = sum(size for _, size in files)
     done = 0
     start = time.monotonic()
     last_emit = start
@@ -116,7 +143,7 @@ def copy_tree(
     source_root = Path(source_dir)
     dest_root = Path(dest_dir)
 
-    for file_path in files:
+    for file_path, _size in files:
         if should_cancel is not None and should_cancel():
             raise OperationCancelled(done)
 

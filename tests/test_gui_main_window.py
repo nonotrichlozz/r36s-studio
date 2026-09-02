@@ -2675,14 +2675,19 @@ def test_starting_a_new_wizard_resets_the_clone_flag(mock_list, mock_filter, moc
 # --- échec d'identification : trois causes distinctes, trois messages -----
 
 
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_identify_mount_failed_suggests_a_faulty_card(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_platform, qapp
 ):
+    """macOS/Linux uniquement (§4.4) : `locate_mounted` y retente
+    activement un montage avant d'abandonner, donc un échec persistant est
+    un signal plus fiable de carte défaillante qu'sur Windows (voir le
+    test dédié ci-dessous)."""
     from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 
     window = MainWindow()
@@ -2693,6 +2698,35 @@ def test_wizard_identify_mount_failed_suggests_a_faulty_card(
     assert window._wizard_panel._continue_button.isEnabled() is True
     log_text = window._log_panel._log_view.toPlainText()
     assert "défaillante" in log_text
+
+
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Windows")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_identify_mount_failed_never_suggests_faulty_card_on_windows(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_platform, qapp
+):
+    """Confirmé sur du vrai matériel (ThinkPad, lecteur SD Realtek) : une
+    partition BOOT saine et lisible peut très bien n'avoir aucune lettre
+    de lecteur sous Windows -- ce n'est pas un défaut de la carte, jamais
+    le suggérer sur cet OS (`locate.py::_list_windows` retombe désormais
+    sur le chemin GUID du volume dans ce cas, rendant ce timeout rare,
+    mais le message doit rester correct pour le cas résiduel où même ce
+    repli échoue)."""
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    window._on_wizard_identify_finished(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "défaillante" not in log_text
+    assert "Débranche-la et rebranche-la" in log_text
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")

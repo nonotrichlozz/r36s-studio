@@ -126,6 +126,17 @@ STRINGS = {
         "C'est fréquent avec les cartes fournies avec la console R36S. "
         "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
     ),
+    # Windows uniquement (§4.4) : contrairement à macOS/Linux, où ce
+    # message n'apparaît qu'après une tentative active de montage restée
+    # sans effet, Windows n'attribue pas toujours une lettre de lecteur à
+    # une partition par ailleurs saine et lisible -- jamais présenter ça
+    # comme un défaut de la carte.
+    "wizard_identify_failed_mount_windows": (
+        "Impossible de lire ta carte d'origine pour l'instant. Débranche-la "
+        "et rebranche-la, puis réessaie — ce n'est pas forcément un défaut "
+        "de la carte. Tu peux continuer : la version MultiPanel sera "
+        "utilisée par défaut."
+    ),
     "wizard_identify_failed_no_dtb": (
         "Ta carte a été lue, mais ne contient pas de fichier d'identification — "
         "c'est le cas d'une carte fraîchement flashée. L'identification se fera "

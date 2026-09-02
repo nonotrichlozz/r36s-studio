@@ -532,11 +532,19 @@ def _list_windows(device_path: str) -> list[PartitionInfo]:
     # boucle, plutôt que de faire confiance à l'ordre du pipeline), et
     # trié une seconde fois côté Python -- qui n'a, lui, aucune raison de
     # réordonner une liste déjà triée.
+    # `AccessPaths` (propriété de `Get-Partition`, pas de `Get-Volume`) porte
+    # toujours un chemin GUID de volume (`\\?\Volume{...}\`), même quand
+    # Windows n'attribue aucune lettre de lecteur -- confirmé lisible sur du
+    # vrai matériel (`os.listdir`/`open`, sans élévation) : une partition
+    # `BOOT` sans lettre n'est donc *pas* forcément illisible, voir note de
+    # module plus bas (repli `mountpoint`).
     command = (
         f"Get-Partition -DiskNumber {disk_number} | Sort-Object PartitionNumber | "
         "ForEach-Object { $p = $_; $vol = $p | Get-Volume -ErrorAction SilentlyContinue; "
-        "if ($vol) { $vol | Add-Member -NotePropertyName PartitionNumber "
-        "-NotePropertyValue $p.PartitionNumber -PassThru } } | ConvertTo-Json -Depth 3"
+        "if ($vol) { $volPath = ($p.AccessPaths | Where-Object { $_.StartsWith('\\\\?\\Volume') } "
+        "| Select-Object -First 1); $vol | Add-Member -NotePropertyName PartitionNumber "
+        "-NotePropertyValue $p.PartitionNumber -Force; $vol | Add-Member -NotePropertyName "
+        "VolumeGuidPath -NotePropertyValue $volPath -PassThru } } | ConvertTo-Json -Depth 3"
     )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", command],
@@ -550,7 +558,17 @@ def _list_windows(device_path: str) -> list[PartitionInfo]:
     partitions = []
     for volume in volumes:
         drive_letter = volume.get("DriveLetter")
-        mountpoint = f"{drive_letter}:\\" if drive_letter else None
+        # Confirmé sur du vrai matériel : une partition BOOT (FAT32, saine
+        # et lisible) peut très bien n'avoir aucune lettre de lecteur --
+        # Windows n'en attribue pas spontanément à toute partition d'un
+        # disque (notamment une partition cachée/de type non standard sur
+        # un disque non explicitement "removable"), ce n'est pas un défaut
+        # matériel (§4.4, note de module). Plutôt que d'attendre en vain
+        # une lettre qui n'arrivera jamais (`locate_mounted`, aucune
+        # tentative de montage actif sur Windows contrairement à Linux/
+        # macOS), le chemin GUID du volume (`AccessPaths`, ci-dessus) sert
+        # de repli -- lisible sans élévation, sans lettre de lecteur.
+        mountpoint = f"{drive_letter}:\\" if drive_letter else (volume.get("VolumeGuidPath") or None)
         size = volume.get("Size")
         # Confirmé sur du vrai matériel : pour une partition dont Windows
         # ne reconnaît pas le système de fichiers (ext4, la partition

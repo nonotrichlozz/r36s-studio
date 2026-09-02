@@ -1023,6 +1023,52 @@ Montage : attendre l'apparition automatique du volume (Windows/macOS le font seu
 avec une temporisation et un contrôle. Sur Linux, `udisksctl mount` évite d'avoir
 besoin des droits root pour cette étape.
 
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : « carte défaillante »
+> affiché à tort à l'étape 2 (identification) sous Windows.** Rapporté sur
+> un ThinkPad avec lecteur SD Realtek intégré : le journal montrait
+> `PartitionNotMounted` (« délai dépassé ») pour `BOOT`, alors que
+> `Get-Volume` confirme que la partition (FAT32, 115 Mo) existe et est
+> parfaitement lisible — elle n'a simplement pas de lettre de lecteur.
+> Cause de fond : contrairement à macOS/Linux, où `locate_mounted` retente
+> activement un montage (`_mount_macos`/`_mount_linux`) avant d'abandonner,
+> Windows n'a *aucune* tentative active dans la boucle — `_list_windows`
+> attend passivement qu'une lettre apparaisse, ce qui n'arrive jamais pour
+> une partition que Windows ne juge pas devoir monter spontanément (rien à
+> voir avec un défaut matériel). Le message `MOUNT_FAILED` (« carte
+> défaillante, courant sur les cartes fournies avec la console »),
+> initialement pensé pour ce cas macOS/Linux, était donc trompeur ici.
+>
+> **Corrigé en deux temps**, tous les deux dans `locate.py`/`gui/main_
+> window.py` :
+> 1. **Monter sans lettre de lecteur, sans élévation.** Chaque volume a
+>    aussi un chemin GUID stable (`\\?\Volume{...}\`, propriété
+>    `AccessPaths` de `Get-Partition`, distincte de `Get-Volume`) —
+>    confirmé lisible sur du vrai matériel (`os.listdir`/`open`, sans
+>    élévation, sans lettre de lecteur assignée) : une identification
+>    complète (lecture des `.dtb`, reconnaissance du modèle) a réussi en
+>    passant directement par ce chemin. `_list_windows` (dans la même
+>    boucle PowerShell qui ré-associe déjà `PartitionNumber`, voir plus
+>    haut) récupère désormais aussi ce chemin (`VolumeGuidPath`) et
+>    l'utilise comme `mountpoint` quand aucune lettre n'est disponible —
+>    `locate_mounted` n'a alors même plus besoin d'attendre : le montage
+>    est déjà là dès le premier appel. Respecte §4.4 (l'identification
+>    doit rester non privilégiée) : aucune élévation n'est nécessaire,
+>    c'est un simple chemin de fichier alternatif vers le même volume.
+> 2. **Message différent selon l'OS pour le cas résiduel.** Même avec ce
+>    repli, un échec de montage reste théoriquement possible (aucun
+>    `AccessPaths` exploitable). `gui/main_window.py::
+>    _identify_failure_message_key` choisit désormais entre le message
+>    existant (macOS/Linux, où un échec après tentative active de montage
+>    reste un signal fiable de carte défaillante) et un nouveau message
+>    Windows (`wizard_identify_failed_mount_windows`, `gui/strings.py`)
+>    qui invite à débrancher/rebrancher la carte sans jamais suggérer un
+>    défaut matériel.
+>
+> Bénéfice au passage : ce repli sert `_list_windows` pour *toute*
+> opération sur une partition sans lettre de lecteur, pas seulement
+> l'identification — extraction du BOOT (étape A) comprise, qui aurait
+> échoué de la même façon sur une carte avec cette même particularité.
+
 Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, puis
 `fsync` et démontage propre à la fin.
 

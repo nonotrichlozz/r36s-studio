@@ -97,6 +97,23 @@ _IDENTIFY_FAILURE_MESSAGE_KEYS = {
     IdentifyFailureReason.ALL_DTB_INVALID: "wizard_identify_failed_invalid_dtb",
 }
 
+
+def _identify_failure_message_key(reason: IdentifyFailureReason) -> str:
+    """`MOUNT_FAILED` seul dépend de l'OS -- confirmé sur du vrai matériel
+    (ThinkPad Windows) : une partition `BOOT` saine et lisible peut très
+    bien n'avoir aucune lettre de lecteur, Windows ne lui en attribuant pas
+    spontanément (rien à voir avec un défaut matériel). `locate.py::
+    _list_windows` retombe désormais sur le chemin GUID du volume dans ce
+    cas (repli qui rend ce timeout rare sur Windows), mais le message «
+    carte défaillante » -- pensé pour macOS/Linux, où `locate_mounted`
+    retente activement un montage avant d'abandonner -- resterait trompeur
+    pour le cas résiduel où même ce repli échoue. `NO_DTB_FOUND`/
+    `ALL_DTB_INVALID` ne dépendent pas de l'OS : une fois la partition
+    lisible, leur cause est la même partout."""
+    if reason == IdentifyFailureReason.MOUNT_FAILED and platform.system() == "Windows":
+        return "wizard_identify_failed_mount_windows"
+    return _IDENTIFY_FAILURE_MESSAGE_KEYS[reason]
+
 # Pane "Accès complet au disque" de Réglages Système -- lien profond ouvert
 # par la fenêtre Aide (§3, `HelpDialog`) pour éviter à l'utilisateur de
 # naviguer les Réglages Système à la main.
@@ -1477,7 +1494,7 @@ class MainWindow(QMainWindow):
                 panel=result.info.panel_compatible or "?",
             )
         else:
-            message = tr(_IDENTIFY_FAILURE_MESSAGE_KEYS[result.failure_reason])
+            message = tr(_identify_failure_message_key(result.failure_reason))
         self._log_panel.append_log(message)
 
         # Console clone (§5 mode assisté, critère validé par l'outil

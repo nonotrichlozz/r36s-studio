@@ -864,6 +864,69 @@ def test_list_windows_reorders_by_partition_number_even_if_get_volume_returns_th
 
 
 @patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_windows_falls_back_to_volume_guid_path_without_drive_letter(mock_run):
+    """Confirmé sur du vrai matériel (ThinkPad, lecteur SD Realtek) :
+    Windows n'attribue pas toujours une lettre de lecteur à une partition
+    par ailleurs saine et lisible (BOOT, notamment) -- son chemin GUID de
+    volume (`AccessPaths`, exposé par `Get-Partition`) reste lisible sans
+    élévation et sert de repli plutôt que d'attendre en vain une lettre
+    qui n'arrivera jamais."""
+    guid_path = "\\\\?\\Volume{e3bd7e11-49fd-11f1-b992-f859711d251c}\\"
+    volumes = json.dumps(
+        [
+            {
+                "FileSystemLabel": "BOOT",
+                "FileSystem": "FAT32",
+                "DriveLetter": None,
+                "PartitionNumber": 1,
+                "VolumeGuidPath": guid_path,
+            }
+        ]
+    )
+    mock_run.return_value = _run_result(volumes)
+
+    partitions = _list_windows(r"\\.\PhysicalDrive9903")
+
+    assert partitions[0].mountpoint == guid_path
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_windows_prefers_drive_letter_over_volume_guid_path_when_both_present(mock_run):
+    volumes = json.dumps(
+        [
+            {
+                "FileSystemLabel": "EASYROMS",
+                "FileSystem": "exFAT",
+                "DriveLetter": "D",
+                "PartitionNumber": 3,
+                "VolumeGuidPath": "\\\\?\\Volume{38185839-a70c-11f1-b997-f859711d251c}\\",
+            }
+        ]
+    )
+    mock_run.return_value = _run_result(volumes)
+
+    partitions = _list_windows(r"\\.\PhysicalDrive9903")
+
+    assert partitions[0].mountpoint == "D:\\"
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_windows_no_drive_letter_and_no_guid_path_leaves_unmounted(mock_run):
+    """Repli absent (cas résiduel, jamais observé en pratique mais pas
+    supposé impossible) -- `mountpoint` reste `None`, pour que
+    `locate_mounted` retombe sur son comportement d'origine (attente puis
+    `PartitionNotMounted`) plutôt que de planter sur un chemin manquant."""
+    volumes = json.dumps(
+        [{"FileSystemLabel": "BOOT", "FileSystem": "FAT32", "DriveLetter": None, "PartitionNumber": 1}]
+    )
+    mock_run.return_value = _run_result(volumes)
+
+    partitions = _list_windows(r"\\.\PhysicalDrive9903")
+
+    assert partitions[0].mountpoint is None
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
 def test_list_windows_treats_zero_size_as_unknown(mock_run):
     """Confirmé sur du vrai matériel : `Get-Volume` renvoie `Size: 0` (pas
     absent) pour une partition dont Windows ne reconnaît pas le système de

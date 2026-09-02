@@ -203,6 +203,25 @@ def test_copy_games_platform_limited_on_macos_even_with_arkos_card(mock_list, mo
     assert status[INJECT_BOOT] == StepStatus.AVAILABLE
 
 
+@patch("r36s_studio.detect.platform.system", return_value="Darwin")
+@patch("r36s_studio.detect.archives.list_archives", return_value=[])
+@patch("r36s_studio.detect.list_partitions")
+def test_copy_games_not_platform_limited_on_macos_when_easyroms_is_exfat(mock_list, mock_archives, mock_platform):
+    """Confirmé sur du vrai matériel : EASYROMS peut être en exFAT selon le
+    vendeur -- macOS écrit l'exFAT nativement (contrairement au NTFS), donc
+    l'étape ne doit plus être marquée limitée par la plateforme une fois
+    cette carte positivement identifiée comme telle."""
+    mock_list.return_value = [
+        PartitionInfo("/dev/fake-disk-test-3s1", "", "fat16", "/Volumes/NO NAME"),
+        PartitionInfo("/dev/fake-disk-test-3s2", "", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-3s3", "EASYROMS", "exfat", "/Volumes/EASYROMS"),
+    ]
+
+    status = detect_workflow_status(_make_device())
+
+    assert status[COPY_GAMES] == StepStatus.AVAILABLE
+
+
 @patch("r36s_studio.detect.platform.system", return_value="Windows")
 @patch("r36s_studio.detect.archives.list_archives", return_value=[])
 @patch("r36s_studio.detect.list_partitions")

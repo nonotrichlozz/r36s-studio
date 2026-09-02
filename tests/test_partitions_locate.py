@@ -37,6 +37,7 @@ from r36s_studio.partitions.locate import (
     find_partition,
     locate_mounted,
     looks_like_arkos,
+    selected_easyroms_partition,
     unmount_forced,
 )
 
@@ -183,6 +184,56 @@ def test_select_easyroms_position_fallback_accepts_fat32_too():
     easyroms = _select_easyroms(partitions, "/dev/fake-disk-test-4")
 
     assert easyroms.device_path == "/dev/fake-disk-test-4s3"
+
+
+def test_select_easyroms_position_fallback_accepts_exfat_too():
+    # Confirmé sur du vrai matériel : le système de fichiers d'EASYROMS
+    # varie selon le vendeur (NTFS constaté ailleurs, exFAT ici) -- une
+    # info, jamais un critère d'exclusion.
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-4s1", "", "fat32", None),
+        PartitionInfo("/dev/fake-disk-test-4s2", "", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-4s3", "", "exfat", None),
+    ]
+
+    easyroms = _select_easyroms(partitions, "/dev/fake-disk-test-4")
+
+    assert easyroms.device_path == "/dev/fake-disk-test-4s3"
+
+
+def test_select_easyroms_labeled_exfat_found_regardless_of_filesystem():
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-4s1", "", "fat32", None),
+        PartitionInfo("/dev/fake-disk-test-4s2", "", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-4s3", "EASYROMS", "exfat", "D:\\"),
+    ]
+
+    easyroms = _select_easyroms(partitions, "/dev/fake-disk-test-4")
+
+    assert easyroms.device_path == "/dev/fake-disk-test-4s3"
+    assert easyroms.filesystem == "exfat"
+
+
+def test_selected_easyroms_partition_returns_it_when_found():
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-4s1", "", "fat32", None),
+        PartitionInfo("/dev/fake-disk-test-4s2", "", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-4s3", "EASYROMS", "exfat", "D:\\"),
+    ]
+
+    easyroms = selected_easyroms_partition(partitions)
+
+    assert easyroms is not None
+    assert easyroms.filesystem == "exfat"
+
+
+def test_selected_easyroms_partition_returns_none_when_not_found():
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-4s1", "", "fat16", None),
+        PartitionInfo("/dev/fake-disk-test-4s2", "", "ntfs", None),
+    ]
+
+    assert selected_easyroms_partition(partitions) is None
 
 
 def test_select_easyroms_position_fallback_rejects_wrong_filesystem():
@@ -790,6 +841,42 @@ def test_list_windows_populates_size_bytes_from_get_volume(mock_run):
     partitions = _list_windows(r"\\.\PhysicalDrive9903")
 
     assert partitions[0].size_bytes == 9_000_000_000
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_windows_reorders_by_partition_number_even_if_get_volume_returns_them_out_of_order(mock_run):
+    """Confirmé sur du vrai matériel : `Get-Volume` ne préserve pas l'ordre
+    de son entrée pipeline -- observé en répétant l'appel sur une carte
+    réelle, l'ordre BOOT/EASYROMS alternait d'un appel à l'autre sans rien
+    changer côté matériel. `_list_windows` doit donc trier lui-même sur
+    `PartitionNumber` plutôt que de faire confiance à l'ordre JSON reçu."""
+    volumes = json.dumps(
+        [
+            {"FileSystemLabel": "EASYROMS", "FileSystem": "exFAT", "DriveLetter": "F", "PartitionNumber": 3},
+            {"FileSystemLabel": "", "FileSystem": "FAT32", "DriveLetter": "E", "PartitionNumber": 1},
+        ]
+    )
+    mock_run.return_value = _run_result(volumes)
+
+    partitions = _list_windows(r"\\.\PhysicalDrive9903")
+
+    assert [p.label for p in partitions] == ["", "EASYROMS"]
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_windows_treats_zero_size_as_unknown(mock_run):
+    """Confirmé sur du vrai matériel : `Get-Volume` renvoie `Size: 0` (pas
+    absent) pour une partition dont Windows ne reconnaît pas le système de
+    fichiers (ext4, la partition root d'une carte ArkOS) -- traité comme
+    `None` (taille inconnue), jamais comme une vraie partition de 0 octet,
+    pour que l'estimation non élevée (§4.3) retombe sur son repli élevé au
+    lieu de sous-compter silencieusement."""
+    volumes = json.dumps([{"FileSystemLabel": "", "FileSystem": "", "DriveLetter": None, "Size": 0}])
+    mock_run.return_value = _run_result(volumes)
+
+    partitions = _list_windows(r"\\.\PhysicalDrive9903")
+
+    assert partitions[0].size_bytes is None
 
 
 @patch("r36s_studio.partitions.locate.subprocess.run")

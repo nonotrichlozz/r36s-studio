@@ -72,7 +72,10 @@ EASYROMS_LABEL = "EASYROMS"
 # "msdos" (macOS), "vfat" (Linux), "fat16"/"fat32"/"fat" (Windows, générique) :
 # toutes les graphies de FAT rencontrées selon l'OS.
 FAT_FILESYSTEMS = {"msdos", "vfat", "fat", "fat16", "fat32"}
-EASYROMS_FALLBACK_FILESYSTEMS = FAT_FILESYSTEMS | {"ntfs"}
+# Confirmé sur du vrai matériel : le système de fichiers d'EASYROMS varie
+# selon le vendeur (NTFS constaté sur certaines cartes, exFAT sur d'autres) --
+# une info à consigner, jamais un critère d'exclusion (§ note de module).
+EASYROMS_FALLBACK_FILESYSTEMS = FAT_FILESYSTEMS | {"ntfs", "exfat"}
 
 BOOT_PARTITION_INDEX = 0  # première partition du disque
 EASYROMS_PARTITION_INDEX = 2  # troisième partition du disque
@@ -163,8 +166,9 @@ def _looks_like_efi_boot(partition: PartitionInfo) -> bool:
 
 def _select_easyroms(partitions: list[PartitionInfo], device_path: str) -> PartitionInfo:
     """Étiquette d'abord (EASYROMS est bien nommée en pratique) ; repli sur
-    la position (troisième partition) et le système de fichiers (NTFS ou
-    FAT) si l'étiquette est absente."""
+    la position (troisième partition) et le système de fichiers (NTFS, FAT
+    ou exFAT -- varie selon le vendeur, confirmé sur du vrai matériel) si
+    l'étiquette est absente."""
     for partition in partitions:
         if partition.label.upper() == EASYROMS_LABEL:
             return partition
@@ -195,6 +199,18 @@ def has_easyroms_partition(partitions: list[PartitionInfo]) -> bool:
     except PartitionNotFound:
         return False
     return True
+
+
+def selected_easyroms_partition(partitions: list[PartitionInfo]) -> Optional[PartitionInfo]:
+    """Retourne la partition EASYROMS identifiée (voir `_select_easyroms`),
+    ou `None` si aucune ne l'est -- utilisé par `detect` pour connaître son
+    système de fichiers réel (ex. distinguer une EASYROMS NTFS, bloquée en
+    écriture sur macOS, d'une EASYROMS exFAT, écriturable nativement) sans
+    dupliquer la logique d'identification déjà en place ici."""
+    try:
+        return _select_easyroms(partitions, "")
+    except PartitionNotFound:
+        return None
 
 
 def looks_like_arkos(partitions: list[PartitionInfo]) -> bool:
@@ -502,11 +518,25 @@ def _windows_disk_number(device_path: str) -> str:
 
 def _list_windows(device_path: str) -> list[PartitionInfo]:
     disk_number = _windows_disk_number(device_path)
-    # Trié explicitement par PartitionNumber : l'identification de BOOT/
-    # EASYROMS par position en dépend (voir note de module).
+    # Confirmé sur du vrai matériel (bug rapporté : « Aucune partition de
+    # jeux reconnue » pour la sauvegarde système, échec intermittent) :
+    # `Get-Partition -DiskNumber N | Sort-Object PartitionNumber | Get-
+    # Volume` ne préserve PAS l'ordre du tri en entrée -- `Get-Volume`
+    # renvoie ses résultats selon sa propre énumération interne, pas selon
+    # l'ordre de son entrée pipeline. Observé en répétant l'appel sur une
+    # carte réelle : l'ordre BOOT/EASYROMS alternait d'un appel à l'autre
+    # sans aucun changement matériel entre les deux. Comme l'identification
+    # de BOOT/EASYROMS par position (voir note de module) et le calcul de
+    # `system_backup.py` en dépendent, chaque volume est ici explicitement
+    # ré-associé à son `PartitionNumber` d'origine (`Add-Member` dans la
+    # boucle, plutôt que de faire confiance à l'ordre du pipeline), et
+    # trié une seconde fois côté Python -- qui n'a, lui, aucune raison de
+    # réordonner une liste déjà triée.
     command = (
         f"Get-Partition -DiskNumber {disk_number} | Sort-Object PartitionNumber | "
-        "Get-Volume | ConvertTo-Json -Depth 3"
+        "ForEach-Object { $p = $_; $vol = $p | Get-Volume -ErrorAction SilentlyContinue; "
+        "if ($vol) { $vol | Add-Member -NotePropertyName PartitionNumber "
+        "-NotePropertyValue $p.PartitionNumber -PassThru } } | ConvertTo-Json -Depth 3"
     )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", command],
@@ -515,18 +545,32 @@ def _list_windows(device_path: str) -> list[PartitionInfo]:
         check=True,
     )
     volumes = _as_list(json.loads(result.stdout)) if result.stdout.strip() else []
+    volumes.sort(key=lambda v: v.get("PartitionNumber") if v.get("PartitionNumber") is not None else 0)
 
     partitions = []
     for volume in volumes:
         drive_letter = volume.get("DriveLetter")
         mountpoint = f"{drive_letter}:\\" if drive_letter else None
+        size = volume.get("Size")
+        # Confirmé sur du vrai matériel : pour une partition dont Windows
+        # ne reconnaît pas le système de fichiers (ext4, la partition
+        # root Linux d'une carte ArkOS), `Get-Volume` renvoie tout de même
+        # un volume "RAW", mais avec `Size: 0` -- pas absent. Une vraie
+        # partition de 0 octet n'existe pas sur une carte SD flashée ; `0`
+        # ici veut dire « taille inconnue », comme le `None` que ce champ
+        # représente déjà pour les OS où l'info manque carrément (§4.3).
+        # Sans ce garde-fou, `imaging/system_backup.py::estimate_system_
+        # backup_size_unprivileged` sous-comptait silencieusement une
+        # carte dont une partition système garder n'est pas montable par
+        # Windows, au lieu de retomber sur le repli élevé prévu pour ce cas.
+        size_bytes = int(size) if size else None
         partitions.append(
             PartitionInfo(
                 device_path=mountpoint or "",
                 label=volume.get("FileSystemLabel") or "",
                 filesystem=(volume.get("FileSystem") or "").lower(),
                 mountpoint=mountpoint,
-                size_bytes=volume.get("Size"),
+                size_bytes=size_bytes,
             )
         )
     return partitions

@@ -845,6 +845,90 @@ Après flash, la carte R36S expose trois partitions : `BOOT`, `root`, `EASYROMS`
 > soit l'OS ou le système de fichiers — filet de sécurité générique pour
 > tout futur cas de détection erronée, pas seulement celui-ci.
 
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel — cause réelle du rapport
+> ci-dessous : `Get-Volume` ne préserve pas l'ordre de son entrée
+> pipeline.** `partitions/locate.py::_list_windows` faisait `Get-Partition
+> -DiskNumber N | Sort-Object PartitionNumber | Get-Volume`, en supposant
+> que trier les partitions *avant* `Get-Volume` suffirait à obtenir les
+> volumes dans le même ordre en sortie. Faux : `Get-Volume` renvoie ses
+> résultats selon sa propre énumération interne, indépendante de l'ordre
+> de son entrée. Constaté en répétant l'appel plusieurs fois de suite sur
+> la même carte R36S réelle (ThinkPad, lecteur SD Realtek intégré), sans
+> rien changer côté matériel entre les appels : l'ordre alternait entre
+> `[EASYROMS, BOOT, (partition Linux)]` et `[BOOT, (partition Linux),
+> EASYROMS]` selon l'invocation.
+>
+> Impact concret : la sauvegarde « système sans les jeux » (§4.3) identifie
+> la partition de jeux par étiquette (`EASYROMS`/`STORAGE`), *peu importe*
+> son système de fichiers — mais refuse explicitement de continuer si
+> cette partition se retrouve en première position (rien à garder avant
+> elle). Quand l'ordre aléatoire plaçait `EASYROMS` en tête, l'opération
+> échouait avec « Aucune partition de jeux reconnue » (`GamesPartitionNot
+> Found`) alors que la carte est parfaitement standard — un échec
+> intermittent, pas systématique, cohérent avec un rapport utilisateur qui
+> voit l'échec une fois mais pas forcément à chaque tentative.
+>
+> **Corrigé** : chaque volume est désormais explicitement ré-associé à son
+> `PartitionNumber` d'origine dans la boucle PowerShell elle-même
+> (`ForEach-Object` + `Add-Member`, plutôt que de faire confiance à l'ordre
+> du pipeline), puis la liste est triée une seconde fois côté Python sur ce
+> champ. Un ordre déjà correct n'est jamais perturbé par ce second tri
+> (stable, et l'ordre PowerShell était déjà par moments le bon). Vérifié en
+> répétant l'appel une dizaine de fois de suite sur la carte réelle après
+> correctif : ordre `[BOOT, (partition Linux), EASYROMS]` stable à chaque
+> fois.
+>
+> **Second effet de bord découvert en vérifiant ce correctif** : pour la
+> partition Linux (`ext4`, système de fichiers que Windows ne reconnaît
+> pas), `Get-Volume` renvoie bien un objet volume (« RAW »), mais avec
+> `Size: 0` plutôt qu'un champ absent — une vraie partition de 0 octet
+> n'existe pas sur une carte SD flashée, `0` ici signifie « taille
+> inconnue », comme le `None` que `PartitionInfo.size_bytes` représente
+> déjà pour ce cas sur les autres OS. Sans distinction, `imaging/system_
+> backup.py::estimate_system_backup_size_unprivileged` (§4.3, l'estimation
+> affichée avant de lancer l'opération) additionnait ce `0` au lieu de
+> détecter une taille manquante et de retomber sur son repli élevé — sur
+> cette carte réelle, ça aurait affiché « ~115 Mo » (la taille de `BOOT`
+> seul) au lieu de retomber sur le calcul exact, pour une sauvegarde
+> système qui fait en réalité plusieurs Go (`BOOT` + la partition Linux).
+> `_list_windows` traite désormais toute taille à `0` comme inconnue
+> (`None`), jamais comme une vraie partition vide.
+
+> ⚠️ **Confirmé sur du vrai matériel : `EASYROMS` peut aussi être en exFAT,
+> pas seulement en NTFS.** Rapporté sur une carte R36S branchée à un
+> ThinkPad Windows : `Get-Volume` y montre bien l'étiquette `EASYROMS`,
+> mais son `FileSystem` vaut `exFAT`, pas `NTFS` — le système de fichiers
+> d'EASYROMS varie donc selon le vendeur de la carte, comme `BOOT` (§4.4
+> ci-dessus, FAT16 ou FAT32 selon les cartes). Traiter ce champ comme un
+> critère d'exclusion plutôt qu'une simple info cassait deux chemins qui le
+> comparaient à un ensemble figé de systèmes de fichiers plausibles :
+> 1. `imaging/system_backup.py::GAMES_PARTITION_FALLBACK_FILESYSTEMS`
+>    (sauvegarde « système sans les jeux », §4.3) et `partitions/
+>    locate.py::EASYROMS_FALLBACK_FILESYSTEMS` (repli sans étiquette,
+>    ci-dessus) ne listaient que FAT/NTFS — une carte dont EASYROMS
+>    retombe sur ce repli (étiquette absente ou non lue) et se trouve en
+>    exFAT y échouait avec `GamesPartitionNotFound`/`PartitionNotFound`.
+>    Les deux ensembles incluent désormais `"exfat"`.
+> 2. `detect/__init__.py::detect_workflow_status` marquait `copy_games`
+>    `StepStatus.PLATFORM_LIMITED` sur macOS *inconditionnellement* (badge
+>    « PC ou Linux »), en supposant EASYROMS toujours en NTFS — alors que
+>    macOS écrit l'exFAT nativement, contrairement au NTFS (pilote intégré
+>    en lecture seule). Corrigé : `selected_easyroms_partition` (nouvelle
+>    fonction publique de `locate.py`, réutilise `_select_easyroms` sans
+>    dupliquer sa logique d'identification) donne le système de fichiers
+>    réel d'EASYROMS sur la carte *actuellement* branchée ; la limitation
+>    n'est levée que si celui-ci est *positivement* confirmé différent de
+>    NTFS — par défaut (aucune carte, ou EASYROMS non identifiable sur
+>    celle-ci), le badge reste affiché comme avant, pour garder
+>    l'avertissement précoce même sans carte insérée.
+>
+> Ni `jobs.py::_reject_macos_ntfs_write` (compare l'exact `== "ntfs"`) ni
+> `_macos_filesystem` (normalise vers `"ntfs"` ou tombe sur la valeur brute
+> du système, `"exfat"` déjà telle quelle chez `diskutil`) n'avaient besoin
+> de changer : une EASYROMS exFAT sur macOS n'a jamais déclenché
+> `MacosNtfsWriteUnsupported` à tort, seul le badge informatif était trop
+> pessimiste.
+
 > ⚠️ **Confirmé sur du vrai matériel** : sur une vraie carte ArkOS R36S, la
 > partition `BOOT` (la première du disque) **n'a aucune étiquette** — `diskutil`
 > l'affiche « NO NAME », type DOS_FAT_16, ~117,4 Mo. L'identifier par étiquette

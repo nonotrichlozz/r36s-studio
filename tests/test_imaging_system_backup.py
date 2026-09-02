@@ -211,6 +211,26 @@ def test_compute_system_boundary_fallback_requires_large_size(mock_list, tmp_pat
 
 
 @patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_compute_system_boundary_fallback_accepts_exfat(mock_list, tmp_path):
+    """Confirmé sur du vrai matériel : le système de fichiers d'EASYROMS
+    varie selon le vendeur (NTFS constaté ailleurs, exFAT ici) -- le repli
+    sans étiquette doit l'accepter comme il accepte FAT/NTFS."""
+    boot = (2048, 4095)
+    root = (4096, 6143)
+    games = (6144, 6144 + 2_100_000 - 1)  # ~1,05 Go, au-dessus du seuil
+    source_path, _ = _build_fake_mbr_image(tmp_path, boot=boot, root=root, games=games, trailing=16, sparse=True)
+    mock_list.return_value = [
+        PartitionInfo(f"{source_path}s1", "", "msdos", None),
+        PartitionInfo(f"{source_path}s2", "", "ext4", None),
+        PartitionInfo(f"{source_path}s3", "", "exfat", None),  # pas d'étiquette reconnue
+    ]
+
+    boundary = compute_system_boundary(source_path)
+
+    assert boundary.end_bytes == 6144 * SECTOR_SIZE  # fin de root, juste avant la partition de jeux
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
 def test_compute_system_boundary_fallback_ignores_non_fat_ntfs_last_partition(mock_list, tmp_path):
     """Une dernière partition volumineuse mais pas FAT/NTFS (ext4, par
     exemple) ne doit jamais être prise pour la partition de jeux --
@@ -291,6 +311,22 @@ def test_estimate_unprivileged_falls_back_to_large_unlabeled_last_fat_partition(
         PartitionInfo("/dev/x1", "", "msdos", None, size_bytes=100_000_000),
         PartitionInfo("/dev/x2", "", "ext4", None, size_bytes=500_000_000),
         PartitionInfo("/dev/x3", "", "fat32", None, size_bytes=9_000_000_000),  # pas d'étiquette reconnue
+    ]
+
+    estimate = estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1")
+
+    assert estimate == 600_000_000
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+def test_estimate_unprivileged_falls_back_to_large_unlabeled_last_exfat_partition(mock_list):
+    """Confirmé sur du vrai matériel : EASYROMS peut être en exFAT selon le
+    vendeur -- le repli sans étiquette doit l'accepter comme il accepte
+    FAT/NTFS."""
+    mock_list.return_value = [
+        PartitionInfo("/dev/x1", "", "msdos", None, size_bytes=100_000_000),
+        PartitionInfo("/dev/x2", "", "ext4", None, size_bytes=500_000_000),
+        PartitionInfo("/dev/x3", "", "exfat", None, size_bytes=9_000_000_000),  # pas d'étiquette reconnue
     ]
 
     estimate = estimate_system_backup_size_unprivileged("/dev/fake-disk-test-1")

@@ -31,6 +31,7 @@ from r36s_studio.partitions.locate import (
     has_easyroms_partition,
     list_partitions,
     looks_like_arkos,
+    selected_easyroms_partition,
 )
 
 # Clés = noms de job (§4.6), identiques à ceux déjà utilisés par
@@ -151,6 +152,17 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
     can_boot = has_card and partitions is not None and has_boot_partition(partitions)
     can_easyroms = has_card and partitions is not None and has_easyroms_partition(partitions)
     is_arkos = card_system == CardSystem.ARKOS
+    # Système de fichiers réel d'EASYROMS sur *cette* carte -- varie selon
+    # le vendeur (NTFS constaté sur certaines cartes, exFAT sur d'autres,
+    # confirmé sur du vrai matériel). Seul le NTFS est bloqué en écriture
+    # par le pilote intégré de macOS ; l'exFAT s'écrit nativement, comme le
+    # FAT. Par défaut (aucune carte branchée, ou EASYROMS pas identifiable
+    # sur celle-ci) on suppose le pire (NTFS) pour garder l'avertissement
+    # précoce sur macOS, même sans carte -- seule une carte dont EASYROMS
+    # est *positivement* identifiée avec un autre système de fichiers lève
+    # la limitation.
+    easyroms_partition = selected_easyroms_partition(partitions) if partitions else None
+    easyroms_is_ntfs_or_unknown = easyroms_partition is None or easyroms_partition.filesystem == "ntfs"
 
     def _extraction_status(possible: bool, label: str) -> StepStatus:
         if is_rocknix:
@@ -175,11 +187,14 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
             else (StepStatus.DONE if is_arkos else StepStatus.AVAILABLE)
         ),
         INJECT_BOOT: _injection_status(is_arkos),
-        # EASYROMS est en NTFS sur une vraie carte R36S ArkOS (§4.4) :
-        # macOS ne monte le NTFS qu'en lecture seule, donc cette étape
-        # échoue toujours sur cet OS pour une carte ArkOS -- une limite de
-        # la plateforme, pas de la carte. Vérifié après `is_rocknix` :
-        # une carte ROCKNIX n'a de toute façon aucune partition NTFS (sa
+        # EASYROMS est en NTFS sur certaines cartes R36S ArkOS, en exFAT sur
+        # d'autres (§4.4, varie selon le vendeur, confirmé sur du vrai
+        # matériel) : seul le NTFS est concerné par la limitation macOS (son
+        # pilote intégré ne le monte qu'en lecture seule) -- l'exFAT s'écrit
+        # nativement, comme le FAT. `easyroms_is_ntfs_or_unknown` ci-dessus
+        # ne lève la limitation que si cette carte a positivement confirmé
+        # un autre système de fichiers. Vérifié après `is_rocknix` : une
+        # carte ROCKNIX n'a de toute façon aucune partition NTFS (sa
         # seconde partition est Linux, opaque depuis tous les OS de bureau
         # de la même façon) -- la vraie raison est alors le système de la
         # carte, pas la plateforme, même sur macOS.
@@ -187,7 +202,7 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
             StepStatus.SYSTEM_INCOMPATIBLE
             if is_rocknix
             else StepStatus.PLATFORM_LIMITED
-            if platform.system() == "Darwin"
+            if platform.system() == "Darwin" and easyroms_is_ntfs_or_unknown
             else _injection_status(is_arkos)
         ),
         EJECT: StepStatus.AVAILABLE if has_card else StepStatus.NOT_RELEVANT,

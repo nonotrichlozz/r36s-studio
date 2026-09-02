@@ -55,11 +55,14 @@ MBR n'ayant ni CRC ni table secondaire à recalculer.
 **Identification de la partition de jeux** : par étiquette d'abord
 (EASYROMS ou STORAGE, comme le reste du projet, via `partitions/
 locate.py::list_partitions`) ; à défaut d'étiquette reconnue, repli sur
-la dernière partition du disque si son système de fichiers est FAT ou
-NTFS et si elle dépasse `_LARGE_PARTITION_THRESHOLD_BYTES` -- une carte
-dont la partition de jeux ne porte aucune des deux étiquettes connues
-reste ainsi couverte, sans risquer de prendre une petite partition FAT
-(BOOT, par exemple) pour la partition de jeux."""
+la dernière partition du disque si son système de fichiers est FAT, NTFS
+ou exFAT et si elle dépasse `_LARGE_PARTITION_THRESHOLD_BYTES` -- une
+carte dont la partition de jeux ne porte aucune des deux étiquettes
+connues reste ainsi couverte, sans risquer de prendre une petite
+partition FAT (BOOT, par exemple) pour la partition de jeux. Le système
+de fichiers d'EASYROMS varie selon le vendeur (NTFS constaté sur
+certaines cartes, exFAT sur d'autres, confirmé sur du vrai matériel) --
+une info à consigner, jamais un critère d'exclusion."""
 
 from __future__ import annotations
 
@@ -81,9 +84,12 @@ GAMES_PARTITION_LABELS = {"EASYROMS", "STORAGE"}
 
 # Repli quand aucune étiquette ne correspond (§ note de module) -- systèmes
 # de fichiers plausibles pour une partition de jeux, et seuil de taille
-# (1 Go) en dessous duquel une dernière partition FAT/NTFS a plus de
+# (1 Go) en dessous duquel une dernière partition FAT/NTFS/exFAT a plus de
 # chances d'être une partition système méconnue qu'une partition de jeux.
-GAMES_PARTITION_FALLBACK_FILESYSTEMS = {"ntfs", "msdos", "vfat", "fat", "fat16", "fat32"}
+# Le système de fichiers d'EASYROMS varie selon le vendeur (NTFS constaté
+# sur certaines cartes, exFAT sur d'autres, confirmé sur du vrai matériel)
+# -- une info à consigner, jamais un critère d'exclusion.
+GAMES_PARTITION_FALLBACK_FILESYSTEMS = {"ntfs", "exfat", "msdos", "vfat", "fat", "fat16", "fat32"}
 _LARGE_PARTITION_THRESHOLD_BYTES = 1_000_000_000
 
 
@@ -117,7 +123,7 @@ def _labeled_games_partition_index(partitions: List[PartitionInfo]) -> Optional[
 
 def _fallback_games_partition_index(partitions: List[PartitionInfo], raw_sizes_bytes: List[int]) -> Optional[int]:
     """Repli sans étiquette reconnue (§ note de module) : dernière
-    partition, système de fichiers FAT/NTFS, de grande taille. `raw_sizes_
+    partition, système de fichiers FAT/NTFS/exFAT, de grande taille. `raw_sizes_
     bytes` doit être dans le même ordre (position sur le disque) que
     `partitions` -- la taille vient de la table brute, `list_partitions`
     n'exposant aucune taille."""
@@ -173,7 +179,7 @@ def estimate_system_backup_size_unprivileged(device_path: str) -> Optional[int]:
     if games_index is None or games_index == 0:
         raise GamesPartitionNotFound(
             "Aucune partition de jeux reconnue (EASYROMS, STORAGE, ou dernière "
-            "partition FAT/NTFS de grande taille) sur cette carte."
+            "partition FAT/NTFS/exFAT de grande taille) sur cette carte."
         )
 
     kept_sizes = sizes[:games_index]
@@ -202,7 +208,7 @@ def compute_system_boundary(device_path: str) -> SystemBoundary:
             if games_index is None or games_index == 0 or games_index >= len(mbr_sorted):
                 raise GamesPartitionNotFound(
                     "Aucune partition de jeux reconnue (EASYROMS, STORAGE, ou dernière "
-                    "partition FAT/NTFS de grande taille) sur cette carte."
+                    "partition FAT/NTFS/exFAT de grande taille) sur cette carte."
                 )
             boundary = mbr_sorted[games_index - 1]
             removed_slots = [p.index for p in mbr_sorted[games_index:]]
@@ -220,7 +226,7 @@ def compute_system_boundary(device_path: str) -> SystemBoundary:
     if games_index is None or games_index == 0 or games_index >= len(entries_sorted):
         raise GamesPartitionNotFound(
             "Aucune partition de jeux reconnue (EASYROMS, STORAGE, ou dernière "
-            "partition FAT/NTFS de grande taille) sur cette carte."
+            "partition FAT/NTFS/exFAT de grande taille) sur cette carte."
         )
     boundary_entry = entries_sorted[games_index - 1]
     kept_entries = entries_sorted[:games_index]

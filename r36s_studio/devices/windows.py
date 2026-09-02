@@ -19,7 +19,10 @@ class WindowsDeviceProvider(DeviceProvider):
         del allow_disk_image
         disks_raw = self._run_powershell("Get-Disk | ConvertTo-Json -Depth 3")
         partitions_raw = self._run_powershell("Get-Partition | ConvertTo-Json -Depth 3")
-        return self._build(disks_raw, partitions_raw)
+        drives_raw = self._run_powershell(
+            "Get-CimInstance Win32_DiskDrive | Select-Object Index, MediaType | ConvertTo-Json -Depth 3"
+        )
+        return self._build(disks_raw, partitions_raw, drives_raw)
 
     @staticmethod
     def _run_powershell(command: str) -> str:
@@ -32,9 +35,13 @@ class WindowsDeviceProvider(DeviceProvider):
         return result.stdout
 
     @classmethod
-    def _build(cls, disks_raw: str, partitions_raw: str) -> list[Device]:
+    def _build(cls, disks_raw: str, partitions_raw: str, drives_raw: str = "") -> list[Device]:
         disks = cls._as_list(json.loads(disks_raw)) if disks_raw.strip() else []
         partitions = cls._as_list(json.loads(partitions_raw)) if partitions_raw.strip() else []
+        drives = cls._as_list(json.loads(drives_raw)) if drives_raw.strip() else []
+        media_type_by_index = {
+            int(d["Index"]): d.get("MediaType") for d in drives if d.get("Index") is not None
+        }
 
         devices = []
         for disk in disks:
@@ -44,7 +51,8 @@ class WindowsDeviceProvider(DeviceProvider):
                 for p in partitions
                 if p.get("DiskNumber") == number and p.get("DriveLetter")
             ]
-            devices.append(cls._to_device(disk, letters))
+            media_type = media_type_by_index.get(number) if number is not None else None
+            devices.append(cls._to_device(disk, letters, media_type))
         return devices
 
     @staticmethod
@@ -56,9 +64,20 @@ class WindowsDeviceProvider(DeviceProvider):
         return list(data or [])
 
     @staticmethod
-    def _to_device(disk: dict, mountpoints: list[str]) -> Device:
+    def _to_device(disk: dict, mountpoints: list[str], media_type: str | None = None) -> Device:
         bus = (disk.get("BusType") or "").upper()
         is_removable = disk.get("IsRemovable")
+        if is_removable is None:
+            # `Get-Disk.IsRemovable` est absent (pas juste faux) sur certains
+            # lecteurs de carte SD intégrés (ex. Realtek PCIE CardReader,
+            # `BusType: SCSI`) -- `Win32_DiskDrive.MediaType` distingue
+            # correctement ce cas ("Removable Media" contre "Fixed hard disk
+            # media" pour un disque système), constaté sur du vrai matériel.
+            normalized_media_type = (media_type or "").strip().lower()
+            if normalized_media_type == "removable media":
+                is_removable = True
+            elif normalized_media_type == "fixed hard disk media":
+                is_removable = False
         if is_removable is None:
             is_removable = bus == "USB"
 

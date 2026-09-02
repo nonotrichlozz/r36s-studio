@@ -321,6 +321,31 @@ class Device:
 | macOS | `diskutil list -plist external physical` puis `diskutil info -plist diskN` |
 | Windows | PowerShell `Get-Disk \| ConvertTo-Json` + `Get-Partition` pour les lettres |
 
+> ⚠️ **Confirmé sur du vrai matériel : `Get-Disk.IsRemovable` est absent
+> (pas faux) pour un lecteur de carte SD intégré.** Premier test réel sur
+> un ThinkPad avec lecteur SD Realtek intégré (`R36S_STUDIO`, aucune carte
+> détectée alors qu'une carte 128 Go était bien montée) : `Get-Disk`
+> renvoie `IsRemovable: $null` pour **tous** les disques de cette machine,
+> carte SD comprise, et son `BusType` vaut `SCSI` (`FriendlyName: Realtek
+> PCIE CardReader`) — jamais `USB`. Le filtre `safety` (§4.2 : « `removable`
+> est faux **et** `bus` n'est pas USB ») rejetait donc la carte à tort :
+> `is_removable = disk.get("IsRemovable")` retombait sur `is None` avant
+> même le repli `bus == "USB"`, qui échoue lui aussi puisque le bus
+> annoncé est SCSI. Ce n'est pas propre à cette machine : n'importe quel
+> lecteur de carte SD interne (PCIe/SCSI plutôt qu'USB) est concerné.
+>
+> **Corrigé** en croisant `Get-Disk` avec `Win32_DiskDrive.MediaType`
+> (`Get-CimInstance Win32_DiskDrive | Select-Object Index, MediaType`,
+> une troisième requête PowerShell dans `devices/windows.py::list_devices`)
+> par index de disque — `"Removable Media"` (carte SD, confirmé sur cette
+> machine) contre `"Fixed hard disk media"` (NVMe système, confirmé aussi)
+> — utilisé seulement quand `IsRemovable` est absent, jamais pour
+> contredire une valeur explicite. Le repli `bus == "USB"` reste en tout
+> dernier recours si `Win32_DiskDrive` ne répond rien d'exploitable non
+> plus (requête échouée, disque absent de sa liste). Aucune autre règle du
+> garde-fou §4.2 n'est affaiblie — seul le signal `removable` change de
+> source.
+
 ### 4.2 `safety/` — le garde-fou
 
 Un périphérique est **refusé** si l'une de ces conditions est vraie :

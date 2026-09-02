@@ -530,6 +530,42 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > le mode assisté — les autres opérations (téléchargement ROCKNIX, chaque
 > étape du parcours guidé) restent déjà correctement dans `MainView`/
 > `WizardStepPanel` ou `AssistedLandingScreen`.
+>
+> ⚠️ **Blocage constaté en conditions réelles, corrigé** : l'écran
+> « Choisis la carte à préparer » (`_on_prepare_card_requested`, ci-dessus)
+> s'affichait bien, mais son bouton Continuer ne déclenchait rien — la
+> première version ouvrait directement la fenêtre modale Choix de la
+> carte (`_device_dialog.open()`, comme n'importe quelle tuile du mode
+> expert) sans jamais démarrer le moindre sondage automatique : aucun
+> bandeau de détection contrairement aux étapes 1/4 du vrai parcours
+> guidé, et le bouton Continuer, affiché mais jamais câblé à une action
+> pour cet écran précis, restait désactivé pour toujours (`can_continue=
+> False`, jamais réactivé). Confirmé qu'aucun filtre `safety` n'est en
+> cause (§4.2 : système, dossier de l'app, amovible/USB, taille —
+> jamais le contenu déjà présent sur la carte).
+>
+> **Corrigé** en répliquant le même mécanisme que les étapes 1/4 :
+> `_prepare_card_poll_timer` (nouveau, distinct de `_wizard_poll_timer` --
+> ce parcours ponctuel n'est jamais un vrai `WizardJob`, y faire toucher
+> `_on_wizard_poll`/`self._wizard_flow` corromprait le vrai parcours
+> guidé) et `_on_prepare_card_poll` : une carte unique détectée active
+> Continuer avec le nom de la carte affiché en bandeau
+> (`wizard_status_device_found`, chaîne déjà utilisée par les étapes
+> 1/4) ; zéro carte laisse Continuer désactivé (`wizard_status_waiting`) ;
+> plusieurs cartes retombent sur le même repli `_device_dialog` qu'avant
+> (`_skip_file_dialog_for_flash` n'est donc plus consommé que par ce cas
+> précis). `_prepare_card_candidate` (nouveau, `None` sauf carte unique
+> trouvée) fait le lien avec le bouton Continuer : `_on_wizard_continue`
+> le vérifie en tout premier, avant même `self._wizard_flow` -- jamais de
+> confusion possible entre les deux parcours, l'un exclut l'autre par
+> construction (`_wizard_active`/`_assisted_ad_hoc_active`). Bouton
+> Actualiser affiché (`show_refresh=True`, comme les étapes 1/4) pour
+> resonder manuellement sans attendre le prochain tick, ou après avoir
+> fermé le repli multi-cartes sans choisir -- `_on_wizard_refresh_
+> requested` route désormais vers le bon sondage selon
+> `self._assisted_ad_hoc_active`, jamais `_on_wizard_poll` pour ce cas.
+> `_cancel_wizard`/`_on_assisted_ad_hoc_return_home` arrêtent aussi ce
+> nouveau minuteur, défensivement.
 
 > ⚠️ **Deux défauts rapportés en usage réel, corrigés.**
 >

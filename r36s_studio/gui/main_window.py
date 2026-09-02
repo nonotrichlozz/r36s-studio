@@ -153,6 +153,12 @@ class MainWindow(QMainWindow):
         # choisir. Consommé (remis à False) dès que `_on_device_chosen` en
         # tient compte.
         self._skip_file_dialog_for_flash = False
+        # Candidate détectée par le sondage automatique de cette même
+        # étape (`_on_prepare_card_poll`, ci-dessous) -- `None` tant
+        # qu'aucune carte unique n'a été trouvée (bouton Continuer
+        # désactivé, même principe que les étapes 1/4 du vrai parcours
+        # guidé, §4.3 : bug corrigé, ce bandeau de détection manquait).
+        self._prepare_card_candidate: Optional[Device] = None
 
         # Une seule autorisation macOS pour toute l'application (§5 mode
         # assisté), créée au premier besoin (`_macos_auth_session`) plutôt
@@ -184,6 +190,13 @@ class MainWindow(QMainWindow):
         self._wizard_poll_timer = QTimer(self)
         self._wizard_poll_timer.setInterval(_WIZARD_POLL_INTERVAL_MS)
         self._wizard_poll_timer.timeout.connect(self._on_wizard_poll)
+        # Sondage dédié à « Préparer une carte avec cette sauvegarde »
+        # (§4.3) -- distinct de `_wizard_poll_timer` : ce parcours ponctuel
+        # n'est jamais un vrai `WizardJob`, `_on_wizard_poll` ne doit donc
+        # jamais être appelé pour lui (il opère sur `self._wizard_flow`).
+        self._prepare_card_poll_timer = QTimer(self)
+        self._prepare_card_poll_timer.setInterval(_WIZARD_POLL_INTERVAL_MS)
+        self._prepare_card_poll_timer.timeout.connect(self._on_prepare_card_poll)
         self._wizard_source_device: Optional[Device] = None
         self._wizard_source_fingerprint: Optional[str] = None
         # Système détecté sur la carte source à l'étape 1 (§4.5 CardSystem)
@@ -846,26 +859,75 @@ class MainWindow(QMainWindow):
         """« Préparer une carte avec cette sauvegarde » (§4.3) -- réutilise
         le fichier fraîchement créé comme source du flash, toujours dans
         le contexte assisté (jamais l'écran expert) : seule la carte
-        cible reste à choisir (`_skip_file_dialog_for_flash`), puis la
-        fenêtre Confirmation habituelle (§2 n°6, jamais sautée)."""
+        cible reste à choisir. Bug corrigé, constaté en conditions
+        réelles : la première version ouvrait directement la fenêtre
+        modale Choix de la carte, sans jamais démarrer le moindre sondage
+        -- aucun bandeau de détection (contrairement aux étapes 1/4 du
+        vrai parcours guidé), bouton Continuer affiché mais jamais câblé à
+        rien. Démarre désormais le même sondage automatique
+        (`_prepare_card_poll_timer`/`_on_prepare_card_poll`) que les
+        étapes 1/4, avec le même bandeau de détection -- `_device_dialog`
+        ne sert plus que de repli pour plusieurs cartes candidates
+        (`_skip_file_dialog_for_flash`, consommé par `_on_device_chosen`
+        dans ce cas précis), puis la fenêtre Confirmation habituelle
+        (§2 n°6, jamais sautée)."""
         backup_path = self._file_path
         self._mode = "flash"
         self._device = None
         self._file_path = backup_path
         self._skip_file_dialog_for_flash = True
+        self._prepare_card_candidate = None
         self._wizard_panel.show_step(
             tr("assisted_prepare_card_choose_device_title"),
             tr("assisted_prepare_card_choose_device_instruction"),
             can_continue=False,
+            show_refresh=True,
         )
-        self._refresh_devices()
-        self._device_dialog.open()
+        self._prepare_card_poll_timer.start()
+        self._on_prepare_card_poll()
+
+    def _on_prepare_card_poll(self) -> None:
+        """Sondage automatique de la carte cible pour « Préparer une carte
+        avec cette sauvegarde » (§4.3) -- même principe que
+        `_on_wizard_poll` (étapes 1/4 : bandeau de détection, Continuer
+        activé seulement une fois une carte trouvée), mais jamais
+        `self._wizard_flow`/`_on_wizard_poll` lui-même : ce parcours
+        ponctuel n'est pas un vrai `WizardJob`, le réutiliser corromprait
+        l'état du vrai parcours guidé. Pas de vérification d'empreinte
+        contrairement à l'étape 4 (rien à comparer : aucune « carte
+        source » n'est suivie dans ce parcours ponctuel)."""
+        devices, rejected_lines = self._list_devices_with_diagnostics()
+        self._log_wizard_detection_diagnostic(len(devices), rejected_lines)
+
+        if len(devices) > 1:
+            # Plusieurs cartes candidates (§4.2) -- même repli que
+            # `_on_wizard_poll` : la fenêtre Choix de la carte plutôt que
+            # de deviner laquelle préparer.
+            self._prepare_card_poll_timer.stop()
+            self._wizard_panel.set_status(tr("wizard_status_multiple_candidates"))
+            self._device_dialog.set_devices(devices)
+            self._device_dialog.open()
+            return
+
+        if not devices:
+            self._wizard_panel.set_status(tr("wizard_status_waiting"))
+            self._wizard_panel.set_can_continue(False)
+            return
+
+        self._prepare_card_poll_timer.stop()
+        device = devices[0]
+        self._prepare_card_candidate = device
+        self._wizard_panel.set_status(tr("wizard_status_device_found", display=device.display))
+        self._wizard_panel.set_can_continue(True)
 
     def _on_assisted_ad_hoc_return_home(self) -> None:
         """« Revenir à l'accueil », proposé après la sauvegarde système
         (ou la préparation de carte qui la réutilise) -- jamais un
         changement de mode persisté (§4.3), même principe que
         `_start_backup_system_from_assisted_landing`."""
+        if self._prepare_card_poll_timer.isActive():
+            self._prepare_card_poll_timer.stop()
+        self._prepare_card_candidate = None
         self._assisted_ad_hoc_active = False
         self._log_panel.set_idle()
         self._root_stack.setCurrentWidget(self._assisted_landing)
@@ -1103,11 +1165,15 @@ class MainWindow(QMainWindow):
         l'accueil assisté (§5) -- aucune opération déjà terminée n'est
         défaite, seul le parcours guidé s'arrête. Câblé au même bouton
         Annuler du `WizardStepPanel` que la sauvegarde système lancée
-        depuis l'accueil assisté (§4.3, `show_step` pendant l'opération) :
-        fonctionne correctement dans les deux cas, `self._runner` étant le
-        même mécanisme sous-jacent quel que soit le contexte."""
+        depuis l'accueil assisté (§4.3, `show_step` pendant l'opération et
+        pendant le sondage de « Préparer une carte ») : fonctionne
+        correctement dans les deux cas, `self._runner` étant le même
+        mécanisme sous-jacent quel que soit le contexte."""
         if self._wizard_poll_timer.isActive():
             self._wizard_poll_timer.stop()
+        if self._prepare_card_poll_timer.isActive():
+            self._prepare_card_poll_timer.stop()
+        self._prepare_card_candidate = None
         if self._runner is not None:
             self._runner.cancel()
         self._wizard_active = False
@@ -1237,7 +1303,19 @@ class MainWindow(QMainWindow):
         copient avancent d'eux-mêmes via `_on_wizard_job_finished`. Cas
         particulier : sur une carte source non reconnue, Continuer à
         l'étape 2 signifie « continuer sans sauvegarde » plutôt que de
-        lancer l'identification (`_enter_wizard_identify_step` ci-dessus)."""
+        lancer l'identification (`_enter_wizard_identify_step` ci-dessus).
+
+        « Préparer une carte avec cette sauvegarde » (§4.3) partage ce
+        même bouton/signal -- vérifié en tout premier, jamais
+        `self._wizard_flow` pour ce cas précis (ce parcours ponctuel n'est
+        pas un vrai `WizardJob`, y toucher corromprait le vrai parcours
+        guidé)."""
+        if self._prepare_card_candidate is not None:
+            device = self._prepare_card_candidate
+            self._prepare_card_candidate = None
+            self._device = device
+            self._proceed_to_flash_confirmation()
+            return
         if self._wizard_skip_extraction_on_continue:
             self._wizard_skip_extraction_on_continue = False
             self._skip_boot_easyroms_extraction()
@@ -1340,11 +1418,20 @@ class MainWindow(QMainWindow):
         self._fingerprint_runner.start()
 
     def _on_wizard_refresh_requested(self) -> None:
-        """Bouton Rafraîchir (étapes 1/4, §5 mode assisté) -- relance la
-        recherche manuellement, sans attendre le prochain tick (jusqu'à
-        1,5 s), utile quand le sondage automatique n'a rien trouvé ou
-        reste bloqué après un choix annulé dans la fenêtre Choix de la
-        carte (plusieurs candidates)."""
+        """Bouton Rafraîchir (étapes 1/4, §5 mode assisté, et « Préparer
+        une carte avec cette sauvegarde », §4.3) -- relance la recherche
+        manuellement, sans attendre le prochain tick (jusqu'à 1,5 s),
+        utile quand le sondage automatique n'a rien trouvé ou reste
+        bloqué après un choix annulé dans la fenêtre Choix de la carte
+        (plusieurs candidates). `self._assisted_ad_hoc_active` route vers
+        le bon sondage -- jamais `_on_wizard_poll` (qui opère sur
+        `self._wizard_flow`, sans rapport avec ce parcours ponctuel) pour
+        « Préparer une carte »."""
+        if self._assisted_ad_hoc_active:
+            if not self._prepare_card_poll_timer.isActive():
+                self._prepare_card_poll_timer.start()
+            self._on_prepare_card_poll()
+            return
         if not self._wizard_poll_timer.isActive():
             self._wizard_poll_timer.start()
         self._on_wizard_poll()

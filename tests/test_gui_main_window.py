@@ -591,22 +591,20 @@ def test_backup_system_return_home_switches_to_assisted_landing(mock_list, mock_
     assert window._assisted_ad_hoc_active is False
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices")
-@patch("r36s_studio.gui.main_window.list_devices")
-def test_backup_system_prepare_card_starts_flash_with_existing_file(
-    mock_list, mock_filter, mock_load, mock_detect, qapp
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_prepare_card_starts_polling_with_continue_disabled(
+    mock_list, mock_filter, mock_load, qapp
 ):
-    """« Préparer une carte avec cette sauvegarde » réutilise le fichier
-    déjà créé comme source du flash -- jamais un aller vers l'écran expert
-    (§5 mode assisté) : reste sur MainView/WizardStepPanel, la fenêtre
-    Choix du fichier est inutile puisque le fichier est déjà connu."""
-    new_device = _make_device(path="/dev/fake-disk-test-9", display="Carte neuve")
-    mock_list.return_value = [new_device]
-    mock_filter.return_value = [new_device]
+    """Bug corrigé, constaté en conditions réelles : cet écran n'affichait
+    aucun bandeau de détection (contrairement aux étapes 1/4) et son
+    bouton Continuer ne déclenchait rien -- ni sondage démarré, ni action
+    câblée. Doit démarrer le même sondage automatique que les étapes 1/4,
+    Continuer désactivé tant qu'aucune carte n'est trouvée."""
     window = MainWindow()
     window._assisted_landing.backup_system_requested.emit()
+    window._device_dialog.close()  # fenêtre Choix de la carte de l'étape backup_system, non simulée ici
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._on_worker_finished(True)
@@ -615,17 +613,162 @@ def test_backup_system_prepare_card_starts_flash_with_existing_file(
 
     assert window._mode == "flash"
     assert window._file_path == "/tmp/systeme.img"
-    assert window._device_dialog.isVisible() is True
+    assert window._prepare_card_poll_timer.isActive() is True
+    assert window._device_dialog.isVisible() is False  # jamais immédiatement
     assert window._root_stack.currentWidget() is window._main_view
+    assert window._wizard_panel._continue_button.isEnabled() is False
 
-    window._device_dialog._list.setCurrentRow(0)
-    window._device_dialog._emit_chosen()
 
-    # Fichier déjà connu : la fenêtre Choix du fichier est sautée, direct
-    # à la fenêtre Confirmation (obligatoire pour un flash, §2 n°6).
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_backup_system_prepare_card_single_candidate_enables_continue(
+    mock_list, mock_filter, mock_load, mock_detect, qapp
+):
+    new_device = _make_device(path="/dev/fake-disk-test-9", display="Carte neuve")
+    mock_list.return_value = [new_device]
+    mock_filter.return_value = [new_device]
+    window = MainWindow()
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+    window._wizard_panel.prepare_card_requested.emit()
+
+    window._on_prepare_card_poll()
+
+    assert window._wizard_panel._continue_button.isEnabled() is True
+    assert window._prepare_card_poll_timer.isActive() is False  # trouvée -> plus besoin de resonder
+    assert "Carte neuve" in window._wizard_panel._status_label.text()
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_backup_system_prepare_card_continue_proceeds_to_confirmation(
+    mock_list, mock_filter, mock_load, mock_detect, qapp
+):
+    """« Préparer une carte avec cette sauvegarde » réutilise le fichier
+    déjà créé comme source du flash -- jamais un aller vers l'écran expert
+    (§5 mode assisté) : reste sur MainView/WizardStepPanel, la fenêtre
+    Choix du fichier est inutile puisque le fichier est déjà connu. La
+    fenêtre Confirmation, elle, reste obligatoire (§2 n°6)."""
+    new_device = _make_device(path="/dev/fake-disk-test-9", display="Carte neuve")
+    mock_list.return_value = [new_device]
+    mock_filter.return_value = [new_device]
+    window = MainWindow()
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+    window._wizard_panel.prepare_card_requested.emit()
+    window._on_prepare_card_poll()
+
+    window._wizard_panel.continue_requested.emit()
+
     assert window._file_dialog.isVisible() is False
     assert window._confirm_dialog.isVisible() is True
     assert window._device is new_device
+    assert window._prepare_card_candidate is None  # consommé
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_backup_system_prepare_card_multiple_candidates_falls_back_to_device_dialog(
+    mock_list, mock_filter, mock_load, qapp
+):
+    devices = [
+        _make_device(path="/dev/fake-disk-test-9", display="Carte 1"),
+        _make_device(path="/dev/fake-disk-test-10", display="Carte 2"),
+    ]
+    mock_list.return_value = devices
+    mock_filter.return_value = devices
+    window = MainWindow()
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+    window._wizard_panel.prepare_card_requested.emit()
+
+    window._on_prepare_card_poll()
+
+    assert window._prepare_card_poll_timer.isActive() is False
+    assert window._device_dialog.isVisible() is True
+
+    window._device_dialog._list.setCurrentRow(1)
+    window._device_dialog._emit_chosen()
+
+    # Fichier déjà connu même via ce repli : la fenêtre Choix du fichier
+    # reste sautée, direct à la fenêtre Confirmation.
+    assert window._file_dialog.isVisible() is False
+    assert window._confirm_dialog.isVisible() is True
+    assert window._device is devices[1]
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_prepare_card_no_candidate_keeps_waiting(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._assisted_landing.backup_system_requested.emit()
+    window._device_dialog.close()  # fenêtre Choix de la carte de l'étape backup_system, non simulée ici
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+    window._wizard_panel.prepare_card_requested.emit()
+
+    window._on_prepare_card_poll()
+
+    assert window._prepare_card_poll_timer.isActive() is True
+    assert window._wizard_panel._continue_button.isEnabled() is False
+    assert window._device_dialog.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_backup_system_prepare_card_refresh_button_polls_the_right_target(
+    mock_list, mock_filter, mock_load, mock_detect, qapp
+):
+    """Le bouton Actualiser de cet écran ne doit jamais relancer le
+    sondage du vrai parcours guidé (`_on_wizard_poll`, qui opère sur
+    `self._wizard_flow` -- sans rapport ici)."""
+    new_device = _make_device(path="/dev/fake-disk-test-9", display="Carte neuve")
+    mock_list.return_value = [new_device]
+    mock_filter.return_value = [new_device]
+    window = MainWindow()
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+    window._wizard_panel.prepare_card_requested.emit()
+    window._prepare_card_poll_timer.stop()  # simule un sondage arrêté (ex. dialogue multi-cartes fermé)
+
+    window._wizard_panel.refresh_requested.emit()
+
+    assert window._wizard_panel._continue_button.isEnabled() is True  # a retrouvé la carte unique
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_backup_system_prepare_card_cancel_stops_polling(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._assisted_landing.backup_system_requested.emit()
+    window._device = _make_device()
+    window._file_path = "/tmp/systeme.img"
+    window._on_worker_finished(True)
+    window._wizard_panel.prepare_card_requested.emit()
+    assert window._prepare_card_poll_timer.isActive() is True
+
+    window._wizard_panel.cancel_requested.emit()
+
+    assert window._prepare_card_poll_timer.isActive() is False
+    assert window._root_stack.currentWidget() is window._assisted_landing
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))

@@ -1151,6 +1151,102 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > (CLI : message `emit_log` ; GUI : journal de bord permanent, §5, ou boîte de
 > dialogue) — jamais un succès silencieux.
 >
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel (parcours de clonage,
+> Windows) : la carte source n'était jamais réellement éjectée à l'étape 3.**
+> `eject()` levait purement et simplement `NotImplementedError` sous
+> Windows depuis le début du projet -- un vrai trou, pas juste un cas mal
+> géré : `_run_wizard_source_eject` (`gui/main_window.py`) l'attrapait
+> bien et affichait l'erreur dans le journal (jamais un échec silencieux
+> côté GUI), mais la carte, elle, restait montée et non éjectée pour de
+> vrai. **Corrigé** : `_windows_eject` (`partitions/eject.py`) verrouille
+> et démonte chaque volume monté du disque
+> (`imaging/winlock.py::lock_and_dismount_volumes`, même mécanisme que
+> l'écriture brute, §4.3), puis envoie l'éjection matérielle proprement
+> dite au disque physique (`IOCTL_STORAGE_EJECT_MEDIA`, nouvelle fonction
+> `winlock.eject_media` -- contrairement à `refresh_disk_properties`,
+> best-effort, celle-ci lève en cas d'échec, une éjection ratée devant
+> être signalée, §2 règle 5). Les lettres de lecteur du disque sont
+> retrouvées via une requête PowerShell dédiée
+> (`_windows_drive_letters`, `Get-Partition -DiskNumber N`) ; une
+> partition sans lettre (BOOT sans lettre, §4.4) n'a simplement rien à
+> démonter, l'éjection matérielle a quand même lieu.
+>
+> ⚠️ **Bug corrigé, confirmé en relisant le code après le rapport
+> ci-dessus : le Continuer du vrai parcours guidé pouvait afficher la
+> fenêtre Confirmation avec la mauvaise carte, court-circuitant la
+> vérification d'empreinte (§5, § pré-vol n°3).** Rapporté comme : image
+> système extraite d'une carte de 128 Go, carte cible de 32 Go insérée,
+> message de confirmation annonçant pourtant la perte des données de la
+> carte de 128 Go. Cause réelle : `_on_wizard_continue`
+> (`gui/main_window.py`) vérifie en tout premier `self._prepare_card_
+> candidate` (`Optional[Device]`, propre au parcours ponctuel « Préparer
+> une carte avec cette sauvegarde », §4.3) pour décider si le clic
+> concerne ce parcours ad-hoc plutôt que le vrai parcours guidé --
+> mais `_start_wizard()` ne réinitialisait jamais ce champ (ni
+> `_assisted_ad_hoc_active`, ni `_prepare_card_poll_timer`) au démarrage
+> du vrai parcours. Un passage antérieur par le parcours ad-hoc laissant
+> une carte candidate détectée sans retour explicite à l'accueil (les
+> deux seuls chemins qui réinitialisaient déjà ce champ, `_cancel_wizard`
+> et `_on_assisted_ad_hoc_return_home`) laissait donc `_prepare_card_
+> candidate` non `None` pour toute la suite de la session -- y compris
+> pendant un vrai parcours de clonage démarré ensuite. Le Continuer de
+> l'étape 3 (détection de la carte cible, qui active ce même bouton une
+> fois une carte trouvée -- comme l'étape 1) se retrouvait alors détourné
+> vers `_proceed_to_flash_confirmation()` avec la carte candidate
+> périmée, **sans jamais passer par `_enter_wizard_restore_image_step`**
+> -- ni son affectation `self._mode = "flash"`, ni sa vérification de
+> taille de destination (`estimate_total_bytes`, § pré-vol n°2) : les
+> deux étaient simplement absentes de ce chemin détourné, pas en défaut
+> elles-mêmes (vérifié séparément : `estimate_total_bytes` sur un `.img`
+> brut renvoie bien `os.path.getsize()` du fichier, jamais une taille de
+> périphérique).
+>
+> **Corrigé à deux niveaux** : `_start_wizard()` réinitialise désormais
+> `_prepare_card_candidate`/`_assisted_ad_hoc_active` (et arrête `_prepare_
+> card_poll_timer` s'il tournait), symétriquement à ce que `_cancel_wizard`/
+> `_on_assisted_ad_hoc_return_home` font déjà en sens inverse -- ces deux
+> parcours sont censés être mutuellement exclusifs, démarrer l'un doit
+> repartir d'un état propre pour l'autre. En plus, garde-fou en dernier
+> recours directement dans `_on_wizard_continue`/`_on_wizard_refresh_
+> requested` (`and not self._wizard_active` ajouté à leur condition de
+> routage ad-hoc) : même si un futur chemin laissait à nouveau cet état
+> incohérent, le Continuer/Actualiser du vrai parcours guidé ne peut plus
+> jamais être détourné vers le parcours ponctuel pendant qu'il tourne.
+>
+> ⚠️ **Bug corrigé au passage : l'échec final s'affichait comme « Une
+> erreur est survenue. », message générique inutile pour diagnostiquer
+> quoi que ce soit après coup.** Cause : six codes d'erreur réellement
+> émis par le worker élevé (`__main__.py::emit_error`) --
+> `OUTPUT_EXISTS`, `IMAGE_NOT_FOUND`, `IO_ERROR`, `UNSUPPORTED_OS`,
+> `CONFIRMATION_REFUSED`, `INVALID_ARGS` -- n'avaient jamais été ajoutés à
+> `gui/strings.py::_ERROR_MESSAGE_KEYS`, retombant systématiquement sur
+> `error_generic` au lieu d'un message précis. `IO_ERROR` en particulier
+> est le repli générique de la quasi-totalité des commandes CLI pour une
+> erreur disque/E-S imprévue (carte débranchée en cours de copie,
+> permission refusée...) -- le plus susceptible d'apparaître en usage
+> réel de tous les codes qui manquaient, et une explication plausible du
+> message générique vu pendant ce même test (le clic détourné ci-dessus
+> relance `backup`/`backup_system` sur un fichier de sortie déjà créé par
+> l'étape précédente, ce qui échoue côté CLI avec `OUTPUT_EXISTS`).
+>
+> **Corrigé** en ajoutant ces six codes à `_ERROR_MESSAGE_KEYS`, avec un
+> message convivial dédié chacun. En complément, `gui/strings.py::
+> error_log_detail(code, msg)` (nouvelle fonction) garantit qu'un futur
+> code encore non mappé n'est plus jamais un trou total : quand
+> `friendly_error_message` retombe sur `error_generic`, le code brut du
+> protocole précède désormais le message dans le détail journalisé (ex.
+> `CODE_INCONNU : message brut`) plutôt que de disparaître silencieusement
+> -- un code déjà traduit n'a pas besoin de cette répétition, le message
+> brut seul suffit comme avant (§5 vocabulaire : le détail brut suit
+> toujours le message principal comme ligne supplémentaire du journal).
+> Les six points d'appel de `gui/main_window.py` qui construisaient
+> `details=self._last_error_msg or ""` en dur passent désormais par cette
+> fonction. Un test dédié (`tests/test_gui_strings.py::test_every_cli_
+> emitted_error_code_is_mapped_to_a_friendly_message`) relit littéralement
+> tous les `emit_error("CODE", ...)` de `__main__.py` et vérifie qu'aucun
+> ne retombe sur le message générique -- filet de sécurité pour qu'un
+> futur code ajouté côté CLI ne reproduise pas ce même trou en silence.
+>
 > ⚠️ **Correction de conception (remplace deux notes « phase 8» retirées
 > ici).** Les étapes A/B lettrées (extraction BOOT/EASYROMS) n'existaient
 > auparavant en mode assisté que comme jobs internes du parcours guidé à

@@ -2542,6 +2542,68 @@ def test_wizard_continue_on_step_one_advances_to_create_image_and_opens_backup_k
     assert window._backup_kind_dialog.isVisible() is True
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_wizard_resets_stale_ad_hoc_prepare_card_state(mock_list, mock_filter, mock_load, qapp):
+    """Bug corrigé, confirmé sur du vrai matériel : un `_prepare_card_
+    candidate`/`_assisted_ad_hoc_active` resté vrai d'un passage précédent
+    par « Préparer une carte avec cette sauvegarde » (§4.3, sans retour
+    explicite à l'accueil) détournait le Continuer du vrai parcours guidé
+    vers cette branche ad-hoc -- `_start_wizard` doit repartir d'un état
+    propre, quel que soit ce qui a été laissé derrière."""
+    window = MainWindow()
+    stale_source_device = _make_device(path="/dev/fake-disk-test-stale", display="Carte laissée par erreur")
+    window._prepare_card_candidate = stale_source_device
+    window._assisted_ad_hoc_active = True
+    window._prepare_card_poll_timer.start()
+
+    window._assisted_landing.prepare_requested.emit()
+
+    assert window._prepare_card_candidate is None
+    assert window._assisted_ad_hoc_active is False
+    assert window._prepare_card_poll_timer.isActive() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_continue_ignores_stale_prepare_card_candidate_while_wizard_active(
+    mock_list, mock_filter, mock_load, qapp, tmp_path
+):
+    """Garde-fou supplémentaire dans `_on_wizard_continue` lui-même (en
+    plus de la réinitialisation dans `_start_wizard` ci-dessus) : même si
+    `_prepare_card_candidate` est resté non `None` par un autre chemin,
+    le Continuer du vrai parcours guidé (`_wizard_active`) ne doit jamais
+    router vers la fenêtre Confirmation avec cette carte-là -- c'est
+    exactement le bug constaté sur du vrai matériel (la carte source de
+    128 Go annoncée à la place de la carte cible de 32 Go, court-
+    circuitant la vérification d'empreinte)."""
+    window = MainWindow()
+    stale_source_device = _make_device(path="/dev/fake-disk-test-source", display="Carte source 128 Go")
+    target_device = _make_device(path="/dev/fake-disk-test-target", display="Carte cible 32 Go")
+    image_path = tmp_path / "clone.img"
+    image_path.write_bytes(b"x" * 1024)
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+    window._wizard_flow.mark_done(WizardJob.CREATE_IMAGE)
+    window._wizard_target_device = target_device
+    window._file_path = str(image_path)
+    window._wizard_panel.set_can_continue(True)
+    # Simule l'état incohérent lui-même (contourne la réinitialisation de
+    # `_start_wizard`, pour vérifier ce garde-fou précis en isolation).
+    window._prepare_card_candidate = stale_source_device
+
+    with patch("r36s_studio.gui.main_window.MainWindow._proceed_to_flash_confirmation") as mock_proceed:
+        window._wizard_panel.continue_requested.emit()
+
+    mock_proceed.assert_not_called()
+    assert window._wizard_flow.is_done(WizardJob.DETECT_TARGET) is True
+    assert window._wizard_flow.current_job() == WizardJob.RESTORE_IMAGE
+    assert window._device is target_device
+    assert window._confirm_dialog.isVisible() is True
+
+
 # --- étape 2 : choix complet/système, puis copie (§5 mode assisté) ---------
 
 

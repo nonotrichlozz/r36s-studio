@@ -16,6 +16,7 @@ from typing import List
 FSCTL_LOCK_VOLUME = 0x00090018
 FSCTL_DISMOUNT_VOLUME = 0x00090020
 IOCTL_DISK_UPDATE_PROPERTIES = 0x00070140
+IOCTL_STORAGE_EJECT_MEDIA = 0x002D4808
 
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
@@ -92,6 +93,32 @@ def lock_and_dismount_volumes(mountpoints: List[str]) -> List[object]:
 def unlock_volumes(handles: List[object]) -> None:
     kernel32 = _kernel32()
     for handle in handles:
+        kernel32.CloseHandle(handle)
+
+
+def eject_media(physical_drive_path: str) -> None:
+    """`IOCTL_STORAGE_EJECT_MEDIA` sur `\\\\.\\PhysicalDriveN` (§4.5 étape F
+    /`partitions/eject.py`) -- l'éjection matérielle proprement dite,
+    distincte du verrouillage/démontage des volumes ci-dessus (nécessaire
+    avant, sans quoi Windows refuse l'éjection tant qu'un volume du
+    disque est encore monté). Lève en cas d'échec, contrairement à
+    `refresh_disk_properties` (best-effort) -- une éjection qui échoue
+    doit être signalée, pas avalée silencieusement (§2 règle 5)."""
+    kernel32 = _kernel32()
+    handle = kernel32.CreateFileW(
+        physical_drive_path,
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        None,
+        OPEN_EXISTING,
+        0,
+        None,
+    )
+    if handle in (0, -1, INVALID_HANDLE_VALUE):
+        raise OSError(f"impossible d'ouvrir {physical_drive_path} (erreur {_last_error()})")
+    try:
+        _device_io_control(handle, IOCTL_STORAGE_EJECT_MEDIA)
+    finally:
         kernel32.CloseHandle(handle)
 
 

@@ -9,6 +9,8 @@ périphérique bloc"."""
 
 from __future__ import annotations
 
+from typing import Optional
+
 STRINGS = {
     "app_title": "R36S Studio",
     # Accueil -- six étapes chronologiques fixes du workflow à deux cartes
@@ -356,6 +358,24 @@ STRINGS = {
         "Cette carte est trop petite pour la sauvegarde à installer. "
         "Utilise une carte neuve d'au moins la même taille."
     ),
+    # Codes émis par le worker élevé (`__main__.py`) mais absents de
+    # `_ERROR_MESSAGE_KEYS` jusqu'ici (bug corrigé) -- retombaient sur
+    # `error_generic` malgré une cause précise et déjà connue. `IO_ERROR`
+    # en particulier est le repli générique de la quasi-totalité des
+    # commandes CLI pour une erreur disque/E-S imprévue (carte débranchée
+    # en cours de copie, permission refusée...) : le plus susceptible
+    # d'apparaître en usage réel de tous les codes qui manquaient.
+    "error_output_exists": "Un fichier du même nom existe déjà à cet emplacement. Choisis un autre nom ou un autre dossier.",
+    "error_image_not_found": "Le fichier image choisi est introuvable. Il a peut-être été déplacé ou supprimé.",
+    "error_io_error": "Une erreur de lecture ou d'écriture est survenue. Vérifie que la carte est toujours branchée.",
+    "error_unsupported_os": "Cette opération n'est pas prise en charge sur ce système.",
+    "error_confirmation_refused": "Écriture annulée : la confirmation n'a pas été reçue.",
+    # INVALID_ARGS : mauvaise combinaison d'options en ligne de commande
+    # (CLI direct, §1) -- la GUI construit toujours des arguments valides,
+    # ce code ne devrait donc jamais apparaître ici, mais mappé quand même
+    # par principe (aucun code connu du protocole ne doit retomber sur le
+    # message générique, ci-dessous).
+    "error_invalid_args": "Commande invalide.",
     "error_generic": "Une erreur est survenue.",
     # Estimation avant de lancer la sauvegarde système sans les jeux (§4.3)
     # -- journal de bord, avant l'ouverture de la fenêtre Choix du fichier.
@@ -396,6 +416,12 @@ _ERROR_MESSAGE_KEYS = {
     "GAMES_PARTITION_NOT_FOUND": "error_games_partition_not_found",
     "INSUFFICIENT_DISK_SPACE": "error_insufficient_disk_space",
     "DESTINATION_TOO_SMALL": "error_destination_too_small",
+    "OUTPUT_EXISTS": "error_output_exists",
+    "IMAGE_NOT_FOUND": "error_image_not_found",
+    "IO_ERROR": "error_io_error",
+    "UNSUPPORTED_OS": "error_unsupported_os",
+    "CONFIRMATION_REFUSED": "error_confirmation_refused",
+    "INVALID_ARGS": "error_invalid_args",
 }
 
 
@@ -406,3 +432,23 @@ def friendly_error_message(code: str) -> str:
     il suit comme ligne supplémentaire dans le journal de bord
     (`LogPanel.finish_error`, §5 refonte navigation)."""
     return tr(_ERROR_MESSAGE_KEYS.get(code, "error_generic"))
+
+
+def error_log_detail(code: Optional[str], msg: Optional[str]) -> str:
+    """Détail à journaliser à la suite du message convivial
+    (`LogPanel.finish_error`/`LogPanel.append_log`, §5) -- bug corrigé,
+    confirmé sur du vrai matériel : un code d'erreur sans traduction
+    connue (`friendly_error_message` retombe alors sur `error_generic`,
+    « Une erreur est survenue. ») ne laissait auparavant aucune trace du
+    code réel, seulement le message brut de l'exception (`msg`, souvent
+    peu parlant seul, ex. juste un chemin) -- rendant tout diagnostic après
+    coup impossible sans reproduire le bug avec un débogueur. Le code brut
+    du protocole (ex. `IO_ERROR`) précède désormais le message dans ce cas
+    précis ; un code déjà traduit (§5 vocabulaire : le message principal
+    reste sans jargon) n'a pas besoin de cette répétition, le message brut
+    seul suffit comme avant."""
+    code = code or ""
+    msg = msg or ""
+    if code and code not in _ERROR_MESSAGE_KEYS:
+        return f"{code} : {msg}" if msg else code
+    return msg

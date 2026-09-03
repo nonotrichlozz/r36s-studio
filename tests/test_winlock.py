@@ -132,3 +132,45 @@ def test_refresh_disk_properties_is_best_effort_on_invalid_handle(mock_kernel32_
     winlock.refresh_disk_properties(r"\\.\PhysicalDrive9902")  # ne doit pas lever
 
     kernel32.DeviceIoControl.assert_not_called()
+
+
+@patch("r36s_studio.imaging.winlock._kernel32")
+def test_eject_media_sends_eject_ioctl_and_closes_handle(mock_kernel32_factory):
+    kernel32 = _fake_kernel32()
+    mock_kernel32_factory.return_value = kernel32
+
+    winlock.eject_media(r"\\.\PhysicalDrive9902")
+
+    codes = [c.args[1] for c in kernel32.DeviceIoControl.call_args_list]
+    assert codes == [winlock.IOCTL_STORAGE_EJECT_MEDIA]
+    kernel32.CloseHandle.assert_called_once()
+
+
+@patch("r36s_studio.imaging.winlock._kernel32")
+def test_eject_media_raises_on_invalid_handle(mock_kernel32_factory):
+    """Contrairement à `refresh_disk_properties` (best-effort), une
+    éjection qui échoue doit être signalée, pas avalée silencieusement."""
+    kernel32 = MagicMock()
+    kernel32.CreateFileW.return_value = winlock.INVALID_HANDLE_VALUE
+    mock_kernel32_factory.return_value = kernel32
+
+    try:
+        winlock.eject_media(r"\\.\PhysicalDrive9902")
+        assert False, "aurait dû lever OSError"
+    except OSError:
+        pass
+
+
+@patch("r36s_studio.imaging.winlock._kernel32")
+def test_eject_media_raises_and_still_closes_handle_when_ioctl_fails(mock_kernel32_factory):
+    kernel32 = _fake_kernel32()
+    kernel32.DeviceIoControl.return_value = False
+    mock_kernel32_factory.return_value = kernel32
+
+    try:
+        winlock.eject_media(r"\\.\PhysicalDrive9902")
+        assert False, "aurait dû lever OSError"
+    except OSError:
+        pass
+
+    kernel32.CloseHandle.assert_called_once()

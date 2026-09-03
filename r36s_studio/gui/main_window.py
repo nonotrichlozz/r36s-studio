@@ -66,7 +66,7 @@ from .screens import (
     _format_size,
     build_console_stage,
 )
-from .strings import friendly_error_message, tr
+from .strings import error_log_detail, friendly_error_message, tr
 from .wizard_flow import WizardFlow, WizardJob
 from .worker_runner import WorkerRunner
 
@@ -542,8 +542,9 @@ class MainWindow(QMainWindow):
         if not ok or self._pending_estimate_size_bytes is None:
             message = friendly_error_message(self._last_error_code or "")
             self._log_panel.append_log(message)
-            if self._last_error_msg and self._last_error_msg != message:
-                self._log_panel.append_log(self._last_error_msg)
+            detail = error_log_detail(self._last_error_code, self._last_error_msg)
+            if detail and detail != message:
+                self._log_panel.append_log(detail)
             self._refresh_home_state()
             return
         self._finish_system_backup_estimate(
@@ -830,7 +831,7 @@ class MainWindow(QMainWindow):
             # à l'ancien écran Résultat qui en avait besoin pour choisir
             # entre deux titres différents.
             friendly = friendly_error_message(self._last_error_code or "")
-            self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
+            self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
         self._refresh_home_state()
 
     def _on_assisted_ad_hoc_worker_finished(self, ok: bool) -> None:
@@ -848,7 +849,7 @@ class MainWindow(QMainWindow):
             self._log_panel.finish_success(self._success_message(), allow_eject=allow_eject, reveal_path=reveal_path)
         else:
             friendly = friendly_error_message(self._last_error_code or "")
-            self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
+            self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
 
         if self._mode == "backup_system":
             self._wizard_panel.show_next_step_choice(
@@ -1007,7 +1008,7 @@ class MainWindow(QMainWindow):
             self._console_stage.resume()
         if not variants:
             friendly = friendly_error_message(self._last_error_code or "")
-            self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
+            self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
             return
         self._log_panel.set_idle()
         self._rocknix_variant_dialog.set_variants(variants)
@@ -1040,7 +1041,7 @@ class MainWindow(QMainWindow):
             self._console_stage.resume()
         if not ok:
             friendly = friendly_error_message(self._last_error_code or "")
-            self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
+            self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
             return
         # Pas d'éjection proposée ici (`allow_eject=False`) : le
         # téléchargement n'a encore rien écrit sur la carte -- seule la
@@ -1159,6 +1160,25 @@ class MainWindow(QMainWindow):
     def _start_wizard(self) -> None:
         self._app_config.ui_mode = "assisted"
         app_config.save_config(self._app_config)
+        # Bug corrigé, confirmé sur du vrai matériel : un `_prepare_card_
+        # candidate`/`_assisted_ad_hoc_active` resté vrai d'un précédent
+        # passage par « Préparer une carte avec cette sauvegarde » (§4.3,
+        # ad-hoc) sans retour explicite à l'accueil détournait le bouton
+        # Continuer/Actualiser du vrai parcours guidé
+        # (`_on_wizard_continue`/`_on_wizard_refresh_requested` routent
+        # tous deux sur ces mêmes champs) -- la fenêtre Confirmation
+        # s'ouvrait alors avec la carte de l'ancien sondage ad-hoc plutôt
+        # que la carte cible réellement détectée à l'étape 3, court-
+        # circuitant au passage la vérification d'empreinte (§ pré-vol
+        # n°3). Ces deux flux sont censés être mutuellement exclusifs
+        # (`_wizard_active`/`_assisted_ad_hoc_active`) : démarrer le vrai
+        # parcours doit donc repartir d'un état ad-hoc propre, quel que
+        # soit ce qui a été laissé derrière, comme `_cancel_wizard`/
+        # `_on_assisted_ad_hoc_return_home` le font déjà en sens inverse.
+        if self._prepare_card_poll_timer.isActive():
+            self._prepare_card_poll_timer.stop()
+        self._prepare_card_candidate = None
+        self._assisted_ad_hoc_active = False
         self._wizard_flow.reset()
         self._wizard_active = True
         self._wizard_source_device = None
@@ -1282,17 +1302,27 @@ class MainWindow(QMainWindow):
             self._start_system_backup_estimate(self._device)
 
     def _on_wizard_continue(self) -> None:
-        """Continuer ne concerne que l'étape de détection (`DETECT_SOURCE`)
-        -- toutes les autres étapes du parcours de clonage avancent
-        d'elles-mêmes via `_on_wizard_job_finished` ou leurs propres
-        boutons dédiés (`BackupKindDialog`).
+        """Continuer avance la détection en cours (`DETECT_SOURCE` ou
+        `DETECT_TARGET`, toutes deux activent ce bouton une fois une carte
+        trouvée, §5 mode assisté) -- les autres étapes du parcours de
+        clonage avancent d'elles-mêmes via `_on_wizard_job_finished` ou
+        leurs propres boutons dédiés (`BackupKindDialog`).
 
         « Préparer une carte avec cette sauvegarde » (§4.3) partage ce
         même bouton/signal -- vérifié en tout premier, jamais
         `self._wizard_flow` pour ce cas précis (ce parcours ponctuel n'est
         pas un vrai `WizardJob`, y toucher corromprait le vrai parcours
-        guidé)."""
-        if self._prepare_card_candidate is not None:
+        guidé). `not self._wizard_active` en garde-fou supplémentaire :
+        bug corrigé, confirmé sur du vrai matériel -- `_prepare_card_
+        candidate` resté vrai d'un passage précédent par ce parcours
+        ponctuel (sans retour explicite à l'accueil) détournait sinon le
+        Continuer du vrai parcours guidé vers cette branche, ouvrant la
+        fenêtre Confirmation avec la mauvaise carte et court-circuitant la
+        vérification d'empreinte (§ pré-vol n°3). `_start_wizard` réinitialise
+        désormais cet état ad-hoc au démarrage -- cette condition reste en
+        plus, en dernier recours, si un futur chemin laissait à nouveau
+        cet état incohérent."""
+        if self._prepare_card_candidate is not None and not self._wizard_active:
             device = self._prepare_card_candidate
             self._prepare_card_candidate = None
             self._device = device
@@ -1388,8 +1418,13 @@ class MainWindow(QMainWindow):
         (plusieurs candidates). `self._assisted_ad_hoc_active` route vers
         le bon sondage -- jamais `_on_wizard_poll` (qui opère sur
         `self._wizard_flow`, sans rapport avec ce parcours ponctuel) pour
-        « Préparer une carte »."""
-        if self._assisted_ad_hoc_active:
+        « Préparer une carte ». `and not self._wizard_active` : même
+        garde-fou supplémentaire qu'`_on_wizard_continue` -- un sondage
+        ad-hoc mal routé pendant l'étape 3 du vrai parcours guidé (carte
+        source encore branchée, éjection en échec) contournerait sinon la
+        vérification d'empreinte propre à cette étape (§ pré-vol n°3),
+        `_on_prepare_card_poll` n'en ayant aucune notion."""
+        if self._assisted_ad_hoc_active and not self._wizard_active:
             if not self._prepare_card_poll_timer.isActive():
                 self._prepare_card_poll_timer.start()
             self._on_prepare_card_poll()
@@ -1452,7 +1487,7 @@ class MainWindow(QMainWindow):
         job = self._wizard_flow.current_job()
         if not ok:
             friendly = friendly_error_message(self._last_error_code or "")
-            self._log_panel.finish_error(friendly, details=self._last_error_msg or "")
+            self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
             self._wizard_panel.show_error()
             return
 

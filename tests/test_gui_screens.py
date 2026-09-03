@@ -1690,65 +1690,6 @@ def test_file_dialog_switching_back_to_arkos_shows_hint_again(qapp):
     assert dialog._arkos_download_hint.isVisible() is True
 
 
-# --- FileDialog : avertissement console clone (§5 mode assisté, étape 2) --
-
-
-def test_file_dialog_clone_warning_hidden_by_default(qapp):
-    dialog = FileDialog()
-    dialog.show()
-
-    dialog.set_mode("flash")
-
-    assert dialog._clone_warning_label.isVisible() is False
-
-
-def test_file_dialog_shows_clone_warning_when_flagged(qapp):
-    dialog = FileDialog()
-    dialog.show()
-
-    dialog.set_mode("flash", is_clone_console=True)
-
-    assert dialog._clone_warning_label.isVisible() is True
-
-
-def test_file_dialog_clone_warning_hidden_outside_flash_mode(qapp):
-    dialog = FileDialog()
-    dialog.show()
-
-    dialog.set_mode("backup", is_clone_console=True)
-
-    assert dialog._clone_warning_label.isVisible() is False
-
-
-def test_file_dialog_clone_console_defaults_selection_to_emuelec(qapp):
-    """Même si la configuration persistée pointait vers un autre firmware
-    (choisi avant que cette carte ne soit identifiée comme clone), une
-    console clone détectée doit orienter par défaut vers EmuELEC -- ArkOS
-    et ROCKNIX ne démarrent pas dessus, ce n'est pas qu'une préférence."""
-    dialog = FileDialog()
-    dialog.show()
-
-    dialog.set_mode("flash", firmware="rocknix", is_clone_console=True)
-
-    assert dialog._emuelec_radio.isChecked() is True
-
-
-def test_file_dialog_clone_flag_does_not_persist_firmware_change_on_its_own(qapp):
-    """La présélection automatique d'EmuELEC (ci-dessus) ne doit pas, à
-    elle seule, écraser la préférence persistée (`config.py`) -- seule une
-    vraie interaction de l'utilisateur (`firmware_changed`) doit le faire,
-    même principe que `test_file_dialog_set_mode_does_not_emit_firmware_
-    changed_on_its_own`."""
-    dialog = FileDialog()
-    dialog.show()
-    received = []
-    dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
-
-    dialog.set_mode("flash", firmware="rocknix", is_clone_console=True)
-
-    assert received == []
-
-
 def test_file_dialog_rocknix_download_button_emits_signal(qapp):
     dialog = FileDialog()
     dialog.set_mode("flash", firmware="rocknix")

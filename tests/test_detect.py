@@ -18,7 +18,6 @@ from r36s_studio.detect import (
     CardSystem,
     StepStatus,
     detect_card_system,
-    detect_card_system_for_device,
     detect_workflow_status,
 )
 from r36s_studio.devices import Device
@@ -282,20 +281,6 @@ def test_detect_card_system_unknown_for_unrecognized_structure():
     partitions = [PartitionInfo("/dev/x1", "", "exfat", None)]
 
     assert detect_card_system(partitions) == CardSystem.UNKNOWN
-
-
-@patch("r36s_studio.detect.list_partitions", return_value=_ROCKNIX_PARTITIONS)
-def test_detect_card_system_for_device_reads_the_device(mock_list):
-    assert detect_card_system_for_device(_make_device()) == CardSystem.ROCKNIX
-
-
-def test_detect_card_system_for_device_unknown_when_device_is_none():
-    assert detect_card_system_for_device(None) == CardSystem.UNKNOWN
-
-
-@patch("r36s_studio.detect.list_partitions", side_effect=OSError("carte débranchée"))
-def test_detect_card_system_for_device_unknown_on_read_error(mock_list):
-    assert detect_card_system_for_device(_make_device()) == CardSystem.UNKNOWN
 
 
 # --- detect_workflow_status : carte ROCKNIX -- A/B/D/E incompatibles ------

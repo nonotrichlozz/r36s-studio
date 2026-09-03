@@ -1184,17 +1184,15 @@ class FileDialog(Dialog):
     (étapes D/E) — une sauvegarde parmi celles déjà extraites, avec un
     repli « Parcourir… » pour une source manuelle.
 
-    Pour le flash uniquement (étape C/5) : choix du firmware (ArkOS/dArkOS,
-    ROCKNIX, ou EmuELEC pour les consoles clones -- §5) au-dessus du reste.
-    ArkOS et EmuELEC gardent le même comportement (bouton ouvrant la page
-    des releases dans le navigateur, aucune image hébergée directement sur
-    GitHub) ; ROCKNIX, dont les images sont attachées directement aux
-    releases GitHub, propose à la place un téléchargement automatique
-    (`rocknix_download_requested`, `identify/rocknix.py`). Un avertissement
-    (`_clone_warning_label`) s'affiche au-dessus des trois choix quand la
-    carte source a été identifiée comme un clone à l'étape 2 -- EmuELEC est
-    alors présélectionné, sans jamais empêcher de revenir sur ArkOS/ROCKNIX
-    (jamais de choix imposé, §5)."""
+    Pour le flash uniquement (étape C, mode expert -- le parcours de
+    clonage du mode assisté n'a pas de choix de firmware, il restaure la
+    propre sauvegarde de l'utilisateur, §5) : choix du firmware (ArkOS/
+    dArkOS, ROCKNIX, ou EmuELEC pour les consoles clones) au-dessus du
+    reste. ArkOS et EmuELEC gardent le même comportement (bouton ouvrant
+    la page des releases dans le navigateur, aucune image hébergée
+    directement sur GitHub) ; ROCKNIX, dont les images sont attachées
+    directement aux releases GitHub, propose à la place un téléchargement
+    automatique (`rocknix_download_requested`, `identify/rocknix.py`)."""
 
     file_chosen = Signal(str)
     releases_requested = Signal(str)  # firmware sélectionné à l'instant du clic (arkos/emuelec)
@@ -1210,15 +1208,6 @@ class FileDialog(Dialog):
         self._title = QLabel()
         self._title.setProperty("role", "title")
         layout.addWidget(self._title)
-
-        # Avertissement console clone (§5 mode assisté, étape 2) --
-        # au-dessus des choix de firmware, jamais affiché sans raison
-        # (`set_mode(is_clone_console=...)`).
-        self._clone_warning_label = QLabel(tr("file_clone_warning"))
-        self._clone_warning_label.setWordWrap(True)
-        self._clone_warning_label.setProperty("role", "danger")
-        self._clone_warning_label.setVisible(False)
-        layout.addWidget(self._clone_warning_label)
 
         # Taille estimée, sauvegarde système sans les jeux uniquement
         # (§4.3 : « affiche la taille estimée et demande confirmation
@@ -1334,7 +1323,6 @@ class FileDialog(Dialog):
         archive_choices: Optional[List] = None,
         default_path: Optional[str] = None,
         firmware: Optional[str] = None,
-        is_clone_console: bool = False,
     ) -> None:
         """`mode` : "backup" (choisir où enregistrer), "flash" (choisir
         l'image source), "extract_boot"/"extract_easyroms" (choisir un
@@ -1343,12 +1331,7 @@ class FileDialog(Dialog):
         une sauvegarde parmi `archive_choices`, ou en désigner une autre
         via Parcourir). `firmware` ("arkos", "rocknix" ou "emuelec", ignoré
         hors flash) initialise le choix depuis la configuration persistée
-        (`config.py`) plutôt que de toujours repartir sur ArkOS.
-        `is_clone_console` (flash uniquement, §5 mode assisté étape 2) :
-        affiche un avertissement et présélectionne EmuELEC quand la carte
-        source a été identifiée comme un clone -- ArkOS/ROCKNIX restent
-        choisissables (jamais un choix imposé), mais partir sur ces
-        systèmes serait immédiatement infructueux sur ce matériel."""
+        (`config.py`) plutôt que de toujours repartir sur ArkOS."""
         self._mode = mode
         self._title.setText(tr(_FILE_TITLE_KEYS[mode]))
         self.setWindowTitle(tr(_FILE_TITLE_KEYS[mode]))
@@ -1370,9 +1353,8 @@ class FileDialog(Dialog):
             self._emuelec_desc,
         ):
             widget.setVisible(is_flash)
-        self._clone_warning_label.setVisible(is_flash and is_clone_console)
         if is_flash:
-            self._firmware = "emuelec" if is_clone_console else (firmware or "arkos")
+            self._firmware = firmware or "arkos"
             radio = {"rocknix": self._rocknix_radio, "emuelec": self._emuelec_radio}.get(
                 self._firmware, self._arkos_radio
             )

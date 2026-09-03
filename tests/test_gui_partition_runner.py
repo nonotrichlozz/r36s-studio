@@ -19,6 +19,7 @@ from r36s_studio.partitions import (
     PartitionNotFound,
     PartitionNotMounted,
 )
+from r36s_studio.partitions.locate import PartitionInfo
 
 
 def _make_device(path="/dev/fake-disk-test-4") -> Device:
@@ -191,53 +192,6 @@ def test_cancel_sets_should_cancel_flag_passed_to_job(mock_copy, qapp):
     assert captured["should_cancel"]() is True
 
 
-# --- WizardIdentifyRunner (étape 2 du mode assisté, §5) ---------------------
-#
-# Distingue trois échecs (message d'étape 2 différent pour chacun) :
-# montage impossible (carte défaillante), montée mais aucun .dtb, .dtb
-# présents mais tous invalides -- les deux derniers sont décidés par
-# identify_from_boot_directory (identify/__init__.py, ses propres tests) ;
-# ici on vérifie seulement le cas du montage, propre à ce runner.
-
-from r36s_studio.gui.partition_runner import WizardIdentifyRunner
-from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
-from r36s_studio.partitions.locate import PartitionInfo
-
-
-@patch("r36s_studio.gui.partition_runner.locate_mounted", side_effect=PartitionNotMounted("BOOT", "/dev/x"))
-def test_wizard_identify_runner_emits_mount_failed_when_locate_mounted_raises(mock_locate, qapp):
-    """`detail` porte le message brut de l'exception -- diagnosticable
-    dans le journal (§5 mode assisté), en plus du message convivial."""
-    runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
-    results = []
-    runner.finished_identify.connect(lambda result: results.append(result))
-
-    runner.run()
-
-    assert len(results) == 1
-    assert results[0].info is None
-    assert results[0].failure_reason == IdentifyFailureReason.MOUNT_FAILED
-    assert "BOOT" in results[0].detail
-
-
-@patch(
-    "r36s_studio.gui.partition_runner.locate_mounted",
-    return_value=PartitionInfo("/dev/fake-disk-test-5s1", "", "fat16", None),
-)
-def test_wizard_identify_runner_emits_mount_failed_when_mountpoint_is_empty(mock_locate, qapp):
-    """`locate_mounted` peut réussir sans lever tout en renvoyant une
-    partition sans mountpoint effectif (cas limite) -- traité comme un
-    montage raté, pas comme « aucun .dtb trouvé » (qui suppose une
-    partition lisible)."""
-    runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
-    results = []
-    runner.finished_identify.connect(lambda result: results.append(result))
-
-    runner.run()
-
-    assert results == [IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED)]
-
-
 # --- RocknixListRunner ------------------------------------------------------
 # Recherche des variantes ROCKNIX disponibles (§5, étape de flash) --
 # `resolve_latest_r36s_assets` (identify/rocknix.py) est mocké ici : aucun
@@ -390,48 +344,6 @@ def test_rocknix_download_runner_cancel_passes_should_cancel_and_maps_to_cancell
     assert mock_download.call_args.kwargs["should_cancel"]() is True
     assert errors == ["CANCELLED"]
     assert finished == [(False, "")]
-
-
-@patch("r36s_studio.gui.partition_runner.identify_from_boot_directory")
-@patch(
-    "r36s_studio.gui.partition_runner.locate_mounted",
-    return_value=PartitionInfo("/dev/fake-disk-test-5s1", "", "fat16", "/Volumes/BOOT"),
-)
-def test_wizard_identify_runner_delegates_to_identify_from_boot_directory_once_mounted(
-    mock_locate, mock_identify, qapp
-):
-    expected = IdentifyResult(failure_reason=IdentifyFailureReason.NO_DTB_FOUND)
-    mock_identify.return_value = expected
-    runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
-    results = []
-    runner.finished_identify.connect(lambda result: results.append(result))
-
-    runner.run()
-
-    mock_identify.assert_called_once_with("/Volumes/BOOT")
-    assert results == [expected]
-
-
-@patch("r36s_studio.gui.partition_runner.unmount_forced")
-@patch("r36s_studio.gui.partition_runner.identify_from_boot_directory")
-@patch(
-    "r36s_studio.gui.partition_runner.locate_mounted",
-    return_value=PartitionInfo(
-        "/dev/fake-disk-test-5s1", "", "", "/tmp/r36s-studio-test", partition_type="efi"
-    ),
-)
-def test_wizard_identify_runner_unmounts_forced_mount_after_identifying(
-    mock_locate, mock_identify, mock_unmount, qapp
-):
-    """Démonte proprement un montage forcé (§4.4, carte GPT/EFI) une fois
-    l'identification terminée -- no-op pour un montage diskutil normal
-    (`unmount_forced`, locate.py)."""
-    partition = mock_locate.return_value
-    runner = WizardIdentifyRunner("/dev/fake-disk-test-5")
-
-    runner.run()
-
-    mock_unmount.assert_called_once_with(partition)
 
 
 # --- SystemBackupEstimateRunner (§4.3, sauvegarde système sans les jeux) --

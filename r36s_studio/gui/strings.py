@@ -151,15 +151,6 @@ STRINGS = {
         "puis choisis ici le fichier .img qu'elle contient."
     ),
     "file_rocknix_download_button": "Télécharger la dernière version",
-    # Avertissement affiché à l'étape de choix du firmware quand la console
-    # source a été identifiée comme un clone (§5 mode assisté, étape 2) --
-    # jamais dans le cas contraire (mode expert direct, ou système non
-    # identifié).
-    "file_clone_warning": (
-        "Cette carte semble provenir d'une console clone, pas d'une R36S "
-        "officielle. Les images ArkOS et ROCKNIX standard ne démarrent pas "
-        "sur ce matériel — choisis EmuELEC ci-dessous."
-    ),
     # Fenêtre de choix entre plusieurs variantes ROCKNIX (§5, étape de
     # flash) -- une vraie release peut en publier plusieurs (ex. -a/-b),
     # jamais de sélection automatique entre elles.

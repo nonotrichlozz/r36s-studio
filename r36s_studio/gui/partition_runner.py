@@ -19,7 +19,7 @@ from typing import Optional
 from PySide6.QtCore import QThread, Signal
 
 from r36s_studio.devices import Device
-from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, identify_from_boot_directory
+from r36s_studio.identify import identify_from_boot_directory
 from r36s_studio.identify.rocknix import (
     ChecksumMismatchError,
     DownloadCancelledError,
@@ -124,47 +124,10 @@ class PartitionJobRunner(QThread):
         self.finished_job.emit(True)
 
 
-class WizardIdentifyRunner(QThread):
-    """Identification de la console (étape 2 du mode assisté, §5) : monte
-    la partition BOOT de la carte source et y cherche un `.dtb`
-    exploitable (`identify.identify_from_boot_directory`), sur un thread
-    séparé comme `PartitionJobRunner` -- `locate_mounted` peut bloquer
-    jusqu'à `MOUNT_WAIT_SECONDS` (§4.4) si le système n'a pas encore monté
-    la partition automatiquement. Émet toujours `finished_identify`
-    (`IdentifyResult`) -- ne lève jamais (§4.5 : une détection ratée ne
-    doit jamais planter l'interface, et l'absence d'identification a un
-    repli prévu, MultiPanel). Distingue le montage raté (`MOUNT_FAILED` --
-    carte probablement défaillante, courant sur les cartes fournies avec
-    la console) des deux échecs décidés par `identify_from_boot_directory`
-    une fois la partition lisible (`NO_DTB_FOUND`/`ALL_DTB_INVALID`) --
-    chacun a son propre message à l'étape 2."""
-
-    finished_identify = Signal(object)  # IdentifyResult
-
-    def __init__(self, device_path: str, parent=None):
-        super().__init__(parent)
-        self._device_path = device_path
-
-    def run(self) -> None:
-        try:
-            boot = locate_mounted(self._device_path, BOOT_LABEL)
-        except (PartitionNotFound, PartitionNotMounted, OSError, subprocess.CalledProcessError) as exc:
-            self.finished_identify.emit(
-                IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED, detail=str(exc))
-            )
-            return
-        if not boot.mountpoint:
-            self.finished_identify.emit(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
-            return
-        result = identify_from_boot_directory(boot.mountpoint)
-        unmount_forced(boot)
-        self.finished_identify.emit(result)
-
-
 class WizardFingerprintRunner(QThread):
     """Empreinte de contenu de la carte (§5 mode assisté, garde-fou des
-    étapes 1/4, `safety/card_fingerprint.py`), sur un thread séparé comme
-    `WizardIdentifyRunner` -- `compute_boot_fingerprint` peut monter la
+    étapes 1/3 du parcours de clonage, `safety/card_fingerprint.py`), sur
+    un thread séparé -- `compute_boot_fingerprint` peut monter la
     partition BOOT et bloquer jusqu'à `MOUNT_WAIT_SECONDS` (§4.4). Geler
     l'interface pendant ce montage se lit comme un plantage, constaté en
     usage réel -- c'est tout le correctif : ne plus jamais appeler

@@ -973,10 +973,9 @@ Après flash, la carte R36S expose trois partitions : `BOOT`, `root`, `EASYROMS`
 >    exploitée — ne fait rien pour un montage `diskutil`/`udisksctl`
 >    normal, qui reste géré par le système jusqu'à l'éjection finale comme
 >    avant ce correctif. Appelé après chaque usage : `extract_boot`,
->    `extract_easyroms`, `inject_boot`, `copy_games` (`jobs.py`),
->    l'identification de l'étape 2 (`WizardIdentifyRunner`,
->    `gui/partition_runner.py`) et le calcul d'empreinte des étapes 1/4
->    (`compute_boot_fingerprint`, `safety/card_fingerprint.py`).
+>    `extract_easyroms`, `inject_boot`, `copy_games` (`jobs.py`) et le
+>    calcul d'empreinte des étapes 1/3 du parcours de clonage (§5,
+>    `compute_boot_fingerprint`, `safety/card_fingerprint.py`).
 >
 > ⚠️ **Confirmé sur du vrai matériel : le montage forcé lui-même demande
 > les droits administrateur.** L'appel non élevé ci-dessus échoue en
@@ -1360,8 +1359,8 @@ sérieux d'un script.
 >   GUI — leur différence n'est pas connue, et rien n'indique laquelle
 >   serait la bonne par défaut. `select_r36s_assets` ne tranche donc
 >   jamais tout seul : `gui/partition_runner.py::RocknixListRunner`
->   interroge l'API (thread séparé, même principe que
->   `WizardIdentifyRunner`) puis `screens.py::RocknixVariantDialog`
+>   interroge l'API (thread séparé, même principe que les autres runners
+>   de ce module) puis `screens.py::RocknixVariantDialog`
 >   affiche le nom de fichier complet de chaque variante trouvée pour que
 >   l'utilisateur choisisse en connaissance de cause — `MainWindow`
 >   enchaîne alors sur `RocknixDownloadRunner` avec l'asset et la somme
@@ -1404,26 +1403,19 @@ sérieux d'un script.
 > ROCKNIX, donc pas de téléchargement automatique). Choisissable à tout
 > moment, indépendamment d'une détection de clone.
 >
-> **Orientation à l'étape 2 (identification, §5 mode assisté)** :
-> `MainWindow._on_wizard_identify_finished` journalise un avertissement
-> clair (`wizard_source_clone_detected`) dès qu'un clone est détecté, et
-> mémorise `_wizard_source_is_clone` pour l'étape 5 (flash) qui suit.
-> `FileDialog.set_mode(is_clone_console=...)` y affiche un bandeau
-> d'avertissement rouge au-dessus des trois choix de firmware et
-> présélectionne EmuELEC — même si la configuration persistée pointait
-> vers un autre firmware, une console clone détectée l'emporte, ce n'est
-> pas qu'une préférence. ArkOS/ROCKNIX restent choisissables : jamais un
-> choix imposé, l'utilisateur garde toujours la main (§5). La
-> présélection automatique n'émet jamais `firmware_changed` (`blockSignals`,
-> même principe que l'initialisation normale du firmware) : elle
-> n'écrase donc jamais la préférence persistée tant que l'utilisateur n'a
-> pas lui-même interagi avec les boutons.
->
-> La commande CLI de diagnostic `identify` (`__main__.py::cmd_identify`,
-> texte simple, pas le protocole JSON Lines) affiche aussi ce signal quand
-> présent. Le mode expert n'a pas de notion d'identification (pas
-> d'équivalent de l'étape 2) : cette orientation n'existe que dans le
-> parcours guidé.
+> ⚠️ **Correction de conception : l'orientation automatique décrite ici à
+> l'étape 2 du parcours guidé (bandeau d'avertissement, présélection
+> EmuELEC dans `FileDialog`) a été retirée avec le parcours à sept
+> étapes** (§5) — le parcours de clonage qui l'a remplacé n'identifie
+> plus la console (indépendant du firmware, donc de la question clone/
+> standard). `IdentifyResult.is_clone`/`CLONE_DTB_FILENAMES` restent
+> pleinement fonctionnels et testés, seule cette consommation GUI a
+> disparu — un clone reste détectable via la commande CLI de diagnostic
+> `identify` (`__main__.py::cmd_identify`, texte simple, pas le protocole
+> JSON Lines), qui affichait déjà ce signal indépendamment de la GUI. Le
+> mode expert n'a jamais eu de notion d'identification (pas d'équivalent
+> de l'ancienne étape 2) : cette orientation n'existait que dans le
+> parcours guidé, elle n'est donc reprise nulle part ailleurs.
 >
 > **Idée future, pas implémentée** : ROCKNIX fournit un script
 > `importpanel.py` qui génère un `mipi-panel.dtbo` à partir d'un `.dtb`

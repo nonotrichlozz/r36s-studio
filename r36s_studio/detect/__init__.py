@@ -122,16 +122,6 @@ def detect_card_system(partitions: Optional[List[PartitionInfo]]) -> CardSystem:
     return CardSystem.UNKNOWN
 
 
-def detect_card_system_for_device(device: Optional[Device]) -> CardSystem:
-    """Symétrique de `detect_card_system`, à partir d'un `Device` plutôt
-    que d'une liste de partitions déjà lue — même robustesse que
-    `detect_workflow_status` (ne lève jamais). Utilisé par le mode
-    assisté (`gui/main_window.py`) pour adapter le parcours guidé à la
-    carte source détectée à l'étape 1, en plus de `detect_workflow_status`
-    (mode expert, six étapes, ci-dessous)."""
-    return detect_card_system(_list_partitions_safe(device))
-
-
 def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
     """Statut des six étapes du workflow (§4.5) pour la carte actuellement
     branchée (`device` à `None` si aucune carte, ou plusieurs candidates
@@ -214,7 +204,6 @@ __all__ = [
     "CardSystem",
     "ROCKNIX_BOOT_LABEL",
     "detect_card_system",
-    "detect_card_system_for_device",
     "detect_workflow_status",
     "EXTRACT_BOOT",
     "EXTRACT_EASYROMS",

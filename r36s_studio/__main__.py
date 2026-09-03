@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -72,6 +73,8 @@ from r36s_studio.imaging import (
     backup_device,
     backup_system_only,
     estimate_system_backup_size,
+    estimate_system_backup_size_unprivileged,
+    estimate_total_bytes,
     flash_device,
 )
 from r36s_studio.partitions import (
@@ -260,6 +263,42 @@ def cmd_backup(args: argparse.Namespace) -> int:
             emit_error("OUTPUT_EXISTS", f"Le fichier de sortie existe déjà : {args.output}")
             return 1
 
+        # Pré-vol (§5 mode assisté, parcours de clonage) : jamais un échec
+        # après une longue copie déjà lancée -- vérifié ici, sur le
+        # backend, comme seule autorité réelle (un pré-contrôle côté GUI,
+        # plus rapide, ne fait qu'éviter de lancer ce worker élevé pour
+        # rien). `device.size_bytes` pour une copie complète est un
+        # majorant sûr, sans lecture supplémentaire : `backup_device` ne
+        # dépasse jamais la taille du périphérique source (il s'arrête à
+        # la fin de la dernière partition utilisée). Pour la sauvegarde
+        # système, réutilise l'estimation non élevée déjà disponible
+        # (`list_partitions`, §4.3) et ne retombe sur le calcul exact
+        # élevé que si elle manque une taille.
+        try:
+            required_bytes = (
+                device.size_bytes
+                if not args.system_only
+                else (
+                    estimate_system_backup_size_unprivileged(device.path)
+                    or estimate_system_backup_size(device.path)
+                )
+            )
+        except GamesPartitionNotFound as exc:
+            emit_error("GAMES_PARTITION_NOT_FOUND", str(exc))
+            return 1
+        try:
+            free_bytes = shutil.disk_usage(Path(args.output).resolve().parent).free
+        except OSError as exc:
+            emit_error("IO_ERROR", str(exc))
+            return 1
+        if free_bytes < required_bytes:
+            emit_error(
+                "INSUFFICIENT_DISK_SPACE",
+                f"Espace libre insuffisant sur {Path(args.output).resolve().parent} : "
+                f"{free_bytes} octets disponibles, ~{required_bytes} nécessaires.",
+            )
+            return 1
+
         if args.system_only:
             emit_log(
                 f"Sauvegarde système (sans les jeux) de {device.display} ({device.path}) vers {args.output}"
@@ -332,6 +371,23 @@ def cmd_flash(args: argparse.Namespace) -> int:
                 "DEVICE_NOT_ALLOWED",
                 f"Périphérique introuvable ou refusé par la sécurité : {args.device} "
                 "(voir `python -m r36s_studio list`)",
+            )
+            return 1
+
+        # Pré-vol (§5 mode assisté, parcours de clonage) : une carte plus
+        # petite que l'image tronque et corrompt la table GPT secondaire
+        # (déjà rencontré) -- `estimate_total_bytes` est exacte et non
+        # privilégiée pour `.img`/`.img.gz`/`.img.xz` (lue depuis le pied
+        # du fichier, sans décompression). `None` seulement pour un pied
+        # tronqué/non standard (cas résiduel) : le contrôle est alors
+        # sauté plutôt que bloqué -- `flash_device` échouera de toute
+        # façon avec une vraie erreur d'écriture (ENOSPC) si ça ne rentre
+        # pas, jamais une troncature silencieuse.
+        total_hint = estimate_total_bytes(args.image)
+        if total_hint is not None and total_hint > device.size_bytes:
+            emit_error(
+                "DESTINATION_TOO_SMALL",
+                f"Image de {total_hint} octets, carte cible « {device.display} » de {device.size_bytes} octets.",
             )
             return 1
 

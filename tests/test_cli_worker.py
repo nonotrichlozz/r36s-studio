@@ -6,6 +6,7 @@ réel n'est touché."""
 from __future__ import annotations
 
 import json
+from collections import namedtuple
 from unittest.mock import patch
 
 from r36s_studio import __main__ as cli
@@ -13,6 +14,16 @@ from r36s_studio import protocol
 from r36s_studio.devices import Device
 from r36s_studio.imaging import OperationCancelled
 from r36s_studio.imaging.flash import FlashResult
+
+# Pré-vol espace disque libre (§5 mode assisté, parcours de clonage) :
+# `_make_device` déclare une taille factice de 32 Go -- `shutil.disk_usage`
+# est mocké pour toute commande `backup` censée réussir, afin de ne jamais
+# dépendre de l'espace libre réel de la machine qui lance la suite (§8).
+_UsageStub = namedtuple("_UsageStub", ["total", "used", "free"])
+
+
+def _fake_usage(free_bytes: int) -> "_UsageStub":
+    return _UsageStub(total=free_bytes * 2, used=free_bytes, free=free_bytes)
 
 
 def teardown_function() -> None:
@@ -64,10 +75,12 @@ def test_flash_worker_mode_skips_interactive_confirmation(mock_list, mock_confir
 # --- --progress-file redirige les événements ------------------------------
 
 
+@patch("r36s_studio.__main__.shutil.disk_usage")
 @patch("r36s_studio.__main__.backup_device", return_value=42)
 @patch("r36s_studio.__main__.list_devices")
-def test_backup_worker_mode_writes_events_to_progress_file(mock_list, mock_backup, tmp_path):
+def test_backup_worker_mode_writes_events_to_progress_file(mock_list, mock_backup, mock_disk_usage, tmp_path):
     mock_list.return_value = [_make_device()]
+    mock_disk_usage.return_value = _fake_usage(100_000_000_000)
     progress_file = tmp_path / "progress.jsonl"
     output = tmp_path / "out.img"
 
@@ -124,10 +137,12 @@ def test_flash_worker_mode_writes_events_to_progress_file(mock_list, mock_flash,
 # --- annulation (--cancel-file) --------------------------------------------
 
 
+@patch("r36s_studio.__main__.shutil.disk_usage")
 @patch("r36s_studio.__main__.backup_device", side_effect=OperationCancelled(1024))
 @patch("r36s_studio.__main__.list_devices")
-def test_backup_reports_cancellation(mock_list, mock_backup, tmp_path):
+def test_backup_reports_cancellation(mock_list, mock_backup, mock_disk_usage, tmp_path):
     mock_list.return_value = [_make_device()]
+    mock_disk_usage.return_value = _fake_usage(100_000_000_000)
     progress_file = tmp_path / "progress.jsonl"
 
     args = _parse(

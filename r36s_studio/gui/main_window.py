@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -24,11 +25,15 @@ from PySide6.QtCore import QTimer, Slot
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 
 from r36s_studio import config as app_config
-from r36s_studio.detect import CardSystem, detect_card_system_for_device, detect_workflow_status
+from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
-from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL, EMUELEC_R36S_RELEASES_URL
-from r36s_studio.imaging import SevenZipArchiveError, UnsupportedImageFormatError, check_image_format
+from r36s_studio.imaging import (
+    SevenZipArchiveError,
+    UnsupportedImageFormatError,
+    check_image_format,
+    estimate_total_bytes,
+)
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, set_privileged_mount_hook
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
@@ -42,12 +47,11 @@ from .partition_runner import (
     SystemBackupEstimate,
     SystemBackupEstimateRunner,
     WizardFingerprintRunner,
-    WizardIdentifyRunner,
 )
 from .reveal import reveal
 from .screens import (
-    ArchiveReuseDialog,
     AssistedLandingScreen,
+    BackupKindDialog,
     ConfirmDialog,
     DeviceDialog,
     FileDialog,
@@ -68,51 +72,18 @@ from .worker_runner import WorkerRunner
 
 _WIZARD_POLL_INTERVAL_MS = 1500
 
-# Étape 3 (§5 mode assisté) recouvre deux jobs internes (EXTRACT_BOOT puis
-# EXTRACT_EASYROMS, gui/wizard_flow.py) mais un seul écran -- même titre/
-# consigne pour les deux.
+# Parcours de clonage (§5 mode assisté) : une étape, un job -- plus besoin
+# qu'un même écran recouvre deux jobs indépendants comme l'ancien parcours
+# à 7 étapes/8 jobs (identification DTB, extraction/injection BOOT-
+# EASYROMS -- déplacées vers le mode expert, qui les a déjà indépendamment
+# de ce parcours).
 _WIZARD_STEP_STRINGS = {
     WizardJob.DETECT_SOURCE: ("wizard_step1_title", "wizard_step1_instruction"),
-    WizardJob.IDENTIFY: ("wizard_step2_title", "wizard_step2_instruction"),
-    WizardJob.EXTRACT_BOOT: ("wizard_step3_title", "wizard_step3_instruction"),
-    WizardJob.EXTRACT_EASYROMS: ("wizard_step3_title", "wizard_step3_instruction"),
-    WizardJob.DETECT_TARGET: ("wizard_step4_title", "wizard_step4_instruction"),
-    WizardJob.FLASH: ("wizard_step5_title", "wizard_step5_instruction"),
-    WizardJob.INJECT_BOOT: ("wizard_step6_title", "wizard_step6_instruction"),
-    WizardJob.EJECT: ("wizard_step7_title", "wizard_step7_instruction"),
+    WizardJob.CREATE_IMAGE: ("wizard_step2_title", "wizard_step2_instruction"),
+    WizardJob.DETECT_TARGET: ("wizard_step3_title", "wizard_step3_instruction"),
+    WizardJob.RESTORE_IMAGE: ("wizard_step4_title", "wizard_step4_instruction"),
+    WizardJob.EJECT: ("wizard_step5_title", "wizard_step5_instruction"),
 }
-_WIZARD_JOB_TO_EXPERT_MODE = {
-    WizardJob.EXTRACT_BOOT: "extract_boot",
-    WizardJob.EXTRACT_EASYROMS: "extract_easyroms",
-    WizardJob.INJECT_BOOT: "inject_boot",
-}
-# Étape 2 (identification) : un message distinct par cause d'échec plutôt
-# qu'un « impossible d'identifier » générique -- le montage raté suggère
-# une carte défaillante (courant sur les cartes fournies avec la
-# console), distinct d'une partition lisible sans .dtb ou avec des .dtb
-# corrompus (identify/__init__.py::IdentifyFailureReason).
-_IDENTIFY_FAILURE_MESSAGE_KEYS = {
-    IdentifyFailureReason.MOUNT_FAILED: "wizard_identify_failed_mount",
-    IdentifyFailureReason.NO_DTB_FOUND: "wizard_identify_failed_no_dtb",
-    IdentifyFailureReason.ALL_DTB_INVALID: "wizard_identify_failed_invalid_dtb",
-}
-
-
-def _identify_failure_message_key(reason: IdentifyFailureReason) -> str:
-    """`MOUNT_FAILED` seul dépend de l'OS -- confirmé sur du vrai matériel
-    (ThinkPad Windows) : une partition `BOOT` saine et lisible peut très
-    bien n'avoir aucune lettre de lecteur, Windows ne lui en attribuant pas
-    spontanément (rien à voir avec un défaut matériel). `locate.py::
-    _list_windows` retombe désormais sur le chemin GUID du volume dans ce
-    cas (repli qui rend ce timeout rare sur Windows), mais le message «
-    carte défaillante » -- pensé pour macOS/Linux, où `locate_mounted`
-    retente activement un montage avant d'abandonner -- resterait trompeur
-    pour le cas résiduel où même ce repli échoue. `NO_DTB_FOUND`/
-    `ALL_DTB_INVALID` ne dépendent pas de l'OS : une fois la partition
-    lisible, leur cause est la même partout."""
-    if reason == IdentifyFailureReason.MOUNT_FAILED and platform.system() == "Windows":
-        return "wizard_identify_failed_mount_windows"
-    return _IDENTIFY_FAILURE_MESSAGE_KEYS[reason]
 
 # Pane "Accès complet au disque" de Réglages Système -- lien profond ouvert
 # par la fenêtre Aide (§3, `HelpDialog`) pour éviter à l'utilisateur de
@@ -198,9 +169,10 @@ class MainWindow(QMainWindow):
             set_privileged_mount_hook(self._mount_boot_privileged)
 
         # Mode assisté (§5 mode assisté) : `WizardFlow` (testable sans Qt,
-        # gui/wizard_flow.py) séquence les 7 étapes ; l'état collecté au
-        # fil du parcours vit ici, à plat, même convention que `_device`/
-        # `_file_path` ci-dessus plutôt qu'une classe d'état séparée.
+        # gui/wizard_flow.py) séquence les 5 étapes du parcours de clonage ;
+        # l'état collecté au fil du parcours vit ici, à plat, même
+        # convention que `_device`/`_file_path` ci-dessus plutôt qu'une
+        # classe d'état séparée.
         self._app_config = app_config.load_config()
         self._wizard_active = False
         self._wizard_flow = WizardFlow()
@@ -216,32 +188,19 @@ class MainWindow(QMainWindow):
         self._prepare_card_poll_timer.timeout.connect(self._on_prepare_card_poll)
         self._wizard_source_device: Optional[Device] = None
         self._wizard_source_fingerprint: Optional[str] = None
-        # Système détecté sur la carte source à l'étape 1 (§4.5 CardSystem)
-        # -- adapte les étapes 2/3 (identification, extraction) : ROCKNIX
-        # les saute automatiquement (structure incompatible, expliquée
-        # dans le journal), un système non reconnu affiche un
-        # avertissement et laisse l'utilisateur choisir de continuer sans
-        # sauvegarde via le bouton Continuer habituel (`_wizard_skip_
-        # extraction_on_continue`) -- jamais un aller simple vers le mode
-        # expert, dans un cas comme dans l'autre.
-        self._wizard_source_system: CardSystem = CardSystem.UNKNOWN
-        # Console clone détectée à l'identification (étape 2, §5 mode
-        # assisté) -- critère validé par l'outil officiel ArkOS, sur le nom
-        # du .dtb (`identify/__init__.py::CLONE_DTB_FILENAMES`), pas sa
-        # présence/validité. Mémorisé jusqu'à l'étape de flash (5), qui
-        # oriente alors vers EmuELEC sans jamais imposer ce choix.
-        self._wizard_source_is_clone = False
-        self._wizard_skip_extraction_on_continue = False
         self._wizard_target_device: Optional[Device] = None
-        self._wizard_boot_archive: Optional[str] = None
-        self._wizard_easyroms_archive: Optional[str] = None
+        # Choix fait à l'étape 2 (`BackupKindDialog`) -- "full" (copie
+        # complète) ou "system" (système seul, sans les jeux) -- décide du
+        # mode passé à `_start_worker` et du texte de fin de parcours.
+        self._wizard_backup_kind: Optional[str] = None
+        # Taille estimée retenue à l'étape 2, quelle que soit l'option
+        # choisie -- `device.size_bytes` pour une copie complète (majorant
+        # sûr, `backup_device` ne dépasse jamais la taille du périphérique
+        # source), le résultat du pipeline d'estimation existant pour
+        # système seul. Sert uniquement au pré-contrôle d'espace disque
+        # libre (`_check_free_space_or_warn`) avant de lancer la copie.
+        self._wizard_estimated_backup_bytes: Optional[int] = None
         self._wizard_last_poll_diagnostic: Optional[tuple] = None
-        # Étapes A/B (§5 mode assisté) : job en attente d'une réponse de
-        # `ArchiveReuseDialog` (réutiliser/refaire/annuler) quand une
-        # sauvegarde existe déjà pour l'empreinte de la carte source --
-        # évite de recopier inutilement plusieurs Go à chaque nouveau
-        # passage sur la même carte (EASYROMS en particulier).
-        self._pending_extraction_job: Optional[WizardJob] = None
 
         # Vue permanente, deux colonnes -- ne change plus jamais de
         # structure (§5, refonte navigation). `_home` (gauche, mode
@@ -282,7 +241,7 @@ class MainWindow(QMainWindow):
         self._confirm_dialog = ConfirmDialog(self)
         self._help_dialog = HelpDialog(self)
         self._rocknix_variant_dialog = RocknixVariantDialog(self)
-        self._archive_reuse_dialog = ArchiveReuseDialog(self)
+        self._backup_kind_dialog = BackupKindDialog(self)
 
         self._wire_signals()
         self._refresh_home_state()
@@ -334,9 +293,9 @@ class MainWindow(QMainWindow):
         self._file_dialog.firmware_changed.connect(self._on_firmware_changed)
         self._file_dialog.rocknix_download_requested.connect(self._on_rocknix_download_requested)
         self._rocknix_variant_dialog.variant_chosen.connect(self._on_rocknix_variant_chosen)
-        self._archive_reuse_dialog.reuse_requested.connect(self._on_archive_reuse_requested)
-        self._archive_reuse_dialog.redo_requested.connect(self._on_archive_redo_requested)
-        self._archive_reuse_dialog.cancelled.connect(self._on_archive_reuse_cancelled)
+        self._backup_kind_dialog.full_copy_requested.connect(lambda: self._on_backup_kind_chosen("full"))
+        self._backup_kind_dialog.system_only_requested.connect(lambda: self._on_backup_kind_chosen("system"))
+        self._backup_kind_dialog.cancelled.connect(self._cancel_wizard)
 
         self._confirm_dialog.confirmed.connect(self._on_confirmed)
 
@@ -537,6 +496,13 @@ class MainWindow(QMainWindow):
         self._finish_system_backup_estimate(estimate.size_bytes, estimate.board_compatible)
 
     def _finish_system_backup_estimate(self, size_bytes: int, board_compatible: Optional[str]) -> None:
+        # Sans effet hors parcours de clonage (§5 mode assisté) -- l'accueil
+        # assisté ad-hoc « Sauvegarder mon système sans les jeux », qui
+        # partage ce même chemin, ne lit jamais ce champ. Alimente le
+        # pré-contrôle d'espace disque libre (`_check_free_space_or_warn`,
+        # consulté dans `_on_file_chosen`) quand ce chemin est atteint
+        # depuis l'étape 2 du parcours de clonage.
+        self._wizard_estimated_backup_bytes = size_bytes
         size_text = _format_size(size_bytes)
         self._log_panel.append_log(tr("system_backup_estimate_result", size=size_text))
         self._file_dialog.set_mode(
@@ -610,10 +576,37 @@ class MainWindow(QMainWindow):
             self._file_path = path
         self._file_dialog.close()
 
+        if self._wizard_active and self._mode in ("backup", "backup_system"):
+            # Parcours de clonage, étape 2 (§5) : vérification rapide,
+            # non élevée, avant de lancer le worker élevé pour une
+            # opération vouée à l'échec après potentiellement deux heures
+            # de copie -- le worker refait la même vérification
+            # (`INSUFFICIENT_DISK_SPACE`, __main__.py), seule autorité
+            # réelle si l'estimation locale manque (`required_bytes is
+            # None`, `_check_free_space_or_warn` laisse alors passer).
+            if not self._check_free_space_or_warn(self._file_path, self._wizard_estimated_backup_bytes):
+                return
+
         if self._mode == "flash":
             self._proceed_to_flash_confirmation()
         else:
             self._start_worker()
+
+    def _check_free_space_or_warn(self, output_path: str, required_bytes: Optional[int]) -> bool:
+        """Vérification rapide, non élevée (`shutil.disk_usage`), de
+        l'espace disque libre sur l'ordinateur avant de créer une image
+        (§ pré-vol, parcours de clonage) -- ne jamais découvrir un espace
+        insuffisant après une longue copie déjà lancée. `required_bytes=
+        None` (taille non encore connue) laisse toujours passer : le
+        worker élevé refait la même vérification (`INSUFFICIENT_DISK_
+        SPACE`), seule autorité pour bloquer réellement dans ce cas."""
+        if required_bytes is None:
+            return True
+        free_bytes = shutil.disk_usage(Path(output_path).resolve().parent).free
+        if free_bytes < required_bytes:
+            QMessageBox.warning(self, tr("app_title"), friendly_error_message("INSUFFICIENT_DISK_SPACE"))
+            return False
+        return True
 
     def _proceed_to_flash_confirmation(self) -> None:
         """Validation du format puis fenêtre Confirmation -- partagé entre
@@ -1164,14 +1157,10 @@ class MainWindow(QMainWindow):
         self._wizard_active = True
         self._wizard_source_device = None
         self._wizard_source_fingerprint = None
-        self._wizard_source_system = CardSystem.UNKNOWN
-        self._wizard_source_is_clone = False
-        self._wizard_skip_extraction_on_continue = False
         self._wizard_target_device = None
-        self._wizard_boot_archive = None
-        self._wizard_easyroms_archive = None
+        self._wizard_backup_kind = None
+        self._wizard_estimated_backup_bytes = None
         self._wizard_last_poll_diagnostic = None
-        self._pending_extraction_job = None
         self._log_panel.set_idle()
         self._main_view.show_wizard_panel()
         self._root_stack.setCurrentWidget(self._main_view)
@@ -1203,11 +1192,10 @@ class MainWindow(QMainWindow):
             return
 
         if job == WizardJob.DETECT_TARGET:
-            # La carte source reste montée pendant les étapes 2/3 (lecture
-            # des .dtb, copie BOOT/EASYROMS -- c'est de là qu'elles sont
-            # lues) : ce n'est qu'en tout début de l'étape 4 qu'elle n'a
-            # plus d'usage et doit être éjectée, avant même d'inviter à la
-            # retirer (`_run_wizard_source_eject`).
+            # La carte source reste montée pendant l'étape 2 (c'est de là
+            # que l'image est lue) : ce n'est qu'en tout début de l'étape 3
+            # qu'elle n'a plus d'usage et doit être éjectée, avant même
+            # d'inviter à la retirer (`_run_wizard_source_eject`).
             self._run_wizard_source_eject()
             return
 
@@ -1220,20 +1208,16 @@ class MainWindow(QMainWindow):
         if is_detect_step:
             self._wizard_panel.set_status(tr("wizard_status_waiting"))
             self._wizard_poll_timer.start()
-        elif job == WizardJob.IDENTIFY:
-            self._enter_wizard_identify_step()
-        elif job in (WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
-            self._enter_wizard_extraction_step(job)
-        elif job == WizardJob.FLASH:
-            self._enter_wizard_flash()
-        elif job == WizardJob.INJECT_BOOT:
-            self._enter_wizard_inject_boot_step()
+        elif job == WizardJob.CREATE_IMAGE:
+            self._enter_wizard_create_image_step()
+        elif job == WizardJob.RESTORE_IMAGE:
+            self._enter_wizard_restore_image_step()
         elif job == WizardJob.EJECT:
             self._run_wizard_eject()
 
     def _run_wizard_source_eject(self) -> None:
         """Démonte et éjecte la carte source avant d'afficher la consigne
-        d'insertion de la carte neuve (étape 4) -- la retirer alors
+        d'insertion de la carte neuve (étape 3) -- la retirer alors
         qu'elle est encore montée risquerait de corrompre des données et
         déclenche un avertissement système. Le job DETECT_TARGET n'est
         jamais marqué fait ici : un échec (volume occupé, partition
@@ -1259,68 +1243,43 @@ class MainWindow(QMainWindow):
         self._wizard_panel.set_status(tr("wizard_status_waiting"))
         self._wizard_poll_timer.start()
 
-    def _enter_wizard_identify_step(self) -> None:
-        """Adapte l'étape 2 au système détecté sur la carte source à
-        l'étape 1 (§4.5 `CardSystem`) -- jamais un aller simple vers le
-        mode expert en cas de structure inattendue (§5) : toujours une
-        explication de ce qui a été trouvé et de ce que l'application
-        propose de faire.
+    def _enter_wizard_create_image_step(self) -> None:
+        """Étape 2 (§5 mode assisté, parcours de clonage) : demande d'abord
+        quoi sauvegarder (`BackupKindDialog`) avant de lancer quoi que ce
+        soit -- même principe que l'ancien `ArchiveReuseDialog`, un job
+        peut afficher un choix intermédiaire avant de démarrer un worker."""
+        self._backup_kind_dialog.open()
 
-        - ArkOS : identification normale (`_run_wizard_identify`), le
-          parcours ne change pas.
-        - ROCKNIX : structure réelle relevée sur du vrai matériel --
-          schéma MBR, deux partitions seulement (ROCKNIX en FAT32,
-          ~2,1 Go, puis une partition Linux ~29,8 Go opaque depuis macOS/
-          Windows, aucune partition de jeux séparée). Ce système ne gère
-          ni l'écran ni les jeux à la façon d'ArkOS : les étapes 2/3
-          n'ont aucun sens ici, sautées automatiquement (cas certain,
-          pas d'ambiguïté) avec une explication dans le journal.
-        - Système non reconnu : contrairement au cas ROCKNIX, la
-          situation est ambiguë -- avertissement affiché, l'utilisateur
-          choisit lui-même de continuer sans sauvegarde via le bouton
-          Continuer habituel plutôt qu'un saut automatique."""
-        system = self._wizard_source_system
-        if system == CardSystem.ROCKNIX:
-            self._log_panel.append_log(tr("wizard_source_rocknix_detected"))
-            self._skip_boot_easyroms_extraction()
-            return
-        if system == CardSystem.UNKNOWN:
-            message = tr("wizard_source_unknown_warning")
-            self._log_panel.append_log(message)
-            self._wizard_panel.set_status(message)
-            self._wizard_skip_extraction_on_continue = True
-            self._wizard_panel.set_can_continue(True)
-            return
-        self._run_wizard_identify()
-
-    def _skip_boot_easyroms_extraction(self) -> None:
-        """Marque IDENTIFY/EXTRACT_BOOT/EXTRACT_EASYROMS faits sans les
-        exécuter, puis avance directement à l'étape 4 -- carte source
-        ROCKNIX (automatique) ou non reconnue (après confirmation de
-        l'utilisateur, `_wizard_skip_extraction_on_continue`)."""
-        for job in (WizardJob.IDENTIFY, WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
-            self._wizard_flow.mark_done(job)
-        self._enter_wizard_job(self._wizard_flow.current_job())
-
-    def _enter_wizard_inject_boot_step(self) -> None:
-        """Rien à réinjecter si l'extraction a été sautée ci-dessus (carte
-        source ROCKNIX ou non reconnue) -- cette étape n'a alors pas plus
-        de sens que les précédentes, sautée de la même façon plutôt que de
-        tenter un job sans source (§5)."""
-        if self._wizard_boot_archive is None:
-            self._log_panel.append_log(tr("wizard_inject_boot_skipped_no_archive"))
-            self._wizard_flow.mark_done(WizardJob.INJECT_BOOT)
-            self._enter_wizard_job(self._wizard_flow.current_job())
-            return
-        self._run_wizard_partition_job(WizardJob.INJECT_BOOT)
+    def _on_backup_kind_chosen(self, kind: str) -> None:
+        """Réponse de `BackupKindDialog` -- "full" (copie complète, `backup
+        --device`) ou "system" (système seul, `backup --device --system-
+        only`, réutilise le pipeline d'estimation existant, inchangé). Les
+        deux mènent à `FileDialog` pour choisir où enregistrer l'image,
+        exactement comme aujourd'hui pour ces deux modes."""
+        self._backup_kind_dialog.close()
+        self._wizard_backup_kind = kind
+        self._device = self._wizard_source_device
+        if kind == "full":
+            self._mode = "backup"
+            # Majorant sûr, sans lecture supplémentaire : `backup_device`
+            # ne dépasse jamais la taille du périphérique source (il
+            # s'arrête à la fin de la dernière partition utilisée).
+            self._wizard_estimated_backup_bytes = self._device.size_bytes
+            self._log_panel.append_log(
+                tr("wizard_create_image_size_hint", size=_format_size(self._device.size_bytes))
+            )
+            self._file_dialog.set_mode("backup")
+            self._file_dialog.open()
+        else:
+            self._mode = "backup_system"
+            self._wizard_estimated_backup_bytes = None  # renseigné par l'estimation ci-dessous
+            self._start_system_backup_estimate(self._device)
 
     def _on_wizard_continue(self) -> None:
-        """Continuer ne concerne que les étapes qui l'activent elles-mêmes
-        (détection de carte, identification) -- les jobs qui écrivent/
-        copient avancent d'eux-mêmes via `_on_wizard_job_finished`. Cas
-        particulier : sur une carte source non reconnue, Continuer à
-        l'étape 2 signifie « continuer sans sauvegarde » plutôt que de
-        lancer l'identification (`_enter_wizard_identify_step` ci-dessus).
+        """Continuer ne concerne que l'étape de détection (`DETECT_SOURCE`)
+        -- toutes les autres étapes du parcours de clonage avancent
+        d'elles-mêmes via `_on_wizard_job_finished` ou leurs propres
+        boutons dédiés (`BackupKindDialog`).
 
         « Préparer une carte avec cette sauvegarde » (§4.3) partage ce
         même bouton/signal -- vérifié en tout premier, jamais
@@ -1332,10 +1291,6 @@ class MainWindow(QMainWindow):
             self._prepare_card_candidate = None
             self._device = device
             self._proceed_to_flash_confirmation()
-            return
-        if self._wizard_skip_extraction_on_continue:
-            self._wizard_skip_extraction_on_continue = False
-            self._skip_boot_easyroms_extraction()
             return
         job = self._wizard_flow.current_job()
         self._wizard_flow.mark_done(job)
@@ -1349,24 +1304,8 @@ class MainWindow(QMainWindow):
 
     def _finish_wizard(self) -> None:
         self._wizard_active = False
-        self._log_panel.append_log(tr("wizard_finished"))
-        # Récapitulatif de fin de parcours (§5 mode assisté) : où sont les
-        # sauvegardes BOOT/EASYROMS et qu'elles sont conservées -- rien ne
-        # les supprime automatiquement (ni ici, ni dans `partitions/
-        # archives.py`, qui n'expose d'ailleurs aucune fonction de
-        # suppression). Bouton Afficher pointant vers le dossier parent
-        # commun aux deux (`default_archives_dir`) plutôt qu'une seule des
-        # deux archives -- un seul bouton ne peut révéler qu'un chemin.
-        self._log_panel.finish_success(
-            tr(
-                "wizard_archives_summary",
-                boot_path=self._wizard_boot_archive or "?",
-                easyroms_path=self._wizard_easyroms_archive or "?",
-            ),
-            allow_eject=False,
-            reveal_path=str(archives.default_archives_dir()),
-        )
-        self._wizard_panel.show_step(tr("wizard_step7_title"), tr("wizard_finished"), can_continue=False)
+        self._log_panel.finish_success(tr("wizard_finished"), allow_eject=False, reveal_path=None)
+        self._wizard_panel.show_step(tr("wizard_step5_title"), tr("wizard_finished"), can_continue=False)
         self._refresh_home_state()
 
     # --- étapes 1/4 : détection, avec garde-fou d'empreinte à l'étape 4 -----
@@ -1460,12 +1399,6 @@ class MainWindow(QMainWindow):
             self._wizard_poll_timer.stop()  # trouvé -> plus besoin de reinterroger
             self._wizard_source_device = candidate
             self._wizard_source_fingerprint = fingerprint
-            # Système présent sur la carte source (§4.5 CardSystem) --
-            # décide de la suite à l'étape 2 (`_enter_wizard_identify_step`) :
-            # lecture seule, jamais de montage (même garantie que le reste
-            # du module `detect`), donc rien à faire sur un thread séparé
-            # ici contrairement à l'empreinte ci-dessus.
-            self._wizard_source_system = detect_card_system_for_device(candidate)
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
             self._wizard_panel.set_can_continue(True)
         elif job == WizardJob.DETECT_TARGET:
@@ -1479,112 +1412,35 @@ class MainWindow(QMainWindow):
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
             self._wizard_panel.set_can_continue(True)
 
-    # --- étape 2 : identification (thread séparé, §4.4) ---------------------
+    # --- étape 4 : restauration de l'image sur la carte neuve ---------------
 
-    def _run_wizard_identify(self) -> None:
-        self._identify_runner = WizardIdentifyRunner(self._wizard_source_device.path, parent=self)
-        self._identify_runner.finished_identify.connect(self._on_wizard_identify_finished)
-        self._identify_runner.start()
-
-    def _on_wizard_identify_finished(self, result: IdentifyResult) -> None:
-        if result.info is not None:
-            message = tr(
-                "wizard_identify_result",
-                board=result.info.board_compatible or "?",
-                panel=result.info.panel_compatible or "?",
+    def _enter_wizard_restore_image_step(self) -> None:
+        """Étape 4 (§5 mode assisté, parcours de clonage) : restaure
+        directement l'image créée à l'étape 2 (`self._file_path`) sur la
+        carte neuve -- aucun choix de firmware ici, contrairement au flash
+        du mode expert : ce n'est pas une nouvelle image téléchargée, c'est
+        la propre sauvegarde de l'utilisateur qu'on réinstalle telle
+        quelle. Vérification de taille avant toute écriture (§ pré-vol) :
+        une carte plus petite que l'image tronquerait la table GPT
+        secondaire (déjà rencontré) -- `estimate_total_bytes` est exacte et
+        non privilégiée pour `.img`/`.img.gz`/`.img.xz` (lue depuis le pied
+        du fichier, sans décompression) ; `None` seulement pour un pied
+        tronqué/non standard, cas résiduel où le blocage est laissé au
+        worker élevé (`flash_device` échoue alors avec une vraie erreur
+        d'écriture plutôt que de tronquer silencieusement)."""
+        self._mode = "flash"
+        self._device = self._wizard_target_device
+        total_hint = estimate_total_bytes(self._file_path)
+        if total_hint is not None and total_hint > self._device.size_bytes:
+            self._last_error_code = "DESTINATION_TOO_SMALL"
+            self._last_error_msg = f"{total_hint} > {self._device.size_bytes}"
+            self._log_panel.finish_error(
+                friendly_error_message("DESTINATION_TOO_SMALL"), details=self._last_error_msg
             )
-        else:
-            message = tr(_identify_failure_message_key(result.failure_reason))
-        self._log_panel.append_log(message)
-
-        # Console clone (§5 mode assisté, critère validé par l'outil
-        # officiel ArkOS sur le nom du .dtb, `identify/__init__.py`) --
-        # mémorisé pour l'étape de flash (5), qui oriente alors vers
-        # EmuELEC sans jamais imposer ce choix (`_enter_wizard_flash`).
-        self._wizard_source_is_clone = result.is_clone
-        if result.is_clone:
-            self._log_panel.append_log(tr("wizard_source_clone_detected"))
-
-        # Diagnostic technique, dans tous les cas (§5 vocabulaire : jamais
-        # dans le message principal, toujours en ligne supplémentaire du
-        # journal) -- absent seulement quand le montage lui-même a échoué
-        # (rien n'a pu être scanné).
-        if result.scanned_directory:
-            self._log_panel.append_log(tr("wizard_identify_log_directory", path=result.scanned_directory))
-            if result.examined_files:
-                self._log_panel.append_log(
-                    tr(
-                        "wizard_identify_log_files",
-                        count=len(result.examined_files),
-                        files=", ".join(result.examined_files),
-                    )
-                )
-            else:
-                self._log_panel.append_log(tr("wizard_identify_log_no_files"))
-        if result.detail:
-            self._log_panel.append_log(result.detail)
-
-        self._wizard_panel.set_status(message)
-        self._wizard_panel.set_can_continue(True)
-
-    # --- étapes 3/6 : extraction/injection, réutilise PartitionJobRunner ----
-
-    def _enter_wizard_extraction_step(self, job: WizardJob) -> None:
-        """Étapes A/B (§5 mode assisté) : si une sauvegarde existe déjà
-        pour l'empreinte de la carte source (`safety.card_fingerprint`,
-        calculée à l'étape 1), propose de la réutiliser plutôt que de tout
-        recopier à nouveau -- EASYROMS en particulier peut représenter
-        plusieurs Go recopiés inutilement à chaque nouveau passage sur la
-        même carte. Vérifie que le dossier référencé existe encore sur le
-        disque avant de le proposer : l'utilisateur a pu le déplacer ou le
-        supprimer depuis (`config.py` ne mémorise qu'un chemin, jamais une
-        garantie de présence)."""
-        label = BOOT_LABEL if job == WizardJob.EXTRACT_BOOT else EASYROMS_LABEL
-        record = app_config.get_archive_record(self._app_config, self._wizard_source_fingerprint, label)
-        if record is not None and Path(record["path"]).is_dir():
-            self._pending_extraction_job = job
-            self._archive_reuse_dialog.set_archive(_WIZARD_JOB_TO_EXPERT_MODE[job], record["path"], record["created_at"])
-            self._archive_reuse_dialog.open()
+            self._wizard_panel.show_error()
             return
-        self._run_wizard_partition_job(job)
-
-    def _on_archive_reuse_requested(self) -> None:
-        job = self._pending_extraction_job
-        self._pending_extraction_job = None
-        label = BOOT_LABEL if job == WizardJob.EXTRACT_BOOT else EASYROMS_LABEL
-        record = app_config.get_archive_record(self._app_config, self._wizard_source_fingerprint, label)
-        path = record["path"]
-        if job == WizardJob.EXTRACT_BOOT:
-            self._wizard_boot_archive = path
-        else:
-            self._wizard_easyroms_archive = path
-        self._log_panel.append_log(tr("wizard_archive_reused_log", path=path))
-        self._wizard_flow.mark_done(job)
-        self._enter_wizard_job(self._wizard_flow.current_job())
-
-    def _on_archive_redo_requested(self) -> None:
-        job = self._pending_extraction_job
-        self._pending_extraction_job = None
-        self._run_wizard_partition_job(job)
-
-    def _on_archive_reuse_cancelled(self) -> None:
-        self._pending_extraction_job = None
-        self._cancel_wizard()
-
-    def _run_wizard_partition_job(self, job: WizardJob) -> None:
-        self._mode = _WIZARD_JOB_TO_EXPERT_MODE[job]
-        if job == WizardJob.EXTRACT_BOOT:
-            self._device = self._wizard_source_device
-            self._file_path = str(archives.new_archive_path(BOOT_LABEL, base_dir=archives.default_archives_dir()))
-        elif job == WizardJob.EXTRACT_EASYROMS:
-            self._device = self._wizard_source_device
-            self._file_path = str(
-                archives.new_archive_path(EASYROMS_LABEL, base_dir=archives.default_archives_dir())
-            )
-        else:  # INJECT_BOOT
-            self._device = self._wizard_target_device
-            self._file_path = self._wizard_boot_archive
-        self._start_worker()
+        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.open()
 
     def _on_wizard_job_finished(self, ok: bool) -> None:
         job = self._wizard_flow.current_job()
@@ -1594,39 +1450,15 @@ class MainWindow(QMainWindow):
             self._wizard_panel.show_error()
             return
 
-        if job == WizardJob.EXTRACT_BOOT:
-            self._wizard_boot_archive = self._file_path
-        elif job == WizardJob.EXTRACT_EASYROMS:
-            self._wizard_easyroms_archive = self._file_path
+        if job == WizardJob.CREATE_IMAGE:
+            self._log_panel.append_log(tr("wizard_image_created_log", path=self._file_path))
 
-        if job in (WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS) and self._wizard_source_fingerprint:
-            # Mémorisé pour un prochain passage sur la même carte source
-            # (§5 mode assisté) -- remplace silencieusement un
-            # enregistrement précédent pour cette combinaison, la
-            # nouvelle extraction étant plus fraîche que l'ancienne.
-            label = BOOT_LABEL if job == WizardJob.EXTRACT_BOOT else EASYROMS_LABEL
-            app_config.set_archive_record(self._app_config, self._wizard_source_fingerprint, label, self._file_path)
-            app_config.save_config(self._app_config)
-
-        archive_info = self._archive_info()
-        if archive_info:
-            self._log_panel.append_log(archive_info)
         self._log_panel.finish_success(self._success_message(), allow_eject=False, reveal_path=None)
 
         self._wizard_flow.mark_done(job)
         self._enter_wizard_job(self._wizard_flow.current_job())
 
-    # --- étape 5 : flash -- choix ArkOS/ROCKNIX/EmuELEC, §5 ------------------
-
-    def _enter_wizard_flash(self) -> None:
-        self._mode = "flash"
-        self._device = self._wizard_target_device
-        self._file_dialog.set_mode(
-            "flash", firmware=self._app_config.firmware, is_clone_console=self._wizard_source_is_clone
-        )
-        self._file_dialog.open()
-
-    # --- étape 7 : éjection, synchrone comme _perform_eject ------------------
+    # --- étape 5 : éjection, synchrone comme _perform_eject ------------------
 
     def _run_wizard_eject(self) -> None:
         self._log_panel.append_log("Éjection de la carte…")

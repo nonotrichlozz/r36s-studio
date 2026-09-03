@@ -88,103 +88,44 @@ STRINGS = {
     "wizard_status_waiting": "En attente de ta carte…",
     "wizard_status_device_found": "Carte reconnue : {display}",
     "wizard_status_same_card": "C'est la même carte — insère la carte neuve, pas l'ancienne.",
-    # Système détecté sur la carte source à l'étape 1 (§4.5 CardSystem) --
-    # adapte l'étape 2/3 sans jamais basculer vers le mode expert.
-    "wizard_source_rocknix_detected": (
-        "Carte ROCKNIX détectée. Ce système ne gère pas l'écran et les jeux de la "
-        "même façon qu'ArkOS : ces étapes ne s'appliquent pas ici. On passe "
-        "directement à l'insertion de ta carte neuve."
-    ),
-    "wizard_source_unknown_warning": (
-        "Impossible de reconnaître le système présent sur cette carte. Tu peux "
-        "continuer sans sauvegarder l'écran ni les jeux, ou débrancher cette carte "
-        "pour vérifier qu'il s'agit bien de la bonne avant de continuer."
-    ),
-    "wizard_inject_boot_skipped_no_archive": (
-        "Aucune sauvegarde de l'écran d'origine à réinjecter : cette étape est ignorée."
-    ),
-    # Console clone détectée à l'identification (étape 2, §5 mode assisté) --
-    # critère validé par l'outil officiel ArkOS (identify/__init__.py::
-    # CLONE_DTB_FILENAMES). N'interrompt jamais le parcours : juste une
-    # orientation claire pour l'étape de flash qui suit.
-    "wizard_source_clone_detected": (
-        "Console clone détectée : ce n'est pas une R36S officielle. Les images "
-        "ArkOS et ROCKNIX standard ne démarrent pas sur ce matériel — EmuELEC "
-        "est recommandé à l'étape d'installation."
-    ),
     "wizard_status_multiple_candidates": "Plusieurs cartes détectées — choisis la bonne.",
     # Journal de bord (§5 vocabulaire : le détail technique n'apparaît
     # que là) -- combien de périphériques retenus/écartés à un sondage du
     # mode assisté, avec la raison de chaque exclusion.
     "wizard_diagnostic_summary": "Détection : {accepted} carte(s) retenue(s), {rejected} écartée(s)",
-    "wizard_identify_result": "Console identifiée : {board} (écran {panel}).",
-    # Trois causes distinctes (§5 mode assisté) plutôt qu'un message
-    # générique -- chacune se termine par le même repli (MultiPanel), le
-    # parcours n'est jamais bloqué par un échec d'identification.
-    "wizard_identify_failed_mount": (
-        "Impossible de lire ta carte d'origine — elle semble défaillante. "
-        "C'est fréquent avec les cartes fournies avec la console R36S. "
-        "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
-    ),
-    # Windows uniquement (§4.4) : contrairement à macOS/Linux, où ce
-    # message n'apparaît qu'après une tentative active de montage restée
-    # sans effet, Windows n'attribue pas toujours une lettre de lecteur à
-    # une partition par ailleurs saine et lisible -- jamais présenter ça
-    # comme un défaut de la carte.
-    "wizard_identify_failed_mount_windows": (
-        "Impossible de lire ta carte d'origine pour l'instant. Débranche-la "
-        "et rebranche-la, puis réessaie — ce n'est pas forcément un défaut "
-        "de la carte. Tu peux continuer : la version MultiPanel sera "
-        "utilisée par défaut."
-    ),
-    "wizard_identify_failed_no_dtb": (
-        "Ta carte a été lue, mais ne contient pas de fichier d'identification — "
-        "c'est le cas d'une carte fraîchement flashée. L'identification se fera "
-        "automatiquement une fois l'écran d'origine réinjecté (étape 6). "
-        "Tu peux continuer : la version MultiPanel sera utilisée en attendant."
-    ),
-    "wizard_identify_failed_invalid_dtb": (
-        "Le fichier de réglages d'écran de ta carte est illisible, corrompu, "
-        "ou ne contient pas les informations attendues. "
-        "Tu peux continuer : la version MultiPanel sera utilisée par défaut."
-    ),
-    # Journal de bord uniquement (§5 vocabulaire) -- diagnostic technique,
-    # jamais dans le message principal.
-    "wizard_identify_log_directory": "Dossier examiné : {path}",
-    "wizard_identify_log_files": "Fichiers .dtb examinés ({count}) : {files}",
-    "wizard_identify_log_no_files": "Aucun fichier .dtb trouvé dans ce dossier.",
     "wizard_step1_title": "1. Insère ta carte SD d'origine",
     "wizard_step1_instruction": "Branche l'ancienne carte SD de ta console sur ton ordinateur.",
-    "wizard_step2_title": "2. Identification de ta console",
-    "wizard_step2_instruction": "On regarde les réglages de ta carte pour reconnaître ton modèle de console.",
-    "wizard_step3_title": "3. Copie de l'écran et des jeux",
-    "wizard_step3_instruction": "On enregistre l'écran, les réglages et les jeux de ta carte d'origine sur ton ordinateur.",
-    "wizard_step4_title": "4. Insère ta carte neuve",
-    "wizard_step4_instruction": "Branche maintenant la carte neuve à préparer.",
-    # Éjection de la carte source, en tout début de l'étape 4 -- avant même
+    "wizard_step2_title": "2. Copie de ta carte sur l'ordinateur",
+    "wizard_step2_instruction": "Choisis ce que tu veux sauvegarder, puis on l'enregistre sur ton ordinateur.",
+    # Étape 2 (§5 mode assisté, parcours de clonage) : choix entre copie
+    # complète et système seul, avant même d'ouvrir la fenêtre Choix du
+    # fichier -- image disque brute dans les deux cas, aucune opération au
+    # niveau fichier, ce qui rend ce choix indépendant du firmware
+    # installé sur la carte source.
+    "wizard_backup_kind_title": "Que veux-tu sauvegarder ?",
+    "wizard_backup_kind_full": "Copie complète",
+    "wizard_backup_kind_full_desc": "L'écran, les réglages et tous tes jeux. Jusqu'à environ {size}.",
+    "wizard_backup_kind_system": "Système seul, sans les jeux",
+    "wizard_backup_kind_system_desc": "L'écran et les réglages seulement — un fichier bien plus petit.",
+    "wizard_create_image_size_hint": "Taille maximale de la copie : environ {size}.",
+    "wizard_image_created_log": "Image créée : {path}",
+    "wizard_step3_title": "3. Insère ta carte neuve",
+    "wizard_step3_instruction": "Branche maintenant la carte neuve à préparer.",
+    # Éjection de la carte source, en tout début de l'étape 3 -- avant même
     # d'afficher la consigne d'insertion ci-dessus (§5 mode assisté,
     # correctif : retirer la carte pendant qu'elle est encore montée
     # risquait de corrompre des données).
     "wizard_ejecting_source": "Éjection de ta carte d'origine…",
     "wizard_source_ejected": "Tu peux maintenant retirer ta carte d'origine en toute sécurité.",
-    "wizard_step5_title": "5. Installation d'ArkOS",
-    "wizard_step5_instruction": "On installe le système sur ta carte neuve.",
-    "wizard_step6_title": "6. Remise en place de ton écran",
-    "wizard_step6_instruction": "On remet l'écran et les réglages d'origine sur la carte neuve.",
-    "wizard_step7_title": "7. Éjection",
-    "wizard_step7_instruction": "On retire ta carte neuve en toute sécurité — elle est prête.",
+    "wizard_step4_title": "4. Installation sur ta carte neuve",
+    "wizard_step4_instruction": "On installe ta sauvegarde sur ta carte neuve.",
+    "wizard_step5_title": "5. Éjection",
+    "wizard_step5_instruction": "On retire ta carte neuve en toute sécurité — elle est prête.",
     "wizard_finished": "Ta carte est prête ! Tu peux la retirer et la mettre dans ta console.",
-    # Chemin de destination annoncé dès le début de la copie (étapes A/B,
-    # §5 mode assisté) -- pas seulement à la fin, journal de bord uniquement
-    # (§5 vocabulaire).
+    # Chemin de destination annoncé dès le début de la copie (étapes A/B du
+    # mode expert, §5 mode assisté historiquement) -- pas seulement à la
+    # fin, journal de bord uniquement (§5 vocabulaire).
     "wizard_archive_destination_log": "Destination : {path}",
-    "wizard_archive_reused_log": "Sauvegarde déjà existante réutilisée, sans recopie : {path}",
-    # Récapitulatif de fin de parcours (§5 mode assisté) : où sont les
-    # sauvegardes et qu'elles sont conservées.
-    "wizard_archives_summary": (
-        "Tes sauvegardes sont conservées sur ton ordinateur : l'écran d'origine "
-        "dans {boot_path}, tes jeux et sauvegardes dans {easyroms_path}."
-    ),
     # Fenêtre Choix du fichier, flash uniquement (§5 mode assisté, étape 5)
     # -- l'image n'est pas hébergée sur GitHub (Mega, Google Drive,
     # OneDrive, torrent), seul le lien vers la page des releases est ouvert.
@@ -252,20 +193,6 @@ STRINGS = {
     "confirm_erase": "Toutes les données de « {display} » ({size_go:.1f} Go) seront définitivement effacées.",
     "confirm_go": "Effacer et écrire",
     "confirm_cancel": "Annuler",
-    # Réutilisation d'une sauvegarde déjà connue (§5 mode assisté, étapes
-    # A/B) -- évite de recopier inutilement plusieurs Go à chaque nouveau
-    # passage sur la même carte.
-    "archive_reuse_title_boot": "Écran d'origine déjà sauvegardé",
-    "archive_reuse_message_boot": (
-        "Une sauvegarde de l'écran d'origine de cette carte existe déjà, du {date} :\n{path}"
-    ),
-    "archive_reuse_title_easyroms": "Jeux et sauvegardes déjà sauvegardés",
-    "archive_reuse_message_easyroms": (
-        "Une sauvegarde de tes jeux et sauvegardes pour cette carte existe déjà, du {date} :\n{path}"
-    ),
-    "archive_reuse_reuse": "Réutiliser cette sauvegarde",
-    "archive_reuse_redo": "Refaire la sauvegarde",
-    "archive_reuse_cancel": "Annuler",
     # Journal de bord (colonne droite, §5 -- remplace les anciens écrans
     # Exécution et Résultat) : en-tête au repos ou pendant une opération.
     "log_header_idle": "En attente",
@@ -402,6 +329,17 @@ STRINGS = {
         "Impossible de reconnaître l'emplacement des jeux (EASYROMS ou STORAGE) sur "
         "cette carte — la sauvegarde système sans les jeux ne sait pas où s'arrêter."
     ),
+    # Pré-vol du parcours de clonage (§5 mode assisté) : jamais un échec
+    # après une longue copie déjà lancée -- ces deux vérifications
+    # s'exécutent avant d'écrire quoi que ce soit.
+    "error_insufficient_disk_space": (
+        "Ton ordinateur n'a pas assez de place libre pour créer cette sauvegarde. "
+        "Libère de l'espace, ou choisis un autre disque, puis réessaie."
+    ),
+    "error_destination_too_small": (
+        "Cette carte est trop petite pour la sauvegarde à installer. "
+        "Utilise une carte neuve d'au moins la même taille."
+    ),
     "error_generic": "Une erreur est survenue.",
     # Estimation avant de lancer la sauvegarde système sans les jeux (§4.3)
     # -- journal de bord, avant l'ouverture de la fenêtre Choix du fichier.
@@ -440,6 +378,8 @@ _ERROR_MESSAGE_KEYS = {
     "ROCKNIX_CHECKSUM_MISMATCH": "error_rocknix_checksum_mismatch",
     "ROCKNIX_DOWNLOAD_FAILED": "error_rocknix_download_failed",
     "GAMES_PARTITION_NOT_FOUND": "error_games_partition_not_found",
+    "INSUFFICIENT_DISK_SPACE": "error_insufficient_disk_space",
+    "DESTINATION_TOO_SMALL": "error_destination_too_small",
 }
 
 

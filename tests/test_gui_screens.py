@@ -9,8 +9,8 @@ from unittest.mock import patch
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.gui.screens import (
-    ArchiveReuseDialog,
     AssistedLandingScreen,
+    BackupKindDialog,
     ConfirmDialog,
     ConsoleArt,
     ConsoleBasePlate,
@@ -2003,104 +2003,54 @@ def test_confirm_dialog_confirmed_signal_on_go_click(qapp):
     assert received == [True]
 
 
-# --- ArchiveReuseDialog : réutiliser une sauvegarde déjà connue (§5) -------
+# --- BackupKindDialog : choix complet/système du parcours de clonage (§5) -
 
 
-def test_archive_reuse_dialog_shows_boot_message_with_date_and_path(qapp):
-    from datetime import datetime
-
-    dialog = ArchiveReuseDialog()
-
-    dialog.set_archive("extract_boot", "/tmp/BOOT_2026-07-06_00-21", datetime(2026, 7, 6, 0, 21))
-
-    assert "6 juillet 2026 à 00h21" in dialog._message.text()
-    assert "/tmp/BOOT_2026-07-06_00-21" in dialog._message.text()
-    # §5 vocabulaire : jamais le jargon technique dans la *phrase* elle-même
-    # (le gabarit non substitué) -- le chemin brut fourni par l'appelant,
-    # lui, peut légitimement contenir "BOOT" (nom du dossier d'archive).
-    from r36s_studio.gui.strings import STRINGS
-
-    assert "BOOT" not in STRINGS["archive_reuse_message_boot"]
-    assert "EASYROMS" not in STRINGS["archive_reuse_message_boot"]
-
-
-def test_archive_reuse_dialog_shows_easyroms_message_with_different_wording(qapp):
-    from datetime import datetime
-
-    dialog = ArchiveReuseDialog()
-
-    dialog.set_archive("extract_easyroms", "/tmp/EASYROMS_2026-07-06_00-25", datetime(2026, 7, 6, 0, 25))
-
-    assert "jeux" in dialog._message.text()
-    from r36s_studio.gui.strings import STRINGS
-
-    assert "EASYROMS" not in STRINGS["archive_reuse_message_easyroms"]
-    assert "BOOT" not in STRINGS["archive_reuse_message_easyroms"]
-
-
-def test_archive_reuse_dialog_accepts_iso_string_date(qapp):
-    dialog = ArchiveReuseDialog()
-
-    dialog.set_archive("extract_boot", "/tmp/BOOT_x", "2026-07-06T00:21:00")
-
-    assert "6 juillet 2026 à 00h21" in dialog._message.text()
-
-
-def test_archive_reuse_dialog_falls_back_to_raw_string_on_unparseable_date(qapp):
-    dialog = ArchiveReuseDialog()
-
-    dialog.set_archive("extract_boot", "/tmp/BOOT_x", "n'importe quoi")
-
-    assert "n'importe quoi" in dialog._message.text()
-
-
-def test_archive_reuse_dialog_reuse_button_emits_signal_and_closes(qapp):
-    dialog = ArchiveReuseDialog()
-    dialog.set_archive("extract_boot", "/tmp/BOOT_x", "2026-07-06T00:21:00")
+def test_backup_kind_dialog_full_copy_emits_signal_and_closes(qapp):
+    dialog = BackupKindDialog()
     dialog.show()
     received = []
-    dialog.reuse_requested.connect(lambda: received.append(True))
+    dialog.full_copy_requested.connect(lambda: received.append(True))
 
-    dialog._reuse_button.click()
+    dialog._full_button.click()
 
     assert received == [True]
     assert dialog.isVisible() is False
 
 
-def test_archive_reuse_dialog_redo_button_emits_signal_and_closes(qapp):
-    dialog = ArchiveReuseDialog()
-    dialog.set_archive("extract_boot", "/tmp/BOOT_x", "2026-07-06T00:21:00")
+def test_backup_kind_dialog_system_only_emits_signal_and_closes(qapp):
+    dialog = BackupKindDialog()
     dialog.show()
     received = []
-    dialog.redo_requested.connect(lambda: received.append(True))
+    dialog.system_only_requested.connect(lambda: received.append(True))
 
-    dialog._redo_button.click()
+    dialog._system_button.click()
 
     assert received == [True]
     assert dialog.isVisible() is False
 
 
-def test_archive_reuse_dialog_cancel_emits_signal_and_closes(qapp):
-    dialog = ArchiveReuseDialog()
-    dialog.set_archive("extract_boot", "/tmp/BOOT_x", "2026-07-06T00:21:00")
+def test_backup_kind_dialog_cancel_emits_signal_and_closes(qapp):
+    dialog = BackupKindDialog()
     dialog.show()
     received = []
     dialog.cancelled.connect(lambda: received.append(True))
 
-    dialog._cancel_button.click()
+    dialog._on_cancel()
 
     assert received == [True]
     assert dialog.isVisible() is False
 
 
-def test_archive_reuse_dialog_reuse_button_is_the_default_action(qapp):
-    """Réutiliser est mis en avant par défaut (§5) : c'est le bouton
+def test_backup_kind_dialog_full_copy_is_the_default_action(qapp):
+    """Copie complète est mise en avant par défaut (§5) : c'est le bouton
     `default` de la boîte de dialogue (activé par Entrée) et il porte le
-    rôle visuel "primary"."""
-    dialog = ArchiveReuseDialog()
+    rôle visuel "primary" -- ni l'un ni l'autre choix n'est pré-coché ou
+    imposé, seul le focus par défaut favorise la copie complète."""
+    dialog = BackupKindDialog()
 
-    assert dialog._reuse_button.isDefault() is True
-    assert dialog._reuse_button.property("role") == "primary"
+    assert dialog._full_button.isDefault() is True
+    assert dialog._full_button.property("role") == "primary"
 
 
 # --- LogPanel (§5, refonte navigation -- remplace Exécution + Résultat) ----

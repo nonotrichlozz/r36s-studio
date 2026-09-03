@@ -1502,81 +1502,65 @@ class ConfirmDialog(Dialog):
         self._go_button.setEnabled(self._checkbox.isChecked())
 
 
-def _format_archive_reuse_date(created_at) -> str:
-    """`created_at` : `datetime` ou chaîne ISO 8601 (telle que stockée
-    dans `config.py::archive_records`) -- repli sur la chaîne brute si
-    elle est illisible, jamais un plantage pour un simple affichage de
-    date."""
-    if isinstance(created_at, str):
-        try:
-            created_at = datetime.fromisoformat(created_at)
-        except ValueError:
-            return created_at
-    return format_datetime_label(created_at)
+class BackupKindDialog(Dialog):
+    """Étape 2 du parcours de clonage (§5 mode assisté) : demande quoi
+    sauvegarder avant de créer l'image sur l'ordinateur -- copie complète
+    (système + jeux, réutilise `imaging.backup_device`) ou système seul
+    (sans les jeux, réutilise `imaging.backup_system_only` via le pipeline
+    d'estimation déjà en place pour l'opération ad-hoc équivalente de
+    l'accueil assisté). Même forme que l'ancien `ArchiveReuseDialog`
+    qu'elle remplace : deux boutons principaux avec une courte description
+    chacun, jamais un choix pré-coché -- l'utilisateur choisit toujours
+    activement (§5 vocabulaire)."""
 
-
-class ArchiveReuseDialog(Dialog):
-    """Propose de réutiliser une sauvegarde BOOT/EASYROMS déjà connue pour
-    la carte source détectée (même empreinte de contenu, §5 mode assisté,
-    `safety.card_fingerprint`) plutôt que de tout recopier à nouveau à
-    chaque nouveau passage sur la même carte -- EASYROMS en particulier
-    peut représenter plusieurs Go recopiés inutilement. Trois choix :
-    réutiliser (mis en avant par défaut, `role="primary"`), refaire la
-    sauvegarde, ou annuler tout le parcours -- jamais une réutilisation
-    silencieuse, l'utilisateur garde toujours la main."""
-
-    reuse_requested = Signal()
-    redo_requested = Signal()
+    full_copy_requested = Signal()
+    system_only_requested = Signal()
     cancelled = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        self._title = QLabel()
+        self._title = QLabel(tr("wizard_backup_kind_title"))
         self._title.setProperty("role", "title")
+        self.setWindowTitle(tr("wizard_backup_kind_title"))
         layout.addWidget(self._title)
+        layout.addStretch()
 
-        self._message = QLabel()
-        self._message.setWordWrap(True)
-        layout.addWidget(self._message)
+        self._full_button = QPushButton(tr("wizard_backup_kind_full"))
+        self._full_button.setProperty("role", "primary")
+        self._full_button.setDefault(True)
+        self._full_button.clicked.connect(self._on_full)
+        full_desc = QLabel(tr("wizard_backup_kind_full_desc"))
+        full_desc.setWordWrap(True)
+        full_desc.setProperty("role", "secondary")
+        layout.addWidget(self._full_button)
+        layout.addWidget(full_desc)
+
+        self._system_button = QPushButton(tr("wizard_backup_kind_system"))
+        self._system_button.clicked.connect(self._on_system)
+        system_desc = QLabel(tr("wizard_backup_kind_system_desc"))
+        system_desc.setWordWrap(True)
+        system_desc.setProperty("role", "secondary")
+        layout.addWidget(self._system_button)
+        layout.addWidget(system_desc)
         layout.addStretch()
 
         buttons = QHBoxLayout()
-        self._cancel_button = QPushButton(tr("archive_reuse_cancel"))
-        self._cancel_button.clicked.connect(self._on_cancel)
-        self._redo_button = QPushButton(tr("archive_reuse_redo"))
-        self._redo_button.clicked.connect(self._on_redo)
-        self._reuse_button = QPushButton(tr("archive_reuse_reuse"))
-        self._reuse_button.setProperty("role", "primary")
-        self._reuse_button.setDefault(True)
-        self._reuse_button.clicked.connect(self._on_reuse)
-        buttons.addWidget(self._cancel_button)
+        cancel_button = QPushButton(tr("confirm_cancel"))
+        cancel_button.clicked.connect(self._on_cancel)
+        buttons.addWidget(cancel_button)
         buttons.addStretch()
-        buttons.addWidget(self._redo_button)
-        buttons.addWidget(self._reuse_button)
         layout.addLayout(buttons)
 
-        self.resize(460, 260)
+        self.resize(460, 320)
 
-    def set_archive(self, mode: str, path: str, created_at) -> None:
-        """`mode` : "extract_boot" ou "extract_easyroms" -- décide du
-        vocabulaire (§5, jamais "BOOT"/"EASYROMS" dans le message
-        principal, seul le chemin brut apparaît, comme pour le
-        récapitulatif de fin de parcours). `created_at` : voir
-        `_format_archive_reuse_date`."""
-        title_key = "archive_reuse_title_boot" if mode == "extract_boot" else "archive_reuse_title_easyroms"
-        message_key = "archive_reuse_message_boot" if mode == "extract_boot" else "archive_reuse_message_easyroms"
-        self._title.setText(tr(title_key))
-        self.setWindowTitle(tr(title_key))
-        self._message.setText(tr(message_key, date=_format_archive_reuse_date(created_at), path=path))
-
-    def _on_reuse(self) -> None:
+    def _on_full(self) -> None:
         self.close()
-        self.reuse_requested.emit()
+        self.full_copy_requested.emit()
 
-    def _on_redo(self) -> None:
+    def _on_system(self) -> None:
         self.close()
-        self.redo_requested.emit()
+        self.system_only_requested.emit()
 
     def _on_cancel(self) -> None:
         self.close()

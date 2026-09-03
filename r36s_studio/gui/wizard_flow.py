@@ -1,17 +1,19 @@
-"""Séquencement du mode assisté (§5 mode assisté) : 7 étapes affichées à
-l'utilisateur, mais 8 « jobs » suivis en interne -- l'étape 3 (« Copie du
-BOOT et d'EASYROMS ») recouvre en réalité deux jobs indépendants
-(`EXTRACT_BOOT`, `EXTRACT_EASYROMS`), chacun avec son propre statut fait/
-pas fait. C'est ce qui permet à la reprise après erreur de ne rejouer que
-le job qui a réellement échoué : si le BOOT a été copié avec succès et
-qu'EASYROMS échoue, `current_job()` continue de désigner EASYROMS après
-l'échec (le BOOT reste marqué fait), donc « Reprendre » (qui relance
-`current_job()`) ne refait jamais un job déjà réussi.
+"""Séquencement du mode assisté (§5 mode assisté) : parcours de clonage à
+5 étapes, chacune son propre job -- détecter la carte source, créer
+l'image (copie complète ou système seul, au choix), détecter la carte
+neuve (éjecte d'abord la source), restaurer l'image, éjecter. Plus simple
+que l'ancien parcours à 7 étapes/8 jobs (identification DTB puis
+extraction/injection BOOT-EASYROMS, propres à ArkOS) : ce parcours ne
+travaille plus qu'en image disque brute, donc `current_job()` avance
+toujours un-pour-un avec les étapes affichées, sans plus jamais avoir
+besoin qu'un même écran recouvre deux jobs indépendants.
 
 Ne pilote rien lui-même (aucun accès disque, aucun signal Qt) --
 `main_window.py` interroge `current_job()`/`mark_done()` et déclenche
 l'opération correspondante. Cette séparation rend la logique de reprise
-testable sans QApplication ni matériel."""
+testable sans QApplication ni matériel : un job qui échoue n'est jamais
+marqué fait, donc « Reprendre » (qui relance `current_job()`) ne rejoue
+jamais un job déjà réussi."""
 
 from __future__ import annotations
 
@@ -21,23 +23,17 @@ from typing import Dict, Optional
 
 class WizardJob(Enum):
     DETECT_SOURCE = "detect_source"  # étape 1
-    IDENTIFY = "identify"  # étape 2
-    EXTRACT_BOOT = "extract_boot"  # étape 3 (a)
-    EXTRACT_EASYROMS = "extract_easyroms"  # étape 3 (b)
-    DETECT_TARGET = "detect_target"  # étape 4
-    FLASH = "flash"  # étape 5
-    INJECT_BOOT = "inject_boot"  # étape 6
-    EJECT = "eject"  # étape 7
+    CREATE_IMAGE = "create_image"  # étape 2 (choix complet/système, puis copie)
+    DETECT_TARGET = "detect_target"  # étape 3 (éjecte la source, puis détecte)
+    RESTORE_IMAGE = "restore_image"  # étape 4
+    EJECT = "eject"  # étape 5
 
 
 _ORDER = [
     WizardJob.DETECT_SOURCE,
-    WizardJob.IDENTIFY,
-    WizardJob.EXTRACT_BOOT,
-    WizardJob.EXTRACT_EASYROMS,
+    WizardJob.CREATE_IMAGE,
     WizardJob.DETECT_TARGET,
-    WizardJob.FLASH,
-    WizardJob.INJECT_BOOT,
+    WizardJob.RESTORE_IMAGE,
     WizardJob.EJECT,
 ]
 

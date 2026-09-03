@@ -2205,24 +2205,10 @@ def test_macos_tcc_protected_folder_error_shows_dedicated_friendly_message(mock_
 # --- mode assisté (§5 mode assisté) -----------------------------------------
 #
 # ui_mode (config.py) pilote l'écran affiché au lancement ; le mode assisté
-# enchaîne 7 étapes (gui/wizard_flow.py) sur la même MainView que le mode
-# expert (colonne gauche remplacée par WizardStepPanel).
+# enchaîne 5 étapes (gui/wizard_flow.py, parcours de clonage) sur la même
+# MainView que le mode expert (colonne gauche remplacée par WizardStepPanel).
 
 from r36s_studio.gui.wizard_flow import WizardJob
-
-
-def _mock_identify_runner_class():
-    instances = []
-
-    def _factory(device_path, parent=None):
-        instance = MagicMock()
-        instance.device_path = device_path
-        instances.append(instance)
-        return instance
-
-    factory = MagicMock(side_effect=_factory)
-    factory.instances = instances
-    return factory
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
@@ -2535,635 +2521,141 @@ def test_wizard_fingerprint_ready_for_detect_source_stores_device_and_enables_co
     assert window._wizard_source_fingerprint == "fp-source"
 
 
-@patch(
-    "r36s_studio.detect.list_partitions",
-    return_value=[
-        PartitionInfo("/dev/fake-disk-test-3s1", "", "fat16", None),
-        PartitionInfo("/dev/fake-disk-test-3s2", "", "ext4", None),
-        PartitionInfo("/dev/fake-disk-test-3s3", "EASYROMS", "ntfs", None),
-    ],
-)
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_continue_on_step_one_advances_to_identify_and_starts_identify_runner(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_partitions, qapp
+def test_wizard_continue_on_step_one_advances_to_create_image_and_opens_backup_kind_dialog(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     device = _make_device()
-    identify_runner_class = _mock_identify_runner_class()
 
     window = MainWindow()
     window._assisted_landing.prepare_requested.emit()
     window._on_wizard_fingerprint_ready(WizardJob.DETECT_SOURCE, device, "fp-source")
 
-    with patch("r36s_studio.gui.main_window.WizardIdentifyRunner", identify_runner_class):
-        window._wizard_panel.continue_requested.emit()
-
-    assert window._wizard_flow.is_done(WizardJob.DETECT_SOURCE) is True
-    assert window._wizard_flow.current_job() == WizardJob.IDENTIFY
-    identify_runner_class.assert_called_once_with(device.path, parent=window)
-    identify_runner_class.instances[0].start.assert_called_once()
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_success_enables_continue_and_logs_result(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyResult
-    from r36s_studio.identify.dtb import DtbInfo
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
-    window._wizard_panel._continue_button.setEnabled(False)
-
-    info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
-    window._on_wizard_identify_finished(IdentifyResult(info=info))
-
-    assert window._wizard_panel._continue_button.isEnabled() is True
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "rk3326-evb-lp3-v12" in log_text
-
-
-# --- console clone détectée à l'identification (§5 mode assisté, étape 2) --
-# --- critère validé par l'outil officiel ArkOS (identify/__init__.py) ------
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_clone_detected_logs_a_clear_warning(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyResult
-    from r36s_studio.identify.dtb import DtbInfo
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
-    window._on_wizard_identify_finished(IdentifyResult(info=info, is_clone=True))
-
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "clone" in log_text.lower()
-    assert "EmuELEC" in log_text
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_clone_flag_remembered_for_the_flash_step(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyResult
-    from r36s_studio.identify.dtb import DtbInfo
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
-    window._on_wizard_identify_finished(IdentifyResult(info=info, is_clone=True))
-
-    assert window._wizard_source_is_clone is True
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_non_clone_does_not_set_clone_flag(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyResult
-    from r36s_studio.identify.dtb import DtbInfo
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    info = DtbInfo(board_compatible="rk3326-r35s", panel_compatible="sitronix,st7703", timings={})
-    window._on_wizard_identify_finished(IdentifyResult(info=info, is_clone=False))
-
-    assert window._wizard_source_is_clone is False
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "clone" not in log_text.lower()
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_starting_a_new_wizard_resets_the_clone_flag(mock_list, mock_filter, mock_load, mock_save, qapp):
-    window = MainWindow()
-    window._wizard_source_is_clone = True
-
-    window._assisted_landing.prepare_requested.emit()
-
-    assert window._wizard_source_is_clone is False
-
-
-# --- échec d'identification : trois causes distinctes, trois messages -----
-
-
-@patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_mount_failed_suggests_a_faulty_card(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_platform, qapp
-):
-    """macOS/Linux uniquement (§4.4) : `locate_mounted` y retente
-    activement un montage avant d'abandonner, donc un échec persistant est
-    un signal plus fiable de carte défaillante qu'sur Windows (voir le
-    test dédié ci-dessous)."""
-    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    window._on_wizard_identify_finished(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
-
-    assert window._wizard_panel._continue_button.isEnabled() is True
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "défaillante" in log_text
-
-
-@patch("r36s_studio.gui.main_window.platform.system", return_value="Windows")
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_mount_failed_never_suggests_faulty_card_on_windows(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_platform, qapp
-):
-    """Confirmé sur du vrai matériel (ThinkPad, lecteur SD Realtek) : une
-    partition BOOT saine et lisible peut très bien n'avoir aucune lettre
-    de lecteur sous Windows -- ce n'est pas un défaut de la carte, jamais
-    le suggérer sur cet OS (`locate.py::_list_windows` retombe désormais
-    sur le chemin GUID du volume dans ce cas, rendant ce timeout rare,
-    mais le message doit rester correct pour le cas résiduel où même ce
-    repli échoue)."""
-    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    window._on_wizard_identify_finished(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
-
-    assert window._wizard_panel._continue_button.isEnabled() is True
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "défaillante" not in log_text
-    assert "Débranche-la et rebranche-la" in log_text
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_no_dtb_found_message_differs_from_mount_failed(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    window._on_wizard_identify_finished(IdentifyResult(failure_reason=IdentifyFailureReason.NO_DTB_FOUND))
-
-    assert window._wizard_panel._continue_button.isEnabled() is True
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "défaillante" not in log_text
-    assert "fraîchement flashée" in log_text
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_invalid_dtb_message_differs_from_the_other_two(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    window._on_wizard_identify_finished(IdentifyResult(failure_reason=IdentifyFailureReason.ALL_DTB_INVALID))
-
-    assert window._wizard_panel._continue_button.isEnabled() is True
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "défaillante" not in log_text
-    assert "fraîchement flashée" not in log_text
-    assert "illisible, corrompu" in log_text
-
-
-# --- journal : chemin examiné et fichiers .dtb, dans tous les cas ---------
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_logs_scanned_directory_and_examined_files_on_success(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyResult
-    from r36s_studio.identify.dtb import DtbInfo
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    info = DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible="sitronix,st7703", timings={})
-    result = IdentifyResult(info=info, scanned_directory="/Volumes/BOOT", examined_files=["/Volumes/BOOT/board.dtb"])
-    window._on_wizard_identify_finished(result)
-
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "/Volumes/BOOT" in log_text
-    assert "board.dtb" in log_text
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_logs_scanned_directory_and_examined_files_on_no_dtb_found(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    result = IdentifyResult(
-        failure_reason=IdentifyFailureReason.NO_DTB_FOUND,
-        scanned_directory="/Volumes/BOOT",
-        examined_files=[],
-    )
-    window._on_wizard_identify_finished(result)
-
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "/Volumes/BOOT" in log_text
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_identify_logs_raw_detail_on_mount_failed(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
-):
-    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
-
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-
-    result = IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED, detail="délai dépassé sur /dev/x")
-    window._on_wizard_identify_finished(result)
-
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "délai dépassé sur /dev/x" in log_text
-
-
-# --- étape 2 : adaptation au système détecté sur la carte source (§4.5) ----
-# ROCKNIX ne gère pas le BOOT/EASYROMS comme ArkOS (structure réelle relevée
-# sur du vrai matériel : MBR, 2 partitions -- ROCKNIX en FAT32 et une
-# partition Linux opaque, aucune partition de jeux séparée) : les étapes
-# 2/3 sont sautées automatiquement. Un système non reconnu, en revanche,
-# affiche un avertissement et laisse l'utilisateur choisir via Continuer --
-# jamais un aller simple vers le mode expert dans un cas comme dans l'autre.
-
-from r36s_studio.detect import CardSystem
-
-
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.eject_device")
-def test_wizard_rocknix_source_skips_identify_and_extraction_with_explanation(
-    mock_eject, mock_list, mock_filter, mock_load, qapp
-):
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
-    window._wizard_source_system = CardSystem.ROCKNIX
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
-
-    window._enter_wizard_job(WizardJob.IDENTIFY)
-
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "ROCKNIX" in log_text
-    assert window._wizard_flow.is_done(WizardJob.IDENTIFY) is True
-    assert window._wizard_flow.is_done(WizardJob.EXTRACT_BOOT) is True
-    assert window._wizard_flow.is_done(WizardJob.EXTRACT_EASYROMS) is True
-    assert window._wizard_flow.current_job() == WizardJob.DETECT_TARGET
-
-
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_unknown_source_shows_warning_and_waits_for_continue(mock_list, mock_filter, mock_load, qapp):
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
-    window._wizard_source_system = CardSystem.UNKNOWN
-
-    window._enter_wizard_job(WizardJob.IDENTIFY)
-
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "Impossible de reconnaître le système" in log_text
-    assert window._wizard_panel._continue_button.isEnabled() is True
-    # Rien n'est encore sauté -- contrairement à ROCKNIX, l'utilisateur doit
-    # activement choisir de continuer.
-    assert window._wizard_flow.is_done(WizardJob.EXTRACT_BOOT) is False
-
-
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.eject_device")
-def test_wizard_continue_after_unknown_warning_skips_extraction(mock_eject, mock_list, mock_filter, mock_load, qapp):
-    window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
-    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
-    window._wizard_source_system = CardSystem.UNKNOWN
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
-    window._enter_wizard_job(WizardJob.IDENTIFY)
-
     window._wizard_panel.continue_requested.emit()
 
-    assert window._wizard_flow.is_done(WizardJob.IDENTIFY) is True
-    assert window._wizard_flow.is_done(WizardJob.EXTRACT_BOOT) is True
-    assert window._wizard_flow.is_done(WizardJob.EXTRACT_EASYROMS) is True
-    assert window._wizard_flow.current_job() == WizardJob.DETECT_TARGET
-    assert window._wizard_skip_extraction_on_continue is False  # remis à plat
+    assert window._wizard_flow.is_done(WizardJob.DETECT_SOURCE) is True
+    assert window._wizard_flow.current_job() == WizardJob.CREATE_IMAGE
+    assert window._backup_kind_dialog.isVisible() is True
 
 
-@patch("r36s_studio.detect.list_partitions", return_value=[PartitionInfo("/dev/x1", "ROCKNIX", "fat32", None)])
+# --- étape 2 : choix complet/système, puis copie (§5 mode assisté) ---------
+
+
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_fingerprint_ready_stores_detected_rocknix_system(
-    mock_list, mock_filter, mock_load, mock_partitions, qapp
-):
+def test_choosing_full_copy_opens_file_dialog_in_backup_mode_with_size_hint(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
-    window._assisted_landing.prepare_requested.emit()
+    window._wizard_source_device = _make_device(size_bytes=64_000_000_000)
 
-    window._on_wizard_fingerprint_ready(WizardJob.DETECT_SOURCE, _make_device(), "fp-source")
+    window._on_backup_kind_chosen("full")
 
-    assert window._wizard_source_system == CardSystem.ROCKNIX
-
-
-# --- étape 6 : rien à réinjecter si l'extraction a été sautée ------------
-
-
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_inject_boot_skipped_when_no_boot_archive(mock_list, mock_filter, mock_load, qapp):
-    window = MainWindow()
-    device = _make_device()
-    window._wizard_target_device = device
-    window._wizard_boot_archive = None  # extraction sautée (ROCKNIX ou non reconnue)
-    window._wizard_flow.reset()
-    for job in (
-        WizardJob.DETECT_SOURCE,
-        WizardJob.IDENTIFY,
-        WizardJob.EXTRACT_BOOT,
-        WizardJob.EXTRACT_EASYROMS,
-        WizardJob.DETECT_TARGET,
-        WizardJob.FLASH,
-    ):
-        window._wizard_flow.mark_done(job)
-    runner_class = _mock_partition_runner_class()
-
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._enter_wizard_job(WizardJob.INJECT_BOOT)
-
-    runner_class.assert_not_called()
-    assert window._wizard_flow.is_done(WizardJob.INJECT_BOOT) is True
-    assert window._wizard_flow.current_job() == WizardJob.EJECT
+    assert window._mode == "backup"
+    assert window._device is window._wizard_source_device
+    assert window._wizard_backup_kind == "full"
+    assert window._wizard_estimated_backup_bytes == 64_000_000_000
+    assert window._file_dialog.isVisible() is True
     log_text = window._log_panel._log_view.toPlainText()
-    assert "ignorée" in log_text
+    assert "64" in log_text or "Go" in log_text  # taille annoncée avant même le choix du fichier
 
 
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_inject_boot_runs_normally_when_archive_present(mock_list, mock_filter, mock_load, qapp):
+def test_choosing_system_only_reuses_the_estimate_pipeline(mock_list, mock_filter, mock_load, qapp):
+    """Réutilise `_start_system_backup_estimate` (§4.3) sans le dupliquer --
+    même pipeline à deux niveaux (estimation non élevée, puis élevée en
+    repli) que l'opération ad-hoc équivalente de l'accueil assisté."""
     window = MainWindow()
-    device = _make_device()
-    window._wizard_target_device = device
-    window._wizard_boot_archive = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
-    window._wizard_flow.reset()
-    for job in (
-        WizardJob.DETECT_SOURCE,
-        WizardJob.IDENTIFY,
-        WizardJob.EXTRACT_BOOT,
-        WizardJob.EXTRACT_EASYROMS,
-        WizardJob.DETECT_TARGET,
-        WizardJob.FLASH,
-    ):
-        window._wizard_flow.mark_done(job)
-    runner_class = _mock_partition_runner_class()
-
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._enter_wizard_job(WizardJob.INJECT_BOOT)
-
-    runner_class.assert_called_once_with("inject_boot", device, window._wizard_boot_archive, parent=window)
-
-
-# --- étapes A/B : réutiliser une sauvegarde déjà connue pour la carte -----
-# --- source (§5 mode assisté) plutôt que de tout recopier à nouveau ------
-#
-# Chaque test construit sa propre AppConfig fraîche (jamais _EXPERT_MODE_
-# CONFIG, un singleton partagé entre tests -- le muter ici polluerait les
-# autres tests qui le réutilisent).
-
-
-def _config_with_archive_record(fingerprint, label, path, created_at="2026-07-06T00:21:00"):
-    cfg = AppConfig(ui_mode="expert")
-    app_config.set_archive_record(cfg, fingerprint, label, path, created_at=datetime.fromisoformat(created_at))
-    return cfg
-
-
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_extraction_step_opens_reuse_dialog_when_a_valid_record_exists(mock_list, mock_filter, qapp, tmp_path):
-    existing = tmp_path / "BOOT_2026-07-06_00-21"
-    existing.mkdir()
-    cfg = _config_with_archive_record("fp-source", "BOOT", str(existing))
-
-    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
-        window = MainWindow()
-    window.show()
-    window._wizard_source_fingerprint = "fp-source"
-    runner_class = _mock_partition_runner_class()
-
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._enter_wizard_extraction_step(WizardJob.EXTRACT_BOOT)
-
-    runner_class.assert_not_called()
-    assert window._archive_reuse_dialog.isVisible() is True
-    assert str(existing) in window._archive_reuse_dialog._message.text()
-
-
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_extraction_step_ignores_stale_record_when_path_no_longer_exists(mock_list, mock_filter, qapp, tmp_path):
-    """L'utilisateur a pu déplacer ou supprimer l'archive depuis --
-    `config.py` ne mémorise qu'un chemin, jamais une garantie de
-    présence : ne jamais proposer un dossier qui n'existe plus."""
-    missing = tmp_path / "BOOT_gone"  # jamais créé
-    cfg = _config_with_archive_record("fp-source", "BOOT", str(missing))
-
-    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
-        window = MainWindow()
-    window._wizard_source_fingerprint = "fp-source"
     window._wizard_source_device = _make_device()
-    runner_class = _mock_partition_runner_class()
+    estimate_runner_class = _mock_estimate_runner_class()
 
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._enter_wizard_extraction_step(WizardJob.EXTRACT_BOOT)
+    with patch("r36s_studio.gui.main_window.SystemBackupEstimateRunner", estimate_runner_class):
+        window._on_backup_kind_chosen("system")
 
-    assert window._archive_reuse_dialog.isVisible() is False
-    runner_class.assert_called_once()  # repart directement sur une nouvelle extraction
+    assert window._mode == "backup_system"
+    assert window._wizard_backup_kind == "system"
+    estimate_runner_class.assert_called_once_with(window._wizard_source_device.path, parent=window)
 
 
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_extraction_step_runs_directly_without_any_record(mock_list, mock_filter, mock_load, qapp):
+def test_system_only_estimate_populates_free_space_precheck_size(mock_list, mock_filter, mock_load, qapp):
+    """`_finish_system_backup_estimate` est partagé avec l'opération ad-hoc
+    de l'accueil assisté -- doit tout de même alimenter `_wizard_estimated_
+    backup_bytes` pour que le pré-contrôle d'espace disque libre (§ pré-vol)
+    ne soit pas silencieusement sans effet pour une sauvegarde système."""
     window = MainWindow()
-    window._wizard_source_fingerprint = "fp-source-without-record"
-    window._wizard_source_device = _make_device()
-    runner_class = _mock_partition_runner_class()
 
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._enter_wizard_extraction_step(WizardJob.EXTRACT_EASYROMS)
+    window._finish_system_backup_estimate(9_000_000_000, None)
 
-    assert window._archive_reuse_dialog.isVisible() is False
-    runner_class.assert_called_once()
+    assert window._wizard_estimated_backup_bytes == 9_000_000_000
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.eject_device")
-def test_reuse_requested_sets_archive_and_advances_without_running_the_job(
-    mock_eject, mock_list, mock_filter, qapp, tmp_path
+def test_wizard_create_image_free_space_precheck_blocks_before_starting_worker(
+    mock_list, mock_filter, mock_load, qapp, tmp_path
 ):
-    existing = tmp_path / "EASYROMS_2026-07-06_00-25"
-    existing.mkdir()
-    cfg = _config_with_archive_record("fp-source", "EASYROMS", str(existing))
-
-    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
-        window = MainWindow()
-    window._wizard_source_fingerprint = "fp-source"
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
-    window._wizard_flow.reset()
-    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
-    window._wizard_flow.mark_done(WizardJob.IDENTIFY)
-    window._wizard_flow.mark_done(WizardJob.EXTRACT_BOOT)
-    runner_class = _mock_partition_runner_class()
-
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._enter_wizard_extraction_step(WizardJob.EXTRACT_EASYROMS)
-        window._archive_reuse_dialog.reuse_requested.emit()
-
-    runner_class.assert_not_called()
-    assert window._wizard_easyroms_archive == str(existing)
-    assert window._wizard_flow.is_done(WizardJob.EXTRACT_EASYROMS) is True
-    assert window._wizard_flow.current_job() == WizardJob.DETECT_TARGET
-    log_text = window._log_panel._log_view.toPlainText()
-    assert str(existing) in log_text
-
-
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_redo_requested_runs_the_partition_job_with_a_freshly_generated_path(mock_list, mock_filter, qapp, tmp_path):
-    existing = tmp_path / "BOOT_2026-07-06_00-21"
-    existing.mkdir()
-    cfg = _config_with_archive_record("fp-source", "BOOT", str(existing))
-
-    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
-        window = MainWindow()
-    window.show()
-    window._wizard_source_fingerprint = "fp-source"
-    window._wizard_source_device = _make_device()
-    runner_class = _mock_partition_runner_class()
-
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._enter_wizard_extraction_step(WizardJob.EXTRACT_BOOT)
-        window._archive_reuse_dialog._redo_button.click()
-
-    runner_class.assert_called_once()
-    assert window._archive_reuse_dialog.isVisible() is False
-
-
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_reuse_cancelled_cancels_the_whole_wizard(mock_list, mock_filter, qapp, tmp_path):
-    existing = tmp_path / "BOOT_2026-07-06_00-21"
-    existing.mkdir()
-    cfg = _config_with_archive_record("fp-source", "BOOT", str(existing))
-
-    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg):
-        window = MainWindow()
-    window._wizard_source_fingerprint = "fp-source"
+    """Pré-vol (§5 mode assisté, parcours de clonage) : jamais un échec
+    après une longue copie déjà lancée -- vérifié avant `_start_worker()`,
+    pas seulement côté worker élevé."""
+    window = MainWindow()
     window._wizard_active = True
-    window._main_view.show_wizard_panel()
-    window._root_stack.setCurrentWidget(window._main_view)
+    window._mode = "backup"
+    window._wizard_backup_kind = "full"
+    window._wizard_estimated_backup_bytes = 999_000_000_000_000  # bien plus que l'espace libre réel
 
-    window._enter_wizard_extraction_step(WizardJob.EXTRACT_BOOT)
-    window._archive_reuse_dialog.cancelled.emit()
+    with patch("r36s_studio.gui.main_window.MainWindow._start_worker") as mock_start_worker, patch(
+        "r36s_studio.gui.main_window.QMessageBox.warning"
+    ) as mock_warning:
+        window._on_file_chosen(str(tmp_path / "out.img"))
 
-    assert window._wizard_active is False
-    assert window._root_stack.currentWidget() is window._assisted_landing
+    mock_start_worker.assert_not_called()
+    mock_warning.assert_called_once()
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_successful_extraction_persists_archive_record_to_config(mock_list, mock_filter, qapp):
-    # `_on_wizard_job_finished` avance de lui-même vers l'étape suivante
-    # (EXTRACT_EASYROMS) une fois EXTRACT_BOOT marqué fait -- `PartitionJobRunner`
-    # doit donc être mocké ici aussi, sans quoi ce test lancerait pour de
-    # vrai un job avec un périphérique source jamais défini (`None`).
-    cfg = AppConfig(ui_mode="expert")
-    runner_class = _mock_partition_runner_class()
-    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=cfg), patch(
-        "r36s_studio.gui.main_window.app_config.save_config"
-    ) as mock_save, patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window = MainWindow()
-        window._wizard_source_fingerprint = "fp-source"
-        window._wizard_source_device = _make_device()
-        window._mode = "extract_boot"
-        window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
-        window._wizard_flow.reset()
-        window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
-        window._wizard_flow.mark_done(WizardJob.IDENTIFY)
+def test_wizard_create_image_free_space_precheck_passes_with_enough_space(
+    mock_list, mock_filter, mock_load, qapp, tmp_path
+):
+    window = MainWindow()
+    window._wizard_active = True
+    window._mode = "backup"
+    window._wizard_backup_kind = "full"
+    window._wizard_estimated_backup_bytes = 1  # 1 octet requis, toujours disponible
 
-        window._on_wizard_job_finished(True)
+    with patch("r36s_studio.gui.main_window.MainWindow._start_worker") as mock_start_worker:
+        window._on_file_chosen(str(tmp_path / "out.img"))
 
-    record = app_config.get_archive_record(window._app_config, "fp-source", "BOOT")
-    assert record["path"] == "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
-    mock_save.assert_called_once_with(window._app_config)
+    mock_start_worker.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_job_finished_for_create_image_logs_created_path(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._wizard_active = True
+    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+    window._mode = "backup"
+    window._device = _make_device()
+    window._file_path = "/home/x/clone.img"
+
+    window._on_wizard_job_finished(True)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "/home/x/clone.img" in log_text
+    assert window._wizard_flow.is_done(WizardJob.CREATE_IMAGE) is True
+    assert window._wizard_flow.current_job() == WizardJob.DETECT_TARGET
 
 
 # --- étapes 3->4 : éjection de la carte source avant d'inviter à la -------
@@ -3216,7 +2708,7 @@ def test_detect_target_eject_failure_shows_explicit_error_and_no_polling(
     window._main_view.show_wizard_panel()
     window._root_stack.setCurrentWidget(window._main_view)
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
-    for job in (WizardJob.DETECT_SOURCE, WizardJob.IDENTIFY, WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
+    for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
 
     window._enter_wizard_job(WizardJob.DETECT_TARGET)
@@ -3235,7 +2727,7 @@ def test_detect_target_eject_failure_shows_explicit_error_and_no_polling(
 def test_detect_target_resume_after_eject_failure_retries_the_eject(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
-    for job in (WizardJob.DETECT_SOURCE, WizardJob.IDENTIFY, WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
+    for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
 
     with patch("r36s_studio.gui.main_window.eject_device", side_effect=OSError("carte occupée")):
@@ -3253,37 +2745,14 @@ def test_detect_target_resume_after_eject_failure_retries_the_eject(mock_list, m
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_source_card_stays_mounted_during_identify_step(mock_list, mock_filter, mock_load, mock_eject, qapp):
-    """La carte source n'est éjectée qu'à l'entrée de l'étape 4 -- elle
-    reste montée pendant l'étape 2 (identification, lit les .dtb depuis
-    cette même carte)."""
+def test_source_card_stays_mounted_during_create_image_step(mock_list, mock_filter, mock_load, mock_eject, qapp):
+    """La carte source n'est éjectée qu'à l'entrée de l'étape 3 -- elle
+    reste montée pendant l'étape 2 (l'image est créée depuis cette même
+    carte)."""
     window = MainWindow()
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
-    window._wizard_source_system = CardSystem.ARKOS
-    identify_runner_class = _mock_identify_runner_class()
 
-    with patch("r36s_studio.gui.main_window.WizardIdentifyRunner", identify_runner_class):
-        window._enter_wizard_job(WizardJob.IDENTIFY)
-
-    mock_eject.assert_not_called()
-
-
-@patch("r36s_studio.gui.main_window.eject_device")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_source_card_stays_mounted_during_extraction_steps(mock_list, mock_filter, mock_load, mock_eject, qapp):
-    """Même garantie pendant l'étape 3 (copie du BOOT/EASYROMS depuis la
-    carte source) : `PartitionJobRunner` est mocké ici, donc le job ne se
-    termine jamais dans ce test -- l'étape 4 (et son éjection) n'est
-    jamais atteinte."""
-    window = MainWindow()
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
-    window._wizard_source_fingerprint = "fp-source-no-record"
-    runner_class = _mock_partition_runner_class()
-
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._enter_wizard_job(WizardJob.EXTRACT_BOOT)
+    window._enter_wizard_job(WizardJob.CREATE_IMAGE)
 
     mock_eject.assert_not_called()
 
@@ -3293,7 +2762,7 @@ def test_source_card_stays_mounted_during_extraction_steps(mock_list, mock_filte
 
 def _target_setup(window, device):
     window._wizard_flow.reset()
-    for job in (WizardJob.DETECT_SOURCE, WizardJob.IDENTIFY, WizardJob.EXTRACT_BOOT, WizardJob.EXTRACT_EASYROMS):
+    for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
     window._wizard_source_fingerprint = "fp-source"
     # Entrer dans DETECT_TARGET éjecte désormais la carte source en tout
@@ -3308,7 +2777,7 @@ def _target_setup(window, device):
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_wizard_step_four_poll_also_starts_fingerprint_runner(
+def test_wizard_step_three_poll_also_starts_fingerprint_runner(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
 ):
     same_card = _make_device(path="/dev/fake-disk-test-9")
@@ -3333,7 +2802,7 @@ def test_wizard_step_four_poll_also_starts_fingerprint_runner(
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_step_four_refuses_to_continue_when_fingerprint_matches_source(
+def test_wizard_step_three_refuses_to_continue_when_fingerprint_matches_source(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
 ):
     same_card = _make_device(path="/dev/fake-disk-test-9")
@@ -3355,7 +2824,7 @@ def test_wizard_step_four_refuses_to_continue_when_fingerprint_matches_source(
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_step_four_allows_continue_when_fingerprint_differs(
+def test_wizard_step_three_allows_continue_when_fingerprint_differs(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
 ):
     new_card = _make_device(path="/dev/fake-disk-test-9")
@@ -3379,100 +2848,57 @@ def test_wizard_step_four_allows_continue_when_fingerprint_differs(
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_wizard_resume_after_easyroms_failure_only_reruns_easyroms_not_boot(
+def test_wizard_resume_after_create_image_failure_reopens_backup_kind_dialog_not_detect_source(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
+    """`current_job()` désigne toujours le job qui a réellement échoué --
+    reprendre après un échec de création d'image ne refait jamais la
+    détection de la carte source, déjà réussie (`WizardFlow`, voir aussi
+    son propre test de reprise partielle)."""
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
-    runner_class = _mock_partition_runner_class()
 
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window = MainWindow()
-        window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
-        window._main_view.show_wizard_panel()
-        window._root_stack.setCurrentWidget(window._main_view)
-        window._wizard_flow.reset()
-        window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
-        window._wizard_flow.mark_done(WizardJob.IDENTIFY)
-        window._wizard_source_device = device
-        window._wizard_active = True
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._main_view.show_wizard_panel()
+    window._root_stack.setCurrentWidget(window._main_view)
+    window._wizard_flow.reset()
+    window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
+    window._wizard_source_device = device
+    window._wizard_active = True
 
-        # Étape 3a (BOOT) réussie.
-        window._enter_wizard_job(WizardJob.EXTRACT_BOOT)
-        window._on_worker_finished(True)
-        assert window._wizard_flow.is_done(WizardJob.EXTRACT_BOOT) is True
+    window._enter_wizard_job(WizardJob.CREATE_IMAGE)
+    window._on_worker_error("IO_ERROR", "disque plein")
+    window._on_wizard_job_finished(False)
 
-        # Étape 3b (EASYROMS) échoue.
-        assert window._wizard_flow.current_job() == WizardJob.EXTRACT_EASYROMS
-        window._on_worker_error("IO_ERROR", "disque plein")
-        window._on_worker_finished(False)
+    assert window._wizard_flow.is_done(WizardJob.CREATE_IMAGE) is False
+    assert window._wizard_panel._resume_button.isVisible() is True
 
-        assert window._wizard_flow.is_done(WizardJob.EXTRACT_EASYROMS) is False
-        assert window._wizard_panel._resume_button.isVisible() is True
+    window._backup_kind_dialog.hide()
+    window._wizard_panel.resume_requested.emit()
 
-        # Reprendre : ne relance qu'EASYROMS, jamais le BOOT une deuxième fois.
-        runner_class.reset_mock()
-        runner_class.instances.clear()
-        window._wizard_panel.resume_requested.emit()
-
-    runner_class.assert_called_once()
-    resume_call_args = runner_class.instances[0]
-    assert resume_call_args.mode == "extract_easyroms"
-    assert resume_call_args.device is device
-    assert "EASYROMS" in resume_call_args.source_path
+    assert window._wizard_flow.is_done(WizardJob.DETECT_SOURCE) is True  # jamais rejoué
+    assert window._backup_kind_dialog.isVisible() is True
 
 
-# --- récapitulatif de fin de parcours : où sont les sauvegardes (§5 mode ----
-# --- assisté), et qu'elles sont conservées -- jamais supprimées automatiquement
+# --- fin de parcours : simple message de succès (§5 mode assisté) ----------
 
 
-@patch("r36s_studio.gui.main_window.archives.default_archives_dir")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_finish_shows_archives_summary_with_reveal_button(mock_list, mock_filter, mock_load, mock_dir, qapp):
-    from pathlib import Path
-
-    mock_dir.return_value = Path("/home/x/Documents/R36S Studio")
+def test_wizard_finish_shows_simple_success_message(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
     window._main_view.show_wizard_panel()
     window._root_stack.setCurrentWidget(window._main_view)  # _log_panel vit dans _main_view
-    window._wizard_boot_archive = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
-    window._wizard_easyroms_archive = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25"
 
     window._finish_wizard()
 
     log_text = window._log_panel._log_view.toPlainText()
-    assert "conservées" in log_text
-    assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
-    assert "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25" in log_text
-    assert window._log_panel._reveal_button.isVisible() is True
-    # str(mock_dir.return_value), pas un littéral codé en dur : Path("/home/x/...")
-    # se sérialise avec des antislashs sous Windows (WindowsPath) -- comparer aux
-    # deux côtés la même conversion évite de supposer une convention Unix.
-    assert window._log_panel._reveal_path == str(mock_dir.return_value)
-
-
-@patch("r36s_studio.gui.main_window.reveal")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_finish_reveal_button_opens_the_shared_archives_folder(
-    mock_list, mock_filter, mock_load, mock_reveal, qapp
-):
-    window = MainWindow()
-    window._wizard_boot_archive = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
-    window._wizard_easyroms_archive = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-25"
-
-    window._finish_wizard()
-    window._log_panel._reveal_button.click()
-
-    mock_reveal.assert_called_once()
-    from r36s_studio.partitions import archives
-
-    assert mock_reveal.call_args[0][0] == str(archives.default_archives_dir())
+    assert "prête" in log_text
+    assert window._wizard_active is False
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
@@ -3548,28 +2974,42 @@ def test_entering_flash_mode_initializes_file_dialog_firmware_from_config(
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_flash_step_passes_clone_flag_to_file_dialog(mock_list, mock_filter, mock_load, qapp):
+def test_wizard_restore_image_step_skips_file_dialog_and_uses_own_created_image(mock_list, mock_filter, mock_load, qapp):
+    """L'étape 4 (§5 mode assisté, parcours de clonage) restaure
+    directement l'image créée à l'étape 2 -- aucun choix de firmware,
+    aucune fenêtre Choix du fichier, contrairement au flash du mode
+    expert."""
     window = MainWindow()
     window._wizard_target_device = _make_device()
-    window._wizard_source_is_clone = True
+    window._file_path = "/home/x/clone.img"
 
-    window._enter_wizard_flash()
+    with patch("r36s_studio.gui.main_window.estimate_total_bytes", return_value=1_000):
+        window._enter_wizard_job(WizardJob.RESTORE_IMAGE)
 
-    assert window._file_dialog._emuelec_radio.isChecked() is True
-    assert window._file_dialog._clone_warning_label.isVisible() is True
+    assert window._mode == "flash"
+    assert window._file_dialog.isVisible() is False
+    assert window._confirm_dialog.isVisible() is True
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_flash_step_no_clone_warning_when_not_a_clone(mock_list, mock_filter, mock_load, qapp):
+def test_wizard_restore_image_destination_too_small_shows_error_without_opening_confirm_dialog(
+    mock_list, mock_filter, mock_load, qapp
+):
     window = MainWindow()
-    window._wizard_target_device = _make_device()
-    window._wizard_source_is_clone = False
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._main_view.show_wizard_panel()
+    window._root_stack.setCurrentWidget(window._main_view)
+    window._wizard_target_device = _make_device(size_bytes=1_000_000)
+    window._file_path = "/home/x/clone.img"
 
-    window._enter_wizard_flash()
+    with patch("r36s_studio.gui.main_window.estimate_total_bytes", return_value=2_000_000):
+        window._enter_wizard_job(WizardJob.RESTORE_IMAGE)
 
-    assert window._file_dialog._clone_warning_label.isVisible() is False
+    assert window._confirm_dialog.isVisible() is False
+    assert window._last_error_code == "DESTINATION_TOO_SMALL"
+    assert window._wizard_panel._resume_button.isVisible() is True
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")

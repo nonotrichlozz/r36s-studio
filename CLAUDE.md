@@ -1152,83 +1152,23 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > (CLI : message `emit_log` ; GUI : journal de bord permanent, §5, ou boîte de
 > dialogue) — jamais un succès silencieux.
 >
-> **Visibilité des archives en mode assisté (phase 8).** En mode expert,
-> l'écran Choix du fichier (ci-dessus) et le résultat de fin d'étape
-> montrent déjà le chemin choisi. En mode assisté, le parcours enchaîne les
-> étapes sans repasser par cet écran de choix pour les étapes A/B (le
-> dossier proposé par défaut est accepté silencieusement,
-> `_run_wizard_partition_job`) — sans autre indication, un débutant ne sait
-> ni où ses sauvegardes atterrissent pendant la copie, ni si elles sont
-> conservées une fois la carte reflashée. Deux ajouts dans
-> `gui/main_window.py` :
-> - `_start_worker` journalise `"Destination : {chemin}"` dès le début de
->   la copie pour les étapes A/B (`_EXTRACTION_MODES`) — pas seulement au
->   succès final (`_archive_info`, déjà en place) : si l'opération est
->   longue ou échoue en cours de route, l'utilisateur sait déjà où
->   regarder, il n'a pas à attendre la fin.
-> - `_finish_wizard` (fin des sept étapes) affiche un récapitulatif dans
->   le journal — chemin complet de l'archive BOOT *et* de l'archive
->   EASYROMS, avec la mention explicite qu'elles sont conservées — plus le
->   bouton de révélation habituel (`LogPanel.finish_success`, déjà utilisé
->   pour A/B individuellement), pointant cette fois vers le dossier parent
->   commun aux deux (`archives.default_archives_dir()`) plutôt qu'une
->   seule des deux archives : un seul bouton ne peut réveler qu'un chemin.
->
-> **Dossier de destination en mode assisté, confirmé** : le même que le
-> mode expert, `archives.default_archives_dir()` =
-> `~/Documents/R36S Studio/` (§4.4 ci-dessus) — le mode assisté ne
-> redéfinit rien de spécifique, il appelle la même fonction avec le même
-> résultat par défaut.
->
-> **Vérifié : aucun nettoyage automatique ne supprime ces archives.**
-> `partitions/archives.py` n'expose que `default_archives_dir`/
-> `new_archive_path`/`list_archives`/`parse_archive_timestamp` — aucune
-> fonction de suppression. Une recherche dans tout le projet
-> (`shutil.rmtree`/`os.remove`/`.unlink`/`tempfile`) ne trouve qu'un seul
-> appel de suppression sans rapport : `partitions/copy.py` retire un
-> petit fichier sonde qu'il vient de créer lui-même pour vérifier qu'un
-> point de montage est inscriptible (§4.4, détection NTFS macOS), jamais
-> une archive BOOT/EASYROMS. Ces dossiers horodatés sont donc conservés
-> indéfiniment, aussi longtemps que l'utilisateur ne les supprime pas
-> lui-même — ce qui correspond à l'attente : ce sont ses sauvegardes.
-
-> **Réutilisation d'une sauvegarde déjà connue (phase 8), étapes A/B.**
-> Reflasher plusieurs fois la même carte d'origine (essais successifs,
-> plusieurs consoles à préparer avec la même carte source) recopiait
-> intégralement le BOOT et l'EASYROMS à chaque passage — sur EASYROMS,
-> plusieurs Go recopiés inutilement à chaque fois, alors que le contenu
-> de la carte source n'a pas changé entre deux passages.
->
-> `config.py::AppConfig.archive_records` mémorise désormais, par
-> empreinte de carte source (`safety.card_fingerprint`, déjà calculée à
-> l'étape 1 pour le garde-fou de l'étape 4, §5 mode assisté), le chemin
-> et la date de la dernière archive BOOT/EASYROMS créée — écrasé
-> silencieusement à chaque nouvelle extraction (jamais deux
-> enregistrements gardés pour la même combinaison carte/label).
-> `get_archive_record`/`set_archive_record` encapsulent la lecture/
-> écriture ; un fichier de configuration corrompu ou modifié à la main
-> retombe sur des enregistrements vides plutôt que de faire planter le
-> chargement (même principe que `ui_mode`/`firmware`).
->
-> À l'entrée des étapes A/B (`_enter_wizard_extraction_step`), si un
-> enregistrement existe pour l'empreinte de la carte source : **vérifie
-> d'abord que le dossier référencé existe encore sur le disque**
-> (`Path(record["path"]).is_dir()`) — l'utilisateur a pu le déplacer ou
-> le supprimer depuis, `config.py` ne mémorisant qu'un chemin, jamais une
-> garantie de présence. S'il existe, `screens.py::ArchiveReuseDialog`
-> propose trois choix, avec la date et le chemin complet de la
-> sauvegarde existante : réutiliser (mis en avant par défaut, bouton
-> `role="primary"` et `setDefault(True)`), refaire la sauvegarde
-> (relance l'extraction normalement, écrase l'ancien enregistrement une
-> fois terminée), ou annuler tout le parcours (jamais une réutilisation
-> silencieuse). Un dossier disparu retombe directement sur une nouvelle
-> extraction, sans passer par cette fenêtre.
->
-> Portée volontairement limitée au mode assisté (`_on_wizard_job_finished`,
-> qui est déjà le point d'arrivée spécifique au parcours guidé, distinct
-> du générique `_on_worker_finished`) : le mode expert n'a pas de notion
-> de carte source « suivie » d'une étape à l'autre (chaque tuile A-F est
-> indépendante), donc rien à mémoriser côté empreinte pour ce chemin.
+> ⚠️ **Correction de conception (remplace deux notes « phase 8» retirées
+> ici).** Les étapes A/B lettrées (extraction BOOT/EASYROMS) n'existaient
+> auparavant en mode assisté que comme jobs internes du parcours guidé à
+> sept étapes — la « visibilité des archives » (chemin annoncé dès le
+> début de la copie, récapitulatif de fin de parcours) et la
+> « réutilisation d'une sauvegarde déjà connue » (`AppConfig.
+> archive_records`, `screens.py::ArchiveReuseDialog`) documentées ici
+> n'étaient pertinentes que pour ce parcours-là. Le parcours de clonage
+> qui l'a remplacé (§5) est entièrement basé sur l'image disque brute —
+> il n'appelle plus jamais `extract_boot`/`extract_easyroms` et n'a donc
+> plus besoin d'aucun des deux mécanismes. `AppConfig.archive_records`/
+> `get_archive_record`/`set_archive_record` et `ArchiveReuseDialog` ont
+> été retirés en conséquence. Les étapes A/B elles-mêmes, la journalisation
+> de leur destination (`_start_worker`, `_EXTRACTION_MODES`) et
+> `archives.default_archives_dir()`/`list_archives` restent pleinement en
+> place pour le mode expert (§4.6), qui les utilise indépendamment
+> — inchangés.
 
 ### 4.5 `detect/` — statut des étapes du parcours
 
@@ -1326,35 +1266,21 @@ les liste toutes.
 > doit comprendre pourquoi, pas juste que « ce n'est pas pertinent
 > maintenant » comme s'il suffisait d'attendre.
 >
-> **Mode assisté** (`gui/main_window.py`) : le système de la carte source
-> est détecté une fois, à la fin de l'étape 1 (`detect_card_system_for_
-> device`, stocké dans `_wizard_source_system`), puis consulté à l'entrée
-> de l'étape 2 (`_enter_wizard_identify_step`) :
-> - **ROCKNIX** (cas certain, sans ambiguïté) : étapes 2/3 sautées
->   automatiquement (`_skip_boot_easyroms_extraction`, marque IDENTIFY/
->   EXTRACT_BOOT/EXTRACT_EASYROMS faits sans les exécuter), avec une
->   explication dans le journal avant de sauter — jamais un saut
->   silencieux. Le parcours continue directement à l'étape 4 (insertion de
->   la carte neuve).
-> - **Système non reconnu** (`UNKNOWN`, ambigu — contrairement à ROCKNIX) :
->   avertissement affiché (journal + statut de l'étape), et le bouton
->   Continuer habituel devient « continuer sans sauvegarde » plutôt que de
->   lancer l'identification (`_wizard_skip_extraction_on_continue`) —
->   l'utilisateur choisit lui-même, l'application ne décide jamais à sa
->   place de continuer sans qu'il l'ait demandé.
-> - **ArkOS** : parcours inchangé.
->
-> Étape 6 (`_enter_wizard_inject_boot_step`) : si l'extraction a été
-> sautée (`_wizard_boot_archive is None`), l'injection n'a rien à
-> réinjecter — sautée de la même façon, avec sa propre ligne de journal,
-> plutôt que de tenter un job avec une source manquante.
->
-> **Jamais un aller simple vers le mode expert** (règle explicitement
-> demandée) : dans les deux cas (ROCKNIX ou système non reconnu), le
-> parcours guidé continue jusqu'au bout (flash, éjection) — le bouton
-> Mode expert reste seulement disponible comme échappatoire volontaire,
-> jamais déclenché par l'application elle-même face à une structure
-> inattendue.
+> ⚠️ **Correction de conception : l'adaptation « Mode assisté » décrite ici
+> a été retirée.** Le parcours guidé à sept étapes détectait le système de
+> la carte source (`detect_card_system_for_device`, stocké dans
+> `_wizard_source_system`) pour sauter automatiquement l'identification
+> DTB et l'extraction BOOT/EASYROMS sur une carte ROCKNIX, ou avertir sur
+> un système non reconnu — logique nécessaire uniquement parce que ce
+> parcours travaillait au niveau fichier (BOOT/EASYROMS), donc sensible au
+> firmware installé. Le parcours de clonage qui l'a remplacé (§5) clone
+> l'image disque brute telle quelle, quel que soit le firmware — il n'a
+> plus besoin de reconnaître ROCKNIX ni aucun autre système pour décider
+> quoi faire. `detect_card_system_for_device` (le point d'entrée
+> spécifique à cette adaptation) a été retiré ; `CardSystem`/
+> `detect_card_system`/`ROCKNIX_BOOT_LABEL` restent en place, toujours
+> utilisés par `detect_workflow_status` pour le mode expert (badges
+> `SYSTEM_INCOMPATIBLE`, ci-dessus, inchangé).
 
 ### 4.6 `jobs/` — les opérations du parcours
 
@@ -1978,172 +1904,121 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > tick suivant) et redémarre le sondage automatique s'il s'était arrêté,
 > notamment après un choix annulé dans la fenêtre Choix de la carte.
 >
-> **Parcours guidé, une étape à la fois** (`WizardStepPanel`, remplace
-> `HomeScreen` dans la colonne gauche de `MainView` — généralisée avec un
-> `QStackedWidget` interne, `show_home()`/`show_wizard_panel()`) : sept
-> étapes visibles, mais huit *jobs* suivis en interne
-> (`gui/wizard_flow.py::WizardFlow`, testable sans Qt) — l'étape 3
-> (« Copie de l'écran et des jeux ») recouvre `EXTRACT_BOOT` puis
-> `EXTRACT_EASYROMS`, deux jobs indépendants avec chacun leur statut
-> fait/pas fait. C'est ce qui garantit qu'après une erreur, « Reprendre »
-> ne rejoue jamais un job déjà réussi : `current_job()` reste sur le job
-> qui a réellement échoué (le précédent reste marqué fait), même en cas
-> de succès partiel — vérifié par un test dédié au scénario exact BOOT
-> réussi / EASYROMS en échec.
+> ⚠️ **Correction de conception majeure : le parcours guidé à sept étapes
+> (identification DTB puis extraction/injection BOOT-EASYROMS, propre à
+> ArkOS) a été remplacé par un parcours de clonage à cinq étapes, en
+> image disque brute.** Le parcours à sept étapes ne fonctionnait que
+> pour une carte de structure ArkOS reconnaissable (BOOT/EASYROMS) — une
+> carte EmuELEC, ROCKNIX, ou un firmware Android nécessitait déjà des
+> contournements dédiés (CardSystem/ROCKNIX ci-dessous, désormais retiré
+> de ce module). Le nouveau parcours n'a plus cette limitation : il clone
+> la carte source telle quelle (`imaging.backup_device`/
+> `imaging.backup_system_only`) puis restaure l'image obtenue
+> (`imaging.flash_device`) sur la carte neuve — indépendant du firmware
+> installé et du système de fichiers, puisqu'aucune opération ne descend
+> au niveau fichier.
 >
-> `MainWindow` orchestre les sept étapes en réutilisant tel quel le
-> pipeline `_start_worker`/`_on_worker_finished` du mode expert
-> (`PartitionJobRunner` pour extract/inject, `WorkerRunner` pour le
-> flash) — un simple drapeau `_wizard_active` décide si la fin
-> d'opération avance la machine à états ou suit le chemin expert
-> existant. La détection de carte (étapes 1 et 4) interroge
-> `list_devices`/`filter_devices` par `QTimer` (1,5 s).
+> **Les cinq étapes** (`gui/wizard_flow.py::WizardJob`, un job par étape
+> visible — plus besoin qu'un même écran en recouvre deux comme
+> auparavant) :
+> 1. **Détecter la carte source** — même sondage automatique
+>    qu'auparavant (`list_devices`/`filter_devices` par `QTimer`, 1,5 s),
+>    inchangé.
+> 2. **Créer l'image** — `screens.py::BackupKindDialog` demande d'abord
+>    copie complète ou système seul (sans les jeux) avant d'ouvrir
+>    `FileDialog` pour choisir où l'enregistrer :
+>    - *Copie complète* (`backup --device`) : la taille annoncée avant
+>      même le choix du fichier est `device.size_bytes` — un majorant
+>      sûr sans lecture supplémentaire, puisque `backup_device` s'arrête
+>      toujours à la fin de la dernière partition utilisée.
+>    - *Système seul* (`backup --device --system-only`) : réutilise
+>      **tel quel** le pipeline d'estimation à deux niveaux déjà en place
+>      pour l'opération ad-hoc équivalente de l'accueil assisté
+>      (`_start_system_backup_estimate`/`SystemBackupEstimateRunner`,
+>      estimation non élevée d'abord, élevée en repli, §4.3) — aucune
+>      duplication.
+> 3. **Détecter la carte neuve** — éjecte d'abord la carte source
+>    (`_run_wizard_source_eject`, logique inchangée depuis le parcours
+>    précédent : la carte source doit rester montée pendant l'étape 2,
+>    c'est de là que l'image est lue), puis sonde la nouvelle carte.
+> 4. **Restaurer l'image** — flash direct de l'image créée à l'étape 2
+>    sur la carte neuve, sans aucun choix de firmware (ce n'est pas une
+>    nouvelle image téléchargée, c'est la propre sauvegarde de
+>    l'utilisateur) : `FileDialog` n'est même pas ouverte pour cette
+>    étape, contrairement au flash du mode expert. Fenêtre Confirmation
+>    obligatoire (§2 n°6) avant l'écriture réelle, jamais sautée.
+> 5. **Éjecter** — inchangé.
 >
-> **Garde-fou de l'étape 4** (« insère ta carte neuve ») : comparer
-> `path`/`size_bytes` entre la carte de l'étape 1 et celle de l'étape 4
-> ne suffit pas — sur macOS le chemin d'un disque peut changer d'un
-> branchement à l'autre, et deux cartes du même modèle ont exactement la
-> même taille. `safety/card_fingerprint.py` calcule à la place une
-> empreinte sha256 du contenu de la partition BOOT (noms de fichiers,
-> tailles, contenu tronqué à 64 Ko par fichier), sans élévation (montage
-> lecture seule, comme `extract_boot`) — jamais via l'accès brut au
-> périphérique, qui exigerait l'élévation (§3) juste pour comparer deux
-> cartes à une étape qui n'écrit rien. `is_same_card()` ne conclut à
-> l'identité que si les deux empreintes existent et sont égales ; une
-> carte vierge (sans BOOT lisible) n'a pas d'empreinte et n'est donc
-> jamais prise pour la carte d'origine — l'étape 4 refuse explicitement
-> de continuer tant que la carte détectée a la même empreinte que celle
-> de l'étape 1.
-
-> ⚠️ **Bug corrigé, signalé par un utilisateur : à l'étape 4, la consigne
-> de retirer la carte source s'affichait alors qu'elle était encore
-> montée** — la retirer ainsi risque de corrompre des données et
-> déclenche un avertissement système. La carte reste nécessairement
-> montée pendant les étapes 2 et 3 (lecture des `.dtb`, copie du BOOT et
-> d'EASYROMS s'y font depuis cette même carte) ; rien ne la démontait
-> ensuite avant d'inviter à la retirer.
+> `MainWindow` réutilise tel quel le pipeline `_start_worker`/
+> `_on_worker_finished` du mode expert (`WorkerRunner` pour `backup`/
+> `flash`, jamais `PartitionJobRunner` — le nouveau parcours n'écrit plus
+> jamais sur une partition déjà montée) — le drapeau `_wizard_active`
+> décide comme avant si la fin d'opération avance la machine à états ou
+> suit le chemin expert existant.
 >
-> **Corrigé** : `MainWindow._enter_wizard_job` traite désormais
-> `WizardJob.DETECT_TARGET` à part, via `_run_wizard_source_eject` —
-> appelée en tout début de l'étape 4, avant même d'afficher sa consigne
-> d'insertion, jamais avant (la carte source doit rester exploitable
-> pendant les étapes 2/3, `test_source_card_stays_mounted_during_
-> identify_step`/`..._during_extraction_steps` le garantissent). Réutilise
-> `partitions/eject.py::eject` (même fonction que l'étape F, §4.4) pour
-> démonter toutes les partitions puis éjecter, avant de confirmer dans le
-> journal de bord *« Tu peux maintenant retirer ta carte d'origine en
-> toute sécurité »* — seulement ensuite la consigne d'insertion de la
-> carte neuve s'affiche et le sondage de détection démarre
-> (`_wizard_poll_timer.start()`), pour ne jamais risquer de détecter la
-> carte source comme si c'était la neuve pendant qu'elle est encore en
-> cours d'éjection.
+> **Trois vérifications obligatoires avant d'écrire quoi que ce soit**
+> (demandées explicitement, jamais un échec après une longue copie déjà
+> lancée) :
+> 1. **Espace disque libre sur l'ordinateur**, avant de créer l'image —
+>    `MainWindow._check_free_space_or_warn` (`shutil.disk_usage`, pré-
+>    contrôle rapide côté GUI, non élevé) et, en autorité réelle,
+>    `__main__.py::cmd_backup` (nouveau code d'erreur
+>    `INSUFFICIENT_DISK_SPACE`) — le worker élevé refait la même
+>    vérification, seule habilitée à bloquer réellement si l'estimation
+>    locale manque.
+> 2. **Taille de la carte de destination ≥ taille de l'image**, avant la
+>    restauration — une carte plus petite tronque et corrompt la table
+>    GPT secondaire (déjà rencontré, §4.3 « point critique table GPT »).
+>    `imaging.image_source.estimate_total_bytes` (déjà existante, exacte
+>    et non privilégiée pour `.img`/`.img.gz`/`.img.xz`, lue depuis le
+>    pied du fichier sans décompression) comparée à `device.size_bytes` —
+>    côté GUI (`_enter_wizard_restore_image_step`, nouveau code
+>    `DESTINATION_TOO_SMALL`) et côté `__main__.py::cmd_flash`, même
+>    principe pré-contrôle/autorité que ci-dessus. `None` (pied
+>    tronqué/non standard, cas résiduel) laisse passer plutôt que de
+>    bloquer sur une estimation incertaine — `flash_device` échoue alors
+>    avec une vraie erreur d'écriture (ENOSPC) plutôt que de tronquer
+>    silencieusement.
+> 3. **Empreinte de carte, refuse d'écrire sur la carte source** —
+>    `safety/card_fingerprint.py::compute_boot_fingerprint`/
+>    `is_same_card`, **conservés inchangés**, via `WizardFingerprintRunner`
+>    aux étapes 1 et 3 (même garde-fou qu'auparavant aux étapes 1/4).
+>    Exception délibérée et limitée à « aucune opération au niveau
+>    fichier » : c'est un garde-fou de pré-vol, pas une des deux
+>    opérations centrales du clonage (création/restauration), et il se
+>    dégrade sans risque — une carte neuve vierge ou d'un firmware
+>    différent n'a simplement aucune partition BOOT montable, donc pas
+>    d'empreinte (`None`), et `is_same_card` ne bloque jamais ce cas
+>    (le cas courant : une carte neuve vierge). Il ne bloque que le cas
+>    qui compte : la carte source encore branchée par erreur à l'étape 3.
 >
-> Un échec (volume occupé, partition verrouillée) affiche le message
-> explicite existant (`EJECT_FAILED`, déjà utilisé par l'étape F) plutôt
-> que de laisser deviner si le retrait est sûr, et bascule le panneau en
-> `show_error()` — ce qui fournit gratuitement le bouton Reprendre déjà
-> utilisé pour les autres échecs du parcours (§5) : le job DETECT_TARGET
-> n'est jamais marqué fait sur un échec d'éjection, donc Reprendre relance
-> exactement la même éjection plutôt qu'un nouveau mécanisme dédié.
->
-> **Étape 2 (identification)** : `identify.identify_from_boot_directory`
-> (scanne les `.dtb` d'un dossier — mountpoint BOOT ici, ou une archive
-> déjà extraite en mode expert) tourne sur un thread séparé
-> (`WizardIdentifyRunner`, `gui/partition_runner.py`) plutôt que sur le
-> thread Qt principal, car `locate_mounted` peut bloquer jusqu'à
-> `MOUNT_WAIT_SECONDS` (10 s, §4.4) si le système n'a pas encore monté la
-> partition. Annuler pendant l'étape 2 arrête l'affichage mais ne peut pas
-> interrompre le thread d'identification déjà lancé (pas de point
-> d'annulation coopératif dans `locate_mounted`) — sans risque de
-> plantage, le résultat arrive simplement après coup sur un panneau déjà
-> quitté.
->
-> ⚠️ **Message d'échec affiné : trois causes distinctes plutôt qu'un
-> « impossible d'identifier » générique.** `identify.IdentifyResult`
-> (`info` + `failure_reason: Optional[IdentifyFailureReason]`) remplace
-> le simple `Optional[DtbInfo]` qu'`identify_from_boot_directory`
-> renvoyait avant. Trois causes, trois messages :
-> - `MOUNT_FAILED` — la partition BOOT elle-même n'a pas pu être montée
->   (décidé par `WizardIdentifyRunner`, avant même d'appeler
->   `identify_from_boot_directory`) : message suggérant explicitement une
->   carte défaillante — fréquent sur les cartes fournies avec la console
->   R36S, constaté en usage réel.
-> - `NO_DTB_FOUND` — partition montée et lisible, mais aucun `.dtb`
->   dessus (ex. une carte fraîchement flashée) : le message le dit
->   explicitement et précise que l'identification se refera d'elle-même
->   une fois l'écran d'origine réinjecté (étape 6).
-> - `ALL_DTB_INVALID` — des `.dtb` existent mais aucun n'est exploitable :
->   soit `InvalidDtbError`/`OSError` au parsing, soit — affiné depuis la
->   première version — structurellement valide mais sans `compatible`
->   racine (`info.board_compatible` vide/`None`). Un DTB qui « parse »
->   sans rien identifier n'est pas un succès : une identification
->   affichant « Console identifiée : ? » n'aide personne, mieux vaut le
->   traiter comme les autres candidats invalides et continuer à chercher.
->
-> Les trois restent non bloquantes (`set_can_continue(True)` dans tous
-> les cas) et se terminent par le même repli MultiPanel — seule la partie
-> diagnostic du message change. Vocabulaire (§5) : le message principal
-> reste sans jargon (« ta carte », jamais « partition »/« .dtb »/
-> « BOOT ») ; le mot « défaillante » est le seul terme volontairement
-> plus insistant, à la demande explicite d'un utilisateur qui voulait que
-> l'appli suggère cette cause précise plutôt que rester vague.
->
-> **Journalisé dans tous les cas, succès compris** (« journalise... le
-> chemin monté et la liste des fichiers examinés ») : `IdentifyResult`
-> porte désormais `scanned_directory`/`examined_files` (toujours
-> renseignés par `identify_from_boot_directory`, y compris en cas de
-> succès) et `detail` (le message brut de l'exception, uniquement pour
-> `MOUNT_FAILED` — rien à scanner dans ce cas, donc pas de
-> `scanned_directory`). `_on_wizard_identify_finished` ajoute ces lignes
-> au journal après le message principal, jamais dedans (§5 vocabulaire).
->
-> **Mode test sans carte physique** : `python -m r36s_studio identify
-> --boot-dir DIR` (`cmd_identify`, `__main__.py`) lance
-> `identify_from_boot_directory` directement sur un dossier local — pour
-> valider le parseur DTB et la future table de correspondance sur des
-> variantes de console fournies par d'autres utilisateurs, sans dépendre
-> d'une carte réelle. Sortie texte simple, pas le protocole JSON Lines
-> (§3) : c'est un outil de diagnostic interactif, jamais piloté par la
-> GUI. `MOUNT_FAILED` n'est jamais produit par cette commande (rien à
-> monter, `identify_from_boot_directory` ne le renvoie jamais lui-même).
->
-> ⚠️ **Corrigé, constaté en conditions réelles : geler l'interface pendant
-> le montage se lit comme un plantage.** `_on_wizard_poll` (étapes 1/4)
-> appelait `compute_boot_fingerprint` directement sur le thread Qt
-> principal — même blocage possible jusqu'à `MOUNT_WAIT_SECONDS` que pour
-> l'identification, mais pas encore déplacé sur un thread séparé à
-> l'écriture de la note ci-dessus. **Corrigé** : `WizardFingerprintRunner`
-> (`gui/partition_runner.py`, même principe que `WizardIdentifyRunner`)
-> calcule l'empreinte sur un thread séparé ; `_on_wizard_poll` se contente
-> désormais de le démarrer et d'arrêter le sondage le temps du calcul,
-> `_on_wizard_fingerprint_ready` reçoit le résultat de façon asynchrone et
-> décide ensuite (redémarre le sondage si la carte détectée à l'étape 4
-> s'avère être la même qu'à l'étape 1). Vérifié avec un vrai `QThread` non
-> mocké (`compute_boot_fingerprint` patché pour répondre vite, boucle
-> d'événements Qt réelle) en plus des tests unitaires : le bouton
-> Continuer reste désactivé pendant le calcul et se réactive correctement
-> une fois le signal cross-thread livré.
->
-> **Étape 5 (flash)** : `FileDialog` (identique au mode expert) porte
-> désormais un bouton « Voir les versions disponibles en ligne », visible
-> uniquement en mode flash, qui ouvre
-> `identify/releases.py::DARKOS_R36S_RELEASES_URL`
-> (`https://github.com/southoz/dArkOSRE-R36/releases`) dans le navigateur
-> par défaut (`webbrowser.open`, `MainWindow._on_releases_requested`).
-> Les images n'y sont pas hébergées — la page renvoie vers Mega, Google
-> Drive, OneDrive et un torrent, jamais un lien téléchargeable
-> directement — donc rien d'autre à automatiser que l'ouverture de cette
-> page ; l'utilisateur télécharge lui-même puis choisit le fichier obtenu
-> via le sélecteur classique, déjà en place. Un seul dépôt géré (l'app ne
-> vise que le R36S) : pas de table de correspondance carte→version à
-> construire pour ce bouton.
+> **Ce qui est sorti du mode assisté, déplacement pas suppression** —
+> reste pleinement en place pour le mode expert, qui l'utilisait déjà
+> indépendamment du parcours guidé :
+> - **Identification DTB** (`identify.identify_from_boot_directory`,
+>   `WizardIdentifyRunner` retiré) : plus aucune étape du parcours de
+>   clonage n'en a besoin (indépendant du firmware). Reste accessible en
+>   diagnostic CLI (`python -m r36s_studio identify --boot-dir DIR`),
+>   inchangé — aucune UI ne l'expose plus nulle part ailleurs.
+> - **Extraction/injection BOOT-EASYROMS** (étapes A/B/D/E) : toujours
+>   utilisées par le mode expert (§4.6), qui les appelait déjà de façon
+>   indépendante du parcours guidé — rien n'y change.
+> - **`CardSystem`/ROCKNIX** (§4.5) : `detect_card_system_for_device`
+>   (le point d'entrée spécifique à l'ancienne adaptation du parcours
+>   guidé) retiré ; `CardSystem`/`detect_card_system`/`ROCKNIX_BOOT_LABEL`
+>   restent, toujours utilisés par `detect_workflow_status` pour les
+>   badges `SYSTEM_INCOMPATIBLE` du mode expert.
+> - **Choix du firmware au flash** (ArkOS/ROCKNIX/EmuELEC, bouton
+>   « Voir les versions disponibles », préselection console clone) :
+>   n'a plus de sens dans le parcours de clonage, qui restaure la propre
+>   sauvegarde de l'utilisateur, jamais une nouvelle image téléchargée.
+>   Reste la façon de choisir un firmware à flasher en mode expert
+>   uniquement (`FileDialog`).
 >
 > **Erreur, à n'importe quelle étape** : le parcours s'arrête,
 > `LogPanel.finish_error` affiche le message clair (§5, vocabulaire),
 > `WizardStepPanel.show_error()` remplace le bouton Continuer par
-> Reprendre/Mode expert. Mode expert depuis une étape en erreur ne défait
-> rien : une archive BOOT/EASYROMS déjà extraite reste utilisable depuis
-> l'étape D/E du mode expert.
+> Reprendre/Mode expert — inchangé.
 
 ---
 

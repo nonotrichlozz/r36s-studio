@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
 
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
+from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID, FIRMWARE_CATALOG
 from r36s_studio.partitions.archives import parse_archive_timestamp
 
 from . import asset_paths, build_info, theme
@@ -1186,13 +1187,18 @@ class FileDialog(Dialog):
 
     Pour le flash uniquement (étape C, mode expert -- le parcours de
     clonage du mode assisté n'a pas de choix de firmware, il restaure la
-    propre sauvegarde de l'utilisateur, §5) : choix du firmware (ArkOS/
-    dArkOS, ROCKNIX, ou EmuELEC pour les consoles clones) au-dessus du
-    reste. ArkOS et EmuELEC gardent le même comportement (bouton ouvrant
-    la page des releases dans le navigateur, aucune image hébergée
-    directement sur GitHub) ; ROCKNIX, dont les images sont attachées
-    directement aux releases GitHub, propose à la place un téléchargement
-    automatique (`rocknix_download_requested`, `identify/rocknix.py`)."""
+    propre sauvegarde de l'utilisateur, §5) : choix du firmware, construit
+    dynamiquement depuis `identify/firmware_catalog.py::FIRMWARE_CATALOG`
+    (un bouton radio par entrée, groupés dans `self._firmware_group`,
+    chacun avec une pastille de statut maintenu/archivé/expérimental) --
+    plutôt que des branches à trois choix codées en dur, qui ne passaient
+    pas à l'échelle au-delà de trois firmwares. ROCKNIX est la seule
+    entrée à téléchargement automatique (images attachées directement aux
+    releases GitHub, `identify/rocknix.py`,
+    `rocknix_download_requested`) ; toutes les autres sont en lien manuel
+    (bouton ouvrant la page des releases dans le navigateur,
+    `releases_requested`) -- vérifié individuellement pour chacune avant
+    l'ajout du catalogue (voir `identify/firmware_catalog.py`)."""
 
     file_chosen = Signal(str)
     releases_requested = Signal(str)  # firmware sélectionné à l'instant du clic (arkos/emuelec)
@@ -1202,7 +1208,7 @@ class FileDialog(Dialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._mode = "backup"
-        self._firmware = "arkos"
+        self._firmware = FIRMWARE_CATALOG[0].id
 
         layout = QVBoxLayout(self)
         self._title = QLabel()
@@ -1223,60 +1229,62 @@ class FileDialog(Dialog):
         layout.addWidget(self._system_backup_size_label)
 
         # Choix du firmware, flash uniquement (§5, étape de flash) --
-        # description courte sous chaque option plutôt qu'une info-bulle,
-        # pour rester visible sans interaction (§5 vocabulaire : pas de
+        # une ligne par entrée du catalogue (§4.6), construite
+        # dynamiquement plutôt que codée en dur : un bouton radio, une
+        # pastille de statut (maintenu/archivé/expérimental), une
+        # description courte sous les deux plutôt qu'une info-bulle, pour
+        # rester visible sans interaction (§5 vocabulaire : pas de
         # jargon, une phrase compréhensible par un néophyte).
-        self._arkos_radio = QRadioButton(tr("file_firmware_arkos_title"))
-        self._arkos_desc = QLabel(tr("file_firmware_arkos_desc"))
-        self._arkos_desc.setWordWrap(True)
-        self._arkos_desc.setProperty("role", "secondary")
-        self._rocknix_radio = QRadioButton(tr("file_firmware_rocknix_title"))
-        self._rocknix_desc = QLabel(tr("file_firmware_rocknix_desc"))
-        self._rocknix_desc.setWordWrap(True)
-        self._rocknix_desc.setProperty("role", "secondary")
-        self._emuelec_radio = QRadioButton(tr("file_firmware_emuelec_title"))
-        self._emuelec_desc = QLabel(tr("file_firmware_emuelec_desc"))
-        self._emuelec_desc.setWordWrap(True)
-        self._emuelec_desc.setProperty("role", "secondary")
+        self._firmware_radios: Dict[str, QRadioButton] = {}
+        self._firmware_rows: List[QWidget] = []
         self._firmware_group = QButtonGroup(self)
-        self._firmware_group.addButton(self._arkos_radio)
-        self._firmware_group.addButton(self._rocknix_radio)
-        self._firmware_group.addButton(self._emuelec_radio)
-        self._arkos_radio.toggled.connect(self._on_firmware_toggled)
-        self._rocknix_radio.toggled.connect(self._on_firmware_toggled)
-        self._emuelec_radio.toggled.connect(self._on_firmware_toggled)
-        for widget in (
-            self._arkos_radio,
-            self._arkos_desc,
-            self._rocknix_radio,
-            self._rocknix_desc,
-            self._emuelec_radio,
-            self._emuelec_desc,
-        ):
-            layout.addWidget(widget)
+        for entry in FIRMWARE_CATALOG:
+            row = QWidget()
+            row_layout = QVBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            header = QHBoxLayout()
+            radio = QRadioButton(tr(entry.title_key))
+            radio.toggled.connect(self._on_firmware_toggled)
+            badge = QLabel(tr(f"firmware_status_{entry.status}"))
+            badge.setProperty("role", "badge")
+            badge.setProperty("badgeKind", entry.status)
+            header.addWidget(radio)
+            header.addWidget(badge)
+            header.addStretch()
+            row_layout.addLayout(header)
+            desc = QLabel(tr(entry.desc_key))
+            desc.setWordWrap(True)
+            desc.setProperty("role", "secondary")
+            row_layout.addWidget(desc)
+            self._firmware_group.addButton(radio)
+            self._firmware_radios[entry.id] = radio
+            self._firmware_rows.append(row)
+            layout.addWidget(row)
 
-        # ArkOS/EmuELEC (§5 mode assisté, étape 5) -- l'image n'est pas
-        # hébergée sur GitHub (Mega/Google Drive/OneDrive/torrent pour
-        # ArkOS ; pas de correspondance d'assets par SoC vérifiée pour
-        # EmuELEC), donc rien à automatiser au-delà de l'ouverture de
-        # cette page, pour les deux.
+        # Lien manuel (tout le catalogue sauf ROCKNIX, §4.6) -- aucune
+        # image hébergée directement sur GitHub pour ces entrées, donc
+        # rien à automatiser au-delà de l'ouverture de la page ;
+        # l'utilisateur télécharge lui-même, puis choisit le fichier
+        # obtenu via Parcourir.
         self._releases_button = QPushButton(tr("file_releases_button"))
         self._releases_button.clicked.connect(lambda: self.releases_requested.emit(self._firmware))
         layout.addWidget(self._releases_button)
 
-        # Les images ArkOS sont distribuées en .7z, que ce logiciel ne
-        # décompresse pas (imaging/image_source.py -- voir CLAUDE.md pour
-        # l'évaluation de py7zr) : annoncé ici, avant même le
-        # téléchargement, plutôt que de laisser un débutant découvrir le
-        # problème après coup avec un fichier que le flash refuse (§5).
-        self._arkos_download_hint = QLabel(tr("file_arkos_download_hint"))
-        self._arkos_download_hint.setWordWrap(True)
-        self._arkos_download_hint.setProperty("role", "secondary")
-        layout.addWidget(self._arkos_download_hint)
+        # Certaines archives de firmware (ex. les images ArkOS, en .7z)
+        # ne sont pas décompressées par ce logiciel
+        # (imaging/image_source.py -- voir CLAUDE.md pour l'évaluation de
+        # py7zr) : annoncé ici, avant même le téléchargement, plutôt que
+        # de laisser un débutant découvrir le problème après coup avec un
+        # fichier que le flash refuse (§5).
+        self._download_hint = QLabel(tr("file_manual_download_hint"))
+        self._download_hint.setWordWrap(True)
+        self._download_hint.setProperty("role", "secondary")
+        layout.addWidget(self._download_hint)
 
-        # ROCKNIX -- images attachées directement aux releases GitHub
+        # ROCKNIX -- seule entrée du catalogue dont les images sont
+        # attachées directement aux releases GitHub
         # (identify/rocknix.py) : téléchargement automatique possible,
-        # contrairement à ArkOS ci-dessus.
+        # contrairement à toutes les autres entrées ci-dessus.
         self._rocknix_download_button = QPushButton(tr("file_rocknix_download_button"))
         self._rocknix_download_button.clicked.connect(self.rocknix_download_requested.emit)
         layout.addWidget(self._rocknix_download_button)
@@ -1329,9 +1337,10 @@ class FileDialog(Dialog):
         dossier de destination — `default_path` le pré-remplit, toujours
         remplaçable via Parcourir), ou "inject_boot"/"copy_games" (choisir
         une sauvegarde parmi `archive_choices`, ou en désigner une autre
-        via Parcourir). `firmware` ("arkos", "rocknix" ou "emuelec", ignoré
-        hors flash) initialise le choix depuis la configuration persistée
-        (`config.py`) plutôt que de toujours repartir sur ArkOS."""
+        via Parcourir). `firmware` (un id du catalogue, §4.6, ignoré hors
+        flash) initialise le choix depuis la configuration persistée
+        (`config.py`) plutôt que de toujours repartir sur la première
+        entrée du catalogue."""
         self._mode = mode
         self._title.setText(tr(_FILE_TITLE_KEYS[mode]))
         self.setWindowTitle(tr(_FILE_TITLE_KEYS[mode]))
@@ -1344,20 +1353,11 @@ class FileDialog(Dialog):
         self._system_backup_size_label.setVisible(False)
 
         is_flash = mode == "flash"
-        for widget in (
-            self._arkos_radio,
-            self._arkos_desc,
-            self._rocknix_radio,
-            self._rocknix_desc,
-            self._emuelec_radio,
-            self._emuelec_desc,
-        ):
-            widget.setVisible(is_flash)
+        for row in self._firmware_rows:
+            row.setVisible(is_flash)
         if is_flash:
-            self._firmware = firmware or "arkos"
-            radio = {"rocknix": self._rocknix_radio, "emuelec": self._emuelec_radio}.get(
-                self._firmware, self._arkos_radio
-            )
+            self._firmware = firmware if firmware in self._firmware_radios else FIRMWARE_CATALOG[0].id
+            radio = self._firmware_radios[self._firmware]
             radio.blockSignals(True)
             radio.setChecked(True)
             radio.blockSignals(False)
@@ -1365,7 +1365,7 @@ class FileDialog(Dialog):
         else:
             self._releases_button.setVisible(False)
             self._rocknix_download_button.setVisible(False)
-            self._arkos_download_hint.setVisible(False)
+            self._download_hint.setVisible(False)
 
         is_archive_mode = mode in _ARCHIVE_MODES
         self._archive_list.clear()
@@ -1389,20 +1389,19 @@ class FileDialog(Dialog):
 
     def _update_firmware_buttons_visibility(self) -> None:
         is_flash = self._mode == "flash"
-        manual_link_firmware = self._firmware in ("arkos", "emuelec")
-        self._releases_button.setVisible(is_flash and manual_link_firmware)
-        self._arkos_download_hint.setVisible(is_flash and self._firmware == "arkos")
-        self._rocknix_download_button.setVisible(is_flash and self._firmware == "rocknix")
+        entry = FIRMWARE_BY_ID[self._firmware]
+        is_manual_link = entry.releases_url is not None
+        self._releases_button.setVisible(is_flash and is_manual_link)
+        self._download_hint.setVisible(is_flash and is_manual_link)
+        self._rocknix_download_button.setVisible(is_flash and not is_manual_link)
 
     def _on_firmware_toggled(self, checked: bool) -> None:
         if not checked:
             return
-        if self._rocknix_radio.isChecked():
-            self._firmware = "rocknix"
-        elif self._emuelec_radio.isChecked():
-            self._firmware = "emuelec"
-        else:
-            self._firmware = "arkos"
+        for firmware_id, radio in self._firmware_radios.items():
+            if radio.isChecked():
+                self._firmware = firmware_id
+                break
         self._update_firmware_buttons_visibility()
         self.firmware_changed.emit(self._firmware)
 

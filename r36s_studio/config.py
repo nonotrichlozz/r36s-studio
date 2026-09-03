@@ -18,6 +18,8 @@ import platform
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
+
 DEFAULT_UI_MODE = "assisted"
 _VALID_UI_MODES = {"assisted", "expert"}
 
@@ -25,9 +27,16 @@ _VALID_UI_MODES = {"assisted", "expert"}
 # uniquement -- le parcours de clonage du mode assisté n'a pas de choix
 # de firmware, il restaure la propre sauvegarde de l'utilisateur).
 # Mémorisé d'un lancement à l'autre comme `ui_mode`, avec le même
-# principe de repli silencieux sur la valeur par défaut.
-DEFAULT_FIRMWARE = "arkos"
-_VALID_FIRMWARES = {"arkos", "rocknix", "emuelec"}
+# principe de repli silencieux sur la valeur par défaut. Dérivé du
+# catalogue (`identify/firmware_catalog.py`) plutôt qu'un second ensemble
+# à resynchroniser à la main à chaque ajout d'entrée. ROCKNIX plutôt
+# qu'ArkOS par défaut : ArkOS est désormais archivé (§4.6) -- un vrai
+# changement de comportement pour toute installation qui n'a jamais
+# choisi explicitement de firmware, volontaire ici plutôt que de
+# continuer à proposer par défaut un firmware qu'on affiche par ailleurs
+# comme archivé.
+DEFAULT_FIRMWARE = "rocknix"
+_VALID_FIRMWARES = set(FIRMWARE_BY_ID)
 
 
 @dataclass

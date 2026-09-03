@@ -130,25 +130,50 @@ STRINGS = {
     # -- l'image n'est pas hébergée sur GitHub (Mega, Google Drive,
     # OneDrive, torrent), seul le lien vers la page des releases est ouvert.
     "file_releases_button": "Voir les versions disponibles en ligne",
-    # Choix du firmware, flash uniquement (§5, étape de flash) -- ArkOS
-    # garde le comportement d'origine (page ouverte dans le navigateur,
-    # file_releases_button ci-dessus) ; ROCKNIX, dont les images sont
-    # attachées directement aux releases GitHub, propose un téléchargement
-    # automatique (file_rocknix_download_button, identify/rocknix.py).
+    # Catalogue de firmwares, flash uniquement (§4.6, mode expert --
+    # identify/firmware_catalog.py). ROCKNIX est la seule entrée à
+    # téléchargement automatique (images attachées directement aux
+    # releases GitHub, file_rocknix_download_button, identify/rocknix.py)
+    # ; toutes les autres ouvrent leur page de releases dans le
+    # navigateur (file_releases_button) -- vérifié individuellement pour
+    # chacune avant l'ajout du catalogue, aucune n'a d'assets exploitables
+    # directement comme ROCKNIX.
+    "firmware_status_maintained": "Maintenu",
+    "firmware_status_archived": "Archivé",
+    "firmware_status_experimental": "Expérimental",
     "file_firmware_arkos_title": "ArkOS / dArkOS",
-    "file_firmware_arkos_desc": "La configuration classique, la plus répandue sur R36S.",
+    "file_firmware_arkos_desc": (
+        "Figée depuis fin 2025 : aucune mise à jour officielle. La version "
+        "communautaire pour R36S (dArkOS) reste installable."
+    ),
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
-    # EmuELEC (§5, étape de flash) -- consoles clones uniquement : ArkOS et
-    # ROCKNIX standard ne démarrent pas sur ce matériel (identify/__init__.py
-    # ::CLONE_DTB_FILENAMES). Même comportement qu'ArkOS (page ouverte dans
-    # le navigateur, file_releases_button) -- pas de correspondance
-    # d'assets par SoC vérifiée à ce jour, contrairement à ROCKNIX.
+    # EmuELEC (§4.6) -- consoles clones uniquement : ArkOS et ROCKNIX
+    # standard ne démarrent pas sur ce matériel (identify/__init__.py::
+    # CLONE_DTB_FILENAMES). Pas de correspondance d'assets par SoC
+    # vérifiée à ce jour pour la R36S/RK3326, contrairement à ROCKNIX.
     "file_firmware_emuelec_title": "EmuELEC",
     "file_firmware_emuelec_desc": "Pour les consoles clones : ArkOS et ROCKNIX n'y démarrent pas.",
-    "file_arkos_download_hint": (
-        "Le fichier téléchargé sera une archive .7z : décompresse-la d'abord, "
-        "puis choisis ici le fichier .img qu'elle contient."
+    # AmberELEC/MinUI/R36Droid/andr36oid (§4.6) -- ajoutés au catalogue
+    # sans compatibilité R36S officiellement confirmée par leur projet
+    # (vérifié sur leurs pages de releases avant l'ajout) : descriptions
+    # honnêtes sur cette incertitude plutôt qu'une promesse non vérifiée.
+    "file_firmware_amberelec_title": "AmberELEC",
+    "file_firmware_amberelec_desc": (
+        "Conçu pour la même famille de puce (RK3326) que la R36S, "
+        "compatibilité R36S non officiellement confirmée."
+    ),
+    "file_firmware_minui_title": "MinUI",
+    "file_firmware_minui_desc": (
+        "Interface minimaliste. Portage communautaire pour R36S, distinct du projet officiel."
+    ),
+    "file_firmware_r36droid_title": "R36Droid (Android)",
+    "file_firmware_r36droid_desc": "Portage communautaire d'Android (LineageOS) pour R36S/RK3326.",
+    "file_firmware_andr36oid_title": "andr36oid (Android)",
+    "file_firmware_andr36oid_desc": "Autre portage communautaire d'Android (LineageOS) pour R36S/RK3326.",
+    "file_manual_download_hint": (
+        "Le fichier téléchargé peut être une archive (.7z, .zip…) : décompresse-la "
+        "d'abord si besoin, puis choisis ici le fichier .img qu'elle contient."
     ),
     "file_rocknix_download_button": "Télécharger la dernière version",
     # Fenêtre de choix entre plusieurs variantes ROCKNIX (§5, étape de

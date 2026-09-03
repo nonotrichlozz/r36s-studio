@@ -1305,13 +1305,60 @@ Après un flash, proposer une **vérification** : relire la carte et comparer le
 SHA-256 avec celui de l'image source. Facultatif mais c'est ce qui distingue un outil
 sérieux d'un script.
 
-> **Choix du firmware (phase 8), étape C / étape 5 du mode assisté.**
-> L'étape de flash propose désormais deux firmwares, avec une courte
-> description plutôt qu'un choix technique sec (`gui/screens.py::FileDialog`) :
-> **ArkOS / dArkOS**, la configuration classique, et **ROCKNIX**, un système
-> plus récent avec le transfert de jeux par USB intégré. Le choix est
-> mémorisé d'un lancement à l'autre (`config.py::AppConfig.firmware`,
-> `"arkos"` par défaut, même principe que `ui_mode`).
+> **Choix du firmware (phase 8, catalogue élargi en phase 10), étape C du
+> mode expert uniquement** — le parcours de clonage du mode assisté n'a
+> pas de choix de firmware, il restaure la propre sauvegarde de
+> l'utilisateur (§5). L'étape de flash construit ses boutons radio
+> dynamiquement depuis un catalogue centralisé,
+> `identify/firmware_catalog.py::FIRMWARE_CATALOG` (`FirmwareEntry` : id,
+> clés de titre/description, statut, `is_clone_safe`, `releases_url`
+> optionnel), plutôt que des branches à trois choix codées en dur
+> (`gui/screens.py::FileDialog`) — nécessaire dès qu'on dépasse trois
+> entrées, chaque branchement en dur devenant un endroit de plus où un
+> nouveau firmware peut être oublié en silence (cas réel trouvé en lisant
+> ce code avant l'élargissement : le bouton « Voir les versions
+> disponibles » retombait déjà silencieusement sur l'URL ArkOS pour tout
+> firmware non reconnu — corrigé au passage, `main_window.py::
+> _on_releases_requested` n'ouvre plus rien pour un id absent du
+> catalogue). Sept entrées : **ArkOS / dArkOS** (archivé), **ROCKNIX**
+> (maintenu), **EmuELEC** (expérimental, consoles clones), **AmberELEC**,
+> **MinUI**, **R36Droid** et **andr36oid** (ces quatre derniers
+> expérimentaux — voir plus bas). Chaque entrée affiche une pastille de
+> statut *maintenu*/*archivé*/*expérimental* (`gui/theme.py`, réutilise
+> les couleurs vert/gris-bleu/orange déjà en place pour les pastilles
+> d'étape — une seule couleur d'accent, §5). Le choix est mémorisé d'un
+> lancement à l'autre (`config.py::AppConfig.firmware`, `_VALID_FIRMWARES`
+> dérivé du catalogue plutôt qu'un second ensemble à resynchroniser à la
+> main). Défaut : **ROCKNIX** (`DEFAULT_FIRMWARE`), pas ArkOS — un vrai
+> changement de comportement pour toute installation qui n'a jamais
+> choisi explicitement de firmware, volontaire puisqu'ArkOS est désormais
+> archivé (ci-dessous) et ROCKNIX la seule entrée maintenue.
+>
+> **ArkOS archivé** : le projet officiel est figé en lecture seule
+> depuis décembre 2025 ; la version communautaire pour R36S (dArkOS,
+> `southoz/dArkOSRE-R36`) reste installable et est celle vers laquelle
+> pointe déjà le bouton de téléchargement — reste choisissable, jamais
+> retiré du catalogue, seul son statut affiché change.
+>
+> **Nouvelles entrées (phase 10), toutes en lien manuel comme ArkOS —
+> aucune n'a de téléchargement automatique.** Vérifié individuellement
+> sur les pages de releases GitHub réelles avant l'ajout (même discipline
+> « confirmé » que le reste de ce document) : ni AmberELEC ni EmuELEC
+> n'ont d'assets RK3326/R36S attachés à leurs releases officielles
+> (AmberELEC : uniquement des images taguées RG351/RG552 ; EmuELEC :
+> uniquement des images Amlogic) — ni l'une ni l'autre n'a donc la
+> structure « une image par SoC » qui rend le téléchargement automatique
+> de ROCKNIX possible (ci-dessous). Conséquence directe : **pas de
+> nouveau module de téléchargement automatique pour AmberELEC** malgré
+> une hypothèse initiale en sens contraire — corrigée avant
+> implémentation plutôt qu'après coup. MinUI : le dépôt officiel
+> (`shauninman/MinUI`) ne prend pas en charge la R36S ; le portage actif
+> vit dans un fork communautaire (`Turro75/MyMinUI`) — utilisé à la place
+> comme URL de releases. R36Droid/andr36oid : deux portages Android
+> (LineageOS) indépendants pour R36S/RK3326, communautaires,
+> compatibilité non officiellement confirmée par leurs projets
+> respectifs — descriptions honnêtes sur cette incertitude plutôt qu'une
+> promesse non vérifiée.
 >
 > Les deux dépôts ne se prêtent pas au même traitement, ce qui explique la
 > dissymétrie entre les deux options :
@@ -1395,13 +1442,13 @@ sérieux d'un script.
 > parsing (un `.dtb` illisible dont le nom correspond est quand même
 > détecté comme clone). `IdentifyResult.is_clone` porte ce signal.
 >
-> **EmuELEC comme troisième choix de firmware** (`config.py::
-> _VALID_FIRMWARES`, `gui/screens.py::FileDialog`) : même comportement
-> qu'ArkOS/dArkOS (bouton ouvrant `identify/releases.py::
-> EMUELEC_R36S_RELEASES_URL` dans le navigateur — aucune correspondance
-> d'assets par SoC vérifiée à ce jour pour EmuELEC, contrairement à
-> ROCKNIX, donc pas de téléchargement automatique). Choisissable à tout
-> moment, indépendamment d'une détection de clone.
+> **EmuELEC comme entrée du catalogue** (`identify/firmware_catalog.py`,
+> `is_clone_safe=True` — seule entrée à porter ce signal) : même
+> comportement que les autres entrées en lien manuel (bouton ouvrant
+> `identify/releases.py::EMUELEC_R36S_RELEASES_URL` dans le navigateur —
+> aucune correspondance d'assets par SoC vérifiée à ce jour pour EmuELEC,
+> contrairement à ROCKNIX, donc pas de téléchargement automatique).
+> Choisissable à tout moment, indépendamment d'une détection de clone.
 >
 > ⚠️ **Correction de conception : l'orientation automatique décrite ici à
 > l'étape 2 du parcours guidé (bandeau d'avertissement, présélection

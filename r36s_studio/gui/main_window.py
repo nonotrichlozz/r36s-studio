@@ -27,7 +27,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 from r36s_studio import config as app_config
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
-from r36s_studio.identify.releases import DARKOS_R36S_RELEASES_URL, EMUELEC_R36S_RELEASES_URL
+from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.imaging import (
     SevenZipArchiveError,
     UnsupportedImageFormatError,
@@ -950,24 +950,30 @@ class MainWindow(QMainWindow):
 
     def _on_releases_requested(self, firmware: str) -> None:
         """Bouton « Voir les versions disponibles » de `FileDialog` (flash
-        uniquement, ArkOS ou EmuELEC -- ROCKNIX a son propre téléchargement
-        automatique, `_on_rocknix_download_requested`) -- ni l'un ni
-        l'autre n'a d'image hébergée directement sur GitHub, donc rien à
-        automatiser au-delà de l'ouverture de la page des releases dans le
-        navigateur. `firmware` est celui réellement sélectionné à
-        l'instant du clic (`FileDialog._firmware`), pas une copie
-        mémorisée séparément qui pourrait être périmée juste après une
-        présélection programmatique (console clone, §5)."""
-        url = EMUELEC_R36S_RELEASES_URL if firmware == "emuelec" else DARKOS_R36S_RELEASES_URL
+        uniquement -- ROCKNIX a son propre téléchargement automatique,
+        `_on_rocknix_download_requested`, et n'utilise jamais ce chemin).
+        Catalogue-driven (`identify/firmware_catalog.py::FIRMWARE_BY_ID`)
+        plutôt qu'un ternaire à deux choix codé en dur -- l'ancienne forme
+        retombait silencieusement sur l'URL ArkOS pour tout id non
+        reconnu, un bug qui ne peut plus se produire ici : un id absent du
+        catalogue, ou une entrée à téléchargement automatique (ROCKNIX),
+        n'ouvre rien plutôt que la mauvaise page. `firmware` est celui
+        réellement sélectionné à l'instant du clic
+        (`FileDialog._firmware`), pas une copie mémorisée séparément qui
+        pourrait être périmée juste après une présélection programmatique
+        (§4.6)."""
+        entry = FIRMWARE_BY_ID.get(firmware)
+        if entry is None or entry.releases_url is None:
+            return
         try:
-            webbrowser.open(url)
+            webbrowser.open(entry.releases_url)
         except Exception as exc:
             QMessageBox.warning(self, tr("app_title"), str(exc))
 
     def _on_firmware_changed(self, firmware: str) -> None:
-        """Choix ArkOS/ROCKNIX (`FileDialog`, flash uniquement, §5) --
+        """Choix de firmware (`FileDialog`, flash uniquement, §4.6) --
         mémorisé comme `ui_mode` (`config.py`), pour ne pas reproposer
-        ArkOS par défaut au prochain flash."""
+        le même choix par défaut au prochain flash."""
         self._app_config.firmware = firmware
         app_config.save_config(self._app_config)
 

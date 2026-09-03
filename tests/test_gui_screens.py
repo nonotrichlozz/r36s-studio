@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.gui.screens import (
@@ -33,7 +35,7 @@ from r36s_studio.gui.screens import (
     format_archive_label,
 )
 from PySide6.QtCore import QParallelAnimationGroup, QPoint, QPropertyAnimation
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QWidget
 
 
 def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000, display="Carte SD factice") -> Device:
@@ -1488,9 +1490,7 @@ def test_file_dialog_backup_system_hides_firmware_choice(qapp):
 
     dialog.set_mode("backup_system", default_path="/tmp/systeme.img")
 
-    assert dialog._arkos_radio.isVisible() is False
-    assert dialog._rocknix_radio.isVisible() is False
-    assert dialog._emuelec_radio.isVisible() is False
+    assert all(row.isVisible() is False for row in dialog._firmware_rows)
     assert dialog._releases_button.isVisible() is False
 
 
@@ -1567,7 +1567,7 @@ def test_file_dialog_releases_button_emits_emuelec_when_selected(qapp):
     sans émettre `firmware_changed`, §5)."""
     dialog = FileDialog()
     dialog.set_mode("flash")
-    dialog._emuelec_radio.setChecked(True)
+    dialog._firmware_radios["emuelec"].setChecked(True)
     received = []
     dialog.releases_requested.connect(lambda firmware: received.append(firmware))
 
@@ -1576,7 +1576,7 @@ def test_file_dialog_releases_button_emits_emuelec_when_selected(qapp):
     assert received == ["emuelec"]
 
 
-# --- FileDialog : choix du firmware, flash uniquement (ArkOS/ROCKNIX) -----
+# --- FileDialog : choix du firmware, flash uniquement (§4.6 catalogue) ----
 
 
 def test_file_dialog_firmware_choice_hidden_outside_flash_mode(qapp):
@@ -1585,9 +1585,16 @@ def test_file_dialog_firmware_choice_hidden_outside_flash_mode(qapp):
 
     dialog.set_mode("backup")
 
-    assert dialog._arkos_radio.isVisible() is False
-    assert dialog._rocknix_radio.isVisible() is False
-    assert dialog._emuelec_radio.isVisible() is False
+    assert all(row.isVisible() is False for row in dialog._firmware_rows)
+
+
+def test_file_dialog_builds_one_radio_per_catalog_entry(qapp):
+    from r36s_studio.identify.firmware_catalog import FIRMWARE_CATALOG
+
+    dialog = FileDialog()
+
+    assert set(dialog._firmware_radios.keys()) == {entry.id for entry in FIRMWARE_CATALOG}
+    assert len(dialog._firmware_rows) == len(FIRMWARE_CATALOG)
 
 
 def test_file_dialog_defaults_to_arkos_when_no_firmware_given(qapp):
@@ -1596,7 +1603,7 @@ def test_file_dialog_defaults_to_arkos_when_no_firmware_given(qapp):
 
     dialog.set_mode("flash")
 
-    assert dialog._arkos_radio.isChecked() is True
+    assert dialog._firmware_radios["arkos"].isChecked() is True
     assert dialog._releases_button.isVisible() is True
     assert dialog._rocknix_download_button.isVisible() is False
 
@@ -1607,7 +1614,7 @@ def test_file_dialog_set_mode_initializes_firmware_from_config(qapp):
 
     dialog.set_mode("flash", firmware="rocknix")
 
-    assert dialog._rocknix_radio.isChecked() is True
+    assert dialog._firmware_radios["rocknix"].isChecked() is True
     assert dialog._releases_button.isVisible() is False
     assert dialog._rocknix_download_button.isVisible() is True
 
@@ -1618,10 +1625,19 @@ def test_file_dialog_set_mode_initializes_firmware_emuelec(qapp):
 
     dialog.set_mode("flash", firmware="emuelec")
 
-    assert dialog._emuelec_radio.isChecked() is True
+    assert dialog._firmware_radios["emuelec"].isChecked() is True
     assert dialog._releases_button.isVisible() is True  # même comportement qu'ArkOS : lien manuel
     assert dialog._rocknix_download_button.isVisible() is False
-    assert dialog._arkos_download_hint.isVisible() is False  # .7z propre à ArkOS, pas confirmé pour EmuELEC
+    assert dialog._download_hint.isVisible() is True  # rappel générique, plus seulement ArkOS
+
+
+def test_file_dialog_set_mode_unknown_firmware_falls_back_to_first_catalog_entry(qapp):
+    dialog = FileDialog()
+    dialog.show()
+
+    dialog.set_mode("flash", firmware="n'importe quoi")
+
+    assert dialog._firmware_radios["arkos"].isChecked() is True
 
 
 def test_file_dialog_selecting_rocknix_swaps_buttons_and_emits_firmware_changed(qapp):
@@ -1631,7 +1647,7 @@ def test_file_dialog_selecting_rocknix_swaps_buttons_and_emits_firmware_changed(
     received = []
     dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
 
-    dialog._rocknix_radio.setChecked(True)
+    dialog._firmware_radios["rocknix"].setChecked(True)
 
     assert received == ["rocknix"]
     assert dialog._rocknix_download_button.isVisible() is True
@@ -1645,7 +1661,7 @@ def test_file_dialog_selecting_arkos_back_swaps_buttons_and_emits_firmware_chang
     received = []
     dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
 
-    dialog._arkos_radio.setChecked(True)
+    dialog._firmware_radios["arkos"].setChecked(True)
 
     assert received == ["arkos"]
     assert dialog._releases_button.isVisible() is True
@@ -1659,25 +1675,53 @@ def test_file_dialog_selecting_emuelec_swaps_buttons_and_emits_firmware_changed(
     received = []
     dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
 
-    dialog._emuelec_radio.setChecked(True)
+    dialog._firmware_radios["emuelec"].setChecked(True)
 
     assert received == ["emuelec"]
     assert dialog._releases_button.isVisible() is True
     assert dialog._rocknix_download_button.isVisible() is False
 
 
-def test_file_dialog_arkos_hint_visible_only_for_arkos_flash(qapp):
+@pytest.mark.parametrize("firmware_id", ["amberelec", "minui", "r36droid", "andr36oid"])
+def test_file_dialog_selecting_new_catalog_entry_is_manual_link(qapp, firmware_id):
+    dialog = FileDialog()
+    dialog.show()
+    dialog.set_mode("flash")
+    received = []
+    dialog.firmware_changed.connect(lambda firmware: received.append(firmware))
+
+    dialog._firmware_radios[firmware_id].setChecked(True)
+
+    assert received == [firmware_id]
+    assert dialog._releases_button.isVisible() is True
+    assert dialog._download_hint.isVisible() is True
+    assert dialog._rocknix_download_button.isVisible() is False
+
+
+def test_file_dialog_firmware_badges_reflect_catalog_status(qapp):
+    from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
+
+    dialog = FileDialog()
+
+    for firmware_id, radio in dialog._firmware_radios.items():
+        row = radio.parentWidget()
+        badges = [w for w in row.findChildren(QLabel) if w.property("role") == "badge"]
+        assert len(badges) == 1
+        assert badges[0].property("badgeKind") == FIRMWARE_BY_ID[firmware_id].status
+
+
+def test_file_dialog_manual_download_hint_visible_for_manual_link_firmware(qapp):
     dialog = FileDialog()
     dialog.show()
 
     dialog.set_mode("flash", firmware="arkos")
-    assert dialog._arkos_download_hint.isVisible() is True
+    assert dialog._download_hint.isVisible() is True
 
     dialog.set_mode("flash", firmware="rocknix")
-    assert dialog._arkos_download_hint.isVisible() is False
+    assert dialog._download_hint.isVisible() is False
 
     dialog.set_mode("backup")
-    assert dialog._arkos_download_hint.isVisible() is False
+    assert dialog._download_hint.isVisible() is False
 
 
 def test_file_dialog_switching_back_to_arkos_shows_hint_again(qapp):
@@ -1685,9 +1729,9 @@ def test_file_dialog_switching_back_to_arkos_shows_hint_again(qapp):
     dialog.show()
     dialog.set_mode("flash", firmware="rocknix")
 
-    dialog._arkos_radio.setChecked(True)
+    dialog._firmware_radios["arkos"].setChecked(True)
 
-    assert dialog._arkos_download_hint.isVisible() is True
+    assert dialog._download_hint.isVisible() is True
 
 
 def test_file_dialog_rocknix_download_button_emits_signal(qapp):

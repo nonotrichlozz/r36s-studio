@@ -205,6 +205,12 @@ QLabel[badgeKind="done"] {{ background-color: {STATUS_DONE_BG}; color: {STATUS_D
 QLabel[badgeKind="platform_limited"] {{ background-color: {STATUS_PLATFORM_LIMITED_BG}; color: {STATUS_PLATFORM_LIMITED_FG}; }}
 QLabel[badgeKind="not_relevant"] {{ background-color: {STATUS_NOT_RELEVANT_BG}; color: {STATUS_NOT_RELEVANT_FG}; }}
 QLabel[badgeKind="system_incompatible"] {{ background-color: {STATUS_SYSTEM_INCOMPATIBLE_BG}; color: {STATUS_SYSTEM_INCOMPATIBLE_FG}; }}
+/* Statut des firmwares (§4.6, catalogue) : mêmes tons que les pastilles
+   d'étape ci-dessus -- même signal bon/neutre/prudence, pas de nouvelle
+   couleur pour la même signification (une seule couleur d'accent, §5). */
+QLabel[badgeKind="maintained"] {{ background-color: {STATUS_AVAILABLE_BG}; color: {STATUS_AVAILABLE_FG}; }}
+QLabel[badgeKind="archived"] {{ background-color: {STATUS_DONE_BG}; color: {STATUS_DONE_FG}; }}
+QLabel[badgeKind="experimental"] {{ background-color: {STATUS_PLATFORM_LIMITED_BG}; color: {STATUS_PLATFORM_LIMITED_FG}; }}
 
 QProgressBar {{
     background-color: {SURFACE};

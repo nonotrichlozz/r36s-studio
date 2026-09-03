@@ -2920,7 +2920,7 @@ def test_wizard_cancel_returns_to_landing_and_stops_polling(
     assert window._wizard_active is False
 
 
-# --- bouton "Voir les versions disponibles" (flash, §5 mode assisté) -------
+# --- bouton "Voir les versions disponibles" (flash, mode expert, §4.6) ----
 
 
 @patch("r36s_studio.gui.main_window.webbrowser.open")
@@ -2951,7 +2951,37 @@ def test_releases_button_opens_emuelec_r36s_releases_url(mock_list, mock_filter,
     mock_open.assert_called_once_with(EMUELEC_R36S_RELEASES_URL)
 
 
-# --- choix du firmware (ArkOS/ROCKNIX/EmuELEC) à l'étape de flash (§5) -----
+@patch("r36s_studio.gui.main_window.webbrowser.open")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_releases_button_does_nothing_for_unknown_firmware_id(mock_list, mock_filter, mock_load, mock_open, qapp):
+    """Corrige un bug confirmé en lisant l'ancien code : l'ancien ternaire
+    à deux choix retombait silencieusement sur l'URL ArkOS pour tout id
+    non reconnu -- le nouveau code catalogue-driven n'ouvre plus rien
+    plutôt que la mauvaise page (§4.6)."""
+    window = MainWindow()
+
+    window._file_dialog.releases_requested.emit("firmware-inconnu")
+
+    mock_open.assert_not_called()
+
+
+@patch("r36s_studio.gui.main_window.webbrowser.open")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_releases_button_does_nothing_for_rocknix(mock_list, mock_filter, mock_load, mock_open, qapp):
+    """ROCKNIX n'a pas d'URL manuelle (téléchargement automatique) --
+    n'ouvrirait rien même si ce signal était émis par erreur pour elle."""
+    window = MainWindow()
+
+    window._file_dialog.releases_requested.emit("rocknix")
+
+    mock_open.assert_not_called()
+
+
+# --- choix du firmware (§4.6 catalogue) à l'étape de flash -----------------
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
@@ -2968,7 +2998,7 @@ def test_entering_flash_mode_initializes_file_dialog_firmware_from_config(
 
     window._on_device_chosen(device)
 
-    assert window._file_dialog._firmware == "arkos"
+    assert window._file_dialog._firmware == "rocknix"
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))

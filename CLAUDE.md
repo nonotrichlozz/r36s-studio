@@ -85,6 +85,44 @@ testable en isolation, sans interface.
 | macOS | `osascript -e 'do shell script "…" with administrator privileges'` |
 | Linux | `pkexec` (fallback `sudo` en terminal si absent) |
 
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : `ELEVATION_FAILED`
+> affiché à tort alors que l'élévation Windows réussissait, masquant un
+> refus légitime du worker.** Rapporté comme un `ELEVATION_FAILED`
+> systématique après ~12 s d'attente. Lancé à la main en administrateur
+> (`py -m r36s_studio backup ...`), le worker émettait en réalité
+> correctement `{"type":"error","code":"GAMES_PARTITION_NOT_FOUND"}` --
+> carte cible de 32 Go branchée, sans partition de jeux : un refus
+> légitime (§4.3), pas un défaut d'élévation. Le vrai problème : ce
+> message n'atteignait jamais la GUI, qui affichait `ELEVATION_FAILED` à
+> la place.
+>
+> Cause : `protocol.py::emit_error` écrit déjà l'événement dans le fichier
+> de progression (`--progress-file`, `protocol.configure`) quand le
+> worker est élevé -- `WorkerRunner._dispatch` (`gui/worker_runner.py`) le
+> relayait donc bien via `self.error.emit(...)`. Mais de nombreux chemins
+> d'erreur de `__main__.py` (`GAMES_PARTITION_NOT_FOUND` entre autres)
+> font seulement `emit_error(...); return 1`, sans jamais appeler
+> `emit_done(False)` -- et `WorkerRunner._poll()` ne savait détecter la
+> fin d'une opération en erreur qu'à `_done_emitted`, jamais à un `error`
+> déjà reçu. Résultat : dès que le process élevé se terminait (`poll()`
+> non `None`) sans `"done"`, `_poll()` retombait sur sa branche «
+> élévation refusée/échouée » et écrasait le vrai code déjà délivré par un
+> `ELEVATION_FAILED` générique -- et sur Windows en particulier,
+> `ShellExecuteW` ne fournissant aucun tube stdout/stderr vers le
+> processus élevé (contrairement à `osascript`/`pkexec`/`sudo`), rien
+> d'autre ne permettait de distinguer un vrai refus d'élévation d'un
+> worker qui avait échoué proprement pour une tout autre raison.
+>
+> **Corrigé** : `WorkerRunner` retient désormais si un vrai événement
+> `"error"` a déjà été reçu (`_error_emitted`, mis à `True` dans
+> `_dispatch`) -- la branche de fin de `_poll()` ne synthétise
+> `ELEVATION_FAILED` (ou les cas macOS TCC détectés via le journal
+> d'élévation) que si aucune erreur réelle n'était déjà connue ;
+> `finished.emit(False)` reste émis dans tous les cas, une seule fois. Le
+> contenu déjà présent dans le fichier de progression prime donc toujours
+> sur une élévation supposée en échec, quel que soit l'OS -- pas seulement
+> pour ce code précis.
+
 > ⚠️ **Limitation macOS confirmée par test.** `osascript … with administrator
 > privileges` obtient bien les droits root pour le worker, mais **ne peut pas
 > accéder à `/dev/rdiskN`** — même avec le Terminal autorisé en Accès complet au

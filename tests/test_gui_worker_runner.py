@@ -258,6 +258,38 @@ def test_process_exit_with_done_already_emitted_does_not_double_report(mock_laun
 
 @patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_process_exit_after_real_error_without_done_does_not_overwrite_with_elevation_failed(
+    mock_launch, mock_log_path, tmp_path, qapp
+):
+    """Bug corrigé, confirmé sur du vrai matériel : le worker élevé émettait
+    bien un vrai code d'erreur (ex. GAMES_PARTITION_NOT_FOUND -- une carte
+    cible sans partition de jeux, refus légitime) dans le fichier de
+    progression, puis se terminait sans jamais écrire "done" (de nombreux
+    chemins d'erreur de __main__.py ne le font pas). Sur Windows,
+    `ShellExecuteW` ne fournit aucun tube stdout/stderr : sans ce
+    correctif, ce vrai code disparaissait, remplacé par un `ELEVATION_
+    FAILED` générique et trompeur dès que le process élevé se terminait."""
+    mock_log_path.return_value = tmp_path / "elevation.log"  # n'existe pas
+    mock_launch.return_value = _fake_process([None, 1])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
+    runner.start()
+
+    error_events = []
+    finished_events = []
+    runner.error.connect(lambda *a: error_events.append(a))
+    runner.finished.connect(lambda ok: finished_events.append(ok))
+
+    # Le worker écrit un vrai événement d'erreur puis meurt sans "done".
+    _write_events(runner._progress_file, [{"type": "error", "code": "GAMES_PARTITION_NOT_FOUND", "msg": "..."}])
+    runner._poll()  # process encore actif (poll() -> None) : lit l'erreur
+    runner._poll()  # process terminé (poll() -> 1) : ne doit pas l'écraser
+
+    assert error_events == [("GAMES_PARTITION_NOT_FOUND", "...")]
+    assert finished_events == [False]
+
+
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
 def test_stop_removes_progress_and_cancel_files_but_keeps_log(mock_launch, mock_log_path, tmp_path, qapp):
     log_path = tmp_path / "elevation.log"
     log_path.write_text("une erreur quelconque", encoding="utf-8")

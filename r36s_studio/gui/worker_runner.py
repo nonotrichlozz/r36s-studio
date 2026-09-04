@@ -117,6 +117,7 @@ class WorkerRunner(QObject):
         self._log_path: Optional[Path] = None
         self._offset = 0
         self._done_emitted = False
+        self._error_emitted = False
         self._timer = QTimer(self)
         self._timer.setInterval(POLL_INTERVAL_MS)
         self._timer.timeout.connect(self._poll)
@@ -174,16 +175,32 @@ class WorkerRunner(QObject):
             # dernier événement et la fin du process se chevauchaient.
             self._read_new_lines()
             if not self._done_emitted:
-                detail = self._read_elevation_log()
-                if _is_macos_tcc_blocked(detail):
-                    self.error.emit(MACOS_TCC_BLOCKED, _MACOS_TCC_HINT)
-                elif _is_macos_tcc_protected_folder(detail):
-                    self.error.emit(MACOS_TCC_PROTECTED_FOLDER, _MACOS_PROTECTED_FOLDER_HINT)
-                else:
-                    msg = "L'opération a été annulée ou l'élévation a échoué."
-                    if detail:
-                        msg = f"{msg}\n{detail}"
-                    self.error.emit("ELEVATION_FAILED", msg)
+                # Bug corrigé, confirmé sur du vrai matériel : le worker élevé
+                # avait bien émis un vrai événement "error" (ex.
+                # GAMES_PARTITION_NOT_FOUND, une carte cible sans partition de
+                # jeux -- refus légitime) dans le fichier de progression --
+                # `emit_error` (protocol.py) y écrit toujours, `_dispatch`
+                # ci-dessus l'avait donc déjà relayé via `self.error.emit(...)`
+                # -- mais de nombreux chemins d'erreur de `__main__.py`
+                # n'appellent jamais `emit_done(False)` après `emit_error`,
+                # seulement `return 1`. Sans `_error_emitted`, cette branche ne
+                # regardait que `_done_emitted` et écrasait systématiquement ce
+                # vrai code d'erreur par un `ELEVATION_FAILED` générique dès
+                # que le process élevé se terminait -- sur Windows en
+                # particulier, `ShellExecuteW` ne fournit aucun tube
+                # stdout/stderr (§3) : impossible de distinguer un worker qui a
+                # échoué proprement d'une élévation refusée sans ce signal.
+                if not self._error_emitted:
+                    detail = self._read_elevation_log()
+                    if _is_macos_tcc_blocked(detail):
+                        self.error.emit(MACOS_TCC_BLOCKED, _MACOS_TCC_HINT)
+                    elif _is_macos_tcc_protected_folder(detail):
+                        self.error.emit(MACOS_TCC_PROTECTED_FOLDER, _MACOS_PROTECTED_FOLDER_HINT)
+                    else:
+                        msg = "L'opération a été annulée ou l'élévation a échoué."
+                        if detail:
+                            msg = f"{msg}\n{detail}"
+                        self.error.emit("ELEVATION_FAILED", msg)
                 self.finished.emit(False)
                 self._done_emitted = True
             self._stop()
@@ -223,6 +240,7 @@ class WorkerRunner(QObject):
         elif etype == "log":
             self.log.emit(event.get("level", "info"), event.get("msg", ""))
         elif etype == "error":
+            self._error_emitted = True
             self.error.emit(event.get("code", ""), event.get("msg", ""))
         elif etype == "estimate":
             self.estimate.emit(event.get("size_bytes", 0))

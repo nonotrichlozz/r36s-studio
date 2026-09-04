@@ -642,6 +642,48 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > correctif (533 secteurs, la taille du disque source factice, au lieu des
 > 266 attendus) avant d'être vérifié à nouveau après.
 >
+> **Vérification supplémentaire, entièrement indépendante des fonctions
+> testées** (le symptôme persistait, rapporté à nouveau après ce premier
+> correctif -- « aucune image `--system-only` n'a jamais démarré une
+> console », sur macOS comme sur Windows identiquement). Risque identifié
+> dans les tests ci-dessus : `_build_fake_gpt_image` (la fixture qui
+> construit le disque source factice) réutilise `build_gpt_header`/
+> `build_gpt_entries` -- les mêmes fonctions que celles réparées et
+> vérifiées ici. Un bug systématique dans ces fonctions de construction
+> pourrait en principe se retrouver identique dans le disque source *et*
+> dans la réparation, invisible à toute comparaison entre les deux.
+> `test_backup_system_only_gpt_output_survives_fully_independent_
+> structural_verification` (même fichier) reconstruit un disque source
+> factice et revérifie la sortie entièrement à la main
+> (`struct.pack`/`struct.unpack`, CRC32 recalculés directement) --
+> aucun import de `imaging/gpt.py`/`imaging/mbr.py` des deux côtés. Résultat
+> avec le code actuel (correctif protective-MBR inclus) : MBR protecteur
+> cohérent avec la taille réelle du fichier, CRC32 des deux en-têtes
+> valides, `AlternateLBA` des deux côtés se référençant correctement l'un
+> l'autre, tableau d'entrées primaire ne contenant jamais la partition de
+> jeux, aucune entrée gardée ne débordant du fichier -- confirmé en échec
+> sans le correctif protective-MBR (comme le test précédent), en succès
+> avec. **Non confirmé pour autant sur du vrai matériel** : aucune image
+> réelle de 128 Go → 8-9 Go ni `gdisk` n'était disponible pour cette
+> vérification (recherchée sur cette machine, absente) -- cette
+> vérification structurelle établit que le fichier produit est
+> internement cohérent (ce qu'un outil comme `gdisk` validerait), pas
+> qu'il démarre réellement une console : une cause distincte, propre au
+> matériel RK3326 réel (ex. un composant de démarrage écrit à un offset
+> fixe hors du schéma de partitions déclaré) resterait possible et non
+> exclue par ce test.
+>
+> **Schéma MBR pur, vérifié distinctement (« la logique diffère
+> complètement » entre les deux schémas, confirmé en relisant le code)** :
+> contrairement à GPT, une table MBR pure n'a nulle part de champ séparé
+> déclarant la taille totale du disque -- chaque partition ne décrit que
+> sa propre étendue (`start_lba`/`sector_count`), déjà correcte et
+> inchangée pour les partitions gardées. Aucun équivalent du bug
+> protective-MBR n'est donc possible côté MBR pur, structurellement. Déjà
+> couvert bout en bout (pas seulement en isolation) par `test_backup_
+> system_only_mbr_output_table_is_consistent_with_real_file_size`, qui
+> vérifie qu'aucune partition gardée ne déborde du fichier produit.
+>
 > **Identification de la partition de jeux, repli sans étiquette
 > reconnue** (`_fallback_games_partition_index`) : une carte qui ne nomme
 > ni EASYROMS ni STORAGE reste couverte — dernière partition du disque,

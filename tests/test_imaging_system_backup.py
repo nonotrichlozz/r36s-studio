@@ -632,3 +632,181 @@ def test_backup_system_only_gpt_reports_progress(mock_prep, mock_list, tmp_path)
 
     assert events
     assert events[-1].done == 234 * SECTOR_SIZE
+
+
+# --- Vérification bout en bout entièrement indépendante ---------------------
+#
+# Bug rapporté sur du vrai matériel (macOS et Windows identiquement) :
+# aucune image produite par `backup --system-only` n'a jamais démarré de
+# console, alors que la sauvegarde complète et le flash d'une image
+# téléchargée fonctionnent tous les deux -- pointant précisément vers ce
+# code de troncature/réparation, seul chemin que les deux autres
+# n'exécutent jamais.
+#
+# Différence délibérée avec les tests ci-dessus : `_build_fake_gpt_image`
+# construit son disque source factice en réutilisant `build_gpt_header`/
+# `build_gpt_entries` -- les MÊMES fonctions que celles testées ici. Un bug
+# systématique dans ces fonctions de construction pourrait donc, en
+# principe, se retrouver identiquement dans le disque source *et* dans la
+# réparation, sans jamais être détecté par un test qui compare les deux.
+# `_build_independent_fake_gpt_source`/`_independent_parse_*` ci-dessous
+# n'importent RIEN de `r36s_studio.imaging.gpt`/`mbr` : struct.pack/unpack
+# à la main, des deux côtés (construction du disque source ET vérification
+# de la sortie) -- la seule façon d'éliminer ce risque de bug symétrique.
+
+
+def _independent_gpt_header_bytes(*, my_lba, alt_lba, first_usable, last_usable, part_entry_lba, entries_bytes):
+    h = bytearray(92)
+    h[0:8] = b"EFI PART"
+    h[8:12] = b"\x00\x00\x01\x00"
+    h[12:16] = struct.pack("<I", 92)
+    h[24:32] = my_lba.to_bytes(8, "little")
+    h[32:40] = alt_lba.to_bytes(8, "little")
+    h[40:48] = first_usable.to_bytes(8, "little")
+    h[48:56] = last_usable.to_bytes(8, "little")
+    h[56:72] = b"\x99" * 16
+    h[72:80] = part_entry_lba.to_bytes(8, "little")
+    h[80:84] = struct.pack("<I", 128)
+    h[84:88] = struct.pack("<I", 128)
+    h[88:92] = (zlib.crc32(entries_bytes) & 0xFFFFFFFF).to_bytes(4, "little")
+    crc = zlib.crc32(bytes(h)) & 0xFFFFFFFF
+    h[16:20] = crc.to_bytes(4, "little")
+    return bytes(h).ljust(SECTOR_SIZE, b"\x00")
+
+
+def _independent_gpt_entry_bytes(start_lba, end_lba, name):
+    return (
+        (b"\x01" * 16) + (b"\xaa" * 16)
+        + start_lba.to_bytes(8, "little") + end_lba.to_bytes(8, "little")
+        + (0).to_bytes(8, "little")
+        + name.encode("utf-16-le").ljust(72, b"\x00")[:72]
+    ).ljust(128, b"\x00")[:128]
+
+
+def _build_independent_fake_gpt_source(tmp_path, *, boot=(34, 133), root=(134, 233), games=(234, 20233)):
+    """`games` s'étend délibérément sur ~20 000 secteurs (~10 Mo) plutôt
+    que quelques centaines comme les fixtures ci-dessus -- plus proche du
+    ratio réel (partition de jeux largement plus grande que le système,
+    §4.3) sans pour autant construire un fichier de plusieurs Go pour un
+    test unitaire."""
+    total_sectors = games[1] + 1 + 2000
+    head = bytearray(34 * SECTOR_SIZE)
+    head[PARTITION_TABLE_OFFSET + 4] = 0xEE
+    head[PARTITION_TABLE_OFFSET + 8 : PARTITION_TABLE_OFFSET + 12] = struct.pack("<I", 1)
+    head[PARTITION_TABLE_OFFSET + 12 : PARTITION_TABLE_OFFSET + 16] = struct.pack(
+        "<I", min(total_sectors - 1, 0xFFFFFFFF)
+    )
+    head[510:512] = b"\x55\xaa"
+
+    entries = [
+        _independent_gpt_entry_bytes(*boot, "BOOT"),
+        _independent_gpt_entry_bytes(*root, "root"),
+        _independent_gpt_entry_bytes(*games, "EASYROMS"),
+    ]
+    entries_bytes = b"".join(entries) + b"\x00" * 128 * (128 - len(entries))
+    header_sector = _independent_gpt_header_bytes(
+        my_lba=1, alt_lba=total_sectors - 1, first_usable=34, last_usable=total_sectors - 34,
+        part_entry_lba=2, entries_bytes=entries_bytes,
+    )
+    head[1 * SECTOR_SIZE : 2 * SECTOR_SIZE] = header_sector
+    head[2 * SECTOR_SIZE : 2 * SECTOR_SIZE + len(entries_bytes)] = entries_bytes
+
+    path = tmp_path / "independent_fake_source.img"
+    with open(path, "wb") as f:
+        f.write(bytes(head))
+        f.seek(total_sectors * SECTOR_SIZE - 1)
+        f.write(b"\x00")
+    return str(path), total_sectors
+
+
+def _independent_parse_mbr_lba0(data):
+    assert data[510:512] == b"\x55\xaa"
+    out = []
+    for i in range(4):
+        off = PARTITION_TABLE_OFFSET + i * 16
+        ptype = data[off + 4]
+        if ptype == 0:
+            continue
+        start_lba = struct.unpack_from("<I", data, off + 8)[0]
+        sector_count = struct.unpack_from("<I", data, off + 12)[0]
+        out.append((i, ptype, start_lba, sector_count))
+    return out
+
+
+def _independent_parse_gpt_header(sector):
+    assert sector[0:8] == b"EFI PART"
+    check = bytearray(sector[:92])
+    stored_crc = struct.unpack_from("<I", check, 16)[0]
+    check[16:20] = b"\x00\x00\x00\x00"
+    header_crc_valid = stored_crc == (zlib.crc32(bytes(check)) & 0xFFFFFFFF)
+    return dict(
+        my_lba=struct.unpack_from("<Q", sector, 24)[0],
+        alt_lba=struct.unpack_from("<Q", sector, 32)[0],
+        last_usable=struct.unpack_from("<Q", sector, 48)[0],
+        part_entry_lba=struct.unpack_from("<Q", sector, 72)[0],
+        num_entries=struct.unpack_from("<I", sector, 80)[0],
+        entry_size=struct.unpack_from("<I", sector, 84)[0],
+        entry_crc=struct.unpack_from("<I", sector, 88)[0],
+        header_crc_valid=header_crc_valid,
+    )
+
+
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+@patch("r36s_studio.imaging.system_backup.prepared_source", side_effect=_no_prep)
+def test_backup_system_only_gpt_output_survives_fully_independent_structural_verification(
+    mock_prep, mock_list, tmp_path
+):
+    """Bug rapporté sur du vrai matériel : aucune image `--system-only`
+    n'a jamais démarré une console, sur macOS comme sur Windows -- pointe
+    vers ce code de troncature/réparation, le seul que la sauvegarde
+    complète (qui démarre, elle) n'exécute jamais. Contrairement aux tests
+    ci-dessus, ni la construction du disque source ni la vérification de
+    la sortie ne passent par `r36s_studio.imaging.gpt`/`mbr` -- struct
+    pack/unpack à la main des deux côtés, pour éliminer tout risque qu'un
+    bug de `build_gpt_header`/`build_gpt_entries` se retrouve identique
+    dans la fixture de test et dans le code réparé, invisible à toute
+    comparaison entre les deux."""
+    source_path, total_sectors = _build_independent_fake_gpt_source(tmp_path)
+    mock_list.return_value = _gpt_partition_labels(source_path)
+    device = _make_device(source_path, total_sectors * SECTOR_SIZE)
+    output_path = tmp_path / "independent_system_backup.img"
+
+    backup_system_only(device, str(output_path))
+    data = output_path.read_bytes()
+
+    # LBA0 : le MBR protecteur doit décrire la taille réelle du fichier
+    # produit, jamais celle du disque source (bug corrigé, §4.3).
+    protective_entries = [e for e in _independent_parse_mbr_lba0(data) if e[1] == 0xEE]
+    assert len(protective_entries) == 1
+    _, _, start_lba, sector_count = protective_entries[0]
+    assert (start_lba + sector_count) * SECTOR_SIZE == len(data)
+
+    # LBA1 : en-tête primaire, CRC valide, AlternateLBA pointant sur la
+    # fin réelle du fichier.
+    primary = _independent_parse_gpt_header(data[SECTOR_SIZE : 2 * SECTOR_SIZE])
+    assert primary["header_crc_valid"] is True
+    assert (primary["alt_lba"] + 1) * SECTOR_SIZE == len(data)
+
+    # En-tête secondaire, à l'emplacement annoncé par le primaire : CRC
+    # valide, AlternateLBA pointant en retour sur le primaire (LBA1).
+    secondary_lba = primary["alt_lba"]
+    secondary = _independent_parse_gpt_header(data[secondary_lba * SECTOR_SIZE : (secondary_lba + 1) * SECTOR_SIZE])
+    assert secondary["header_crc_valid"] is True
+    assert secondary["alt_lba"] == 1
+    assert secondary["last_usable"] == primary["last_usable"]
+
+    # Tableau d'entrées primaire : CRC valide, exactement BOOT+root
+    # (jamais EASYROMS), aucune entrée ne débordant du fichier produit.
+    entries_off = primary["part_entry_lba"] * SECTOR_SIZE
+    entries_bytes = data[entries_off : entries_off + primary["num_entries"] * primary["entry_size"]]
+    assert (zlib.crc32(entries_bytes) & 0xFFFFFFFF) == primary["entry_crc"]
+    kept = []
+    for i in range(primary["num_entries"]):
+        raw = entries_bytes[i * primary["entry_size"] : (i + 1) * primary["entry_size"]]
+        if raw[0:16] == b"\x00" * 16:
+            continue
+        start_lba = struct.unpack_from("<Q", raw, 32)[0]
+        end_lba = struct.unpack_from("<Q", raw, 40)[0]
+        assert (end_lba + 1) * SECTOR_SIZE <= len(data)
+        kept.append(start_lba)
+    assert kept == [34, 134]

@@ -90,6 +90,20 @@ STRINGS = {
     "wizard_status_waiting": "En attente de ta carte…",
     "wizard_status_device_found": "Carte reconnue : {display}",
     "wizard_status_same_card": "C'est la même carte — insère la carte neuve, pas l'ancienne.",
+    # Bug corrigé, confirmé sur du vrai matériel : `is_same_card` ne peut
+    # rien affirmer quand la carte source n'a pas d'empreinte (vierge ou
+    # firmware non reconnu, §5) -- le repli sur le chemin du périphérique
+    # (safety/card_fingerprint.py::is_same_card_or_unverifiable) ne prouve
+    # jamais qu'il s'agit de la même carte, seulement qu'on ne peut pas
+    # prouver le contraire. Message honnête distinct de la certitude
+    # ci-dessus, pour qu'un utilisateur qui a bien changé de carte (même
+    # emplacement de lecteur, ex. certains lecteurs SD intégrés Windows,
+    # §4.4) comprenne que l'appli est prudente plutôt que buguée.
+    "wizard_status_same_card_unverified": (
+        "Impossible de vérifier qu'il s'agit d'une carte différente (aucune "
+        "empreinte lisible sur la carte d'origine) — si tu es sûr d'avoir "
+        "changé de carte, essaie un autre lecteur."
+    ),
     "wizard_status_multiple_candidates": "Plusieurs cartes détectées — choisis la bonne.",
     # Journal de bord (§5 vocabulaire : le détail technique n'apparaît
     # que là) -- combien de périphériques retenus/écartés à un sondage du

@@ -37,7 +37,7 @@ from r36s_studio.imaging import (
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, set_privileged_mount_hook
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
-from r36s_studio.safety.card_fingerprint import is_same_card
+from r36s_studio.safety.card_fingerprint import is_same_card, is_same_card_or_unverifiable
 
 from . import elevate
 from .partition_runner import (
@@ -1443,8 +1443,25 @@ class MainWindow(QMainWindow):
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
             self._wizard_panel.set_can_continue(True)
         elif job == WizardJob.DETECT_TARGET:
-            if is_same_card(self._wizard_source_fingerprint, fingerprint):
-                self._wizard_panel.set_status(tr("wizard_status_same_card"))
+            # Bug corrigé, confirmé sur du vrai matériel : `is_same_card`
+            # seule ne peut plus rien affirmer quand la source n'a pas
+            # d'empreinte (carte vierge ou firmware non reconnu, § pré-vol
+            # n°3) -- `is_same_card_or_unverifiable` (safety/card_
+            # fingerprint.py) ajoute un repli sur le chemin du périphérique
+            # dans ce cas précis, prudent par défaut plutôt que de laisser
+            # passer silencieusement une carte qui pourrait être la
+            # source. Message distinct (`..._unverified`) quand c'est ce
+            # repli qui bloque plutôt qu'une empreinte réellement
+            # identique -- honnête : l'appli ne peut ici que se montrer
+            # prudente, pas certaine qu'il s'agit de la même carte.
+            source_device = self._wizard_source_device
+            blocked = source_device is not None and is_same_card_or_unverifiable(
+                self._wizard_source_fingerprint, fingerprint, source_device.path, candidate.path
+            )
+            if blocked:
+                confirmed_same = is_same_card(self._wizard_source_fingerprint, fingerprint)
+                status_key = "wizard_status_same_card" if confirmed_same else "wizard_status_same_card_unverified"
+                self._wizard_panel.set_status(tr(status_key))
                 self._wizard_panel.set_can_continue(False)
                 self._wizard_poll_timer.start()  # continue d'attendre une vraie carte différente
                 return

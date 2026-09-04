@@ -10,7 +10,11 @@ import subprocess
 from unittest.mock import patch
 
 from r36s_studio.partitions.locate import PartitionInfo, PartitionNotFound, PartitionNotMounted
-from r36s_studio.safety.card_fingerprint import compute_boot_fingerprint, is_same_card
+from r36s_studio.safety.card_fingerprint import (
+    compute_boot_fingerprint,
+    is_same_card,
+    is_same_card_or_unverifiable,
+)
 
 
 @patch("r36s_studio.safety.card_fingerprint.list_partitions", return_value=[])
@@ -104,3 +108,55 @@ def test_is_same_card_false_when_either_fingerprint_missing():
     assert is_same_card(None, "abc123") is False
     assert is_same_card("abc123", None) is False
     assert is_same_card(None, None) is False
+
+
+# --- is_same_card_or_unverifiable : bug corrigé, confirmé sur du vrai ----
+# matériel -- is_same_card seule se désactive silencieusement quand la ----
+# carte source n'a pas d'empreinte (vierge ou firmware non reconnu) -------
+
+
+def test_same_card_or_unverifiable_true_on_matching_fingerprints_regardless_of_path():
+    assert (
+        is_same_card_or_unverifiable("abc123", "abc123", r"\\.\PhysicalDrive1", r"\\.\PhysicalDrive2") is True
+    )
+
+
+def test_same_card_or_unverifiable_false_when_both_fingerprints_present_and_differ():
+    """Les deux empreintes sont connues et diffèrent -- signal fiable, le
+    chemin ne doit jamais être consulté (même chemin ou non)."""
+    assert (
+        is_same_card_or_unverifiable("abc123", "def456", r"\\.\PhysicalDrive1", r"\\.\PhysicalDrive1") is False
+    )
+
+
+def test_same_card_or_unverifiable_blocks_on_matching_path_when_source_fingerprint_missing():
+    """Le scénario réel rapporté : carte source vierge (ou firmware non
+    reconnu), même lecteur de carte des deux côtés -- chemin de disque
+    physique identique aux deux étapes sur certains lecteurs Windows,
+    quelle que soit la carte insérée. Prudence par défaut : bloque plutôt
+    que d'écrire potentiellement par-dessus la carte source elle-même."""
+    assert (
+        is_same_card_or_unverifiable(None, None, r"\\.\PhysicalDrive1", r"\\.\PhysicalDrive1") is True
+    )
+
+
+def test_same_card_or_unverifiable_allows_different_path_when_source_fingerprint_missing():
+    """Chemin différent : aucune preuve positive de similarité -- reste
+    autorisé à passer (le cas courant : carte source vierge, carte cible
+    dans un lecteur ou un port différent)."""
+    assert (
+        is_same_card_or_unverifiable(None, None, r"\\.\PhysicalDrive1", r"\\.\PhysicalDrive2") is False
+    )
+    assert (
+        is_same_card_or_unverifiable(None, "target-fp", r"\\.\PhysicalDrive1", r"\\.\PhysicalDrive2") is False
+    )
+
+
+def test_same_card_or_unverifiable_ignores_target_path_when_source_fingerprint_present():
+    """Repli sur le chemin réservé au cas où la source n'a pas d'empreinte
+    -- une source avec empreinte utilise toujours is_same_card seule,
+    jamais le chemin (déjà couvert par les deux premiers tests, vérifié
+    explicitement une fois de plus avec des chemins identiques)."""
+    assert (
+        is_same_card_or_unverifiable("abc123", None, r"\\.\PhysicalDrive1", r"\\.\PhysicalDrive1") is False
+    )

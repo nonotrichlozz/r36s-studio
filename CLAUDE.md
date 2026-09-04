@@ -2273,16 +2273,55 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 >    silencieusement.
 > 3. **Empreinte de carte, refuse d'écrire sur la carte source** —
 >    `safety/card_fingerprint.py::compute_boot_fingerprint`/
->    `is_same_card`, **conservés inchangés**, via `WizardFingerprintRunner`
->    aux étapes 1 et 3 (même garde-fou qu'auparavant aux étapes 1/4).
->    Exception délibérée et limitée à « aucune opération au niveau
->    fichier » : c'est un garde-fou de pré-vol, pas une des deux
->    opérations centrales du clonage (création/restauration), et il se
->    dégrade sans risque — une carte neuve vierge ou d'un firmware
->    différent n'a simplement aucune partition BOOT montable, donc pas
->    d'empreinte (`None`), et `is_same_card` ne bloque jamais ce cas
->    (le cas courant : une carte neuve vierge). Il ne bloque que le cas
->    qui compte : la carte source encore branchée par erreur à l'étape 3.
+>    `is_same_card`, via `WizardFingerprintRunner` aux étapes 1 et 3 (même
+>    garde-fou qu'auparavant aux étapes 1/4). Exception délibérée et
+>    limitée à « aucune opération au niveau fichier » : c'est un garde-fou
+>    de pré-vol, pas une des deux opérations centrales du clonage
+>    (création/restauration), et il se dégrade sans risque — une carte
+>    neuve vierge ou d'un firmware différent n'a simplement aucune
+>    partition BOOT montable, donc pas d'empreinte (`None`), et
+>    `is_same_card` ne bloque jamais ce cas (le cas courant : une carte
+>    neuve vierge). Il ne bloque que le cas qui compte : la carte source
+>    encore branchée par erreur à l'étape 3.
+>
+>    ⚠️ **Bug corrigé, confirmé sur du vrai matériel : ce garde-fou peut se
+>    désactiver silencieusement, pas seulement se dégrader sans risque.**
+>    Le raisonnement ci-dessus suppose que c'est toujours la carte
+>    *cible* qui manque d'empreinte -- faux depuis que le parcours de
+>    clonage clone n'importe quel firmware (§5) : si la carte *source*
+>    elle-même n'a pas d'empreinte (vierge, ou dont le BOOT n'est
+>    simplement pas reconnu), `is_same_card` ne peut plus rien affirmer et
+>    retourne toujours `False`, quelle que soit la carte réellement
+>    branchée à l'étape 3 -- le garde-fou est alors désactivé pour tout le
+>    reste du parcours. Combiné à une observation Windows sur du vrai
+>    matériel (certains lecteurs de carte gardent le même chemin de disque
+>    physique quelle que soit la carte insérée, la sauvegarde et le flash
+>    du même parcours utilisant tous deux le même chemin), le chemin seul
+>    ne peut pas non plus prouver qu'il s'agit de deux cartes différentes
+>    dans ce cas précis -- risque réel d'écrire l'image par-dessus la
+>    carte source elle-même si l'utilisateur ne l'a pas changée.
+>
+>    **Corrigé** : `safety/card_fingerprint.py::is_same_card_or_
+>    unverifiable` (nouvelle fonction, `is_same_card` elle-même reste
+>    inchangée) ajoute un repli sur `device.path` uniquement quand
+>    l'empreinte source est indisponible -- un chemin identique dans ce
+>    cas précis ne *prouve* jamais qu'il s'agit de la même carte, mais
+>    l'inverse n'est pas prouvable non plus : prudence par défaut, bloque
+>    plutôt que de laisser passer silencieusement (§2 règle 1). Décision
+>    délibérée, sans échappatoire pour l'instant : un lecteur à
+>    emplacement unique reste bloqué tant que la source garde une
+>    empreinte indisponible, même si l'utilisateur a réellement changé de
+>    carte -- pas de confirmation manuelle de contournement ajoutée à ce
+>    stade (prudence choisie plutôt qu'une fenêtre de confirmation
+>    supplémentaire, en l'absence de données sur la fréquence réelle de ce
+>    scénario). `gui/main_window.py::_on_wizard_fingerprint_ready`
+>    distingue le message affiché selon le cas : `wizard_status_same_card`
+>    (empreintes réellement identiques, certain) contre
+>    `wizard_status_same_card_unverified` (repli sur le chemin, honnête
+>    sur le fait que l'appli ne peut ici que se montrer prudente, pas
+>    certaine) -- pour qu'un utilisateur qui a bien changé de carte sur un
+>    lecteur à emplacement unique comprenne que l'appli est prudente
+>    plutôt que buguée.
 >
 > **Ce qui est sorti du mode assisté, déplacement pas suppression** —
 > reste pleinement en place pour le mode expert, qui l'utilisait déjà

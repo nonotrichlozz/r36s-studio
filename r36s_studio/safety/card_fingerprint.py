@@ -9,9 +9,17 @@ lecture seule, jamais privilégié -- §4.4, comme `extract_boot`) plutôt que
 des octets bruts du périphérique : lire le périphérique brut exige
 l'élévation (§3, réservée au worker pour les écritures), ce qu'on ne veut
 pas déclencher juste pour comparer deux cartes à une étape qui n'écrit
-rien. Une carte vierge ou sans BOOT lisible n'a pas d'empreinte (`None`) --
-trivialement différente de la carte d'origine, qui elle en a toujours une
-à ce stade du parcours."""
+rien. Une carte vierge ou sans BOOT lisible n'a pas d'empreinte (`None`).
+
+⚠️ Correction de conception, confirmée sur du vrai matériel : la phrase
+ci-dessus supposait à tort que la carte *source* a toujours une empreinte
+à ce stade du parcours (« trivialement différente de la carte d'origine,
+qui elle en a toujours une »). Faux depuis que le parcours de clonage
+clone n'importe quel firmware (§5) : une source vierge, ou dont le BOOT
+n'est simplement pas reconnu, produit aussi `None` -- et `is_same_card`
+seule ne peut alors plus rien affirmer, désactivant silencieusement ce
+garde-fou. Voir `is_same_card_or_unverifiable` ci-dessous, le repli requis
+dans ce cas précis."""
 
 from __future__ import annotations
 
@@ -85,3 +93,39 @@ def is_same_card(fingerprint_a: Optional[str], fingerprint_b: Optional[str]) -> 
     """Vrai seulement si les deux empreintes existent et sont identiques --
     `None` ne prouve jamais une égalité, il signifie « pas d'empreinte »."""
     return fingerprint_a is not None and fingerprint_a == fingerprint_b
+
+
+def is_same_card_or_unverifiable(
+    source_fingerprint: Optional[str],
+    target_fingerprint: Optional[str],
+    source_path: str,
+    target_path: str,
+) -> bool:
+    """Bug corrigé, confirmé sur du vrai matériel : quand la carte
+    *source* n'a pas d'empreinte (vierge, ou firmware dont le BOOT n'est
+    pas reconnu -- réaliste depuis que le parcours de clonage clone
+    n'importe quel firmware, §5), `is_same_card` ne peut plus rien
+    affirmer et retourne toujours `False`, quelle que soit la carte
+    réellement branchée à l'étape 3 -- le garde-fou est alors
+    silencieusement désactivé pour tout le reste du parcours, avec le
+    risque d'écrire l'image de sauvegarde par-dessus la carte source
+    elle-même si l'utilisateur ne l'a pas physiquement retirée.
+
+    Repli sur `source_path`/`target_path` dans ce cas précis : un chemin
+    identique ne *prouve* jamais qu'il s'agit de la même carte physique
+    (certains lecteurs Windows gardent le même chemin de disque physique
+    quelle que soit la carte insérée dans le même emplacement, §4.4) -- mais
+    l'inverse n'est pas prouvable non plus dans ce cas, et le contenu ne
+    permet déjà pas de trancher. Échoue donc du côté prudent (bloque)
+    plutôt que de laisser passer silencieusement une carte qui pourrait
+    être la source (§2 règle 1) : un chemin différent, lui, reste autorisé
+    à passer (aucune preuve positive de similarité). Pas d'échappatoire
+    dans ce module -- un lecteur à emplacement unique bloquera donc tant
+    que la carte source garde une empreinte indisponible, décision
+    délibérée (prudence par défaut plutôt qu'une confirmation manuelle
+    pour l'instant)."""
+    if is_same_card(source_fingerprint, target_fingerprint):
+        return True
+    if source_fingerprint is None and source_path == target_path:
+        return True
+    return False

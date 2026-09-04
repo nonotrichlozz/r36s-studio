@@ -159,6 +159,35 @@ def test_windows_locks_letterless_boot_partition_too(mock_system, mock_lock, moc
     mock_lock.assert_called_once_with([boot_guid, root_guid, easyroms_guid])
 
 
+@patch("r36s_studio.imaging.write_target.subprocess.run")
+@patch("r36s_studio.imaging.winlock.refresh_disk_properties")
+@patch("r36s_studio.imaging.winlock.unlock_volumes")
+@patch("r36s_studio.imaging.winlock.lock_and_dismount_volumes", return_value=[])
+@patch("r36s_studio.imaging.write_target.platform.system", return_value="Windows")
+def test_windows_blank_disk_with_no_partitions_does_not_raise(
+    mock_system, mock_lock, mock_unlock, mock_refresh, mock_run
+):
+    """Bug corrigé, confirmé sur du vrai matériel : sur un disque sans
+    aucune partition (carte vierge, `Clear-Disk` avant un premier flash),
+    `Get-Partition -DiskNumber N` ne renvoie pas une liste vide -- il lève
+    `ObjectNotFound` et PowerShell sort en code 1 (vérifié à la main).
+    `check=True` traitait ça comme un échec fatal, empêchant toute
+    restauration sur une carte neuve tout juste effacée -- alors qu'« aucune
+    partition à verrouiller » est un résultat parfaitement normal ici."""
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=["powershell"],
+        returncode=1,
+        stdout="",
+        stderr="Get-Partition : No MSFT_Partition objects found ... ObjectNotFound\n",
+    )
+    device = _make_device(r"\\.\PhysicalDrive1", mountpoints=[])
+
+    with prepared_write_target(device) as path:
+        assert path == r"\\.\PhysicalDrive1"
+
+    mock_lock.assert_called_once_with([])
+
+
 # --- _windows_all_volume_paths (bug corrigé : verrouiller/démonter tous --
 # les volumes du disque, pas seulement ceux avec une lettre de lecteur) ---
 
@@ -183,6 +212,24 @@ def test_windows_all_volume_paths_empty_disk_returns_empty_list(mock_run):
     _mock_powershell_volume_paths(mock_run, [])
 
     assert _windows_all_volume_paths(r"\\.\PhysicalDrive3") == []
+
+
+@patch("r36s_studio.imaging.write_target.subprocess.run")
+def test_windows_all_volume_paths_returns_empty_list_when_powershell_fails(mock_run):
+    """Bug corrigé, confirmé sur du vrai matériel : `Get-Partition` lève
+    `ObjectNotFound` (code de retour 1) sur un disque sans aucune
+    partition -- ne pas confondre avec `test_..._empty_disk_returns_empty_
+    list` ci-dessus (retour 0, stdout vide, un disque *avec* des
+    partitions mais aucune ne matchant le filtre). Les deux doivent
+    aboutir à une liste vide, jamais lever."""
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=["powershell"],
+        returncode=1,
+        stdout="",
+        stderr="Get-Partition : No MSFT_Partition objects found ... ObjectNotFound\n",
+    )
+
+    assert _windows_all_volume_paths(r"\\.\PhysicalDrive1") == []
 
 
 def test_windows_all_volume_paths_rejects_unexpected_device_path():

@@ -49,7 +49,21 @@ def _windows_all_volume_paths(device_path: str) -> List[str]:
     (ext4, la partition root d'une carte ArkOS) obtient tout de même un
     volume "RAW" avec son propre chemin GUID -- verrouiller/démonter un
     volume RAW non monté est sans risque (`FSCTL_LOCK_VOLUME` réussit
-    trivialement dessus)."""
+    trivialement dessus).
+
+    Bug corrigé, confirmé sur du vrai matériel : sur un disque *sans
+    aucune partition* (carte vierge, `Clear-Disk` ou équivalent avant un
+    premier flash), `Get-Partition -DiskNumber N` ne renvoie pas une liste
+    vide -- il lève `ObjectNotFound` et PowerShell sort en code 1, vérifié
+    à la main. `check=True` traitait ça comme un échec fatal alors
+    qu'« aucune partition à verrouiller » est un résultat parfaitement
+    normal avant un flash sur une carte neuve -- même principe que
+    `write_target.reunmount_before_verify` sur macOS, qui utilise déjà
+    `check=False` pour cette raison exacte (rien à démonter n'est pas une
+    erreur). `check=False` ici : un code de retour non nul (disque sans
+    partition, ou toute autre erreur PowerShell) retombe sur une liste
+    vide plutôt que de lever -- `lock_and_dismount_volumes([])` est déjà
+    un no-op sûr (boucle vide)."""
     match = re.search(r"PhysicalDrive(\d+)", device_path)
     if not match:
         raise ValueError(f"chemin de périphérique Windows invalide : {device_path}")
@@ -63,8 +77,10 @@ def _windows_all_volume_paths(device_path: str) -> List[str]:
         ["powershell", "-NoProfile", "-Command", command],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    if result.returncode != 0:
+        return []
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 

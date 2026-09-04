@@ -93,7 +93,21 @@ def copy_range(
         if sector_size and len(chunk) % sector_size != 0:
             pad = sector_size - (len(chunk) % sector_size)
             write_chunk = chunk + b"\x00" * pad
-        destination.write(write_chunk)
+        try:
+            destination.write(write_chunk)
+        except OSError as exc:
+            # Diagnostic non encore confirmé (Windows, `[Errno 9] Bad file
+            # descriptor` observé y compris après verrouillage complet de
+            # toutes les partitions du disque, §4.3) -- ce contexte
+            # (octets déjà écrits, temps écoulé depuis le début de la
+            # copie) atteint déjà le journal de bord via le chemin
+            # existant (IO_ERROR -> str(exc), §5 vocabulaire : le message
+            # brut suit toujours le message convivial) sans nouveau
+            # mécanisme : de quoi confirmer si l'échec survient toujours
+            # au même octet/délai caractéristique lors du prochain test
+            # sur du vrai matériel, plutôt que de reguesser à l'aveugle.
+            elapsed = time.monotonic() - start
+            raise OSError(f"{exc} (après {done} octets écrits, {elapsed:.1f} s depuis le début de la copie)") from exc
         done += len(chunk)
 
         now = time.monotonic()

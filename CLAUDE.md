@@ -422,6 +422,15 @@ flush + fsync
   Sans ce verrouillage, Windows refuse l'écriture ou corrompt la carte.
 - **Linux** — `open(path, O_RDWR)` après `umount` des partitions montées. Rien d'exotique.
 
+> ⚠️ **Diagnostic partiel, PAS le correctif complet -- voir la note plus
+> bas (« Investigation en cours, non résolue ») : cette hypothèse (BOOT
+> resté monté) a corrigé un vrai bug de champ d'application, mais
+> l'échec `[Errno 9] Bad file descriptor` persiste sur du vrai matériel
+> même une fois BOOT verrouillé/démonté comme le reste.** Gardé tel quel
+> ci-dessous (raisonnement toujours valide sur ce point précis, et
+> nécessaire au correctif de la carte vierge qui suit), mais ne pas le
+> lire comme la cause complète de `[Errno 9]` sur Windows.
+>
 > ⚠️ **Bug corrigé, confirmé sur du vrai matériel : `[Errno 9] Bad file
 > descriptor` une seconde après le début de l'écriture Windows.** Rapporté
 > sur une carte cible portant un ArkOS complet (BOOT + root + EASYROMS,
@@ -466,6 +475,59 @@ flush + fsync
 > périphérique (le repasser tel quel, débarrassé seulement de son `\`
 > final, plutôt que de le préfixer une seconde fois par `\\.\` -- ce qui
 > aurait produit un chemin invalide).
+>
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : le correctif ci-dessus
+> faisait planter la restauration sur une carte vierge.** Testé
+> spécifiquement pour trancher entre les hypothèses en cours sur ce même
+> code (voir plus bas) : carte de 32 Go effacée (`Clear-Disk`, zéro
+> partition, aucun volume monté), la restauration échouait avec `Command
+> [...] "Get-Partition -DiskNumber 1 | ..." returned non-zero exit status
+> 1`. Cause : sur un disque sans aucune partition, `Get-Partition` ne
+> renvoie pas une liste vide -- il lève `ObjectNotFound` et PowerShell sort
+> en code 1 (vérifié à la main). `check=True` traitait ça comme un échec
+> fatal, alors qu'« aucune partition à verrouiller » est un résultat
+> parfaitement normal avant un premier flash sur une carte neuve -- même
+> principe que `reunmount_before_verify` sur macOS, qui utilise déjà
+> `check=False` pour cette raison exacte. **Corrigé** : `check=False`, un
+> code de retour non nul retombe sur une liste vide plutôt que de lever --
+> `lock_and_dismount_volumes([])` est déjà un no-op sûr.
+>
+> ⚠️ **Investigation en cours, non résolue : `[Errno 9] Bad file
+> descriptor` persiste sur la carte ArkOS complète malgré le correctif
+> ci-dessus (verrouillage de toutes les partitions, lettrées ou non).**
+> Confirmé sur du vrai matériel en testant les deux cartes en séquence
+> pour isoler la cause : la carte vierge produit l'échec `ObjectNotFound`
+> ci-dessus (corrigé), mais la même séquence de code sur la carte ArkOS
+> (BOOT + root + EASYROMS, EASYROMS lettrée) redonne `[Errno 9] Bad file
+> descriptor` -- donc l'hypothèse initiale (BOOT resté monté parce
+> qu'exclu de `device.mountpoints`) est réfutée par cette nouvelle
+> donnée : BOOT est désormais verrouillé/démonté comme les autres, et
+> l'échec persiste quand même. Le mécanisme réel reste à confirmer -- pas
+> encore une explication établie, seulement des pistes :
+> - Le démontage (`FSCTL_DISMOUNT_VOLUME`) lui-même pourrait déclencher,
+>   sur un lecteur de carte SD amovible, un comportement du pilote de
+>   stockage (reset/re-détection du périphérique USB) qui invalide toute
+>   poignée ouverte sur le disque physique peu après -- y compris une
+>   poignée ouverte *après* le démontage, ce qui expliquerait pourquoi
+>   l'ordre actuel (ouvrir `\\.\PhysicalDriveN` seulement après
+>   `lock_and_dismount_volumes`, jamais avant) ne suffit pas.
+> - Le sous-processus PowerShell de `_windows_all_volume_paths`
+>   (`Get-Partition`) pourrait laisser un état transitoire (WMI/CIM) qui
+>   n'a pas fini de se libérer au moment où le verrouillage direct
+>   (`ctypes`) commence.
+>
+> Aucune des deux n'est vérifiée -- correctif non tenté tant que la cause
+> réelle n'est pas confirmée, pour ne pas répéter l'erreur du correctif
+> précédent (une hypothèse plausible mais incomplète, présentée comme
+> réglée avant d'être re-testée sur du vrai matériel). **Diagnostic ajouté
+> en attendant** : `imaging/copy.py::copy_range` inclut désormais, dans le
+> message de l'exception ré-levée en cas d'échec d'écriture, le nombre
+> d'octets déjà écrits et le temps écoulé depuis le début de la copie --
+> ce contexte atteint déjà le journal de bord via le chemin d'erreur
+> existant (`IO_ERROR` -> `str(exc)`, §5 vocabulaire) sans nouveau
+> mécanisme. Le prochain test sur la carte ArkOS dira si l'échec survient
+> toujours au même octet/délai caractéristique (cohérent avec un
+> mécanisme déterministe côté pilote) ou de façon variable.
 
 **Sauvegarde intelligente :** ne pas copier 128 Go quand la dernière partition s'arrête
 à 8 Go. Lire la table de partitions (MBR ou GPT), calculer la fin du dernier secteur

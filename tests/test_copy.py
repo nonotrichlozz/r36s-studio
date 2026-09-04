@@ -200,3 +200,49 @@ def test_no_cancellation_when_should_cancel_always_false():
     )
 
     assert copied == len(data)
+
+
+# --- diagnostic sur échec d'écriture (Windows, "[Errno 9] Bad file --------
+# descriptor" observé même après verrouillage complet des volumes, §4.3 -- --
+# investigation en cours, pas encore une cause confirmée) ------------------
+
+
+class _FailingDestination:
+    """`.write()` réussit `fail_after` fois puis lève `OSError` -- simule un
+    handle qui devient invalide après un certain nombre de blocs, sans
+    dépendre d'un vrai périphérique Windows."""
+
+    def __init__(self, fail_after: int):
+        self._remaining = fail_after
+        self.written = bytearray()
+
+    def write(self, data: bytes) -> int:
+        if self._remaining <= 0:
+            raise OSError(9, "Bad file descriptor")
+        self._remaining -= 1
+        self.written.extend(data)
+        return len(data)
+
+    def fileno(self):
+        raise AttributeError  # pas un vrai descripteur -- copy_range doit l'ignorer (fsync)
+
+
+def test_write_failure_is_reraised_with_bytes_written_and_elapsed_time():
+    """Bug corrigé, confirmé sur du vrai matériel : le message d'erreur brut
+    (`[Errno 9] Bad file descriptor`) seul ne dit rien de *quand* ni de
+    *combien* d'octets avaient déjà été écrits -- ce contexte est
+    maintenant inclus directement dans le message ré-levé, qui atteint déjà
+    le journal de bord via le chemin d'erreur existant (IO_ERROR ->
+    str(exc)) sans nouveau mécanisme."""
+    block_size = 1024
+    data = b"x" * (block_size * 5)
+    source = io.BytesIO(data)
+    destination = _FailingDestination(fail_after=2)
+
+    with pytest.raises(OSError) as exc_info:
+        copy_range(source, destination, total_bytes=len(data), block_size=block_size)
+
+    message = str(exc_info.value)
+    assert "Bad file descriptor" in message
+    assert f"après {block_size * 2} octets écrits" in message
+    assert "s depuis le début de la copie" in message

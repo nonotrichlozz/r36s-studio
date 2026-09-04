@@ -26,6 +26,18 @@ def test_drive_letter_to_volume_path():
     assert winlock._drive_letter_to_volume_path("E:") == r"\\.\E:"
 
 
+def test_drive_letter_to_volume_path_passes_through_guid_volume_path():
+    """Bug corrigé, confirmé sur du vrai matériel : un chemin déjà dans
+    l'espace de noms périphérique (une partition sans lettre de lecteur,
+    ex. BOOT sur une carte ArkOS, identifiée par son chemin GUID) ne doit
+    pas être préfixé une seconde fois par `\\\\.\\` -- ça produirait un
+    chemin invalide, ce qui a provoqué un `[Errno 9] Bad file descriptor`
+    en cours d'écriture (write_target.py laissait BOOT monté faute de le
+    verrouiller correctement)."""
+    assert winlock._drive_letter_to_volume_path("\\\\?\\Volume{abc-123}\\") == "\\\\?\\Volume{abc-123}"
+    assert winlock._drive_letter_to_volume_path(r"\\.\D:") == r"\\.\D:"
+
+
 @patch("r36s_studio.imaging.winlock._kernel32")
 def test_lock_and_dismount_locks_then_dismounts_each_volume(mock_kernel32_factory):
     kernel32 = _fake_kernel32()

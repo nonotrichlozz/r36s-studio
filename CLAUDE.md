@@ -422,6 +422,51 @@ flush + fsync
   Sans ce verrouillage, Windows refuse l'écriture ou corrompt la carte.
 - **Linux** — `open(path, O_RDWR)` après `umount` des partitions montées. Rien d'exotique.
 
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : `[Errno 9] Bad file
+> descriptor` une seconde après le début de l'écriture Windows.** Rapporté
+> sur une carte cible portant un ArkOS complet (BOOT + root + EASYROMS,
+> seule EASYROMS montée avec une lettre de lecteur), `ConfirmDialog`
+> affichée correctement, l'échec survenait au tout début de l'écriture
+> réelle. Cause : `write_target.prepared_write_target` (§4.3) verrouillait/
+> démontait `device.mountpoints` (`devices/windows.py`) avant d'ouvrir
+> `\\.\PhysicalDriveN` -- mais ce champ ne contient que les partitions
+> *avec une lettre de lecteur*. BOOT (FAT, typiquement sans lettre sur une
+> carte ArkOS, §4.4) restait donc monté pendant toute l'écriture brute du
+> disque entier. Environ une seconde après le début de l'écriture --
+> celle des tout premiers secteurs, qui appartiennent justement à BOOT --
+> Windows détecte que le contenu d'un volume encore monté change sous lui
+> et révoque le handle physique en cours d'écriture pour protéger ce
+> volume plutôt que de le laisser continuer : `ERROR_INVALID_HANDLE` côté
+> Win32, `[Errno 9] Bad file descriptor` côté Python. L'ordre des
+> opérations lui-même était déjà correct (`\\.\PhysicalDriveN` n'est
+> ouvert qu'*après* `lock_and_dismount_volumes`, jamais avant) -- ce n'est
+> pas la séquence qui était en cause, mais son périmètre : verrouiller
+> seulement les volumes lettrés en oublie silencieusement ceux qui n'en
+> ont pas. Confirmé sans rapport avec `eject_media()`/`IOCTL_STORAGE_
+> EJECT_MEDIA` (ajoutés dans le même module par un commit récent, §4.4
+> « Éjection ») : ce code n'est appelé que par l'étape F (éjection),
+> jamais pendant l'écriture -- vérifié par une recherche exhaustive des
+> appelants (`eject_media`/`_windows_eject` : uniquement `partitions/
+> eject.py`).
+>
+> **Corrigé** : `write_target._windows_all_volume_paths` (nouvelle
+> fonction) interroge `Get-Partition -DiskNumber N` (même mécanisme
+> `AccessPaths` que `partitions/locate.py::_list_windows`, requête
+> PowerShell distincte pour ne pas coupler `imaging/` à `partitions/` pour
+> un simple besoin d'énumération) et retourne le chemin GUID
+> (`\\?\Volume{...}\`) de *toutes* les partitions du disque, lettrées ou
+> non -- une partition dont Windows ne reconnaît pas le système de
+> fichiers (ext4, la partition root) obtient tout de même un volume "RAW"
+> avec son propre chemin GUID (§4.4, comportement déjà confirmé
+> ailleurs) ; le verrouiller/démonter sans risque (`FSCTL_LOCK_VOLUME`
+> réussit trivialement sur un volume RAW non monté). `prepared_write_
+> target` verrouille désormais cette liste complète plutôt que `device.
+> mountpoints`. `winlock._drive_letter_to_volume_path` accepte maintenant
+> aussi bien une lettre (`"D:\\"`) qu'un chemin déjà dans l'espace de noms
+> périphérique (le repasser tel quel, débarrassé seulement de son `\`
+> final, plutôt que de le préfixer une seconde fois par `\\.\` -- ce qui
+> aurait produit un chemin invalide).
+
 **Sauvegarde intelligente :** ne pas copier 128 Go quand la dernière partition s'arrête
 à 8 Go. Lire la table de partitions (MBR ou GPT), calculer la fin du dernier secteur
 utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` ou
@@ -1208,6 +1253,18 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > (`_windows_drive_letters`, `Get-Partition -DiskNumber N`) ; une
 > partition sans lettre (BOOT sans lettre, §4.4) n'a simplement rien à
 > démonter, l'éjection matérielle a quand même lieu.
+>
+> ⚠️ **Gap connu, non corrigé ici** (repéré en corrigeant le bug d'écriture
+> ci-dessous, §4.3 « Bad file descriptor ») : `_windows_drive_letters`
+> partage le même défaut que l'ancien code d'écriture -- seules les
+> partitions *avec* une lettre de lecteur sont verrouillées/démontées
+> avant l'éjection, BOOT (sans lettre) n'y figure jamais. Contrairement à
+> l'écriture, une éjection ne maintient pas un accès brut soutenu pendant
+> plusieurs minutes : rien ne prouve que ce gap cause un échec observable
+> en pratique (pas de rapport en ce sens), mais il partage la même cause
+> structurelle et mériterait le même traitement (`write_target.
+> _windows_all_volume_paths`, toutes les partitions du disque) si un
+> problème d'éjection est un jour rapporté.
 >
 > ⚠️ **Bug corrigé, confirmé en relisant le code après le rapport
 > ci-dessus : le Continuer du vrai parcours guidé pouvait afficher la

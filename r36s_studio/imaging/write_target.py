@@ -6,14 +6,66 @@ from __future__ import annotations
 
 import contextlib
 import platform
+import re
 import subprocess
-from typing import Iterator
+from typing import Iterator, List
 
 from r36s_studio.devices import Device
 
 from .source import raw_read_path
 
 WINDOWS_SECTOR_SIZE = 512
+
+
+def _windows_all_volume_paths(device_path: str) -> List[str]:
+    """Chemin GUID (`\\\\?\\Volume{...}\\`) de *toutes* les partitions
+    montables du disque cible -- lettre de lecteur ou non.
+
+    Bug corrigé, confirmé sur du vrai matériel : `prepared_write_target`
+    ne verrouillait/démontait que `device.mountpoints` (`devices/
+    windows.py`, uniquement les lettres de lecteur) avant d'ouvrir
+    `\\\\.\\PhysicalDriveN` en écriture. Sur une carte ArkOS complète
+    (BOOT + root + EASYROMS, seule EASYROMS montée avec une lettre), BOOT
+    restait donc monté pendant toute l'écriture brute du disque entier --
+    et environ une seconde après le début de l'écriture (celle des
+    premiers secteurs, qui appartiennent justement à BOOT), Windows
+    détecte que le contenu d'un volume encore monté change sous lui et
+    révoque le handle physique en cours d'écriture pour protéger ce
+    volume, plutôt que de le laisser continuer : `[Errno 9] Bad file
+    descriptor` (`ERROR_INVALID_HANDLE`) côté Python, en toute logique.
+    L'ouverture de `\\\\.\\PhysicalDriveN` elle-même a lieu correctement
+    *après* `lock_and_dismount_volumes` (jamais avant) -- ce n'est pas
+    l'ordre des opérations qui était en cause, mais leur périmètre :
+    verrouiller/démonter seulement les volumes lettrés en oublie
+    silencieusement ceux qui n'en ont pas.
+
+    `Get-Partition -DiskNumber N` (même disque que `device.path`, requête
+    PowerShell distincte de celle de `partitions/locate.py::_list_windows`
+    pour ne pas coupler `imaging/` à `partitions/` pour un simple besoin
+    d'énumération) expose `AccessPaths` pour chaque partition -- un chemin
+    GUID de volume y figure toujours dès qu'un volume existe, même sans
+    lettre (confirmé sur du vrai matériel ailleurs dans ce projet, §4.4) ;
+    une partition dont Windows ne reconnaît pas le système de fichiers
+    (ext4, la partition root d'une carte ArkOS) obtient tout de même un
+    volume "RAW" avec son propre chemin GUID -- verrouiller/démonter un
+    volume RAW non monté est sans risque (`FSCTL_LOCK_VOLUME` réussit
+    trivialement dessus)."""
+    match = re.search(r"PhysicalDrive(\d+)", device_path)
+    if not match:
+        raise ValueError(f"chemin de périphérique Windows invalide : {device_path}")
+    disk_number = match.group(1)
+    command = (
+        f"Get-Partition -DiskNumber {disk_number} | "
+        "ForEach-Object { $_.AccessPaths } | "
+        "Where-Object { $_ -like '\\\\?\\Volume*' }"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
 @contextlib.contextmanager
@@ -42,7 +94,12 @@ def prepared_write_target(device: Device) -> Iterator[str]:
     if system == "Windows":
         from . import winlock
 
-        handles = winlock.lock_and_dismount_volumes(device.mountpoints)
+        # Toutes les partitions montables du disque, lettre de lecteur ou
+        # non -- pas seulement `device.mountpoints` (voir le docstring de
+        # `_windows_all_volume_paths` : le bug corrigé qui motive cet appel
+        # au lieu du précédent `device.mountpoints`).
+        volume_paths = _windows_all_volume_paths(device.path)
+        handles = winlock.lock_and_dismount_volumes(volume_paths)
         try:
             yield device.path
         finally:

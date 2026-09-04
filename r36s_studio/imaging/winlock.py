@@ -39,7 +39,13 @@ def _last_error():
 
 
 def _drive_letter_to_volume_path(mountpoint: str) -> str:
-    """"D:\\" -> "\\\\.\\D:" """
+    """"D:\\" -> "\\\\.\\D:" -- un chemin déjà dans l'espace de noms
+    périphérique (`\\\\?\\Volume{GUID}\\`, une partition sans lettre de
+    lecteur identifiée par son chemin GUID, §4.4/§4.3) est retourné tel
+    quel, seulement débarrassé de son `\\` final : le préfixer à nouveau
+    par `\\\\.\\` produirait un chemin invalide."""
+    if mountpoint.startswith("\\\\?\\") or mountpoint.startswith("\\\\.\\"):
+        return mountpoint.rstrip("\\")
     letter = mountpoint.rstrip("\\")
     return f"\\\\.\\{letter}"
 
@@ -72,7 +78,15 @@ def _device_io_control(handle, code: int) -> None:
 
 def lock_and_dismount_volumes(mountpoints: List[str]) -> List[object]:
     """Verrouille (`FSCTL_LOCK_VOLUME`) puis démonte (`FSCTL_DISMOUNT_VOLUME`)
-    chaque volume monté du disque cible. Retourne les handles ouverts, à
+    chaque volume monté du disque cible. `mountpoints` : une lettre de
+    lecteur (`"D:\\"`) ou un chemin déjà dans l'espace de noms périphérique
+    (`\\\\?\\Volume{GUID}\\`, pour une partition sans lettre -- l'appelant
+    doit énumérer *tous* les volumes du disque, lettrés ou non, voir
+    `write_target.py` : ne verrouiller que les volumes lettrés laisse un
+    volume comme BOOT (FAT, souvent sans lettre sur une carte ArkOS)
+    monté pendant l'écriture brute du disque entier, ce que Windows finit
+    par détecter en invalidant le handle `\\\\.\\PhysicalDriveN` en cours
+    d'écriture pour protéger ce volume). Retourne les handles ouverts, à
     refermer avec `unlock_volumes` une fois l'écriture terminée. Si un
     volume échoue, referme d'abord ceux déjà verrouillés avant de
     propager l'erreur."""

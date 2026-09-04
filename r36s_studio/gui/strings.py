@@ -398,6 +398,17 @@ STRINGS = {
     "error_output_exists": "Un fichier du même nom existe déjà à cet emplacement. Choisis un autre nom ou un autre dossier.",
     "error_image_not_found": "Le fichier image choisi est introuvable. Il a peut-être été déplacé ou supprimé.",
     "error_io_error": "Une erreur de lecture ou d'écriture est survenue. Vérifie que la carte est toujours branchée.",
+    # Bug corrigé, confirmé sur du vrai matériel : sans ce code dédié,
+    # FSCTL_LOCK_VOLUME refusé par un autre programme (Explorateur,
+    # indexeur, antivirus) retombait sur error_io_error ci-dessus -- « vérifie
+    # que la carte est branchée » est faux dans ce cas précis (la carte est
+    # bien branchée, le worker bien élevé) et n'aide pas à résoudre le
+    # problème réel.
+    "error_volume_in_use": (
+        "La carte semble utilisée par un autre programme (l'Explorateur de "
+        "fichiers, l'indexation de recherche, un antivirus…). Ferme les "
+        "fenêtres qui l'affichent puis réessaie."
+    ),
     "error_unsupported_os": "Cette opération n'est pas prise en charge sur ce système.",
     "error_confirmation_refused": "Écriture annulée : la confirmation n'a pas été reçue.",
     # INVALID_ARGS : mauvaise combinaison d'options en ligne de commande
@@ -449,6 +460,7 @@ _ERROR_MESSAGE_KEYS = {
     "OUTPUT_EXISTS": "error_output_exists",
     "IMAGE_NOT_FOUND": "error_image_not_found",
     "IO_ERROR": "error_io_error",
+    "VOLUME_IN_USE": "error_volume_in_use",
     "UNSUPPORTED_OS": "error_unsupported_os",
     "CONFIRMATION_REFUSED": "error_confirmation_refused",
     "INVALID_ARGS": "error_invalid_args",

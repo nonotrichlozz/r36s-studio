@@ -77,6 +77,7 @@ from r36s_studio.imaging import (
     estimate_total_bytes,
     flash_device,
 )
+from r36s_studio.imaging.winlock import VolumeInUseError
 from r36s_studio.partitions import (
     BOOT_LABEL,
     EASYROMS_LABEL,
@@ -416,6 +417,17 @@ def cmd_flash(args: argparse.Namespace) -> int:
             return 1
         except UnsupportedImageFormatError as exc:
             emit_error("UNSUPPORTED_IMAGE_FORMAT", str(exc))
+            return 1
+        except VolumeInUseError as exc:
+            # Bug corrigé, confirmé sur du vrai matériel : FSCTL_LOCK_VOLUME
+            # refusé (ERROR_ACCESS_DENIED) même sur un worker déjà élevé --
+            # un autre processus (Explorateur, indexeur, antivirus) tient
+            # encore un descripteur sur le volume, jamais un problème de
+            # privilèges ni une carte débranchée (§4.3). Code dédié pour ne
+            # pas retomber sur le message générique IO_ERROR, faux dans ce
+            # cas précis (`winlock._lock_volume` a déjà réessayé plusieurs
+            # fois avant d'abandonner).
+            emit_error("VOLUME_IN_USE", str(exc))
             return 1
         except (OSError, subprocess.CalledProcessError, ValueError) as exc:
             emit_error("IO_ERROR", str(exc))

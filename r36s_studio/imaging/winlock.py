@@ -11,7 +11,8 @@ mockant `_kernel32`)."""
 from __future__ import annotations
 
 import ctypes
-from typing import List
+import time
+from typing import List, Optional
 
 FSCTL_LOCK_VOLUME = 0x00090018
 FSCTL_DISMOUNT_VOLUME = 0x00090020
@@ -24,6 +25,41 @@ FILE_SHARE_READ = 0x00000001
 FILE_SHARE_WRITE = 0x00000002
 OPEN_EXISTING = 3
 INVALID_HANDLE_VALUE = 0xFFFFFFFF  # comparé en tant qu'entier non signé 64 bits
+
+ERROR_ACCESS_DENIED = 5
+
+# Bug corrigé, confirmé sur du vrai matériel : `FSCTL_LOCK_VOLUME` échoue
+# régulièrement avec `ERROR_ACCESS_DENIED` (5) même sur un worker déjà
+# élevé -- ce n'est donc jamais un problème de privilèges (une élévation
+# refusée/absente échouerait autrement, avant même d'atteindre ce point),
+# mais un AUTRE processus (Explorateur qui prévisualise le volume,
+# l'indexeur de recherche, un antivirus) qui tient encore un descripteur
+# ouvert dessus au moment précis où le worker tente de le verrouiller.
+# Ce genre de descripteur transitoire se libère très souvent en une ou
+# deux secondes -- quelques tentatives espacées d'un court délai avant
+# d'abandonner, plutôt qu'un échec immédiat sur la toute première.
+LOCK_VOLUME_RETRY_COUNT = 5
+LOCK_VOLUME_RETRY_DELAY_SECONDS = 0.5
+
+
+class DeviceIoControlError(OSError):
+    """Levée par `_device_io_control` -- porte le code Win32 réel
+    (`GetLastError`) dans `win32_error`, pour que l'appelant puisse
+    distinguer un refus d'accès (`ERROR_ACCESS_DENIED`, 5) d'une autre
+    défaillance sans avoir à reparser le message."""
+
+    def __init__(self, message: str, win32_error: Optional[int]):
+        super().__init__(message)
+        self.win32_error = win32_error
+
+
+class VolumeInUseError(OSError):
+    """`FSCTL_LOCK_VOLUME` a échoué avec `ERROR_ACCESS_DENIED` sur toutes
+    les tentatives (`LOCK_VOLUME_RETRY_COUNT`, voir plus haut) -- distincte
+    d'une `OSError` générique pour que `write_target.py`/le protocole
+    puissent émettre un message dédié (« un programme utilise encore la
+    carte ») plutôt que le message générique d'erreur d'E/S, faux dans ce
+    cas précis (le worker est bien élevé, la carte est bien branchée)."""
 
 
 def _kernel32():
@@ -73,7 +109,29 @@ def _device_io_control(handle, code: int) -> None:
         handle, code, None, 0, None, 0, ctypes.byref(bytes_returned), None
     )
     if not ok:
-        raise OSError(f"DeviceIoControl a échoué (code {code:#x}, erreur {_last_error()})")
+        error = _last_error()
+        raise DeviceIoControlError(f"DeviceIoControl a échoué (code {code:#x}, erreur {error})", error)
+
+
+def _lock_volume(handle) -> None:
+    """`FSCTL_LOCK_VOLUME` avec quelques tentatives en cas d'`ERROR_ACCESS_
+    DENIED` (voir `LOCK_VOLUME_RETRY_COUNT` ci-dessus) -- toute autre
+    erreur est propagée immédiatement, sans intérêt à réessayer."""
+    last_exc: Optional[DeviceIoControlError] = None
+    for attempt in range(LOCK_VOLUME_RETRY_COUNT):
+        try:
+            _device_io_control(handle, FSCTL_LOCK_VOLUME)
+            return
+        except DeviceIoControlError as exc:
+            if exc.win32_error != ERROR_ACCESS_DENIED:
+                raise
+            last_exc = exc
+            if attempt < LOCK_VOLUME_RETRY_COUNT - 1:
+                time.sleep(LOCK_VOLUME_RETRY_DELAY_SECONDS)
+    raise VolumeInUseError(
+        "impossible de verrouiller le volume -- probablement utilisé par un autre "
+        f"programme (Explorateur, indexeur, antivirus) : {last_exc}"
+    ) from last_exc
 
 
 def lock_and_dismount_volumes(mountpoints: List[str]) -> List[object]:
@@ -95,7 +153,7 @@ def lock_and_dismount_volumes(mountpoints: List[str]) -> List[object]:
         for mountpoint in mountpoints:
             volume_path = _drive_letter_to_volume_path(mountpoint)
             handle = _open_volume_handle(volume_path)
-            _device_io_control(handle, FSCTL_LOCK_VOLUME)
+            _lock_volume(handle)
             _device_io_control(handle, FSCTL_DISMOUNT_VOLUME)
             handles.append(handle)
     except Exception:

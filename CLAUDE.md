@@ -528,6 +528,63 @@ flush + fsync
 > mécanisme. Le prochain test sur la carte ArkOS dira si l'échec survient
 > toujours au même octet/délai caractéristique (cohérent avec un
 > mécanisme déterministe côté pilote) ou de façon variable.
+>
+> ⚠️ **Piste supplémentaire, non vérifiée mais à rapprocher de ce qui
+> suit** : un bug distinct confirmé juste après (`FSCTL_LOCK_VOLUME`
+> refusé par un autre processus, ci-dessous) établit qu'Explorateur/
+> indexeur/antivirus interfèrent réellement avec ce même verrouillage sur
+> du vrai matériel Windows. Rien ne prouve encore un lien avec le `[Errno
+> 9]` ci-dessus, mais la même famille de cause (un processus tiers qui
+> rouvre un descriptor sur le volume ou le disque physique juste après le
+> démontage) reste plausible et n'a pas été exclue -- à garder en tête si
+> une future session revient sur cette investigation.
+
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : `FSCTL_LOCK_VOLUME`
+> refusé (`DeviceIoControl a échoué (code 0x90018, erreur 5)`,
+> `ERROR_ACCESS_DENIED`) alors que le worker est bien élevé.** Le worker
+> élevé ne manque donc jamais de privilèges pour ce refus précis -- une
+> élévation refusée ou absente échouerait plus tôt, avant même d'atteindre
+> ce point. Cause : un AUTRE processus (l'Explorateur qui prévisualise le
+> volume, l'indexeur de recherche Windows, un antivirus) tient encore un
+> descripteur ouvert sur ce volume au moment précis où le worker tente de
+> le verrouiller -- un état transitoire qui se libère très souvent en une
+> ou deux secondes. Le code refusait déjà correctement d'écrire sans ce
+> verrouillage (§4.3 : sans lui, Windows refuse l'écriture ou corrompt la
+> carte) -- le vrai défaut était le message affiché, `error_io_error`
+> (« Vérifie que la carte est toujours branchée »), faux et inutile dans
+> ce cas précis : la carte est bien branchée, le worker bien élevé, rien à
+> vérifier de ce côté.
+>
+> **Corrigé en deux temps**, tous les deux dans `imaging/winlock.py` :
+> 1. **Nouvelles tentatives avant d'abandonner.** `_lock_volume` (remplace
+>    l'appel direct à `_device_io_control(handle, FSCTL_LOCK_VOLUME)` dans
+>    `lock_and_dismount_volumes`) réessaie jusqu'à `LOCK_VOLUME_RETRY_
+>    COUNT` fois (5), espacées de `LOCK_VOLUME_RETRY_DELAY_SECONDS` (0,5 s),
+>    mais *seulement* quand l'échec est `ERROR_ACCESS_DENIED` -- toute
+>    autre erreur (volume déjà absent, périphérique disparu...) est
+>    propagée immédiatement, réessayer n'y changerait rien.
+>    `_device_io_control` porte désormais le code Win32 réel sur
+>    l'exception qu'elle lève (`DeviceIoControlError.win32_error`, nouvelle
+>    classe -- sous-classe d'`OSError`, donc rien ne casse côté appelants
+>    existants qui attrapent `OSError` génériquement) pour que `_lock_
+>    volume` puisse distinguer les deux cas sans reparser le message.
+> 2. **Message dédié si les tentatives s'épuisent.** `VolumeInUseError`
+>    (nouvelle exception, `imaging/winlock.py`) -- `cmd_flash`
+>    (`__main__.py`) l'intercepte *avant* le repli générique `except
+>    (OSError, ...)` (dont elle hérite, mais l'ordre des `except` fait
+>    gagner la branche spécifique) et émet un nouveau code dédié,
+>    `VOLUME_IN_USE`, plutôt que `IO_ERROR`. Message convivial
+>    (`gui/strings.py::error_volume_in_use`) : invite explicitement à
+>    fermer les fenêtres de l'Explorateur qui affichent la carte, plutôt
+>    que de suggérer (à tort) un débranchement.
+>
+> Portée volontairement limitée à `FSCTL_LOCK_VOLUME` (l'écriture, §4.3) --
+> `eject_media`/`refresh_disk_properties` (`partitions/eject.py`, même
+> module) ne bénéficient pas encore de ces nouvelles tentatives ; même
+> mécanisme d'interférence plausible pour l'éjection, mais non rapporté et
+> non traité ici, par cohérence avec le principe déjà appliqué ailleurs
+> dans ce fichier (ne corriger que ce qui a été signalé, noter le reste
+> comme piste future).
 
 **Sauvegarde intelligente :** ne pas copier 128 Go quand la dernière partition s'arrête
 à 8 Go. Lire la table de partitions (MBR ou GPT), calculer la fin du dernier secteur

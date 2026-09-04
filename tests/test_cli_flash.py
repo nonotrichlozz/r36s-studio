@@ -11,6 +11,7 @@ from r36s_studio import __main__ as cli
 from r36s_studio.devices import Device
 from r36s_studio.imaging.flash import FlashResult
 from r36s_studio.imaging.image_source import SevenZipArchiveError, UnsupportedImageFormatError
+from r36s_studio.imaging.winlock import VolumeInUseError
 
 
 def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000) -> Device:
@@ -179,3 +180,30 @@ def test_cmd_flash_unsupported_format_emits_dedicated_code(mock_list, mock_confi
     assert code == 1
     out = capsys.readouterr().out
     assert '"code": "UNSUPPORTED_IMAGE_FORMAT"' in out
+
+
+@patch(
+    "r36s_studio.__main__.flash_device",
+    side_effect=VolumeInUseError("impossible de verrouiller le volume -- probablement utilisé par un autre programme"),
+)
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_volume_in_use_emits_dedicated_code_not_io_error(mock_list, mock_confirm, mock_flash, tmp_path, capsys):
+    """Bug corrigé, confirmé sur du vrai matériel : `FSCTL_LOCK_VOLUME`
+    refusé (ERROR_ACCESS_DENIED) par un autre programme (Explorateur,
+    indexeur, antivirus) tombait auparavant dans le repli générique
+    IO_ERROR (`except (OSError, ...)`, VolumeInUseError étant une sous-
+    classe d'OSError) -- doit être intercepté avant, avec son propre code,
+    puisque le message générique ("vérifie que la carte est branchée")
+    est faux dans ce cas précis."""
+    mock_list.return_value = [_make_device()]
+    image = tmp_path / "ArkOS.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    code = args.func(args)
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert '"code": "VOLUME_IN_USE"' in out
+    assert '"code": "IO_ERROR"' not in out

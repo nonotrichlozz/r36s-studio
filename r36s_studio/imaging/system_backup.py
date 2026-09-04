@@ -75,7 +75,7 @@ from r36s_studio.partitions.locate import PartitionInfo, list_partitions
 
 from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
 from .gpt import GptHeader, GptPartitionEntry, build_gpt_entries, build_gpt_header, parse_gpt_entries, parse_gpt_header
-from .mbr import PARTITION_TABLE_OFFSET, SECTOR_SIZE, is_gpt_protective, parse_mbr
+from .mbr import GPT_PROTECTIVE_TYPE, PARTITION_ENTRY_SIZE, PARTITION_TABLE_OFFSET, SECTOR_SIZE, is_gpt_protective, parse_mbr
 from .source import prepared_source
 
 # Étiquettes reconnues pour la partition de jeux (§4.4) -- EASYROMS sur
@@ -294,6 +294,48 @@ def _rewrite_gpt_tables_after_truncation(destination, boundary: SystemBoundary) 
     destination.seek(end_of_file)
 
 
+def _repair_protective_mbr_after_truncation(source, destination, boundary: SystemBoundary) -> None:
+    """Bug corrigé, confirmé sur du vrai matériel : le même symptôme
+    (image inbootable) apparaissait sur macOS *et* Windows, quelle que
+    soit la carte cible -- pas un défaut du chemin Windows, mais un trou
+    dans cette réparation elle-même. `_rewrite_gpt_tables_after_
+    truncation` corrige bien l'en-tête GPT (primaire et secondaire) et ses
+    tableaux d'entrées, mais ne touche jamais LBA0 : le MBR protecteur qui
+    y vit continue de décrire la taille du disque *d'origine* (ex. 128 Go)
+    alors que le fichier produit n'en fait plus que quelques-uns -- une
+    incohérence que des outils comme `gdisk` détectent et signalent
+    (§4.3 : « Disk size is smaller than the main header indicates »),
+    même une fois l'en-tête GPT lui-même parfaitement cohérent. Cette
+    incohérence existe dans le *fichier image* produit, indépendamment de
+    toute carte cible -- rien à voir avec la taille de la carte sur
+    laquelle l'image est ensuite restaurée.
+
+    Reconstruit LBA0 à partir de `source` (lisible) plutôt que
+    `destination` (ouvert en écriture seule), même principe que
+    `_repair_mbr_table_after_truncation` pour le cas MBR pur : le créneau
+    portant le type `0xEE` (MBR protecteur GPT, retrouvé via `parse_mbr`
+    plutôt que supposé au créneau 0, bien qu'il n'y ait jamais été observé
+    ailleurs) voit son compte de secteurs recalculé à partir de la taille
+    réelle du fichier produit (fin de la copie tronquée + table
+    secondaire, même formule que `estimate_system_backup_size`)."""
+    header = boundary.gpt_header
+    new_total_sectors = (boundary.end_bytes + _gpt_secondary_table_size(header)) // SECTOR_SIZE
+    new_sector_count = min(new_total_sectors - 1, 0xFFFFFFFF)
+
+    source.seek(0)
+    first_sector = bytearray(source.read(SECTOR_SIZE))
+    mbr_partitions = parse_mbr(bytes(first_sector))
+    protective = next((p for p in mbr_partitions if p.partition_type == GPT_PROTECTIVE_TYPE), None)
+    if protective is not None:
+        offset = PARTITION_TABLE_OFFSET + protective.index * PARTITION_ENTRY_SIZE + 12
+        first_sector[offset : offset + 4] = new_sector_count.to_bytes(4, "little")
+
+    end_of_file = destination.tell()
+    destination.seek(0)
+    destination.write(bytes(first_sector))
+    destination.seek(end_of_file)
+
+
 def _repair_mbr_table_after_truncation(source, destination, boundary: SystemBoundary) -> None:
     """Appelé juste après avoir tronqué la copie MBR à `boundary.
     end_bytes` -- met à zéro, dans le premier secteur de l'image produite,
@@ -358,6 +400,7 @@ def backup_system_only(
             )
             if boundary.is_gpt:
                 _rewrite_gpt_tables_after_truncation(destination, boundary)
+                _repair_protective_mbr_after_truncation(source, destination, boundary)
             else:
                 _repair_mbr_table_after_truncation(source, destination, boundary)
             destination.flush()

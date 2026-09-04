@@ -587,6 +587,61 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > puis réécrire la table) est exactement ce qu'automatise `backup_
 > system_only`.
 >
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : l'image produite
+> restait inbootable même une fois l'en-tête GPT lui-même réparé --
+> observé identiquement sur macOS et sur Windows, pas un défaut du chemin
+> Windows.** Rapporté indépendamment de toute carte cible (l'image seule,
+> testée avec `gdisk -l image.img`, sans jamais être flashée) : le symptôme
+> exact déjà documenté ci-dessus (« Disk size is smaller than the main
+> header indicates ») persistait. Vérification demandée en trois points --
+> réponses trouvées en relisant le code :
+> 1. **La réparation est-elle réellement exécutée ?** Oui --
+>    `backup_system_only` appelle bien `_rewrite_gpt_tables_after_
+>    truncation` juste après la copie tronquée, structurellement, à chaque
+>    appel GPT ; `cmd_backup` (`__main__.py`) route bien `--system-only`
+>    vers `backup_system_only`, jamais vers `backup_device`. Pas le
+>    problème.
+> 2. **Les tests portent-ils sur des tables factices plutôt que sur une
+>    image réellement produite ?** Non pour le test de cohérence GPT
+>    existant (`test_backup_system_only_gpt_output_has_a_consistent_
+>    partition_table`) -- il appelle bien `backup_system_only` bout en
+>    bout et reparse le fichier produit. Mais un vrai trou : ce test ne
+>    vérifiait *jamais* le MBR protecteur (LBA0), seulement l'en-tête GPT
+>    et ses tableaux d'entrées.
+> 3. **Le cas d'une carte cible plus petite que la source est-il traité ?**
+>    Question mal ciblée par la carte cible -- le symptôme est dans le
+>    *fichier image* lui-même, avant toute restauration : `gdisk -l` sur
+>    l'image seule échoue déjà, indépendamment d'où elle serait ensuite
+>    flashée. (La vérification taille-cible-vs-image, § pré-vol n°2 du
+>    parcours de clonage, est un problème séparé, déjà traité.)
+>
+> **Cause réelle, trouvée grâce au point 2** : `_rewrite_gpt_tables_after_
+> truncation` corrige bien l'en-tête GPT (primaire et secondaire) et ses
+> tableaux d'entrées, mais ne touche jamais LBA0 -- le MBR protecteur qui
+> y vit continuait donc de décrire la taille du disque *d'origine* (ex.
+> 128 Go pour une carte R36S typique) alors que le fichier produit n'en
+> fait plus que 8-9 Go. `gdisk` (et tout outil qui valide la cohérence
+> entre le MBR protecteur et la taille réelle du disque) signale cette
+> incohérence -- exactement le symptôme rapporté, persistant même une fois
+> l'en-tête GPT proprement réparé. Explique aussi pourquoi le symptôme est
+> identique sur les deux OS : ce code est entièrement commun (`imaging/
+> system_backup.py`), rien de spécifique à une plateforme.
+>
+> **Corrigé** : `_repair_protective_mbr_after_truncation` (nouvelle
+> fonction, appelée juste après `_rewrite_gpt_tables_after_truncation`
+> dans `backup_system_only`) recalcule le compte de secteurs du créneau
+> MBR protecteur (type `0xEE`, retrouvé via `parse_mbr` plutôt que supposé
+> au créneau 0) à partir de la taille réelle du fichier produit (fin de la
+> copie tronquée + table secondaire, même formule qu'`estimate_system_
+> backup_size`). Reconstruit LBA0 à partir de `source` (lisible) plutôt
+> que `destination` (écriture seule), même principe que `_repair_mbr_
+> table_after_truncation` pour le cas MBR pur. **Trou de test fermé** :
+> `test_backup_system_only_gpt_updates_protective_mbr_sector_count`
+> (`tests/test_imaging_system_backup.py`) vérifie ce champ précis sur la
+> même image produite bout en bout -- confirmé qu'il échoue sans le
+> correctif (533 secteurs, la taille du disque source factice, au lieu des
+> 266 attendus) avant d'être vérifié à nouveau après.
+>
 > **Identification de la partition de jeux, repli sans étiquette
 > reconnue** (`_fallback_games_partition_index`) : une carte qui ne nomme
 > ni EASYROMS ni STORAGE reste couverte — dernière partition du disque,

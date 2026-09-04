@@ -576,6 +576,39 @@ def test_backup_system_only_gpt_output_has_a_consistent_partition_table(mock_pre
     assert _verify_entry_array_crc32(secondary_header, secondary_entries_bytes)
 
 
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+@patch("r36s_studio.imaging.system_backup.prepared_source", side_effect=_no_prep)
+def test_backup_system_only_gpt_updates_protective_mbr_sector_count(mock_prep, mock_list, tmp_path):
+    """Bug corrigé, confirmé sur du vrai matériel : le même symptôme
+    (image inbootable, `gdisk` signalant « Disk size is smaller than the
+    main header indicates ») apparaissait sur macOS et Windows, quelle que
+    soit la carte cible -- l'en-tête GPT (primaire/secondaire) était bien
+    corrigé (test ci-dessus), mais le MBR protecteur (LBA0) continuait de
+    décrire la taille du disque *source* (128 Go dans le scénario réel)
+    au lieu de la taille du fichier produit (quelques Go). Cette
+    incohérence n'était couverte par aucun test -- ce test ferme
+    exactement ce trou, sur la même image produite bout en bout par
+    `backup_system_only` (pas une table synthétique construite à la
+    main)."""
+    source_path, total_sectors = _build_fake_gpt_image(tmp_path)
+    mock_list.return_value = _gpt_partition_labels(source_path)
+    device = _make_device(source_path, total_sectors * SECTOR_SIZE)
+    output_path = tmp_path / "system_backup.img"
+
+    backup_system_only(device, str(output_path))
+    output_bytes = output_path.read_bytes()
+
+    mbr_partitions = parse_mbr(output_bytes[:SECTOR_SIZE])
+    protective = next(p for p in mbr_partitions if p.partition_type == 0xEE)
+    expected_sector_count = (len(output_bytes) // SECTOR_SIZE) - 1
+    assert protective.sector_count == expected_sector_count
+    # Le défaut corrigé, constaté avant ce correctif : `sector_count`
+    # décrivait encore le disque source (bien plus grand que le fichier
+    # produit) -- jamais une valeur qui dépasse la taille réelle du
+    # fichier.
+    assert (protective.start_lba + protective.sector_count) * SECTOR_SIZE <= len(output_bytes)
+
+
 def _verify_header_crc32(disk_bytes: bytes, header_offset: int) -> bool:
     header_bytes = bytearray(disk_bytes[header_offset : header_offset + GPT_HEADER_SIZE])
     stored = int.from_bytes(header_bytes[16:20], "little")

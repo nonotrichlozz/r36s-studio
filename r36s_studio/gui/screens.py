@@ -1483,6 +1483,64 @@ class ConfirmDialog(Dialog):
         self._go_button.setEnabled(self._checkbox.isChecked())
 
 
+class SameCardUnverifiedDialog(Dialog):
+    """Étape 3 du parcours de clonage (§5), quand ni le contenu (empreinte
+    de BOOT, §4.4) ni la taille de la carte détectée ne peuvent prouver
+    qu'il s'agit d'une carte différente de la carte source -- confirmé sur
+    du vrai matériel : le chemin de périphérique (`\\\\.\\PhysicalDriveN`)
+    ne peut pas non plus servir de repli sur Windows, certains lecteurs de
+    carte SD gardant le même chemin quelle que soit la carte insérée.
+    Garde-fou le plus critique du parcours (écrire par erreur sur la carte
+    source détruirait la seule copie fonctionnelle de la console) : jamais
+    un passage silencieux dans ce cas -- une confirmation explicite est
+    exigée, récapitulatif du modèle et de la taille détectés à l'appui,
+    même esprit que `ConfirmDialog` (case à cocher obligatoire, §2
+    règle 6)."""
+
+    confirmed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("same_card_unverified_title"))
+        self.setProperty("role", "danger")  # WA_StyledBackground déjà posé par Dialog
+
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("same_card_unverified_title"))
+        title.setProperty("role", "dangerTitle")
+        layout.addWidget(title)
+
+        self._message = QLabel()
+        self._message.setWordWrap(True)
+        self._message.setProperty("role", "dangerMessage")
+        layout.addWidget(self._message)
+
+        self._checkbox = QCheckBox(tr("same_card_unverified_checkbox"))
+        self._checkbox.stateChanged.connect(self._update_go_enabled)
+        layout.addWidget(self._checkbox)
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        cancel_button = QPushButton(tr("confirm_cancel"))
+        cancel_button.clicked.connect(self.close)
+        self._go_button = QPushButton(tr("same_card_unverified_confirm"))
+        self._go_button.setEnabled(False)
+        self._go_button.clicked.connect(self.confirmed.emit)
+        buttons.addWidget(cancel_button)
+        buttons.addStretch()
+        buttons.addWidget(self._go_button)
+        layout.addLayout(buttons)
+
+        self.resize(460, 320)
+
+    def set_device(self, device: Device) -> None:
+        size_go = device.size_bytes / 1_000_000_000 if device.size_bytes else 0.0
+        self._message.setText(tr("same_card_unverified_message", display=device.display, size_go=size_go))
+        self._checkbox.setChecked(False)
+
+    def _update_go_enabled(self) -> None:
+        self._go_button.setEnabled(self._checkbox.isChecked())
+
+
 class BackupKindDialog(Dialog):
     """Étape 2 du parcours de clonage (§5 mode assisté) : demande quoi
     sauvegarder avant de créer l'image sur l'ordinateur -- copie complète

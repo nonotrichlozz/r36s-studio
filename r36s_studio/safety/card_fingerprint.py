@@ -95,37 +95,31 @@ def is_same_card(fingerprint_a: Optional[str], fingerprint_b: Optional[str]) -> 
     return fingerprint_a is not None and fingerprint_a == fingerprint_b
 
 
-def is_same_card_or_unverifiable(
-    source_fingerprint: Optional[str],
-    target_fingerprint: Optional[str],
-    source_path: str,
-    target_path: str,
+def size_proves_different_card(
+    source_size_bytes: Optional[int], target_size_bytes: Optional[int]
 ) -> bool:
-    """Bug corrigé, confirmé sur du vrai matériel : quand la carte
-    *source* n'a pas d'empreinte (vierge, ou firmware dont le BOOT n'est
-    pas reconnu -- réaliste depuis que le parcours de clonage clone
-    n'importe quel firmware, §5), `is_same_card` ne peut plus rien
-    affirmer et retourne toujours `False`, quelle que soit la carte
-    réellement branchée à l'étape 3 -- le garde-fou est alors
-    silencieusement désactivé pour tout le reste du parcours, avec le
-    risque d'écrire l'image de sauvegarde par-dessus la carte source
-    elle-même si l'utilisateur ne l'a pas physiquement retirée.
+    """Vrai seulement si les deux tailles sont connues et diffèrent -- une
+    carte ne change jamais de capacité, une différence est donc une preuve
+    positive qu'il s'agit d'une carte différente. L'inverse n'est jamais
+    vrai : deux tailles identiques (cas courant en préparant plusieurs
+    consoles avec des cartes du même modèle) ne prouvent rien -- ni que
+    c'est la même carte, ni le contraire. `None` (taille inconnue) ne
+    prouve jamais rien non plus.
 
-    Repli sur `source_path`/`target_path` dans ce cas précis : un chemin
-    identique ne *prouve* jamais qu'il s'agit de la même carte physique
-    (certains lecteurs Windows gardent le même chemin de disque physique
-    quelle que soit la carte insérée dans le même emplacement, §4.4) -- mais
-    l'inverse n'est pas prouvable non plus dans ce cas, et le contenu ne
-    permet déjà pas de trancher. Échoue donc du côté prudent (bloque)
-    plutôt que de laisser passer silencieusement une carte qui pourrait
-    être la source (§2 règle 1) : un chemin différent, lui, reste autorisé
-    à passer (aucune preuve positive de similarité). Pas d'échappatoire
-    dans ce module -- un lecteur à emplacement unique bloquera donc tant
-    que la carte source garde une empreinte indisponible, décision
-    délibérée (prudence par défaut plutôt qu'une confirmation manuelle
-    pour l'instant)."""
-    if is_same_card(source_fingerprint, target_fingerprint):
-        return True
-    if source_fingerprint is None and source_path == target_path:
-        return True
-    return False
+    ⚠️ Correction de conception, confirmée sur du vrai matériel :
+    remplace `is_same_card_or_unverifiable` (repli sur le chemin de
+    périphérique), qui s'est révélé non fonctionnel en pratique -- certains
+    lecteurs de carte SD Windows gardent le même chemin
+    (`\\\\.\\PhysicalDriveN`) quelle que soit la carte insérée dans le même
+    emplacement, donc *jamais différent* même après un vrai changement de
+    carte. Un repli sur un signal qui ne varie jamais bloquerait le
+    parcours indéfiniment sur ce type de lecteur, sans issue -- pire que le
+    problème d'origine. Voir `gui/screens.py::SameCardUnverifiedDialog` :
+    quand ni le contenu (`is_same_card`) ni la taille ne peuvent trancher,
+    le parcours exige désormais une confirmation explicite de
+    l'utilisateur plutôt qu'un signal automatique supplémentaire."""
+    return (
+        source_size_bytes is not None
+        and target_size_bytes is not None
+        and source_size_bytes != target_size_bytes
+    )

@@ -37,7 +37,7 @@ from r36s_studio.imaging import (
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, set_privileged_mount_hook
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
-from r36s_studio.safety.card_fingerprint import is_same_card, is_same_card_or_unverifiable
+from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
 
 from . import elevate
 from .partition_runner import (
@@ -61,6 +61,7 @@ from .screens import (
     LogPanel,
     MainView,
     RocknixVariantDialog,
+    SameCardUnverifiedDialog,
     WizardStepPanel,
     _OPERATION_TITLE_KEYS,
     _format_size,
@@ -201,6 +202,10 @@ class MainWindow(QMainWindow):
         # libre (`_check_free_space_or_warn`) avant de lancer la copie.
         self._wizard_estimated_backup_bytes: Optional[int] = None
         self._wizard_last_poll_diagnostic: Optional[tuple] = None
+        # Carte détectée à l'étape 3 en attente de confirmation explicite
+        # (`SameCardUnverifiedDialog`) -- ni son empreinte ni sa taille ne
+        # prouvent qu'elle diffère de la carte source (§ pré-vol n°3).
+        self._pending_target_candidate: Optional[Device] = None
 
         # Vue permanente, deux colonnes -- ne change plus jamais de
         # structure (§5, refonte navigation). `_home` (gauche, mode
@@ -242,6 +247,7 @@ class MainWindow(QMainWindow):
         self._help_dialog = HelpDialog(self)
         self._rocknix_variant_dialog = RocknixVariantDialog(self)
         self._backup_kind_dialog = BackupKindDialog(self)
+        self._same_card_unverified_dialog = SameCardUnverifiedDialog(self)
 
         self._wire_signals()
         self._refresh_home_state()
@@ -298,6 +304,7 @@ class MainWindow(QMainWindow):
         self._backup_kind_dialog.cancelled.connect(self._cancel_wizard)
 
         self._confirm_dialog.confirmed.connect(self._on_confirmed)
+        self._same_card_unverified_dialog.confirmed.connect(self._on_same_card_unverified_confirmed)
 
         self._log_panel.cancel_requested.connect(self._on_cancel_requested)
         self._log_panel.eject_requested.connect(self._on_eject_requested)
@@ -1187,6 +1194,8 @@ class MainWindow(QMainWindow):
         self._wizard_backup_kind = None
         self._wizard_estimated_backup_bytes = None
         self._wizard_last_poll_diagnostic = None
+        self._pending_target_candidate = None
+        self._same_card_unverified_dialog.close()
         self._log_panel.set_idle()
         self._main_view.show_wizard_panel()
         self._root_stack.setCurrentWidget(self._main_view)
@@ -1206,6 +1215,8 @@ class MainWindow(QMainWindow):
         if self._prepare_card_poll_timer.isActive():
             self._prepare_card_poll_timer.stop()
         self._prepare_card_candidate = None
+        self._pending_target_candidate = None
+        self._same_card_unverified_dialog.close()
         if self._runner is not None:
             self._runner.cancel()
         self._wizard_active = False
@@ -1443,32 +1454,54 @@ class MainWindow(QMainWindow):
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
             self._wizard_panel.set_can_continue(True)
         elif job == WizardJob.DETECT_TARGET:
+            if is_same_card(self._wizard_source_fingerprint, fingerprint):
+                self._wizard_panel.set_status(tr("wizard_status_same_card"))
+                self._wizard_panel.set_can_continue(False)
+                self._wizard_poll_timer.start()  # continue d'attendre une vraie carte différente
+                return
             # Bug corrigé, confirmé sur du vrai matériel : `is_same_card`
             # seule ne peut plus rien affirmer quand la source n'a pas
             # d'empreinte (carte vierge ou firmware non reconnu, § pré-vol
-            # n°3) -- `is_same_card_or_unverifiable` (safety/card_
-            # fingerprint.py) ajoute un repli sur le chemin du périphérique
-            # dans ce cas précis, prudent par défaut plutôt que de laisser
-            # passer silencieusement une carte qui pourrait être la
-            # source. Message distinct (`..._unverified`) quand c'est ce
-            # repli qui bloque plutôt qu'une empreinte réellement
-            # identique -- honnête : l'appli ne peut ici que se montrer
-            # prudente, pas certaine qu'il s'agit de la même carte.
+            # n°3) -- et sur Windows, certains lecteurs de carte gardent le
+            # même chemin de périphérique quelle que soit la carte insérée
+            # (un repli tenté sur le chemin bloquait donc indéfiniment,
+            # sans issue, sur ce type de lecteur -- retiré). Une différence
+            # de taille reste une preuve positive de carte différente
+            # (une carte ne change jamais de capacité) ; une taille
+            # identique, elle, ne prouve jamais rien (cas courant en
+            # préparant plusieurs consoles avec des cartes du même
+            # modèle) -- garde-fou le plus critique du parcours (écrire
+            # par erreur sur la carte source détruirait la seule copie
+            # fonctionnelle de la console), donc une confirmation
+            # explicite plutôt qu'un signal automatique supplémentaire.
             source_device = self._wizard_source_device
-            blocked = source_device is not None and is_same_card_or_unverifiable(
-                self._wizard_source_fingerprint, fingerprint, source_device.path, candidate.path
-            )
-            if blocked:
-                confirmed_same = is_same_card(self._wizard_source_fingerprint, fingerprint)
-                status_key = "wizard_status_same_card" if confirmed_same else "wizard_status_same_card_unverified"
-                self._wizard_panel.set_status(tr(status_key))
-                self._wizard_panel.set_can_continue(False)
-                self._wizard_poll_timer.start()  # continue d'attendre une vraie carte différente
+            source_size = source_device.size_bytes if source_device is not None else None
+            if fingerprint is None and not size_proves_different_card(source_size, candidate.size_bytes):
+                self._wizard_poll_timer.stop()
+                self._pending_target_candidate = candidate
+                self._wizard_panel.set_status(tr("wizard_status_confirmation_needed"))
+                self._same_card_unverified_dialog.set_device(candidate)
+                self._same_card_unverified_dialog.open()
                 return
             self._wizard_poll_timer.stop()
             self._wizard_target_device = candidate
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
             self._wizard_panel.set_can_continue(True)
+
+    def _on_same_card_unverified_confirmed(self) -> None:
+        """L'utilisateur a explicitement certifié que la carte détectée à
+        l'étape 3 est bien différente de la carte source (`SameCard
+        UnverifiedDialog`, § pré-vol n°3) -- accepte alors la carte comme
+        `_on_wizard_fingerprint_ready` l'aurait fait directement si un
+        signal automatique (empreinte ou taille) avait pu trancher."""
+        self._same_card_unverified_dialog.close()
+        candidate = self._pending_target_candidate
+        self._pending_target_candidate = None
+        if candidate is None:
+            return
+        self._wizard_target_device = candidate
+        self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
+        self._wizard_panel.set_can_continue(True)
 
     # --- étape 4 : restauration de l'image sur la carte neuve ---------------
 

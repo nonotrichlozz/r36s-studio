@@ -2301,27 +2301,46 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 >    dans ce cas précis -- risque réel d'écrire l'image par-dessus la
 >    carte source elle-même si l'utilisateur ne l'a pas changée.
 >
->    **Corrigé** : `safety/card_fingerprint.py::is_same_card_or_
->    unverifiable` (nouvelle fonction, `is_same_card` elle-même reste
->    inchangée) ajoute un repli sur `device.path` uniquement quand
->    l'empreinte source est indisponible -- un chemin identique dans ce
->    cas précis ne *prouve* jamais qu'il s'agit de la même carte, mais
->    l'inverse n'est pas prouvable non plus : prudence par défaut, bloque
->    plutôt que de laisser passer silencieusement (§2 règle 1). Décision
->    délibérée, sans échappatoire pour l'instant : un lecteur à
->    emplacement unique reste bloqué tant que la source garde une
->    empreinte indisponible, même si l'utilisateur a réellement changé de
->    carte -- pas de confirmation manuelle de contournement ajoutée à ce
->    stade (prudence choisie plutôt qu'une fenêtre de confirmation
->    supplémentaire, en l'absence de données sur la fréquence réelle de ce
->    scénario). `gui/main_window.py::_on_wizard_fingerprint_ready`
->    distingue le message affiché selon le cas : `wizard_status_same_card`
->    (empreintes réellement identiques, certain) contre
->    `wizard_status_same_card_unverified` (repli sur le chemin, honnête
->    sur le fait que l'appli ne peut ici que se montrer prudente, pas
->    certaine) -- pour qu'un utilisateur qui a bien changé de carte sur un
->    lecteur à emplacement unique comprenne que l'appli est prudente
->    plutôt que buguée.
+>    **Premier correctif tenté (`is_same_card_or_unverifiable`, repli sur
+>    `device.path`), non fonctionnel en pratique -- retiré.** Confirmé sur
+>    du vrai matériel après coup : le lecteur de carte SD Realtek intégré
+>    utilisé pour tester ce parcours (déjà rencontré ailleurs dans ce
+>    projet, §4.1/§4.4) garde le *même* `\\.\PhysicalDrive1` quelle que
+>    soit la carte insérée -- la sauvegarde (carte source 128 Go) et le
+>    flash (carte cible 32 Go) apparaissaient donc sous le même chemin
+>    dans les traces d'élévation, alors qu'il s'agit bien de deux cartes
+>    physiques différentes. Un repli qui bloque sur un chemin identique
+>    bloquait donc *indéfiniment* sur ce type de lecteur, sans aucune
+>    issue -- pire que le problème d'origine (un garde-fou inutilisable
+>    plutôt qu'un garde-fou dégradé). Restait aussi le trou signalé
+>    séparément : deux cartes de même capacité (cas courant en préparant
+>    plusieurs consoles) ont le même `size_bytes`, un signal tout aussi
+>    inutilisable seul.
+>
+>    **Corrigé pour de bon** : `safety/card_fingerprint.py::
+>    size_proves_different_card` (remplace `is_same_card_or_unverifiable`,
+>    `is_same_card` elle-même toujours inchangée) n'affirme une carte
+>    différente que si les deux tailles sont connues et *diffèrent* -- une
+>    carte ne change jamais de capacité, c'est une preuve positive fiable
+>    contrairement au chemin. Une taille identique, comme une empreinte
+>    manquante, ne prouve jamais rien dans un sens ou dans l'autre. Quand
+>    ni le contenu ni la taille ne peuvent trancher,
+>    `gui/screens.py::SameCardUnverifiedDialog` (nouvelle fenêtre modale,
+>    même famille que `ConfirmDialog` -- case à cocher obligatoire, fond
+>    "danger") exige une confirmation *explicite* de l'utilisateur plutôt
+>    qu'un signal automatique supplémentaire ou un blocage sans issue :
+>    récapitule le modèle et la taille détectés, jamais pré-cochée.
+>    `gui/main_window.py::_on_wizard_fingerprint_ready` l'ouvre (et arrête
+>    le sondage automatique, comme pour plusieurs candidats détectés) dès
+>    que `fingerprint is None` et qu'aucune différence de taille n'est
+>    prouvée ; `_on_same_card_unverified_confirmed` accepte alors la carte
+>    en attente (`_pending_target_candidate`) exactement comme si un
+>    signal automatique avait tranché. Annuler la fenêtre laisse le
+>    sondage arrêté (même convention que `DeviceDialog` sur plusieurs
+>    candidats, §5 mode assisté) -- le bouton Actualiser de l'étape 3 le
+>    relance. C'est délibérément le garde-fou le plus critique du
+>    parcours : écrire par erreur sur la carte source détruirait la seule
+>    copie fonctionnelle de la console de l'utilisateur.
 >
 > **Ce qui est sorti du mode assisté, déplacement pas suppression** —
 > reste pleinement en place pour le mode expert, qui l'utilisait déjà

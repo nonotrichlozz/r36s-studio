@@ -90,20 +90,16 @@ STRINGS = {
     "wizard_status_waiting": "En attente de ta carte…",
     "wizard_status_device_found": "Carte reconnue : {display}",
     "wizard_status_same_card": "C'est la même carte — insère la carte neuve, pas l'ancienne.",
-    # Bug corrigé, confirmé sur du vrai matériel : `is_same_card` ne peut
-    # rien affirmer quand la carte source n'a pas d'empreinte (vierge ou
-    # firmware non reconnu, §5) -- le repli sur le chemin du périphérique
-    # (safety/card_fingerprint.py::is_same_card_or_unverifiable) ne prouve
-    # jamais qu'il s'agit de la même carte, seulement qu'on ne peut pas
-    # prouver le contraire. Message honnête distinct de la certitude
-    # ci-dessus, pour qu'un utilisateur qui a bien changé de carte (même
-    # emplacement de lecteur, ex. certains lecteurs SD intégrés Windows,
-    # §4.4) comprenne que l'appli est prudente plutôt que buguée.
-    "wizard_status_same_card_unverified": (
-        "Impossible de vérifier qu'il s'agit d'une carte différente (aucune "
-        "empreinte lisible sur la carte d'origine) — si tu es sûr d'avoir "
-        "changé de carte, essaie un autre lecteur."
-    ),
+    # Bug corrigé, confirmé sur du vrai matériel : ni le contenu (empreinte
+    # de BOOT indisponible) ni la taille ne peuvent alors prouver qu'il
+    # s'agit d'une carte différente -- et le chemin de périphérique ne peut
+    # pas servir de repli non plus sur Windows (certains lecteurs gardent
+    # le même chemin quelle que soit la carte insérée, §4.4). Plutôt qu'un
+    # blocage silencieux et définitif (l'approche précédente, qui bloquait
+    # indéfiniment sur ce type de lecteur, sans issue), `SameCardUnverified
+    # Dialog` (screens.py) exige une confirmation explicite -- ce statut
+    # s'affiche pendant qu'elle est ouverte.
+    "wizard_status_confirmation_needed": "Confirmation nécessaire — vérifie la fenêtre affichée.",
     "wizard_status_multiple_candidates": "Plusieurs cartes détectées — choisis la bonne.",
     # Journal de bord (§5 vocabulaire : le détail technique n'apparaît
     # que là) -- combien de périphériques retenus/écartés à un sondage du
@@ -225,6 +221,26 @@ STRINGS = {
     "confirm_erase": "Toutes les données de « {display} » ({size_go:.1f} Go) seront définitivement effacées.",
     "confirm_go": "Effacer et écrire",
     "confirm_cancel": "Annuler",
+    # SameCardUnverifiedDialog (§5 mode assisté, étape 3) : ni le contenu ni
+    # la taille de la carte détectée ne prouvent qu'il s'agit d'une carte
+    # différente de la carte d'origine -- garde-fou le plus critique du
+    # parcours (écrire par erreur sur la carte source détruirait la seule
+    # copie fonctionnelle de la console), donc une confirmation explicite
+    # plutôt qu'un passage silencieux. Bug corrigé, confirmé sur du vrai
+    # matériel : remplace un repli sur le chemin de périphérique qui ne
+    # fonctionnait pas sur certains lecteurs Windows (chemin identique quelle
+    # que soit la carte insérée).
+    "same_card_unverified_title": "Confirme qu'il s'agit d'une carte différente",
+    "same_card_unverified_message": (
+        "Impossible de vérifier automatiquement que « {display} » ({size_go:.1f} Go) "
+        "est bien une carte différente de la carte d'origine — elle n'a pas de "
+        "système lisible pour comparer son contenu, et la taille seule ne suffit "
+        "pas à le prouver. Si c'est une carte neuve ou vierge, c'est normal. "
+        "Assure-toi d'avoir bien retiré la carte d'origine : y écrire par erreur "
+        "détruirait la seule copie fonctionnelle de ta console."
+    ),
+    "same_card_unverified_checkbox": "Je confirme qu'il s'agit bien d'une carte différente de la carte d'origine.",
+    "same_card_unverified_confirm": "Continuer",
     # Journal de bord (colonne droite, §5 -- remplace les anciens écrans
     # Exécution et Résultat) : en-tête au repos ou pendant une opération.
     "log_header_idle": "En attente",

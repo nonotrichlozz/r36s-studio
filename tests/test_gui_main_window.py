@@ -2902,9 +2902,11 @@ def test_wizard_step_three_allows_continue_when_fingerprint_differs(
     assert window._wizard_poll_timer.isActive() is False
 
 
-# --- étape 3, repli chemin quand la source n'a pas d'empreinte : bug -------
-# corrigé, confirmé sur du vrai matériel (carte source vierge ou firmware --
-# non reconnu, is_same_card seule se désactive silencieusement, §4.4) ------
+# --- étape 3, confirmation explicite quand ni le contenu ni la taille ------
+# ne peuvent prouver un changement de carte : bug corrigé, confirmé sur -----
+# du vrai matériel (chemin de périphérique inutilisable comme repli sur ----
+# certains lecteurs Windows -- remplace une tentative précédente basée sur -
+# le chemin, qui bloquait indéfiniment sur ce type de lecteur, §4.4) --------
 
 
 @patch("r36s_studio.gui.main_window.eject_device")
@@ -2913,29 +2915,30 @@ def test_wizard_step_three_allows_continue_when_fingerprint_differs(
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_step_three_refuses_to_continue_on_matching_path_when_source_fingerprint_missing(
+def test_wizard_step_three_opens_confirmation_dialog_when_unverifiable(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
 ):
     """Scénario réel rapporté : carte source vierge (ou firmware non
-    reconnu), même lecteur de carte des deux côtés -- sur certains
-    lecteurs Windows, le chemin de périphérique reste identique quelle que
-    soit la carte insérée. `is_same_card` seule laisserait passer (les
-    deux empreintes sont `None`) ; le repli sur le chemin doit bloquer."""
-    same_path = "/dev/fake-disk-test-9"
+    reconnu), carte cible détectée de même taille -- ni `is_same_card` ni
+    `size_proves_different_card` ne peuvent trancher. Doit ouvrir
+    `SameCardUnverifiedDialog` plutôt que de laisser passer silencieusement
+    ou de bloquer indéfiniment sans confirmation possible."""
     window = MainWindow()
     window._wizard_flow.reset()
     for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
     window._wizard_source_fingerprint = None
-    window._wizard_source_device = _make_device(path=same_path)
+    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source", size_bytes=32_000_000_000)
     window._enter_wizard_job(WizardJob.DETECT_TARGET)
-    candidate = _make_device(path=same_path)
+    candidate = _make_device(path="/dev/fake-disk-test-target", size_bytes=32_000_000_000)
 
     window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, candidate, None)
 
-    assert window._wizard_panel._continue_button.isEnabled() is False
+    assert window._same_card_unverified_dialog.isVisible() is True
+    assert window._pending_target_candidate is candidate
     assert window._wizard_target_device is None
-    assert window._wizard_poll_timer.isActive() is True  # continue d'attendre une vraie carte différente
+    assert window._wizard_panel._continue_button.isEnabled() is False
+    assert window._wizard_poll_timer.isActive() is False  # pas de deuxième calcul en parallèle
 
 
 @patch("r36s_studio.gui.main_window.eject_device")
@@ -2944,25 +2947,53 @@ def test_wizard_step_three_refuses_to_continue_on_matching_path_when_source_fing
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_wizard_step_three_allows_continue_on_different_path_when_source_fingerprint_missing(
+def test_wizard_step_three_confirming_dialog_accepts_the_candidate(
     mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
 ):
-    """Chemin différent : aucune preuve positive qu'il s'agit de la même
-    carte -- reste autorisé à passer (le cas courant : source vierge,
-    cible dans un lecteur ou un port différent)."""
     window = MainWindow()
     window._wizard_flow.reset()
     for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
     window._wizard_source_fingerprint = None
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source", size_bytes=32_000_000_000)
     window._enter_wizard_job(WizardJob.DETECT_TARGET)
-    candidate = _make_device(path="/dev/fake-disk-test-target")
+    candidate = _make_device(path="/dev/fake-disk-test-target", size_bytes=32_000_000_000)
+    window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, candidate, None)
+
+    window._same_card_unverified_dialog.confirmed.emit()
+
+    assert window._same_card_unverified_dialog.isVisible() is False
+    assert window._pending_target_candidate is None
+    assert window._wizard_target_device is candidate
+    assert window._wizard_panel._continue_button.isEnabled() is True
+
+
+@patch("r36s_studio.gui.main_window.eject_device")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_step_three_allows_continue_without_confirmation_when_sizes_differ(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
+):
+    """Une différence de taille est une preuve positive (une carte ne
+    change jamais de capacité) -- ne doit pas ouvrir la fenêtre de
+    confirmation, contrairement au cas de taille identique ci-dessus."""
+    window = MainWindow()
+    window._wizard_flow.reset()
+    for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
+        window._wizard_flow.mark_done(job)
+    window._wizard_source_fingerprint = None
+    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source", size_bytes=128_000_000_000)
+    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    candidate = _make_device(path="/dev/fake-disk-test-target", size_bytes=32_000_000_000)
 
     window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, candidate, None)
 
-    assert window._wizard_panel._continue_button.isEnabled() is True
+    assert window._same_card_unverified_dialog.isVisible() is False
     assert window._wizard_target_device is candidate
+    assert window._wizard_panel._continue_button.isEnabled() is True
     assert window._wizard_poll_timer.isActive() is False
 
 

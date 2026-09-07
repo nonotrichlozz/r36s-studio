@@ -16,20 +16,8 @@ import platform
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import (
-    Property,
-    QEasingCurve,
-    QParallelAnimationGroup,
-    QPoint,
-    QPointF,
-    QPropertyAnimation,
-    QRect,
-    QSize,
-    Qt,
-    QTimer,
-    Signal,
-)
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QRadialGradient
+from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -191,65 +179,32 @@ class _ConsoleIcon(QWidget):
 class ConsoleArt(QWidget):
     """Illustration de la console R36S, en haut de la colonne droite (§5,
     refonte navigation) : grande, bien visible, à une opacité fixe d'
-    environ 70 %, avec une légère flottaison verticale. Le halo cyan qui
-    l'entoure (§5) est peint séparément par `ConsoleHalo`, pas ici --
-    voir la note de performance sur `ConsoleStage`. Peinte au `QPainter`
-    plutôt qu'affichée via `QLabel.setPixmap`, avec l'opacité appliquée
-    directement dans `paintEvent` (`painter.setOpacity`). Absente sans
-    lever d'exception si le fichier n'existe pas (`build_console_stage`
-    retourne alors None) -- l'interface s'affiche normalement sans elle
-    (§5).
+    environ 70 %. Peinte au `QPainter` plutôt qu'affichée via
+    `QLabel.setPixmap`, avec l'opacité appliquée directement dans
+    `paintEvent` (`painter.setOpacity`). Absente sans lever d'exception
+    si le fichier n'existe pas (`build_console_stage` retourne alors
+    None) -- l'interface s'affiche normalement sans elle (§5).
 
-    Le seul état qui change en continu (`floatOffset`, animé par
-    `ConsoleStage`) ne déclenche plus lui-même de repeint (pas de
-    `self.update()` dans son setter) : `ConsoleStage` en impose un, à
-    fréquence limitée, pour tous ses widgets enfants d'un coup (§5,
-    correctif de performance -- voir sa docstring)."""
+    ⚠️ **Animations retirées.** Cette console portait auparavant un halo
+    et un socle lumineux pulsants (`ConsoleHalo`/`ConsoleBasePlate`,
+    retirés) plus une légère flottaison verticale (`floatOffset`, retirée
+    ici aussi) -- mesuré en pratique à 7-9 % d'un cœur au repos (backend
+    `offscreen`), et de toute façon désactivé systématiquement en usage
+    réel (le réglage « Animations de la console » restait décoché). La
+    console est désormais immobile, de face, à opacité fixe -- plus
+    aucun état à animer, plus aucun repeint périodique."""
 
     _OPACITY = 0.70
-
-    # Amplitude de la flottaison verticale (§5) -- définie ici plutôt que
-    # sur `ConsoleStage` (qui pilote l'animation) car `resizeEvent`
-    # ci-dessous en a besoin pour réserver sa propre marge de mise à
-    # l'échelle ; `ConsoleStage` la référence (`ConsoleArt._FLOAT_AMPLITUDE`)
-    # plutôt que de dupliquer la valeur.
-    _FLOAT_AMPLITUDE = 6.0
 
     def __init__(self, pixmap: QPixmap, parent=None):
         super().__init__(parent)
         self._source_pixmap = pixmap
         self._scaled_pixmap = QPixmap()
-        self._float_offset = 0.0
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-
-    def _get_float_offset(self) -> float:
-        return self._float_offset
-
-    def _set_float_offset(self, value: float) -> None:
-        self._float_offset = value
-
-    # Propriété Qt (pas un simple attribut Python) : `QPropertyAnimation`
-    # a besoin d'un `Property` déclaré au niveau de la classe pour animer
-    # `floatOffset` par son nom (`b"floatOffset"`, voir `ConsoleStage`).
-    floatOffset = Property(float, _get_float_offset, _set_float_offset)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)
-        # Bug corrigé, constaté en pratique sur l'accueil du mode assisté
-        # (boîte plus grande/plus carrée que celle du mode expert) : sans
-        # cette réserve, quand la hauteur devient la contrainte liante du
-        # redimensionnement proportionnel (`Qt.KeepAspectRatio`), le pixmap
-        # scalé remplit *exactement* toute la hauteur du widget -- zéro
-        # marge pour `floatOffset`, qui pousse alors le bas de la console
-        # hors des limites de peinture du widget dès que la flottaison
-        # devient positive (Qt rogne toute peinture au-delà du rect d'un
-        # widget). Mettre à l'échelle vers une taille cible réduite de
-        # `2 * amplitude` en hauteur garantit `rendered.height() <=
-        # self.height() - 2 * amplitude`, donc au moins `amplitude` de
-        # marge de chaque côté dans les limites propres du widget, quelle
-        # que soit la contrainte liante.
-        target = QSize(self.width(), max(1, self.height() - 2 * int(self._FLOAT_AMPLITUDE)))
-        self._scaled_pixmap = self._source_pixmap.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._scaled_pixmap = self._source_pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
@@ -258,39 +213,28 @@ class ConsoleArt(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         x = (self.width() - self._scaled_pixmap.width()) / 2
-        y = (self.height() - self._scaled_pixmap.height()) / 2 + self._float_offset
+        y = (self.height() - self._scaled_pixmap.height()) / 2
         painter.setOpacity(self._OPACITY)
         painter.drawPixmap(int(x), int(y), self._scaled_pixmap)
 
     def rendered_size(self):
         """Taille réelle de l'image affichée (après mise à l'échelle avec
-        conservation du ratio) -- `ConsoleStage` s'en sert pour placer le
-        socle lumineux exactement sous la console, pas sous tout le
-        widget (bien plus grand, il occupe toute la zone du haut).
+        conservation du ratio).
 
-        ⚠️ Peut être périmée juste après un `setGeometry()` sur ce widget :
-        bug corrigé, constaté en pratique -- `ConsoleStage.resizeEvent`
-        appelle `self._console_art.setGeometry(...)` alors que `self`
-        (`ConsoleStage`) est *elle-même* en train de traiter son propre
-        `resizeEvent`, déclenché par l'activation d'un layout parent (pas
-        un `.resize()` direct sur un widget autonome, comme dans les
-        tests unitaires les plus simples) -- Qt diffère alors la livraison
-        du `resizeEvent` de `ConsoleArt` plutôt que de l'envoyer sur le
-        coup, laissant `_scaled_pixmap` (donc `rendered_size()`) refléter
-        l'état *précédent* jusqu'au prochain passage de la boucle
-        d'événements. `ConsoleStage.resizeEvent` ne s'appuie donc plus sur
-        cette méthode pour ses propres calculs (`_fit_within_aspect_ratio`
-        ci-dessous, un calcul pur qui ne dépend d'aucune livraison
-        d'événement) -- seul `set_archive`-like usage ponctuel après un
-        rendu déjà stabilisé (tests, `paintEvent` déjà à jour) peut encore
-        s'y fier sans risque."""
+        ⚠️ Peut être périmée juste après un `setGeometry()` sur ce widget
+        (Qt diffère la livraison du `resizeEvent` d'un widget enfant
+        redimensionné depuis l'intérieur du `resizeEvent` de son parent,
+        voir `ConsoleStage.resizeEvent`) -- ce dernier ne s'appuie donc
+        plus sur cette méthode pour ses propres calculs
+        (`_fit_within_aspect_ratio` ci-dessous, un calcul pur qui ne
+        dépend d'aucune livraison d'événement)."""
         return self._scaled_pixmap.size()
 
     def source_size(self):
         """Taille de l'image source, avant mise à l'échelle -- utilisée
-        par `ConsoleStage._fit_within_aspect_ratio` pour calculer, par le
-        calcul plutôt qu'en lisant `rendered_size()` (périmée juste après
-        un `setGeometry`, voir sa docstring), la taille qu'aurait le rendu
+        par `_fit_within_aspect_ratio` pour calculer, par le calcul plutôt
+        qu'en lisant `rendered_size()` (périmée juste après un
+        `setGeometry`, voir sa docstring), la taille qu'aurait le rendu
         pour une boîte donnée."""
         return self._source_pixmap.size()
 
@@ -302,407 +246,236 @@ def _fit_within_aspect_ratio(source, target):
     après un `setGeometry()`, à l'intérieur du `resizeEvent` d'un widget
     parent, peut refléter l'état précédent (livraison différée par Qt).
     `ConsoleStage.resizeEvent` a besoin de cette taille immédiatement pour
-    calculer les marges du halo/du socle -- ce calcul, indépendant de tout
-    événement Qt, ne peut jamais être périmé."""
+    placer le terminal d'activité sur l'écran de la console -- ce calcul,
+    indépendant de tout événement Qt, ne peut jamais être périmé."""
     if source.isEmpty() or target.width() <= 0 or target.height() <= 0:
         return QSize(0, 0)
     scale = min(target.width() / source.width(), target.height() / source.height())
     return QSize(max(1, round(source.width() * scale)), max(1, round(source.height() * scale)))
 
 
-class _RadialGlowWidget(QWidget):
-    """Base commune à `ConsoleBasePlate` et `ConsoleHalo` : une ellipse en
-    dégradé radial cyan -> transparent, dont seule l'*opacité* s'anime.
+class ConsoleTerminalOverlay(QWidget):
+    """Terminal d'activité disque, superposé à l'écran de la console R36S
+    (§5) : une ligne par événement de progression réellement émis par
+    `imaging/copy.py::copy_range`/`partitions/copy.py::copy_tree`
+    (relayés par `MainWindow._on_progress` -> `ConsoleStage.append_line`)
+    -- jamais une ligne inventée (§2 règle 5) : au repos, rien d'autre
+    qu'un curseur clignotant, jamais de fausse activité.
 
-    Correctif de performance (§5) : le dégradé n'est reconstruit qu'une
-    fois par changement de taille (`resizeEvent`), dans un `QPixmap` mis
-    en cache -- jamais à chaque frame. `paintEvent` se contente d'un
-    `drawPixmap` suivi de `painter.setOpacity`, le calcul le plus léger
-    possible pour Qt. C'est aussi ce qui a remplacé l'ancien halo en
-    `QGraphicsDropShadowEffect` (voir `ConsoleHalo`) : un effet Qt recalcule
-    son flou gaussien à chaque repeint du widget source, quel que soit son
-    rayon -- largement plus coûteux qu'un `drawPixmap`, et la cause du
-    saccadement observé en pratique, la flottaison de la console changeant
-    justement son apparence en continu."""
+    Vert monospace sur fond sombre, mêmes couleurs que le journal de bord
+    (`theme.LOG_BG`/`theme.LOG_TEXT`) pour rester cohérent avec le reste
+    de l'habillage (§5) tout en restant un affichage distinct : le
+    journal garde les heures de début/fin, l'éjection, les erreurs ;
+    celui-ci ne montre que l'activité brute, au fil de l'eau.
 
-    _MIN_OPACITY: float = 0.0
-    _MAX_OPACITY: float = 1.0
+    Taille et position de ce widget sont décidées par `ConsoleStage`, en
+    proportion de l'image de la console redimensionnée -- jamais en
+    coordonnées absolues (même piège que le rognage du bas de la console,
+    déjà corrigé une fois pour la flottaison, désormais retirée). La
+    taille de police, elle, est calculée ici en proportion de la hauteur
+    du widget lui-même (`resizeEvent`), pour la même raison.
+
+    **Correctif de performance appliqué par précaution** (`append_line`/
+    `_toggle_cursor`/`clear_lines` ne font que muter l'état interne
+    (`_dirty = True`), jamais `self.update()` directement -- un `QTimer`
+    dédié, `_repaint_timer`, cadencé à `_REPAINT_INTERVAL_MS` (~33 ms,
+    ~30 im/s), impose un unique repeint groupé par tick, seulement si
+    quelque chose a changé depuis le tick précédent. `_terminal_font` met
+    en cache le `QFont` construit, invalidé seulement quand la hauteur de
+    ligne change. **Correction de conception, confirmée sur du vrai
+    matériel : ce correctif visait un faux coupable.** Ce terminal avait
+    été soupçonné (puis entièrement retiré une première fois) d'un
+    ralentissement de la sauvegarde système d'un facteur dix (~85 Mo/s ->
+    6,7 Mo/s) -- la cause réelle, confirmée en bissectant par mesure du
+    débit CLI pur (sans la moindre interface, donc sans ce terminal), était
+    une carte SD d'origine de console non reconnue (~6 Mo/s en lecture,
+    contre ~88 Mo/s pour une SanDisk sur le même port) : capacité exposée
+    (104,8 Go) très inférieure à celle annoncée (128 Go), signe révélateur
+    d'une carte de capacité falsifiée -- jamais un défaut logiciel. Voir
+    §8 pour la même mise en garde générale. Le cadencement du repeint et
+    la mise en cache de la police restent en place (ils ne coûtent rien et
+    restent une bonne pratique), mais aucun correctif supplémentaire sur ce
+    terminal ne doit plus être tenté sur la seule foi d'un débit mesuré
+    bas : toujours vérifier la carte en premier."""
+
+    _MAX_LINES = 500  # borne mémoire large, bien au-delà de ce qu'affiche jamais cette zone
+    _CURSOR_BLINK_MS = 500
+    _REPAINT_INTERVAL_MS = 33  # ~30 im/s -- voir la docstring de la classe
+    _LINE_HEIGHT_FRACTION = 0.16  # ~6 lignes visibles dans le cadre calibré (§ ConsoleStage)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._opacity = self._MIN_OPACITY
-        self._pixmap = QPixmap()
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._lines: List[str] = []
+        self._cursor_on = True
+        self._dirty = False
+        self._font_cache: Optional[QFont] = None
+        self._font_cache_line_height = -1
 
-    def _get_glow_opacity(self) -> float:
-        return self._opacity
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(self._CURSOR_BLINK_MS)
+        self._blink_timer.timeout.connect(self._toggle_cursor)
+        self._blink_timer.start()
 
-    def _set_glow_opacity(self, value: float) -> None:
-        # Pas de self.update() ici : `ConsoleStage` impose un seul repeint
-        # groupé, à fréquence limitée, pour tous ses widgets enfants (§5).
-        self._opacity = value
+        # Repeint cadencé, découplé des setters -- voir le correctif de
+        # performance dans la docstring de la classe. Tourne en permanence
+        # (le curseur cligne même au repos) ; son coût par tick quand rien
+        # n'a changé se limite à un test booléen.
+        self._repaint_timer = QTimer(self)
+        self._repaint_timer.setInterval(self._REPAINT_INTERVAL_MS)
+        self._repaint_timer.timeout.connect(self._flush_repaint)
+        self._repaint_timer.start()
 
-    glowOpacity = Property(float, _get_glow_opacity, _set_glow_opacity)
+    def _toggle_cursor(self) -> None:
+        self._cursor_on = not self._cursor_on
+        self._dirty = True
+
+    def append_line(self, text: str) -> None:
+        """Une ligne par événement de progression réel -- jamais appelée
+        pour simuler une activité (§2 règle 5). Ne repeint jamais elle-même
+        (voir le correctif de performance de la docstring de classe) :
+        `_repaint_timer` s'en charge, à cadence bornée."""
+        self._lines.append(text)
+        if len(self._lines) > self._MAX_LINES:
+            del self._lines[: len(self._lines) - self._MAX_LINES]
+        self._dirty = True
+
+    def clear_lines(self) -> None:
+        """Retour à l'état de repos (`ConsoleStage.start_activity`/
+        `stop_activity`) -- curseur seul, jamais les dernières lignes
+        d'une activité terminée."""
+        if not self._lines:
+            return
+        self._lines.clear()
+        self._dirty = True
+
+    def _flush_repaint(self) -> None:
+        if self._dirty:
+            self._dirty = False
+            self.update()
+
+    def _line_height(self) -> int:
+        return max(6, int(self.height() * self._LINE_HEIGHT_FRACTION))
+
+    def _terminal_font(self) -> QFont:
+        """Mis en cache (voir le correctif de performance de la docstring
+        de classe) -- reconstruit seulement quand la hauteur de ligne
+        change, jamais à chaque `paintEvent`."""
+        line_height = self._line_height()
+        if self._font_cache is not None and self._font_cache_line_height == line_height:
+            return self._font_cache
+        font = QFont()
+        # Mêmes polices de repli que `theme.MONO_FONT_FAMILY` (utilisé en
+        # QSS pour le journal de bord) -- `setFamilies` (pas un simple nom
+        # unique) pour un vrai repli monospace sur les trois OS, `Consolas`
+        # (Windows) n'existant ni sur macOS ni sur Linux.
+        font.setFamilies(["Consolas", "Menlo", "DejaVu Sans Mono", "Courier New"])
+        font.setStyleHint(QFont.Monospace)
+        font.setFixedPitch(True)
+        font.setPixelSize(max(6, int(line_height * 0.72)))
+        self._font_cache = font
+        self._font_cache_line_height = line_height
+        return font
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)
-        self._pixmap = self._render_pixmap(self.size())
-
-    @staticmethod
-    def _render_pixmap(size) -> QPixmap:
-        pixmap = QPixmap(size)
-        pixmap.fill(Qt.transparent)
-        if size.width() <= 0 or size.height() <= 0:
-            return pixmap
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        rect = pixmap.rect()
-        # Technique classique pour un dégradé radial elliptique (Qt n'a
-        # qu'un rayon unique) : mettre à l'échelle le repère pour que
-        # l'ellipse voulue devienne un cercle unité, puis y peindre un
-        # dégradé radial défini dans ce même repère mis à l'échelle.
-        # L'opacité pleine (alpha 255) est peinte ici, une fois pour
-        # toutes -- l'opacité *animée* est appliquée au tracé du pixmap
-        # (`paintEvent`), jamais en reconstruisant ce dégradé.
-        painter.translate(rect.center())
-        painter.scale(max(rect.width(), 1) / 2, max(rect.height(), 1) / 2)
-        cyan = QColor(theme.ACCENT_CYAN)
-        transparent = QColor(theme.ACCENT_CYAN)
-        transparent.setAlpha(0)
-        gradient = QRadialGradient(QPointF(0, 0), 1)
-        gradient.setColorAt(0.0, cyan)
-        gradient.setColorAt(1.0, transparent)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(gradient)
-        painter.drawEllipse(QPointF(0, 0), 1, 1)
-        painter.end()
-        return pixmap
+        self._dirty = True
 
     def paintEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
-        if self._pixmap.isNull() or self._opacity <= 0.0:
-            return
         painter = QPainter(self)
-        painter.setOpacity(self._opacity)
-        painter.drawPixmap(0, 0, self._pixmap)
-
-
-class ConsoleBasePlate(_RadialGlowWidget):
-    """Socle lumineux sous la console (§5) : une ellipse aplatie en
-    dégradé radial cyan -> transparent. Son opacité (propriété Qt
-    `glowOpacity`, animée par `ConsoleStage`) pulse doucement entre 25 %
-    et 55 %."""
-
-    _MIN_OPACITY = 0.25
-    _MAX_OPACITY = 0.55
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._opacity = self._MIN_OPACITY
-
-
-class ConsoleHalo(_RadialGlowWidget):
-    """Lueur cyan diffuse autour de la console (§5) -- remplace l'ancien
-    `QGraphicsDropShadowEffect` posé sur `ConsoleArt` : voir la docstring
-    de `_RadialGlowWidget` pour la raison (coût du flou gaussien recalculé
-    à chaque frame). Une ellipse plus large que la console, centrée
-    derrière elle, dont seule l'opacité pulse (entre 15 % et 38 %) plutôt
-    qu'un rayon de flou -- même effet visuel de lueur, sans recalcul."""
-
-    _MIN_OPACITY = 0.15
-    _MAX_OPACITY = 0.38
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._opacity = self._MIN_OPACITY
+        painter.fillRect(self.rect(), QColor(theme.LOG_BG))
+        if self.width() <= 0 or self.height() <= 0:
+            return
+        painter.setFont(self._terminal_font())
+        painter.setPen(QColor(theme.LOG_TEXT))
+        line_height = self._line_height()
+        max_lines = max(1, self.height() // line_height)
+        visible = self._lines[-max_lines:]
+        margin = 4
+        y = line_height
+        for line in visible:
+            painter.drawText(margin, y, line)
+            y += line_height
+        cursor_text = "_" if self._cursor_on else " "
+        if visible:
+            last_width = painter.fontMetrics().horizontalAdvance(visible[-1])
+            painter.drawText(margin + last_width + 2, y - line_height, cursor_text)
+        else:
+            painter.drawText(margin, line_height, cursor_text)
 
 
 class ConsoleStage(QWidget):
-    """Zone du haut de la colonne droite (§5) : la console (`ConsoleArt`)
-    devant son halo (`ConsoleHalo`) et son socle lumineux
-    (`ConsoleBasePlate`), plus une légère flottaison verticale de la
-    console -- trois animations permanentes, décalées entre elles pour ne
-    jamais respirer à l'unisson, regroupées dans un seul
-    `QParallelAnimationGroup` en boucle infinie pour un pilotage
-    centralisé (`pause`/`resume`/`set_animations_enabled`).
-    `QEasingCurve.InOutSine` partout : une respiration, pas un mouvement
-    mécanique.
+    """Zone du haut de la colonne droite (§5) : la console (`ConsoleArt`),
+    immobile et à opacité fixe (animations retirées, voir sa docstring),
+    et son terminal d'activité disque (`ConsoleTerminalOverlay`),
+    superposé à l'écran de la console.
 
-    Chaque animation garde son propre cycle (le socle et le halo n'ont pas
-    la même durée) ; le groupe sert à les démarrer/mettre en pause/arrêter
-    ensemble en un seul appel -- pas à les synchroniser sur un cycle
-    commun, ce qui contredirait justement le "jamais à l'unisson" demandé.
-    Mises en pause pendant une opération disque (le journal de bord suffit
-    alors comme signal d'activité, pas la peine de faire tourner ceci pour
-    rien) et désactivables via un réglage utilisateur -- dans les deux cas,
-    retour à l'état de repos plutôt qu'un arrêt figé sur une valeur
-    intermédiaire arbitraire.
+    Le rectangle de l'écran (`_SCREEN_RECT_FRACTIONS`) est exprimé en
+    fraction de l'image *source* (`gui/assets/console.png`, 595x900 --
+    photo recadrée, vue de face, fond rendu transparent) -- calibré par
+    script en mesurant la boîte englobante des pixels opaques, de
+    luminosité moyenne (70-210) et de faible saturation (écart max entre
+    canaux < 25) dans la moitié supérieure de l'image (distingue l'écran,
+    verre gris neutre, du corps de la console -- bien plus sombre -- et
+    des boutons colorés), puis resserré d'environ 3 % pour rester dans le
+    verre plutôt que sur son biseau. Cette photo de face donne un écran
+    quasiment rectangulaire dans le plan de l'image -- le rectangle aligné
+    sur les axes épouse donc ses quatre coins nettement mieux qu'avec
+    l'ancienne vue de profil en perspective (vérifié visuellement,
+    superposition du rectangle sur l'image). Ces fractions s'appliquent à
+    la taille *rendue* de la console (calculée par `_fit_within_aspect_
+    ratio`, jamais en coordonnées absolues -- même piège que le rognage du
+    bas de la console, déjà corrigé une fois pour la flottaison désormais
+    retirée), pour rester juste quelle que soit la taille de la fenêtre."""
 
-    **Correctif de performance (constaté en pratique : l'animation
-    saccadait fortement).** `QPropertyAnimation` met à jour ses valeurs à
-    la fréquence de son minuteur interne (proche du taux de
-    rafraîchissement de l'écran) -- bien plus souvent que nécessaire pour
-    une respiration lente sur plusieurs secondes, et chaque valeur mise à
-    jour appelait jusqu'ici `update()` sur le widget concerné. Les
-    widgets enfants (`ConsoleArt`, `ConsoleBasePlate`, `ConsoleHalo`) ne
-    déclenchent donc plus eux-mêmes de repeint dans leurs setters de
-    propriété : `_repaint_timer`, un simple `QTimer` cadencé à 33 ms
-    (~30 images/seconde, largement suffisant pour l'œil sur ce genre de
-    mouvement), impose un unique repeint groupé par tick pour tous ses
-    widgets enfants d'un coup. Invalide `self.rect()` en entier à chaque
-    tick plutôt qu'une sous-région calculée (bug corrigé : une sous-région
-    qui ne suivait pas exactement le déplacement du socle -- ci-dessous --
-    laissait une partie de l'image sans repeint, donnant l'impression
-    qu'un morceau de la console restait figé pendant que le reste
-    flottait) -- `ConsoleStage` reste petit et le repeint déjà cadencé à
-    30 im/s, le coût d'invalider tout son rect plutôt qu'une sous-région
-    reste négligeable. Le minuteur ne tourne que pendant que le groupe
-    d'animations tourne réellement (démarré dans `resume()`/`__init__`,
-    arrêté dans `pause()` et à la désactivation) : à l'arrêt, aucun
-    repeint périodique, donc aucun coût.
-
-    **Le socle lumineux flotte avec la console, dans le même repère (bug
-    corrigé) :** `ConsoleBasePlate` avait une géométrie fixe, calculée une
-    fois dans `resizeEvent` sans jamais suivre `floatOffset` -- la console
-    flottait pendant que son socle restait immobile, donnant l'impression
-    qu'un morceau se détachait ou s'enfonçait selon le sens du mouvement.
-    `_repaint_console_area` repositionne désormais le socle
-    (`QWidget.move`, qui ne redéclenche jamais `resizeEvent` -- seule la
-    position change, pas la taille, donc aucun recalcul du dégradé mis en
-    cache) à `_plate_base_pos` décalée de `floatOffset`, exactement comme
-    `ConsoleArt.paintEvent` décale son propre tracé -- les deux widgets
-    partagent ainsi la même valeur d'offset à chaque tick."""
-
-    _PLATE_CYCLE_MS = 3000
-    _GLOW_CYCLE_MS = 4000
-    # Référence la constante de `ConsoleArt` (qui en a besoin pour sa
-    # propre réserve de marge, voir sa docstring) plutôt que de dupliquer
-    # la valeur -- une seule source de vérité.
-    _FLOAT_AMPLITUDE = ConsoleArt._FLOAT_AMPLITUDE
-    # Facteurs déjà utilisés plus bas pour la taille du socle/du halo,
-    # nommés ici pour dériver les marges réservées ci-dessous des mêmes
-    # constantes plutôt que de deviner des valeurs séparées.
-    _PLATE_WIDTH_RATIO = 0.7
-    _PLATE_HEIGHT_RATIO = 0.22
-    _HALO_SCALE = 1.35
-    _FLOAT_CYCLE_MS = 6000
-    _REPAINT_INTERVAL_MS = 33  # ~30 im/s -- voir la docstring de la classe
+    _SCREEN_RECT_FRACTIONS = (0.11, 0.08, 0.88, 0.465)  # x0, y0, x1, y1
 
     def __init__(self, console_art: ConsoleArt, parent=None):
         super().__init__(parent)
-        self._enabled = True
         self._console_art = console_art
         self._console_art.setParent(self)
-        self._halo = ConsoleHalo(self)
-        self._base_plate = ConsoleBasePlate(self)
-        self._halo.lower()
-        self._base_plate.lower()
-        # Position de repos du socle (floatOffset == 0), recalculée dans
-        # `resizeEvent` -- `_repaint_console_area` la décale de l'offset
-        # courant à chaque tick pour que le socle flotte avec la console,
-        # dans le même repère (voir la docstring de la classe).
-        self._plate_base_pos = QPoint(0, 0)
-
-        self._group = QParallelAnimationGroup(self)
-
-        self._plate_animation = QPropertyAnimation(self._base_plate, b"glowOpacity", self)
-        self._plate_animation.setDuration(self._PLATE_CYCLE_MS)
-        self._plate_animation.setLoopCount(-1)
-        self._plate_animation.setEasingCurve(QEasingCurve.InOutSine)
-        self._plate_animation.setKeyValueAt(0.0, ConsoleBasePlate._MIN_OPACITY)
-        self._plate_animation.setKeyValueAt(0.5, ConsoleBasePlate._MAX_OPACITY)
-        self._plate_animation.setKeyValueAt(1.0, ConsoleBasePlate._MIN_OPACITY)
-
-        self._glow_animation = QPropertyAnimation(self._halo, b"glowOpacity", self)
-        self._glow_animation.setDuration(self._GLOW_CYCLE_MS)
-        self._glow_animation.setLoopCount(-1)
-        self._glow_animation.setEasingCurve(QEasingCurve.InOutSine)
-        self._glow_animation.setKeyValueAt(0.0, ConsoleHalo._MIN_OPACITY)
-        self._glow_animation.setKeyValueAt(0.5, ConsoleHalo._MAX_OPACITY)
-        self._glow_animation.setKeyValueAt(1.0, ConsoleHalo._MIN_OPACITY)
-
-        self._float_animation = QPropertyAnimation(self._console_art, b"floatOffset", self)
-        self._float_animation.setDuration(self._FLOAT_CYCLE_MS)
-        self._float_animation.setLoopCount(-1)
-        self._float_animation.setEasingCurve(QEasingCurve.InOutSine)
-        self._float_animation.setKeyValueAt(0.0, -self._FLOAT_AMPLITUDE)
-        self._float_animation.setKeyValueAt(0.5, self._FLOAT_AMPLITUDE)
-        self._float_animation.setKeyValueAt(1.0, -self._FLOAT_AMPLITUDE)
-
-        self._group.addAnimation(self._plate_animation)
-        self._group.addAnimation(self._glow_animation)
-        self._group.addAnimation(self._float_animation)
-        self._group.setLoopCount(-1)
-
-        self._repaint_timer = QTimer(self)
-        self._repaint_timer.setInterval(self._REPAINT_INTERVAL_MS)
-        self._repaint_timer.timeout.connect(self._repaint_console_area)
-
-        self._group.start()
-        # Décale le halo par rapport au socle (§5 : "pour éviter que les
-        # deux respirent à l'unisson") -- au-delà de la simple différence
-        # de période (3 s contre 4 s, qui les désynchronise déjà tout
-        # seule au fil du temps), un déphasage explicite dès le départ
-        # évite qu'ils démarrent malgré tout en phase.
-        self._glow_animation.setCurrentTime(self._GLOW_CYCLE_MS // 2)
-        self._repaint_timer.start()
-
-    def _repaint_console_area(self) -> None:
-        # Le socle flotte avec la console, dans le même repère (bug
-        # corrigé, voir la docstring de la classe) : `move()` ne change
-        # que la position, jamais la taille -- pas de recalcul du dégradé
-        # mis en cache (`_RadialGlowWidget.resizeEvent`), contrairement à
-        # `setGeometry` avec une taille différente. Toute la zone du
-        # widget est invalidée (pas une sous-région calculée, §5 correctif)
-        # : `ConsoleStage` reste petit et déjà cadencé à 30 im/s, le coût
-        # est négligeable, et une sous-région qui ne suivrait pas
-        # exactement chaque élément mobile est justement le bug que ça
-        # corrige.
-        offset = int(self._console_art.floatOffset)
-        self._base_plate.move(self._plate_base_pos.x(), self._plate_base_pos.y() + offset)
-        self.update()
+        self._terminal = ConsoleTerminalOverlay(self)
+        self._terminal.raise_()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)
+        self._console_art.setGeometry(0, 0, self.width(), self.height())
 
-        # Bug corrigé, constaté en pratique : lire `self._console_art.
-        # rendered_size()` juste après `setGeometry()` peut refléter
-        # l'état *précédent* -- Qt diffère la livraison du `resizeEvent`
-        # d'un widget enfant quand ce widget est lui-même redimensionné
-        # depuis l'intérieur du `resizeEvent` d'un parent (le cas ici,
-        # `ConsoleStage` étant redimensionnée par un layout parent réel --
-        # contrairement à un test unitaire qui redimensionne `ConsoleStage`
-        # directement). Toutes les tailles ci-dessous sont donc calculées
-        # par `_fit_within_aspect_ratio` (pur, indépendant de tout
-        # événement Qt) plutôt que lues sur `ConsoleArt` entre deux
-        # `setGeometry` -- `setGeometry` reste appelé pour que Qt peigne
-        # effectivement le bon résultat dès que l'événement différé
-        # arrive, mais plus rien ici ne dépend de son délai de livraison.
+        # Bug corrigé par le passé, toujours valable ici : lire
+        # `self._console_art.rendered_size()` juste après `setGeometry()`
+        # peut refléter l'état *précédent* (livraison différée du
+        # `resizeEvent` de l'enfant, voir `ConsoleArt.rendered_size`) --
+        # `_fit_within_aspect_ratio` (pur) reproduit ce même calcul sans
+        # dépendre de cette livraison.
         source_size = self._console_art.source_size()
+        rendered = _fit_within_aspect_ratio(source_size, self.size())
+        art_x = (self.width() - rendered.width()) // 2
+        art_y = (self.height() - rendered.height()) // 2
 
-        # Réserve aussi une marge horizontale : le halo est `_HALO_SCALE`
-        # fois plus large que la console -- sans cette réserve, son bord
-        # peut dépasser `self.width()` dès que la console s'ajuste par la
-        # largeur (contrainte liante), quelle que soit la marge verticale
-        # par ailleurs. `fit_width` est donc la largeur maximale que la
-        # console peut occuper tout en laissant son halo entièrement dans
-        # `self.width()`.
-        horizontal_margin = int(self.width() * (1 - 1 / self._HALO_SCALE) / 2)
-        fit_width = max(1, self.width() - 2 * horizontal_margin)
-
-        # Passe 1 : dimensions "naturelles" de la console si elle recevait
-        # toute la hauteur disponible (comme avant le correctif de
-        # rognage, et en tenant compte de la propre marge interne de
-        # `ConsoleArt` pour sa flottaison) -- sert uniquement à estimer, à
-        # partir de la taille RENDUE réelle (pas de la boîte entière), les
-        # marges réellement nécessaires pour le halo/le socle. Bug
-        # corrigé : estimer ces marges à partir de `self.width()`/
-        # `self.height()` (comme la première version de ce correctif)
-        # surestimait grossièrement dès que la console est engendrée par
-        # la hauteur plutôt que par la largeur -- le socle, dont la
-        # largeur suit celle de la console (pas celle de la boîte), se
-        # retrouvait démesuré, rétrécissant la console bien plus que
-        # nécessaire (mode expert) voire jusqu'à la rendre invisible
-        # (accueil du mode assisté, boîte plus carrée).
-        natural_target = QSize(fit_width, max(1, self.height() - 2 * int(self._FLOAT_AMPLITUDE)))
-        natural = _fit_within_aspect_ratio(source_size, natural_target)
-        natural_width = natural.width() or int(fit_width * 0.6)
-        natural_height = natural.height() or int(self.height() * 0.6)
-        # Marge verticale déjà présente naturellement (non nulle quand la
-        # largeur est la contrainte liante, comme en mode expert -- nulle
-        # quand c'est la hauteur, comme sur l'accueil du mode assisté).
-        natural_margin = (self.height() - natural_height) / 2
-
-        plate_width_estimate = max(20, int(natural_width * self._PLATE_WIDTH_RATIO))
-        plate_height_estimate = max(10, int(plate_width_estimate * self._PLATE_HEIGHT_RATIO))
-        halo_excess_estimate = natural_height * (self._HALO_SCALE - 1) / 2
-        # Le socle flotte désormais avec la console (bug corrigé
-        # ci-dessus) : sa marge doit couvrir l'amplitude de la flottaison
-        # en plus de sa propre demi-hauteur, pas seulement sa demi-hauteur.
-        plate_clearance = plate_height_estimate / 2 + self._FLOAT_AMPLITUDE
-
-        # Jamais moins que la marge déjà là naturellement (`max` avec
-        # `natural_margin`) : ne réduire que ce qui manque réellement,
-        # jamais un budget entier recalculé à partir de zéro -- c'est ce
-        # qui évite de rétrécir une console déjà correctement dans ses
-        # limites (mode expert, où le socle rentrait déjà de justesse
-        # avant même ce correctif).
-        top_margin = int(max(natural_margin, halo_excess_estimate))
-        bottom_margin = int(max(natural_margin, halo_excess_estimate, plate_clearance))
-
-        art_box = QRect(
-            horizontal_margin,
-            top_margin,
-            fit_width,
-            max(1, self.height() - top_margin - bottom_margin),
+        x0f, y0f, x1f, y1f = self._SCREEN_RECT_FRACTIONS
+        screen_rect = QRect(
+            art_x + int(rendered.width() * x0f),
+            art_y + int(rendered.height() * y0f),
+            max(1, int(rendered.width() * (x1f - x0f))),
+            max(1, int(rendered.height() * (y1f - y0f))),
         )
-        self._console_art.setGeometry(art_box)
-        final_target = QSize(art_box.width(), max(1, art_box.height() - 2 * int(self._FLOAT_AMPLITUDE)))
-        rendered = _fit_within_aspect_ratio(source_size, final_target)
-        art_width = rendered.width() or int(fit_width * 0.6)
-        # `ConsoleArt.paintEvent` centre toujours l'image verticalement
-        # dans son propre rect (`art_box` ci-dessus, pas tout `self`) : ce
-        # centre est donc toujours exact, jamais une valeur de repli --
-        # seule sa taille dépend de `rendered`, pas encore connue lors du
-        # tout premier passage de layout.
-        art_center_y = art_box.top() + art_box.height() // 2
-        art_height = rendered.height() or int(art_box.height() * 0.6)
-        art_bottom = art_center_y + art_height // 2
+        self._terminal.setGeometry(screen_rect)
 
-        plate_width = max(20, int(art_width * self._PLATE_WIDTH_RATIO))
-        plate_height = max(10, int(plate_width * self._PLATE_HEIGHT_RATIO))
-        plate_x = (self.width() - plate_width) // 2
-        plate_y = art_bottom - plate_height // 2
-        self._base_plate.setGeometry(plate_x, plate_y, plate_width, plate_height)
-        # Position de repos (floatOffset == 0) -- `_repaint_console_area`
-        # la décale de l'offset courant à chaque tick.
-        self._plate_base_pos = QPoint(plate_x, plate_y)
+    def append_line(self, text: str) -> None:
+        self._terminal.append_line(text)
 
-        # Halo (§5) : une ellipse plus large que la console rendue,
-        # centrée derrière elle -- remplace la zone que couvrait
-        # auparavant le flou du QGraphicsDropShadowEffect.
-        halo_width = max(20, int(art_width * self._HALO_SCALE))
-        halo_height = max(20, int(art_height * self._HALO_SCALE))
-        halo_x = (self.width() - halo_width) // 2
-        halo_y = art_center_y - halo_height // 2
-        self._halo.setGeometry(halo_x, halo_y, halo_width, halo_height)
+    def start_activity(self) -> None:
+        """À appeler au démarrage d'une opération disque (§4.3/§4.4) --
+        prépare un terminal vierge pour la nouvelle activité plutôt que
+        de continuer d'accumuler les lignes de l'opération précédente."""
+        self._terminal.clear_lines()
 
-    def pause(self) -> None:
-        if self._group.state() == QParallelAnimationGroup.Running:
-            self._group.pause()
-        self._repaint_timer.stop()
-
-    def resume(self) -> None:
-        if not self._enabled:
-            return
-        if self._group.state() == QParallelAnimationGroup.Paused:
-            self._group.resume()
-        elif self._group.state() != QParallelAnimationGroup.Running:
-            self._group.start()
-        self._repaint_timer.start()
-
-    def set_animations_enabled(self, enabled: bool) -> None:
-        """Réglage utilisateur (§5) : à la désactivation, retombe sur
-        l'état de repos (socle au minimum, halo au minimum, pas de
-        flottaison) plutôt que de figer une valeur intermédiaire
-        arbitraire en plein milieu d'un cycle."""
-        self._enabled = enabled
-        if enabled:
-            self.resume()
-        else:
-            self._group.stop()
-            self._repaint_timer.stop()
-            self._base_plate.glowOpacity = ConsoleBasePlate._MIN_OPACITY
-            self._halo.glowOpacity = ConsoleHalo._MIN_OPACITY
-            self._console_art.floatOffset = 0.0
-            # Le socle suit la flottaison (voir la docstring de la
-            # classe) -- le remettre explicitement à sa position de repos,
-            # comme `floatOffset` ci-dessus, plutôt que de le laisser
-            # décalé de la dernière valeur avant l'arrêt du minuteur.
-            self._base_plate.move(self._plate_base_pos)
-            # Le minuteur périodique est arrêté : sans ce repeint explicite,
-            # le dernier état visible resterait celui d'avant la
-            # désactivation jusqu'au prochain événement Qt fortuit.
-            self.update()
+    def stop_activity(self) -> None:
+        """À appeler à la fin d'une opération disque -- au repos, l'écran
+        de la console n'affiche qu'un curseur, jamais les dernières
+        lignes d'une activité terminée (§ demande explicite : « pas de
+        fausse activité »)."""
+        self._terminal.clear_lines()
 
 
 def build_console_stage(parent=None) -> Optional[ConsoleStage]:
@@ -1894,14 +1667,6 @@ class MainView(Screen):
         right_column.setSpacing(12)
         if console_stage is not None:
             right_column.addWidget(console_stage, 3)
-            # Réglage utilisateur (§5) : désactive les trois animations de
-            # la console -- pas persisté d'une session à l'autre pour
-            # l'instant (pas de module de configuration dans le projet à
-            # ce stade, §6), comme le réglage équivalent qu'il remplace.
-            self.animation_toggle = QCheckBox(tr("console_animation_toggle"))
-            self.animation_toggle.setChecked(True)
-            self.animation_toggle.toggled.connect(console_stage.set_animations_enabled)
-            right_column.addWidget(self.animation_toggle)
         right_column.addWidget(log_panel, 2)
         root.addLayout(right_column, 1)
 

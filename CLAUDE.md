@@ -981,6 +981,168 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > sauvegarde système puis un flash et contrôle qu'une seule
 > `AuthorizationRef` est créée pour les deux.
 
+> ⚠️ **Bug corrigé, cause trouvée sur du vrai matériel : une sauvegarde
+> « système sans les jeux » restaurée sur une carte neuve démarre bien
+> (confirmé sur une console EmuELEC), mais n'a ensuite que ses partitions
+> système.** `backup_system_only` retire délibérément la partition de jeux
+> de la table (§ ci-dessus) -- correct pour la sauvegarde elle-même. Mais
+> côté restauration (`flash.py::flash_device`), rien ne recréait cette
+> partition : sur une carte de 32 Go restaurée depuis une image de 11,5 Go,
+> une vingtaine de Go restaient non partitionnés, rendant `copy_games`
+> (étape E) impossible -- la partition n'existe simplement pas.
+> L'hypothèse initiale (« la console recrée la partition de jeux au
+> premier démarrage ») est infirmée par ce test réel : pas fiable selon
+> les firmwares.
+>
+> **Corrigé** : `imaging/games_partition.py` (nouveau module) ajoute une
+> partition occupant tout l'espace libre restant après un flash réussi, et
+> la formate -- exFAT par défaut (système de fichiers relevé sur l'EASYROMS
+> de la carte source, §4.4), symétrique de la réparation de table après
+> troncature mais dans l'autre sens (GPT : la table secondaire est
+> déplacée vers la fin réelle du périphérique de destination -- plus grand
+> que l'image restaurée -- et le MBR protecteur corrigé en conséquence,
+> même raison que `_repair_protective_mbr_after_truncation` ; MBR : une
+> entrée est ajoutée dans le premier créneau libre). `__main__.py::
+> cmd_flash` gagne `--create-games-partition`, appelé après l'écriture et
+> la vérification SHA-256. Nouveaux codes `GAMES_PARTITION_CREATE_FAILED`
+> (pas assez de place libre) et `GAMES_PARTITION_FORMAT_FAILED` (le
+> formatage natif a échoué).
+>
+> ✅ **`--create-games-partition` validé sur du vrai matériel, via le
+> CLI directement** : partition de 20 406 861 824 octets créée après une
+> restauration système seule, reconnue *immédiatement* par Windows avec
+> une lettre de lecteur — sans retrait/réinsertion de la carte (l'incertitude
+> qui justifiait de séparer `create_games_partition`/`format_games_
+> partition`, ci-dessous, ne s'est pas matérialisée sur ce test).
+> `Get-Partition` confirme trois partitions, la nouvelle en position 3,
+> type IFS, 19,01 Go. Le calcul/la réécriture de table (déjà testés bout
+> en bout en isolation) et le formatage natif (`Format-Volume`) sont donc
+> tous les deux confirmés fonctionnels sur Windows ; macOS/Linux restent
+> non testés (aucun matériel disponible pour ces deux OS).
+>
+> ⚠️ **Bug corrigé, trouvé en testant le câblage GUI après cette
+> validation CLI : le drapeau n'était en fait jamais passé, ni en mode
+> expert ni en mode assisté.** La première implémentation ne le déclenchait
+> que via `self._wizard_active and self._wizard_backup_kind == "system"`
+> -- couvrant uniquement le vrai parcours guidé à 5 étapes (§5). Deux
+> autres chemins mènent pourtant tout autant à restaurer une sauvegarde
+> système sans les jeux, et aucun des deux ne passait par ce drapeau :
+> l'ad-hoc « Préparer une carte avec cette sauvegarde » de l'accueil
+> assisté (`_assisted_ad_hoc_active`, jamais `_wizard_active`), et le
+> simple enchaînement manuel en mode expert (ligne « Par sécurité » du
+> mode expert -- `HomeScreen.backup_system_selected` -- puis étape « C.
+> Flasher » avec le fichier ainsi produit), qui n'a même pas de notion de
+> parcours pour porter un tel drapeau.
+>
+> **Corrigé** en abandonnant le drapeau spécifique au parcours guidé au
+> profit d'un état central, `MainWindow._last_system_backup_output_path`
+> -- le chemin de sortie de la dernière sauvegarde système réussie de la
+> session, rempli une seule fois dans `_on_worker_finished` (« seul point
+> d'arrivée de tout runner », déjà établi ailleurs dans ce fichier) dès que
+> `self._mode == "backup_system"` et `ok`, peu importe lequel des trois
+> chemins y a mené. Au moment de construire les arguments d'un flash,
+> `--create-games-partition` est ajouté si et seulement si `self._file_
+> path == self._last_system_backup_output_path` -- une comparaison de
+> chemin exacte (on sait que ce fichier précis a été produit par
+> `backup_system_only` cette session, jamais une supposition sur le
+> contenu d'un fichier choisi par ailleurs) plutôt qu'une inspection du
+> fichier ou une détection par nom. Couvre les trois chemins uniformément,
+> y compris le mode expert : reprendre le même fichier pour l'étape
+> « Flasher » suffit désormais à déclencher le drapeau, sans action
+> supplémentaire de l'utilisateur ni notion de parcours à faire porter ce
+> signal côté mode expert.
+>
+> **Piste distincte, à ne pas mélanger avec ce qui précède** : l'image
+> système seule démarre sur une console EmuELEC mais pas sur la console
+> d'origine testée. Peut être la partition de jeux manquante (corrigé
+> ci-dessus, confirmé recréée), peut être un écran/DTB différent entre les
+> deux consoles (§4.6, `identify/dtb.py`) -- non élucidé, à retester
+> maintenant que la partition se recrée correctement.
+
+> ⚠️ **Signalé de nouveau sur du vrai matériel : `--create-games-partition`
+> n'atteignait jamais la ligne de commande, dans aucun mode -- pas même le
+> vrai parcours guidé, malgré le correctif précédent.** Vérifié dans les
+> traces d'élévation : aucune commande `flash` lancée depuis l'app ne
+> portait ce drapeau. Cause réelle, trouvée en lisant `FileDialog._browse`
+> (`gui/screens.py`) : `QFileDialog.getSaveFileName`/`getOpenFileName`
+> renvoient des chemins à séparateurs `/` (convention Qt, y compris sous
+> Windows), alors que le chemin par défaut proposé pour une sauvegarde
+> système (`_suggested_system_backup_path`, via `pathlib.Path`) utilise le
+> séparateur natif de l'OS (`\` sous Windows) -- la comparaison de chaîne
+> stricte alors utilisée pour reconnaître « ce fichier vient bien d'une
+> sauvegarde système de cette session » échouait dès que l'utilisateur
+> cliquait Parcourir, y compris pour re-sélectionner exactement le même
+> fichier déjà proposé par défaut. Expliquait aussi pourquoi le mode
+> expert était touché **plus durement** (le drapeau n'était proposé
+> *jamais*, pas seulement parfois) : son flash n'a **aucun** chemin par
+> défaut (`getOpenFileName(..., "", ...)`, toujours vide) -- Parcourir y
+> est donc obligatoire, jamais optionnel comme pour la sauvegarde, donc le
+> mésappariement de séparateur s'y produisait systématiquement.
+>
+> **Un premier correctif (comparaison de chemin normalisée, puis une case
+> à cocher optionnelle proposée en mode expert pour les cas que la
+> comparaison ne pouvait pas reconnaître) a été implémenté, testé, puis
+> entièrement retiré sur retour d'usage réel.** La case demandait à
+> l'utilisateur de savoir si l'image qu'il restaure laissera de l'espace
+> libre -- une information qu'il n'a structurellement pas, surtout avec un
+> firmware qu'il découvre (§1 : « le chemin par défaut doit fonctionner
+> sans que l'utilisateur ait à comprendre ce qu'il fait »). Signalé
+> explicitement : même l'auteur du logiciel hésitait devant cette case --
+> un signal fort qu'elle n'avait pas sa place dans une interface pensée
+> pour un néophyte total.
+>
+> **Corrigé pour de bon : décision entièrement automatique, prise par le
+> worker élevé lui-même après l'écriture, jamais par la GUI.** L'app
+> dispose déjà de toute l'information nécessaire pour décider seule --
+> la taille de l'image qu'elle vient d'écrire, la taille réelle de la
+> carte -- sans jamais demander à l'utilisateur de la deviner :
+> - `imaging/games_partition.py::create_and_format_games_partition_if_
+>   worthwhile` (nouveau point d'entrée, remplace l'ancien `--create-
+>   games-partition` conditionnel) : calcule d'abord, en lecture seule
+>   (`_peek_free_games_partition_bytes`, sans `prepared_write_target` --
+>   lire quelques secteurs d'un périphérique déjà monté fonctionne
+>   nativement sur les trois OS, contrairement à l'écriture, §4.3),
+>   l'espace qui serait disponible ; ne tente la création réelle
+>   (verrouillage + écriture, `create_and_format_games_partition`) que si
+>   cet espace atteint `GAMES_PARTITION_WORTHWHILE_BYTES` (1 Go, seuil
+>   demandé explicitement -- un seuil *métier*, distinct du minimum
+>   *technique* `MIN_GAMES_PARTITION_BYTES` de 64 Mo en dessous duquel une
+>   partition ne serait de toute façon pas assez grande pour un seul jeu).
+>   En dessous du seuil, ou si `NoFreeSpaceForGamesPartition`/
+>   `NoFreeMbrSlot` sont quand même levées lors de la tentative réelle
+>   (rare : l'espace a pu changer entre l'estimation et l'écriture) --
+>   retourne `None` sans jamais lever, « sinon ne rien faire » plutôt
+>   qu'un échec.
+> - `__main__.py::cmd_flash` : plus de drapeau `--create-games-partition`
+>   à passer (retiré de l'argument parser) -- tentée pour **tout** flash
+>   réussi et vérifié, sur toute plateforme, sans condition sur le
+>   firmware ni sur la provenance du fichier. Journalise systématiquement
+>   la décision et son résultat (§4.4 : jamais silencieusement) -- « pas
+>   assez d'espace libre », ou la taille effectivement créée. Une
+>   véritable erreur d'écriture/formatage (`OSError`,
+>   `subprocess.CalledProcessError`, `ValueError`) est journalisée en
+>   avertissement (`emit_log(..., level="warning")`) mais **ne fait
+>   jamais échouer le flash déjà réussi** -- même principe déjà établi
+>   pour `--eject-after` (§4.6) : un bonus qui échoue après coup ne doit
+>   pas renverser un résultat par ailleurs correct et déjà vérifié par
+>   SHA-256. Les anciens codes `GAMES_PARTITION_CREATE_FAILED`/
+>   `GAMES_PARTITION_FORMAT_FAILED` (qui faisaient échouer tout le flash)
+>   ont été retirés en conséquence, `gui/strings.py` compris.
+> - Côté GUI (`gui/main_window.py`) : plus rien à faire. `_same_output_
+>   path`, `_last_system_backup_output_path`, la journalisation de
+>   diagnostic associée, et la case `ConfirmDialog._games_partition_
+>   checkbox` (`gui/screens.py`) ont tous été retirés -- `_start_worker`
+>   ne construit plus jamais ce drapeau, quel que soit le mode.
+>
+> **Non confirmé sur du vrai matériel au moment d'écrire cette note** :
+> couvert par des tests qui isolent le calcul (lecture directe d'un
+> fichier factice servant de périphérique, sans verrouillage) et la
+> décision (mocks), plus les tests CLI existants -- pas par une vraie
+> restauration Windows. À vérifier au prochain flash réel d'une image plus
+> petite que la carte : la ligne « Espace de jeux recréé sur l'espace
+> libre restant (… octets) » doit apparaître dans le journal, sans aucune
+> action de l'utilisateur.
+
 **Formats source acceptés au flash :** `.img`, `.img.gz`, `.img.xz`, `.img.zip`
 (décompression en flux, sans fichier temporaire).
 
@@ -1482,7 +1644,124 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > _windows_all_volume_paths`, toutes les partitions du disque) si un
 > problème d'éjection est un jour rapporté.
 >
-> ⚠️ **Bug corrigé, confirmé en relisant le code après le rapport
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : l'éjection ne
+> fonctionnait jamais sur Windows, ni automatiquement (étape 3 du parcours
+> de clonage) ni via le bouton du journal (mode expert comme mode
+> assisté).** Le correctif ci-dessus (`_windows_eject`) répare bien
+> l'implémentation Windows de `partitions/eject.py::eject`, mais cette
+> fonction continuait d'être appelée **directement dans le processus GUI**
+> (`gui/main_window.py::_perform_eject`/`_on_eject_requested`/`_run_
+> wizard_source_eject`/`_run_wizard_eject`) -- à privilèges normaux, alors
+> qu'ouvrir `\\.\PhysicalDriveN` pour `IOCTL_STORAGE_EJECT_MEDIA` exige
+> l'élévation, exactement comme l'écriture brute (§4.3). Le flash y
+> échappe déjà puisqu'il passe par le worker élevé (§3) ; l'éjection, elle,
+> ne le faisait jamais. Symptômes observés :
+> - **Bouton « Éjecter la carte » du journal** : `impossible d'ouvrir
+>   \\.\PhysicalDrive1 (erreur 5)` -- `ERROR_ACCESS_DENIED`, affiché dans
+>   une simple `QMessageBox` jamais journalisée (violation de la règle
+>   « jamais un succès -- ni un échec -- silencieux », §4.4).
+> - **Éjection automatique de la carte source avant l'étape « insère la
+>   carte neuve »** (§5, `_run_wizard_source_eject`) : échec entièrement
+>   silencieux, aucune ligne dans le journal entre la fin de la sauvegarde
+>   et la détection suivante -- risque de corruption si l'utilisateur
+>   retire la carte (exFAT/NTFS) sans savoir que l'éjection a échoué.
+>
+> **Corrigé** : les quatre points d'appel passent désormais par un worker
+> élevé dédié (`gui/main_window.py::_start_eject`, réutilise `gui.worker_
+> runner.WorkerRunner` avec `["eject", "--device", device.path]` --
+> exactement le même mécanisme que `backup`/`flash`), jamais un appel
+> synchrone à `partitions.eject.eject` dans le processus GUI. `__main__.py
+> ::cmd_eject` gagne `--worker`/`--progress-file`/`--cancel-file`
+> (`_add_worker_args`, déjà utilisés par `backup`/`flash`) pour pouvoir
+> tourner comme worker élevé -- son échec émet désormais un code dédié,
+> `EJECT_FAILED` (déjà utilisé côté GUI avant ce correctif pour un échec
+> local, message : « ferme les fichiers ouverts... ou retire-la
+> manuellement »), plutôt que le générique `IO_ERROR`. Chaque appelant
+> (`_perform_eject`, `_on_eject_requested`, `_run_wizard_source_eject`,
+> `_run_wizard_eject`) journalise désormais explicitement le résultat,
+> succès comme échec (§4.4) -- `_on_eject_requested` ne se contentait
+> auparavant que d'une `QMessageBox` en cas d'échec, jamais du journal.
+>
+> **Invite d'élévation supplémentaire, tranché en faveur de la
+> fiabilité.** Chaîner l'éjection dans le worker qui vient d'écrire/de
+> lire (`backup`/`flash`, déjà élevé) aurait évité une seconde invite UAC
+> pour l'éjection automatique de l'étape 3 -- envisagé, non retenu : ça
+> ferait perdre la distinction entre « la sauvegarde a réussi » et « l'
+> éjection qui a suivi a échoué », nécessaire pour bloquer la suite du
+> parcours tant que la carte source n'est pas sûre à retirer (le job
+> `DETECT_TARGET` n'est jamais marqué fait sur un échec d'éjection --
+> `Reprendre` relance alors cette éjection, pas toute la sauvegarde).
+> Windows n'a de toute façon pas d'équivalent de `MacosAuthorizationSession`
+> (§3, « ce correctif ne change rien pour Windows/Linux, qui continuent de
+> redemander l'élévation à chaque worker élevé ») -- une invite
+> supplémentaire par éjection reste donc cohérente avec le reste du projet
+> sur cet OS, plutôt qu'une exception à ce principe déjà établi.
+>
+> **Non vérifié** : si `IOCTL_STORAGE_EJECT_MEDIA` fonctionnerait sur un
+> handle ouvert en lecture seule sans élévation (ce qui éviterait
+> l'élévation pour le seul cas du bouton) -- aucune carte physique
+> disponible pour le tester ici, et l'hypothèse la plus probable reste que
+> Windows restreint tout accès direct à `\\.\PhysicalDriveN`
+> indépendamment du mode d'ouverture (lecture seule ou lecture/écriture),
+> comme c'est déjà le cas pour l'écriture brute (§4.3). Piste future, à
+> tenter uniquement si une session dispose d'un vrai lecteur de carte SD
+> Windows pour vérifier sans risque de casser le correctif actuel.
+>
+> **Non confirmé sur du vrai matériel au moment d'écrire cette note**
+> (aucune carte physique disponible ici) : la logique (worker élevé dédié,
+> code d'erreur `EJECT_FAILED`, journalisation systématique) est couverte
+> par des tests qui simulent le worker (`WorkerRunner` mocké, callback de
+> fin appelé directement pour reproduire un succès ou un échec) plutôt que
+> d'exécuter une vraie élévation Windows -- c'est précisément ce mécanisme
+> non simulable ici (élévation réelle, disparition effective de la carte
+> dans l'Explorateur Windows) qui reste à vérifier au premier test en
+> conditions réelles.
+
+> ⚠️ **Quatrième signalement, sur du vrai matériel, non résolu -- diagnostic
+> ajouté en attendant, pas encore un correctif.** Malgré tout ce qui
+> précède, l'éjection automatique de la carte source (mode assisté, entrée
+> dans l'étape 3/DETECT_TARGET) ne se produit toujours pas : journal réel
+> montrant la fin de la sauvegarde système suivie *directement* de la
+> prochaine ligne de détection, six heures plus tard, sans une seule ligne
+> d'éjection entre les deux -- ni succès, ni échec (§4.4 : exactement ce
+> que ce module doit justement ne jamais laisser passer). Conséquence
+> aggravée avec une image Android (§4.6, `is_android`) : les partitions de
+> la carte source restent montées, Windows propose de les formater --
+> risque réel de destruction si l'utilisateur accepte par erreur.
+>
+> **Cause non confirmée.** Avant ce correctif, `_run_wizard_source_eject`
+> journalisait `wizard_ejecting_source` *après* `show_step(...)` et *avant*
+> `_start_eject(...)`, sans aucune protection contre une exception --
+> `self._wizard_source_device` valant `None` (état incohérent, cause non
+> vérifiée) aurait fait échouer `_start_eject` sur `device.path` avant même
+> d'atteindre `WorkerRunner`, avec l'exception remontant sans jamais
+> toucher le journal : une explication plausible du symptôme exact
+> rapporté, mais non confirmée sur le vrai matériel en cause -- aucune autre
+> piste n'a été exclue non plus (`_on_wizard_job_finished`/`_enter_wizard_
+> job` n'atteignant jamais DETECT_TARGET, par exemple).
+>
+> **Diagnostic ajouté, pas encore un correctif** : la ligne
+> `wizard_ejecting_source` est désormais journalisée en tout premier, avant
+> `show_step`, avec le reste du corps de `_run_wizard_source_eject`
+> protégé par un `try/except` qui journalise explicitement toute exception
+> (nouveau message, `friendly_error_message("EJECT_FAILED")` + détail brut)
+> plutôt que de la laisser disparaître -- `_start_eject` réinitialise aussi
+> l'état « occupé » des deux écrans si la construction du `WorkerRunner`
+> échoue avant même son démarrage, pour ne jamais laisser l'interface
+> bloquée sans issue dans ce cas. Si cette ligne apparaît enfin au prochain
+> test réel (avec ou sans message d'erreur à sa suite), le bug est confirmé
+> plus haut dans la chaîne (`_on_wizard_job_finished`/`_enter_wizard_job`)
+> et cette instrumentation n'aura fait que l'exclure ; si un message
+> d'erreur explicite apparaît à sa place, la cause exacte sera enfin connue
+> et corrigeable directement. **Non testé sur du vrai matériel** (aucune
+> carte physique disponible ici) -- couvert seulement par deux nouveaux
+> tests (`tests/test_gui_main_window.py` :
+> `test_entering_detect_target_logs_before_starting_the_eject_worker`,
+> `test_entering_detect_target_with_no_source_device_logs_instead_of_
+> vanishing`) qui simulent l'état incohérent plutôt que de le reproduire
+> sur un vrai lecteur.
+
+⚠️ **Bug corrigé, confirmé en relisant le code après le rapport
 > ci-dessus : le Continuer du vrai parcours guidé pouvait afficher la
 > fenêtre Confirmation avec la mauvaise carte, court-circuitant la
 > vérification d'empreinte (§5, § pré-vol n°3).** Rapporté comme : image
@@ -1871,6 +2150,138 @@ sérieux d'un script.
 > de l'ancienne étape 2) : cette orientation n'existait que dans le
 > parcours guidé, elle n'est donc reprise nulle part ailleurs.
 >
+> ⚠️ **Signalé, corrigé : après un flash Android (R36Droid/andr36oid),
+> Windows affiche une boîte « Vous devez formater le disque » par
+> partition Android illisible (quatre observées) -- un débutant risque
+> d'accepter et de détruire ce qui vient d'être écrit.** Cause : ces
+> firmwares utilisent des partitions (boot/system/vendor/userdata...)
+> qu'aucun pilote Windows ne sait lire, et Windows propose de les
+> formater dès qu'il les découvre -- ce qui arrive dès que `prepared_
+> write_target` relâche le disque en fin d'écriture (§4.3,
+> `IOCTL_DISK_UPDATE_PROPERTIES`, qui force justement Windows à
+> redécouvrir les partitions).
+>
+> **Corrigé en deux temps, complémentaires plutôt qu'exclusifs (les deux
+> options envisagées ont été retenues) :**
+> 1. **Éjection automatique**, dans le worker élevé lui-même
+>    (`__main__.py::cmd_flash`, nouveau `--eject-after`) -- appelée juste
+>    après l'écriture et la vérification, dans le même processus déjà
+>    élevé (aucune invite supplémentaire), pour réduire la fenêtre
+>    pendant laquelle Windows peut proposer de formater. Best-effort : un
+>    échec d'éjection ne remet jamais en cause le flash déjà réussi
+>    (seulement journalisé). `gui/main_window.py::_start_worker` l'ajoute
+>    à l'argv du flash uniquement quand `_is_flashing_android_firmware()`
+>    est vrai (mode expert, jamais le parcours de clonage du mode
+>    assisté, qui n'a pas de choix de firmware) ; `_on_worker_finished`
+>    masque alors le bouton Éjecter du succès (déjà fait, redondant).
+>    **Non garanti de gagner la course contre Windows** (non vérifié sur
+>    du vrai matériel, aucune image Android disponible ici) -- l'éjection
+>    a lieu dès que possible côté application, mais rien ne garantit
+>    qu'elle précède la notification système.
+> 2. **Message explicite dans le journal**, systématique, que l'éjection
+>    automatique ait réussi ou non -- le vrai filet de sécurité, puisque
+>    l'éjection automatique ne protège que la session en cours : la même
+>    carte rebranchée plus tard, sur n'importe quelle machine Windows,
+>    déclenchera exactement les mêmes propositions de formatage (les
+>    partitions restent tout aussi illisibles). Contrairement au reste de
+>    l'interface (§5, jamais de jargon), ce message nomme volontairement
+>    le vrai texte de la fenêtre Windows (« Vous devez formater le
+>    disque… ») -- même principe que `HelpDialog` pour les réglages macOS,
+>    §3 : une vraie fenêtre système à laquelle réagir correctement, pas
+>    la description d'une action de l'app. `identify/firmware_catalog.py::
+>    FirmwareEntry.is_android` (nouveau champ, `True` pour `r36droid`/
+>    `andr36oid` seulement) porte ce signal.
+
+> ⚠️ **Signalé, corrigé : le correctif ci-dessus était trop étroit --
+> Windows propose aussi de formater la carte après un flash "Linux"
+> (ArkOS/ROCKNIX/EmuELEC/AmberELEC/MinUI), pas seulement Android, jusqu'à
+> cinq boîtes observées au total selon le firmware.** Cause : ces
+> firmwares aussi utilisent au moins une partition (le système ext4
+> "root", §4.4) qu'aucun pilote Windows ne sait lire -- une seule boîte
+> pour eux contre plusieurs pour Android (boot/system/vendor/userdata...),
+> mais le même risque exact : un débutant qui accepte de formater détruit
+> la carte qu'il vient de préparer. Aucune entrée du catalogue
+> (`identify/firmware_catalog.py::FIRMWARE_CATALOG`) n'est donc à l'abri
+> de ce problème -- filtrer sur `is_android` comme le faisait le premier
+> correctif laissait tout le reste du catalogue sans aucune protection.
+>
+> **Corrigé** en généralisant le mécanisme existant plutôt qu'en le
+> dupliquant pour "Linux" séparément : `gui/main_window.py::MainWindow.
+> _flash_may_trigger_windows_format_prompt` (nouvelle méthode, même
+> emplacement et même forme que `_is_flashing_android_firmware`) renvoie
+> vrai pour **tout** flash mode expert, quel que soit le firmware --
+> puisqu'aucune entrée du catalogue n'est jamais entièrement lisible par
+> Windows, pas besoin d'y filtrer par identifiant comme pour Android.
+> `_is_flashing_android_firmware` reste utilisée séparément, mais
+> uniquement pour choisir *quel message* afficher (détaillé pour Android,
+> ci-dessus, générique sinon) -- plus pour décider *si* le mécanisme
+> s'applique.
+> - `_start_worker` ajoute désormais `--eject-after` dès que `_flash_may_
+>   trigger_windows_format_prompt()` est vrai (auparavant : seulement
+>   `_is_flashing_android_firmware()`) -- couvre donc aussi ROCKNIX/ArkOS/
+>   EmuELEC/AmberELEC/MinUI, en plus de R36Droid/andr36oid.
+> - `_on_worker_finished` masque le bouton Éjecter du succès dans les
+>   mêmes conditions élargies (`allow_eject = ... and not format_prompt_
+>   flash`), et journalise un nouveau message générique,
+>   `gui/strings.py::flash_format_prompt_warning_generic` (« Windows va
+>   peut-être proposer de formater la carte — refuse, c'est normal. »),
+>   pour tout flash non-Android concerné -- le message Android détaillé
+>   (mécanisme des écrans de rechange compris, ci-dessous) reste propre à
+>   Android, `elif format_prompt_flash` évitant les deux messages à la
+>   fois pour un même flash.
+>
+> Toujours sans effet sur le parcours de clonage du mode assisté
+> (`_flash_may_trigger_windows_format_prompt` renvoie faux dès que
+> `_wizard_active` est vrai, comme `_is_flashing_android_firmware`) --
+> celui-ci éjecte déjà automatiquement la carte neuve à l'étape 5
+> (`_run_wizard_eject`), immédiatement après la restauration, quel que
+> soit le contenu de l'image clonée : un second mécanisme y ferait double
+> emploi. **Non vérifié sur du vrai matériel au moment d'écrire cette
+> note** pour le cas "Linux" précisément (le cas Android l'était déjà,
+> ci-dessus, avec la même réserve sur la course contre Windows) -- couvert
+> par des tests qui vérifient l'argv du worker et le contenu du journal,
+> pas une vraie élévation Windows.
+
+> ⚠️ **Constaté en usage réel : une image Android flashée démarre parfois
+> sur un écran figé si l'écran choisi ne correspond pas à celui de la
+> console -- le mécanisme de rechange existe déjà côté firmware, mais rien
+> ne l'indiquait dans l'app avant ce correctif.** Ces portages (R36Droid/
+> andr36oid) embarquent un dossier `Panels/` sur le BOOT, un sous-dossier
+> par type d'écran, chacun contenant les `.dtb` à copier à la racine du
+> BOOT pour changer d'écran -- exactement le même genre de fichier que
+> celui déjà lu par `identify/dtb.py` pour reconnaître le modèle de
+> console (§4.5), mais ici c'est l'utilisateur qui doit le copier à la
+> main, l'app n'automatise rien de ce mécanisme. Sans explication, un
+> débutant qui obtient un écran figé au premier démarrage conclut que le
+> logiciel ne marche pas, alors que le flash a en réalité réussi -- il
+> manque juste le bon écran.
+>
+> **Corrigé** : un second message, `gui/strings.py::
+> flash_android_panel_mismatch_warning`, s'ajoute désormais dans le
+> journal juste après l'avertissement sur les boîtes de formatage
+> ci-dessus (`_on_worker_finished`, même bloc `if android_flash`) --
+> explique le dossier `Panels/` et le fait de copier les `.dtb` à la
+> racine du BOOT, précise qu'il faut parfois plusieurs essais, et ne
+> promet jamais que ça marchera : **sur la console de test, les trois
+> écrans compatibles annoncés pour cette carte
+> (`rockchip,rk3326-rg351mp-linux` -- Panel1, Panel2/3, Panel4) ont tous
+> échoué**, aucun n'a produit d'affichage. Message volontairement prudent
+> en conséquence -- une piste à essayer, jamais une garantie.
+>
+> **Usage non prévu de `identify --boot-dir`, utile à documenter** : cette
+> commande de diagnostic (§4.6, pensée à l'origine pour valider le parseur
+> DTB sur des variantes de console) s'est révélée très efficace pour
+> trier les `.dtb` d'un dossier `Panels/` extrait -- exécutée sur chacun
+> des sept sous-dossiers de panels de cette image R36Droid, elle a écarté
+> quatre d'entre eux en identifiant la carte (`board_compatible`) à
+> laquelle chaque `.dtb` est réellement destiné (une autre console de la
+> même famille RK3326, pas la R36S/R35S) -- ne laissant que les trois
+> panels ci-dessus comme candidats plausibles pour cette console, avant
+> même de les essayer un par un sur du vrai matériel. Aucun code n'a
+> changé pour permettre cet usage : la commande fonctionne déjà sur
+> n'importe quel dossier de `.dtb` local, indépendamment de son origine
+> (carte réelle ou dossier `Panels/` extrait d'une image).
+
 > **Idée future, pas implémentée** : ROCKNIX fournit un script
 > `importpanel.py` qui génère un `mipi-panel.dtbo` à partir d'un `.dtb`
 > d'origine (le même type de fichier que celui déjà lu par
@@ -2278,6 +2689,102 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > semble tronqué. Non confirmé sur un vrai écran, faute d'écran physique
 > disponible ici (même limite que la mesure de charge CPU plus haut).
 
+> ✅ **Animations de la console retirées, sur demande explicite** (§5) --
+> `ConsoleHalo`, `ConsoleBasePlate`, la propriété `floatOffset` (console),
+> le `QParallelAnimationGroup` qui les pilotait et le minuteur de repeint
+> à 30 im/s (`_repaint_timer`) ont tous été supprimés, avec le réglage
+> « Animations de la console » qui permettait de les désactiver. Motif :
+> mesurées à 7-9 % d'un cœur au repos (§5 ci-dessus, backend `offscreen`)
+> et de toute façon désactivées systématiquement en usage réel -- un coût
+> permanent pour un agrément jamais utilisé. La console (`ConsoleArt`)
+> est désormais immobile, de face, à opacité fixe (70 %, inchangée) ;
+> `ConsoleStage` n'a donc plus besoin de réserver de marge pour une
+> flottaison qui n'existe plus, ni de calculer la position d'un halo/
+> socle qui n'existent plus non plus -- son `resizeEvent` s'en trouve
+> largement simplifié (centre `ConsoleArt` dans tout son rect, plus de
+> passe d'estimation en deux temps).
+>
+> ⚠️ **Correction de conception, en deux temps : le terminal
+> d'activité disque en temps réel de l'écran de la console a été retiré
+> à tort, puis rétabli une fois la vraie cause du ralentissement
+> identifiée.** Ajouté pour afficher, en direct sur l'écran de
+> `console.png`, une ligne par événement de progression réel (offset
+> hexadécimal, taille de bloc, débit) -- `ConsoleTerminalOverlay`
+> (`gui/screens.py`), alimentée par `MainWindow._on_progress`. Une
+> sauvegarde système mesurée à ~85 Mo/s est retombée à ~6-8 Mo/s peu
+> après son ajout (7 min -> 20 min) -- confondu avec une régression
+> causée par ce terminal. Un premier correctif de repeint (cadencé à
+> 33 ms via un `QTimer` dédié plutôt qu'un `self.update()` synchrone à
+> chaque événement, police mise en cache) n'a rien changé au débit
+> mesuré -- ce qui aurait dû alerter plus tôt que le terminal n'était
+> pas en cause, plutôt que de le retirer entièrement dans un second
+> temps.
+>
+> **Cause réelle, trouvée en bissectant par mesure du débit CLI pur
+> (sans la moindre interface, donc sans ce terminal, éliminé comme
+> variable) :** une carte SD d'origine de la console (non-marque,
+> chinoise), pas un défaut logiciel -- voir la mise en garde générale,
+> §8. Confirmé sur du vrai matériel : ~88,5 Mo/s en CLI sur la branche
+> principale avec une carte SanDisk, sur le même port, la même machine,
+> la même commande -- aucune régression de code n'a jamais existé.
+> Piste environnementale (disque de destination plein/fragmenté, Avast)
+> également écartée avant d'en arriver là : 222 Go libres sur le disque
+> externe, débit inchangé Avast désactivé, et le même débit lent observé
+> aussi bien sur une carte de 128 Go que sur une de 32 Go pour la carte
+> d'origine en cause.
+>
+> **Rétabli entièrement** : `ConsoleTerminalOverlay`, `ConsoleStage.
+> append_line`/`start_activity`/`stop_activity`, `_SCREEN_RECT_FRACTIONS`,
+> `_fit_within_aspect_ratio` et `ConsoleArt.source_size` sont de retour
+> dans `gui/screens.py`, avec le correctif de repeint cadencé/police mise
+> en cache conservé (sans coût, toujours une bonne pratique, mais plus
+> présenté comme correctif d'un problème qu'il n'a jamais résolu) ; les
+> points d'appel `start_activity`/`stop_activity` et le bloc `append_line`
+> de `_on_progress` (`gui/main_window.py`) aussi. `LogPanel` (bas de la
+> colonne droite) reste inchangé, le terminal reste un affichage distinct
+> et complémentaire, jamais un remplacement.
+>
+> **Leçon retenue** : ne jamais accuser un changement récent sur la seule
+> foi d'une corrélation temporelle avant d'avoir isolé les autres
+> variables (matériel, environnement) -- surtout quand un premier
+> correctif censé régler la cause suspectée ne change rien au symptôme
+> mesuré, ce qui est en soi un signal fort que l'hypothèse est fausse.
+>
+> **L'image de la console (photo de face, `gui/assets/console.png`) et sa
+> découpe restent inchangées** -- le rectangle d'écran calibré pour y
+> placer le terminal (`_SCREEN_RECT_FRACTIONS`) redevient utile tel quel.
+> Remplacement de l'image (rappel) : photo source fournie par
+> l'utilisateur (`IMG_20260906_105401.png`, 2000x4452, vue de face, écran
+> rectangulaire, la console n'y occupant qu'environ un tiers de la
+> hauteur). Écart constaté en la traitant : le fond n'était pas
+> réellement transparent contrairement à ce qui était attendu (vérifié
+> directement sur les pixels, `(255, 255, 255, 255)` partout) -- détourée
+> par remplissage par propagation (`scipy.ndimage.label`, seules les
+> composantes connexes touchant le bord de l'image retirées, pour ne
+> jamais créer de trou dans un reflet clair isolé à l'intérieur de la
+> console) puis un léger flou du canal alpha pour adoucir le contour ;
+> recadrée à la boîte englobante du canal alpha (+5 % de marge) et
+> réduite à 900 px de haut (595x900, contre 499x500 avant). `MainView`
+> (expert) et `AssistedLandingScreen` (assisté) chargent toujours le même
+> fichier via `build_console_stage()`/`asset_paths.asset_path
+> ("console.png")` -- aucun changement de code nécessaire pour que
+> l'image comme le terminal s'appliquent aux deux. `packaging/*.spec`
+> (trois fichiers) référencent déjà `"console.png"` par ce nom exact,
+> inchangé.
+
+> ✅ **Fenêtre de console du worker élevé masquée sur Windows** (§1/§3) --
+> `ShellExecuteExW` (`gui/elevate.py::_launch_windows`) ouvrait jusqu'ici
+> le worker élevé avec `nShow=SW_SHOWNORMAL` : une fenêtre de console
+> visible, vide en pratique (`ShellExecuteW` ne fournit aucun tube stdout/
+> stderr vers ce processus, §3 -- toute la communication passe déjà par
+> `--progress-file`/le journal d'élévation), qui clignotait à chaque
+> opération élevée sous les yeux d'un néophyte -- contraire à la règle §1
+> (« aucune ligne de commande, jamais, à aucune étape »). `nShow=SW_HIDE`
+> désormais. Sans risque identifié : rien ne lit jamais la sortie de cette
+> fenêtre, et le mécanisme d'élévation lui-même (verbe `runas`, détection
+> d'échec via le fichier de progression/le journal d'élévation) ne dépend
+> en rien de sa visibilité.
+
 > **Mode assisté (phase 8), par défaut au lancement.** Le mode expert
 > (six étapes, ci-dessus) reste disponible en entier, mais n'est plus
 > l'écran de démarrage — `config.py` (première vraie implémentation de
@@ -2628,6 +3135,24 @@ d'écriture ne doit être écrite.
 
 ## 8. Tests
 
+- ⚠️ **Toujours vérifier la carte SD avant de suspecter le code, en cas de
+  débit anormalement bas.** Confirmé sur du vrai matériel : une carte
+  d'origine de console (chinoise, non-marque) peut plafonner à ~6 Mo/s en
+  lecture, contre ~88 Mo/s pour une carte SanDisk sur le même port, la
+  même machine — une sauvegarde qui prend normalement ~7 min peut alors en
+  prendre ~20, sans le moindre défaut logiciel en cause. Un investigation
+  entière a été menée à tort sur cette base (voir §5, « le terminal
+  d'activité disque en temps réel de l'écran de la console ») avant de
+  confirmer, en comparant le débit CLI pur d'une carte suspecte à celui
+  d'une carte SanDisk sur la même machine, qu'aucune régression de code
+  n'existait. **Signe révélateur** : la capacité exposée par l'OS très
+  inférieure à la capacité annoncée sur la carte (ex. 104,8 Go exposés
+  pour une carte marquée 128 Go) — un indice classique de carte à capacité
+  falsifiée (la carte ment sur sa taille réelle, et est presque toujours
+  aussi nettement plus lente que l'annoncée). Avant de bissecter des
+  commits ou de soupçonner `imaging/copy.py`, comparer le débit obtenu
+  avec une carte connue bonne (SanDisk ou équivalent) sur le même port et
+  la même machine.
 - Jeu de données de test : tables de partitions MBR et GPT factices.
 - Test manuel obligatoire avant chaque release : brancher un disque dur externe et
   vérifier qu'il **n'apparaît pas** comme carte SD si les critères l'excluent.

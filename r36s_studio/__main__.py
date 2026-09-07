@@ -72,6 +72,7 @@ from r36s_studio.imaging import (
     UnsupportedImageFormatError,
     backup_device,
     backup_system_only,
+    create_and_format_games_partition_if_worthwhile,
     estimate_system_backup_size,
     estimate_system_backup_size_unprivileged,
     estimate_total_bytes,
@@ -445,6 +446,59 @@ def cmd_flash(args: argparse.Namespace) -> int:
             return 1
 
         emit_log(f"Vérification SHA-256 réussie ({result.source_sha256})")
+
+        # Décision automatique, après l'écriture et la vérification (§4.3) :
+        # une restauration d'image (sauvegarde « système sans les jeux »,
+        # mais aussi n'importe quel firmware plus petit que la carte de
+        # destination) peut laisser de l'espace non partitionné. L'app
+        # dispose de toute l'information nécessaire (taille de l'image déjà
+        # écrite, taille réelle de la carte) pour décider seule s'il vaut la
+        # peine d'y recréer une partition de jeux -- l'utilisateur ne peut
+        # pas le savoir lui-même, surtout avec un firmware qu'il découvre
+        # (§1). Plus de drapeau `--create-games-partition` à passer :
+        # tentée pour tout flash, sur toute plateforme, jamais seulement
+        # pour un fichier reconnu comme une sauvegarde système de cette
+        # session (comparaison de chemin, GUI -- retirée, trop fragile et
+        # trop étroite : ni les images d'origine externe ni le mode expert
+        # n'en bénéficiaient). Jamais un échec du flash déjà réussi pour ce
+        # motif (best-effort, même principe que `--eject-after` ci-dessous)
+        # -- journalisé dans tous les cas (§4.4 : jamais une décision
+        # silencieuse), que le résultat soit « rien à faire », un succès ou
+        # un échec.
+        try:
+            games_result = create_and_format_games_partition_if_worthwhile(device)
+        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+            emit_log(f"Espace de jeux non recréé : {exc}", level="warning")
+        else:
+            if games_result is None:
+                emit_log("Pas assez d'espace libre restant pour créer un espace de jeux supplémentaire.")
+            else:
+                emit_log(f"Espace de jeux recréé sur l'espace libre restant ({games_result.size_bytes} octets).")
+
+        if args.eject_after:
+            # Firmware Android (§4.6) : ses partitions (boot/system/vendor/
+            # userdata...) sont illisibles pour Windows, qui propose alors
+            # de les formater dès qu'il les remarque -- ce qui arrive
+            # généralement tout de suite après l'écriture, dès que
+            # `prepared_write_target` relâche le disque (§4.3,
+            # `IOCTL_DISK_UPDATE_PROPERTIES`, qui force justement Windows à
+            # les re-découvrir). Éjecter tout de suite, dans ce même worker
+            # déjà élevé (pas de nouvelle invite), réduit la fenêtre pendant
+            # laquelle ces propositions de formatage peuvent apparaître --
+            # sans garantie de gagner la course à chaque fois (non vérifié
+            # sur du vrai matériel, §5 : le message explicite du journal de
+            # bord reste le filet de sécurité qui compte vraiment, y
+            # compris si la carte est un jour rebranchée ailleurs). Un
+            # échec d'éjection ici ne remet jamais en cause le flash déjà
+            # réussi -- best-effort, seulement journalisé.
+            emit_log("Éjection automatique de la carte (firmware Android)...")
+            try:
+                eject_device(device.path)
+            except Exception as exc:
+                emit_log(f"Éjection automatique impossible : {exc}", level="warning")
+            else:
+                emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
+
         emit_done(True)
         return 0
     finally:
@@ -668,24 +722,45 @@ def cmd_identify(args: argparse.Namespace) -> int:
 
 
 def cmd_eject(args: argparse.Namespace) -> int:
-    device = _resolve_device_or_report(args)
-    if device is None:
-        return 1
-
-    emit_log(f"Éjection de {device.display}")
-
+    """Bug corrigé, confirmé sur du vrai matériel : sur Windows, ouvrir
+    `\\\\.\\PhysicalDriveN` pour `IOCTL_STORAGE_EJECT_MEDIA` (`partitions/
+    eject.py::_windows_eject` -> `imaging/winlock.py::eject_media`) exige
+    l'élévation, exactement comme l'écriture brute (§4.3) -- mais cette
+    commande tournait jusqu'ici uniquement dans le processus GUI, à
+    privilèges normaux (`ERROR_ACCESS_DENIED`, erreur 5). `--worker`/
+    `--progress-file`/`--cancel-file` (`_add_worker_args`, ci-dessous) la
+    rendent utilisable par `gui.worker_runner.WorkerRunner` comme `backup`/
+    `flash` -- la GUI ne l'appelle donc plus jamais directement, seulement
+    via un worker élevé (`gui/main_window.py::_start_eject`)."""
+    progress_file = _open_progress_file(args)
     try:
-        eject_device(device.path)
-    except NotImplementedError as exc:
-        emit_error("UNSUPPORTED_OS", str(exc))
-        return 1
-    except (OSError, subprocess.CalledProcessError) as exc:
-        emit_error("IO_ERROR", str(exc))
-        return 1
+        device = _resolve_device_or_report(args)
+        if device is None:
+            return 1
 
-    emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
-    emit_done(True)
-    return 0
+        emit_log(f"Éjection de {device.display}")
+
+        try:
+            eject_device(device.path)
+        except NotImplementedError as exc:
+            emit_error("UNSUPPORTED_OS", str(exc))
+            return 1
+        except (OSError, subprocess.CalledProcessError) as exc:
+            # Code dédié (déjà utilisé côté GUI pour un échec local avant ce
+            # correctif, `friendly_error_message("EJECT_FAILED")`) plutôt
+            # que le générique IO_ERROR -- son message (« ferme les
+            # fichiers ouverts... ou retire-la manuellement ») est plus
+            # précis pour ce cas précis qu'un renvoi vers « vérifie que la
+            # carte est branchée ».
+            emit_error("EJECT_FAILED", str(exc))
+            return 1
+
+        emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
+        emit_done(True)
+        return 0
+    finally:
+        if progress_file is not None:
+            progress_file.close()
 
 
 def cmd_gui(args: argparse.Namespace) -> int:
@@ -765,6 +840,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MAX_SIZE_BYTES,
         help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    flash_parser.add_argument(
+        "--eject-after",
+        action="store_true",
+        help=(
+            "Éjecte la carte automatiquement après l'écriture et la vérification (§4.6 -- "
+            "pour un firmware Android, dont les partitions illisibles pour Windows "
+            "déclenchent sinon des propositions de formatage)"
+        ),
     )
     _add_worker_args(flash_parser)
     _add_dev_args(flash_parser)
@@ -872,6 +956,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_SIZE_BYTES,
         help="Taille maximale acceptée en octets (défaut : 1 To)",
     )
+    _add_worker_args(eject_parser)
     _add_dev_args(eject_parser)
     eject_parser.set_defaults(func=cmd_eject)
 

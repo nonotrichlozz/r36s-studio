@@ -15,9 +15,8 @@ from r36s_studio.gui.screens import (
     BackupKindDialog,
     ConfirmDialog,
     ConsoleArt,
-    ConsoleBasePlate,
-    ConsoleHalo,
     ConsoleStage,
+    ConsoleTerminalOverlay,
     DeviceDialog,
     FileDialog,
     FullDiskAccessScreen,
@@ -34,7 +33,6 @@ from r36s_studio.gui.screens import (
     build_window_backdrop,
     format_archive_label,
 )
-from PySide6.QtCore import QParallelAnimationGroup, QPoint, QPropertyAnimation
 from PySide6.QtWidgets import QLabel, QWidget
 
 
@@ -418,427 +416,241 @@ def test_build_console_stage_returns_widget_when_asset_present(tmp_path, qapp):
 
 
 def test_console_art_paints_at_70_percent_opacity_and_has_no_graphics_effect(qapp):
-    """§5 (correctif de performance) : l'ancien QGraphicsDropShadowEffect
-    a été retiré -- ConsoleArt ne porte plus aucun QGraphicsEffect, le
-    halo est désormais un widget peint séparément (ConsoleHalo)."""
     art = ConsoleArt(_fake_pixmap())
 
     assert art._OPACITY == 0.70
     assert art.graphicsEffect() is None
 
 
-def test_console_art_float_offset_is_an_animatable_qt_property(qapp):
+def test_console_art_paints_without_raising_at_various_sizes(qapp):
     art = ConsoleArt(_fake_pixmap())
+    for w, h in [(0, 0), (1, 1), (200, 220), (400, 300)]:
+        art.resize(w, h)
+        art.grab()  # force un paintEvent réel
 
-    art.floatOffset = 4.5
 
-    assert art.floatOffset == 4.5
-    assert art._float_offset == 4.5
-
-
-def test_console_base_plate_glow_opacity_is_an_animatable_qt_property(qapp):
-    plate = ConsoleBasePlate()
-
-    plate.glowOpacity = 0.4
-
-    assert plate.glowOpacity == 0.4
-
-
-def test_console_base_plate_paints_without_raising_at_various_sizes(qapp):
-    """Pas d'assertion facile sur les pixels peints (dégradé radial
-    elliptique, technique du repère mis à l'échelle) -- au minimum, un
-    rendu ne doit jamais lever, y compris à taille nulle."""
-    plate = ConsoleBasePlate()
-    for w, h in [(0, 0), (1, 1), (140, 30)]:
-        plate.resize(w, h)
-        plate.grab()  # force un paintEvent réel
-
-
-def test_console_base_plate_caches_gradient_pixmap_and_only_rebuilds_on_resize(qapp):
-    """§5 (correctif de performance) : le QRadialGradient n'est reconstruit
-    que dans resizeEvent, jamais depuis le setter de glowOpacity."""
-    plate = ConsoleBasePlate()
-    plate.resize(140, 30)
-    cached = plate._pixmap
-
-    plate.glowOpacity = 0.4
-
-    assert plate._pixmap is cached
-
-
-def test_console_halo_glow_opacity_is_an_animatable_qt_property(qapp):
-    halo = ConsoleHalo()
-
-    halo.glowOpacity = 0.3
-
-    assert halo.glowOpacity == 0.3
-
-
-def test_console_halo_paints_without_raising_at_various_sizes(qapp):
-    halo = ConsoleHalo()
-    for w, h in [(0, 0), (1, 1), (200, 220)]:
-        halo.resize(w, h)
-        halo.grab()
-
-
-# --- ConsoleStage : les trois animations groupées (§5) ----------------------
-
-
-def test_console_stage_groups_three_animations_with_correct_periods(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    assert stage._group.animationCount() == 3
-    assert stage._plate_animation.duration() == 3000
-    assert stage._glow_animation.duration() == 4000
-    assert stage._float_animation.duration() == 6000
-    for animation in (stage._plate_animation, stage._glow_animation, stage._float_animation):
-        assert animation.loopCount() == -1
-        assert animation.easingCurve().type() == animation.easingCurve().type().InOutSine
-
-
-def test_console_stage_plate_animation_pulses_between_25_and_55_percent(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    assert stage._plate_animation.keyValueAt(0.0) == 0.25
-    assert stage._plate_animation.keyValueAt(0.5) == 0.55
-    assert stage._plate_animation.keyValueAt(1.0) == 0.25
-
-
-def test_console_stage_glow_animation_pulses_halo_opacity_between_15_and_38_percent(qapp):
-    """§5 (correctif de performance) : le halo n'anime plus un rayon de
-    flou (QGraphicsDropShadowEffect, coûteux) mais l'opacité d'une
-    ellipse peinte (ConsoleHalo), sur le même principe que le socle."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    assert stage._glow_animation.targetObject() is stage._halo
-    assert stage._glow_animation.keyValueAt(0.0) == 0.15
-    assert stage._glow_animation.keyValueAt(0.5) == 0.38
-    assert stage._glow_animation.keyValueAt(1.0) == 0.15
-
-
-def test_console_stage_float_animation_moves_6px_up_and_down(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    assert stage._float_animation.keyValueAt(0.0) == -6.0
-    assert stage._float_animation.keyValueAt(0.5) == 6.0
-    assert stage._float_animation.keyValueAt(1.0) == -6.0
-
-
-def test_console_stage_glow_animation_starts_out_of_phase_with_plate(qapp):
-    """§5 : "décalé par rapport au socle pour éviter que les deux
-    respirent à l'unisson" -- vérifie qu'un déphasage explicite est bien
-    appliqué au démarrage (au-delà de la simple différence de période)."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    assert stage._glow_animation.currentTime() == 2000  # moitié de son cycle de 4 s
-
-
-def test_console_stage_animations_start_running_by_default(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    assert stage._group.state() == QParallelAnimationGroup.Running
-
-
-def test_console_stage_pause_and_resume(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    stage.pause()
-    assert stage._group.state() == QParallelAnimationGroup.Paused
-
-    stage.resume()
-    assert stage._group.state() == QParallelAnimationGroup.Running
-
-
-# --- Correctif de performance (§5) : minuteur de repeint à 30 im/s, ---------
-# --- valeurs animées découplées du repeint --------------------------------
-
-
-def test_console_stage_caps_repaint_at_30fps_and_runs_by_default(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    assert stage._repaint_timer.interval() == 33
-    assert stage._repaint_timer.isActive() is True
-
-
-def test_console_stage_pause_stops_the_repaint_timer(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    stage.pause()
-
-    assert stage._repaint_timer.isActive() is False
-
-
-def test_console_stage_resume_restarts_the_repaint_timer(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.pause()
-
-    stage.resume()
-
-    assert stage._repaint_timer.isActive() is True
-
-
-def test_console_stage_set_animations_enabled_false_stops_the_repaint_timer(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-
-    stage.set_animations_enabled(False)
-
-    assert stage._repaint_timer.isActive() is False
-
-
-def test_console_property_setters_do_not_trigger_their_own_repaint(qapp):
-    """Les valeurs animées (glowOpacity, floatOffset) ne doivent plus
-    déclencher leur propre update() -- seul le minuteur groupé de
-    ConsoleStage impose un repeint (§5, correctif de performance)."""
-    art = ConsoleArt(_fake_pixmap())
-    plate = ConsoleBasePlate()
-    halo = ConsoleHalo()
-
-    with patch.object(QWidget, "update") as mock_update:
-        art.floatOffset = 3.0
-        plate.glowOpacity = 0.4
-        halo.glowOpacity = 0.3
-
-    mock_update.assert_not_called()
-
-
-def test_console_stage_set_animations_enabled_false_stops_and_resets_to_rest_state(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage._base_plate.glowOpacity = 0.55
-    stage._halo.glowOpacity = 0.38
-    stage._console_art.floatOffset = 6.0
-
-    stage.set_animations_enabled(False)
-
-    assert stage._group.state() == QParallelAnimationGroup.Stopped
-    assert stage._base_plate.glowOpacity == ConsoleBasePlate._MIN_OPACITY
-    assert stage._halo.glowOpacity == ConsoleHalo._MIN_OPACITY
-    assert stage._console_art.floatOffset == 0.0
-
-
-def test_console_stage_set_animations_enabled_true_after_false_resumes(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.set_animations_enabled(False)
-
-    stage.set_animations_enabled(True)
-
-    assert stage._group.state() == QParallelAnimationGroup.Running
-
-
-def test_console_stage_resume_is_a_noop_while_disabled(qapp):
-    """`pause()` (appelé pendant une opération disque, §5) ne doit pas
-    relancer les animations si l'utilisateur les a désactivées entre
-    temps."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.set_animations_enabled(False)
-
-    stage.resume()
-
-    assert stage._group.state() == QParallelAnimationGroup.Stopped
-
-
-def test_console_stage_positions_base_plate_under_the_console(qapp):
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.resize(400, 300)
-    stage.show()
-
-    # La console est centrée dans une réserve verticale pour le halo/le
-    # socle (pas tout `stage.rect()`, §5 correctif de rognage) -- lu
-    # directement sur la géométrie/le rendu réels plutôt que de reproduire
-    # la formule de marge interne (qui reste un détail d'implémentation).
-    art_geometry = stage._console_art.geometry()
-    rendered_height = stage._console_art.rendered_size().height()
-    art_rect_bottom = art_geometry.top() + art_geometry.height() // 2 + rendered_height // 2
-
-    plate_rect = stage._base_plate.geometry()
-
-    # Le socle est centré horizontalement et sa largeur avoisine 70 % de
-    # celle de la console rendue (§5).
-    assert plate_rect.width() > 0
-    assert abs(plate_rect.center().x() - stage.width() // 2) <= 1
-    assert abs(plate_rect.center().y() - art_rect_bottom) <= plate_rect.height()
-
-
-# --- bug corrigé : console tronquée + socle invisible sur une boîte -------
-# --- plus carrée/plus haute que large (accueil du mode assisté, §5) -------
-#
-# Constaté en pratique : le bas de la console était tronqué net (rognée
-# sous les joysticts) et le socle lumineux n'apparaissait jamais du tout,
-# uniquement sur l'accueil du mode assisté (boîte plus grande, plus
-# carrée) -- jamais sur la colonne droite du mode expert (boîte plus
-# large que haute). Cause : `ConsoleArt` recevait tout `stage.rect()`
-# sans marge réservée ; quand la hauteur devient la contrainte liante du
-# redimensionnement proportionnel, le pixmap scalé remplit exactement
-# toute la hauteur du widget -- zéro marge pour `floatOffset` (bas rogné
-# dès que la flottaison est positive) et pour le socle/le halo (poussés
-# hors des limites de `stage`, rognés par Qt aux bornes de son parent).
-# Désactiver « Animations de la console » faisait disparaître le défaut
-# (`floatOffset` reste alors à 0) -- confirmant que c'est bien la
-# flottaison qui sortait la console de sa zone de dessin.
-
-
-def _assert_nothing_clips_at_any_float_offset(stage):
-    """Balaie tout le cycle de `floatOffset` (pas seulement les deux
-    bornes) et vérifie qu'aucun repeint de la console ne dépasserait les
-    limites de son propre widget, et que le halo/le socle restent
-    entièrement dans `stage.rect()`."""
-    art = stage._console_art
-    for offset in (
-        -ConsoleArt._FLOAT_AMPLITUDE,
-        -ConsoleArt._FLOAT_AMPLITUDE / 2,
-        0.0,
-        ConsoleArt._FLOAT_AMPLITUDE / 2,
-        ConsoleArt._FLOAT_AMPLITUDE,
-    ):
-        art.floatOffset = offset
-        rendered = art.rendered_size()
-        y = (art.height() - rendered.height()) / 2 + offset
-        assert y >= 0, f"console rognée en haut à floatOffset={offset} (y={y})"
-        assert y + rendered.height() <= art.height(), (
-            f"console rognée en bas à floatOffset={offset} " f"(y={y}, hauteur rendue={rendered.height()})"
-        )
-
-    stage_rect = stage.rect()
-    assert stage_rect.contains(stage._halo.geometry()), "halo rogné par les limites de ConsoleStage"
-    assert stage_rect.contains(stage._base_plate.geometry()), "socle rogné par les limites de ConsoleStage"
-
-
-def test_console_stage_nothing_clips_on_a_tall_square_ish_box(qapp):
-    """Reproduit la forme de boîte de l'accueil du mode assisté (plus
-    grande, plus carrée que celle du mode expert) où le défaut a été
-    constaté."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.resize(360, 420)  # plus haute que large -- la hauteur lie le scaling
-    stage.show()
-
-    _assert_nothing_clips_at_any_float_offset(stage)
-
-
-def test_console_stage_nothing_clips_on_a_wide_box(qapp):
-    """Forme de boîte du mode expert (plus large que haute) -- déjà
-    correcte avant le correctif, doit le rester."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.resize(640, 220)
-    stage.show()
-
-    _assert_nothing_clips_at_any_float_offset(stage)
-
-
-def test_console_stage_nothing_clips_on_a_small_box(qapp):
-    """Boîte très petite (redimensionnement en cours, premières passes de
-    layout) -- ne doit jamais lever ni produire de géométrie négative
-    absurde."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.resize(60, 50)
-    stage.show()
-
-    _assert_nothing_clips_at_any_float_offset(stage)
-
-
-def test_console_art_reserves_float_margin_even_when_height_is_the_binding_constraint(qapp):
-    """Test ciblé sur `ConsoleArt` seul (sans `ConsoleStage`) : une boîte
-    carrée pour un pixmap carré rend la hauteur strictement liante --
-    exactement le cas dégénéré à l'origine du bug."""
+def test_console_art_scales_with_aspect_ratio_preserved(qapp):
+    """Animations retirées (§5) : plus de marge de flottaison à réserver,
+    la mise à l'échelle utilise directement `self.size()`."""
     art = ConsoleArt(_fake_pixmap())
     art.resize(200, 200)
+    art.show()  # resizeEvent n'est livré qu'une fois le widget affiché
 
     rendered = art.rendered_size()
+    assert rendered.width() > 0 and rendered.height() > 0
+    assert rendered.width() <= 200 and rendered.height() <= 200
 
-    assert rendered.height() <= 200 - 2 * ConsoleArt._FLOAT_AMPLITUDE
 
-
-# --- régressions du premier correctif de rognage, corrigées à nouveau -----
+# --- ConsoleTerminalOverlay : activité disque en temps réel (§5) -----------
 #
-# Trois défauts constatés après le premier correctif (ci-dessus) : (1) la
-# console avait disparu de l'accueil du mode assisté, (2) elle était
-# devenue nettement plus petite en mode expert, (3) pendant la flottaison,
-# le socle restait immobile pendant que la console bougeait -- un morceau
-# semblait se détacher ou s'enfoncer selon le sens du mouvement.
+# Correction de conception, confirmée sur du vrai matériel : ce terminal a
+# été accusé à tort d'un ralentissement de la sauvegarde système d'un
+# facteur dix, puis entièrement retiré -- la cause réelle, confirmée en
+# bissectant par mesure du débit CLI pur (donc sans ce terminal), était une
+# carte SD d'origine de console non reconnue (~6 Mo/s en lecture contre
+# ~88 Mo/s pour une SanDisk, capacité exposée très inférieure à celle
+# annoncée -- §8). Rétabli : ce code n'a jamais été la cause du
+# ralentissement rapporté.
 
 
-def test_console_stage_console_size_is_reasonable_in_a_landscape_box(qapp):
-    """(2) régression : la vraie image `console.png` est quasi carrée
-    (499x500, vérifié) -- dans une boîte paysage comme en mode expert
-    (~616x415), la première version du correctif (marge estimée à partir
-    de `self.width()`/`self.height()`, pas de la taille rendue réelle)
-    aurait réduit le rendu à ~177px de haut sur 415 disponibles. Avec
-    l'estimation basée sur le rendu naturel, la console reste nettement
-    plus grande."""
-    from PySide6.QtGui import QPixmap
+def test_console_terminal_overlay_starts_empty_with_no_fake_activity(qapp):
+    """Au repos, rien d'inventé -- pas de ligne tant qu'aucun événement de
+    progression réel n'a été ajouté (§2 règle 5)."""
+    overlay = ConsoleTerminalOverlay()
 
-    square_pixmap = QPixmap(500, 500)  # proportions de la vraie console.png
-    square_pixmap.fill()
-    stage = ConsoleStage(ConsoleArt(square_pixmap))
-
-    stage.resize(616, 415)  # proportions réelles du mode expert
-    stage.show()
-
-    rendered_height = stage._console_art.rendered_size().height()
-    assert rendered_height > 200  # nettement plus que les ~177px de la version buggée
+    assert overlay._lines == []
 
 
-def test_console_stage_console_remains_clearly_visible_on_a_tall_square_box(qapp):
-    """(1) Sur une boîte plus haute que large (accueil du mode assisté),
-    la première version du correctif réservait tant de marge que la
-    console disparaissait entièrement."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+def test_console_terminal_overlay_append_line_records_real_events_only(qapp):
+    overlay = ConsoleTerminalOverlay()
 
-    stage.resize(400, 400)
-    stage.show()
+    overlay.append_line("0x0000000000  +4.0 Mo  18.4 Mo/s")
+    overlay.append_line("0x0000400000  +4.0 Mo  19.1 Mo/s")
 
-    rendered = stage._console_art.rendered_size()
-    assert rendered.width() > 0
-    assert rendered.height() > 50  # visiblement affichée, pas un fragment
+    assert overlay._lines == ["0x0000000000  +4.0 Mo  18.4 Mo/s", "0x0000400000  +4.0 Mo  19.1 Mo/s"]
 
 
-def test_console_stage_repaint_moves_plate_by_the_same_float_offset_as_console(qapp):
-    """(3) Le socle doit suivre exactement le même décalage que la
-    console -- sinon l'un semble se détacher de l'autre pendant que
-    l'autre flotte."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.resize(400, 300)
-    base_pos = stage._plate_base_pos
+def test_console_terminal_overlay_clear_lines_returns_to_rest_state(qapp):
+    overlay = ConsoleTerminalOverlay()
+    overlay.append_line("0x0000000000  +4.0 Mo  18.4 Mo/s")
 
-    stage._console_art.floatOffset = 4.0
-    stage._repaint_console_area()
+    overlay.clear_lines()
 
-    assert stage._base_plate.pos() == base_pos + QPoint(0, 4)
+    assert overlay._lines == []
 
 
-def test_console_stage_moving_the_plate_does_not_regenerate_its_cached_pixmap(qapp):
-    """`move()` ne doit jamais redéclencher `resizeEvent` (donc jamais
-    reconstruire le dégradé mis en cache, §5 correctif de performance) --
-    seule sa position change à chaque tick, jamais sa taille."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.resize(400, 300)
-    cached_pixmap = stage._base_plate._pixmap
+def test_console_terminal_overlay_caps_memory_at_max_lines(qapp):
+    overlay = ConsoleTerminalOverlay()
 
-    stage._console_art.floatOffset = 4.0
-    stage._repaint_console_area()
+    for i in range(overlay._MAX_LINES + 50):
+        overlay.append_line(str(i))
 
-    assert stage._base_plate._pixmap is cached_pixmap
+    assert len(overlay._lines) == overlay._MAX_LINES
+    assert overlay._lines[-1] == str(overlay._MAX_LINES + 49)  # les plus récentes, pas les plus anciennes
 
 
-def test_console_stage_repaint_invalidates_the_whole_widget(qapp):
-    """(3) Une sous-région calculée ne suivait pas exactement chaque
-    élément mobile -- invalide tout `self.rect()` à chaque tick plutôt."""
-    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
-    stage.resize(400, 300)
+def test_console_terminal_overlay_paints_without_raising_at_various_sizes(qapp):
+    overlay = ConsoleTerminalOverlay()
+    overlay.append_line("0x0000000000  +4.0 Mo  18.4 Mo/s")
+    for w, h in [(0, 0), (1, 1), (140, 60), (300, 120)]:
+        overlay.resize(w, h)
+        overlay.grab()
+
+
+def test_console_terminal_overlay_cursor_blinks_on_a_timer(qapp):
+    overlay = ConsoleTerminalOverlay()
+    initial = overlay._cursor_on
+
+    overlay._toggle_cursor()
+
+    assert overlay._cursor_on is not initial
+
+
+# --- correctif de performance : repeint cadencé, jamais depuis un setter --
+# (appliqué par précaution -- ce n'était pas la cause du ralentissement, ---
+# mais reste une bonne pratique, sans coût) --------------------------------
+
+
+def test_console_terminal_overlay_append_line_never_repaints_directly(qapp):
+    overlay = ConsoleTerminalOverlay()
 
     with patch.object(QWidget, "update") as mock_update:
-        stage._repaint_console_area()
+        overlay.append_line("0x0000000000  +4.0 Mo  18.4 Mo/s")
 
-    mock_update.assert_called_once_with()
+    mock_update.assert_not_called()
+    assert overlay._dirty is True
 
 
-def test_console_stage_disabling_animations_resets_plate_to_its_base_position(qapp):
+def test_console_terminal_overlay_toggle_cursor_never_repaints_directly(qapp):
+    overlay = ConsoleTerminalOverlay()
+
+    with patch.object(QWidget, "update") as mock_update:
+        overlay._toggle_cursor()
+
+    mock_update.assert_not_called()
+    assert overlay._dirty is True
+
+
+def test_console_terminal_overlay_clear_lines_never_repaints_directly(qapp):
+    overlay = ConsoleTerminalOverlay()
+    overlay.append_line("une ligne")
+    overlay._dirty = False
+
+    with patch.object(QWidget, "update") as mock_update:
+        overlay.clear_lines()
+
+    mock_update.assert_not_called()
+    assert overlay._dirty is True
+
+
+def test_console_terminal_overlay_repaint_timer_runs_at_30fps(qapp):
+    overlay = ConsoleTerminalOverlay()
+
+    assert overlay._repaint_timer.interval() == 33
+    assert overlay._repaint_timer.isActive() is True
+
+
+def test_console_terminal_overlay_flush_repaint_only_updates_when_dirty(qapp):
+    overlay = ConsoleTerminalOverlay()
+    overlay._dirty = False
+
+    with patch.object(QWidget, "update") as mock_update:
+        overlay._flush_repaint()
+    mock_update.assert_not_called()
+
+    overlay._dirty = True
+    with patch.object(QWidget, "update") as mock_update:
+        overlay._flush_repaint()
+    mock_update.assert_called_once()
+    assert overlay._dirty is False
+
+
+def test_console_terminal_overlay_caches_font_and_only_rebuilds_on_line_height_change(qapp):
+    overlay = ConsoleTerminalOverlay()
+    overlay.resize(300, 120)
+
+    font_a = overlay._terminal_font()
+    font_b = overlay._terminal_font()
+    assert font_a is font_b  # même instance -- pas reconstruite à chaque appel
+
+    overlay.resize(300, 500)  # hauteur de ligne différente
+    font_c = overlay._terminal_font()
+    assert font_c is not font_a
+
+
+# --- ConsoleStage : positionnement du terminal en proportion de l'image ----
+# --- rendue, jamais en coordonnées absolues (§5) ---------------------------
+
+
+def test_console_stage_positions_terminal_within_the_rendered_console(qapp):
     stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
     stage.resize(400, 300)
-    stage._console_art.floatOffset = 4.0
-    stage._repaint_console_area()
+    stage.show()
 
-    stage.set_animations_enabled(False)
+    terminal_rect = stage._terminal.geometry()
+    art_rect = stage._console_art.geometry()
 
-    assert stage._base_plate.pos() == stage._plate_base_pos
+    assert terminal_rect.width() > 0
+    assert terminal_rect.height() > 0
+    # Entièrement contenu dans la zone de la console (le rectangle de
+    # l'écran est une fraction de l'image rendue, jamais hors de ses
+    # limites).
+    assert art_rect.contains(terminal_rect)
+
+
+def test_console_stage_terminal_rect_scales_proportionally_not_absolutely(qapp):
+    """Même piège que le rognage du bas de la console (déjà corrigé pour
+    la flottaison, désormais retirée) : la position/taille du terminal
+    doit suivre la taille rendue, jamais une valeur en pixels fixe."""
+    small = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    small.resize(200, 150)
+    small.show()
+
+    large = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    large.resize(800, 600)
+    large.show()
+
+    assert large._terminal.geometry().width() > small._terminal.geometry().width() * 2
+    assert large._terminal.geometry().height() > small._terminal.geometry().height() * 2
+
+
+def test_console_stage_nothing_clips_on_various_box_shapes(qapp):
+    """Formes de boîte réelles (mode expert paysage, accueil assisté plus
+    carré, redimensionnement en cours) -- ne doit jamais lever ni placer
+    le terminal hors de `ConsoleStage`."""
+    for w, h in [(360, 420), (640, 220), (60, 50), (1, 1)]:
+        stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+        stage.resize(w, h)
+        stage.show()
+        assert stage.rect().contains(stage._terminal.geometry())
+
+
+def test_console_stage_append_line_forwards_to_terminal(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+
+    stage.append_line("0x0000000000  +4.0 Mo  18.4 Mo/s")
+
+    assert stage._terminal._lines == ["0x0000000000  +4.0 Mo  18.4 Mo/s"]
+
+
+def test_console_stage_start_activity_clears_the_terminal(qapp):
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.append_line("ligne d'une opération précédente")
+
+    stage.start_activity()
+
+    assert stage._terminal._lines == []
+
+
+def test_console_stage_stop_activity_clears_the_terminal(qapp):
+    """Au repos, l'écran de la console n'affiche qu'un curseur -- jamais
+    les dernières lignes d'une activité terminée."""
+    stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
+    stage.append_line("dernière ligne de l'opération")
+
+    stage.stop_activity()
+
+    assert stage._terminal._lines == []
 
 
 def test_build_window_backdrop_returns_none_when_asset_missing(qapp):
@@ -892,27 +704,16 @@ def test_main_view_works_without_console_stage(qapp):
     assert view is not None
 
 
-def test_main_view_has_no_animation_toggle_without_console_stage(qapp):
-    home = HomeScreen()
-    log_panel = LogPanel()
-
-    view = MainView(home, None, log_panel)
-
-    assert not hasattr(view, "animation_toggle")
-
-
-def test_main_view_animation_toggle_is_checked_by_default_and_wired_to_console_stage(qapp):
+def test_main_view_has_no_animation_toggle(qapp):
+    """Réglage retiré avec les animations elles-mêmes (§5) : plus rien à
+    activer/désactiver, la console est désormais toujours immobile."""
     home = HomeScreen()
     log_panel = LogPanel()
     stage = ConsoleStage(ConsoleArt(_fake_pixmap()))
 
     view = MainView(home, stage, log_panel)
 
-    assert view.animation_toggle.isChecked() is True
-
-    view.animation_toggle.setChecked(False)
-
-    assert stage._group.state() == QParallelAnimationGroup.Stopped
+    assert not hasattr(view, "animation_toggle")
 
 
 def test_main_view_without_backdrop_asset_has_no_backdrop(qapp):

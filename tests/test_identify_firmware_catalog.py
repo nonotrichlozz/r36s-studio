@@ -50,4 +50,14 @@ def test_firmware_entry_is_frozen():
 def test_firmware_entry_defaults():
     entry = FirmwareEntry("x", "t", "d", status="experimental")
     assert entry.is_clone_safe is False
+    assert entry.is_android is False
     assert entry.releases_url is None
+
+
+def test_android_entries_are_exactly_r36droid_and_andr36oid():
+    """§4.6 : Windows ne sait lire aucune partition d'une image Android et
+    propose de la formater dès qu'il la découvre -- `MainWindow` s'appuie
+    sur ce drapeau pour avertir l'utilisateur et éjecter automatiquement
+    après un flash (§5)."""
+    android = {entry.id for entry in FIRMWARE_CATALOG if entry.is_android}
+    assert android == {"r36droid", "andr36oid"}

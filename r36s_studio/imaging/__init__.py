@@ -10,6 +10,16 @@ from __future__ import annotations
 from .backup import backup_device, compute_backup_size
 from .copy import BLOCK_SIZE, CancelCheck, OperationCancelled, ProgressCallback, ProgressEvent, copy_range
 from .flash import FlashResult, flash_device
+from .games_partition import (
+    GAMES_PARTITION_LABEL,
+    GAMES_PARTITION_WORTHWHILE_BYTES,
+    MIN_GAMES_PARTITION_BYTES,
+    GamesPartitionResult,
+    NoFreeMbrSlot,
+    NoFreeSpaceForGamesPartition,
+    create_and_format_games_partition,
+    create_and_format_games_partition_if_worthwhile,
+)
 from .image_source import (
     SevenZipArchiveError,
     UnsupportedImageFormatError,
@@ -54,4 +64,12 @@ __all__ = [
     "estimate_system_backup_size",
     "estimate_system_backup_size_unprivileged",
     "prepared_write_target",
+    "GAMES_PARTITION_LABEL",
+    "GAMES_PARTITION_WORTHWHILE_BYTES",
+    "MIN_GAMES_PARTITION_BYTES",
+    "GamesPartitionResult",
+    "NoFreeMbrSlot",
+    "NoFreeSpaceForGamesPartition",
+    "create_and_format_games_partition",
+    "create_and_format_games_partition_if_worthwhile",
 ]

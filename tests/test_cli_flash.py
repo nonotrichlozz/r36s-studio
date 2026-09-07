@@ -207,3 +207,183 @@ def test_cmd_flash_volume_in_use_emits_dedicated_code_not_io_error(mock_list, mo
     out = capsys.readouterr().out
     assert '"code": "VOLUME_IN_USE"' in out
     assert '"code": "IO_ERROR"' not in out
+
+
+# --- partition de jeux, décision automatique post-écriture (§4.3) ----------
+# Plus de drapeau `--create-games-partition` (retiré, §1 : l'utilisateur ne
+# peut pas savoir à l'avance si une image laissera de l'espace libre) --
+# `create_and_format_games_partition_if_worthwhile` est appelée pour tout
+# flash réussi, décide seule (taille réelle de la carte, seuil de 1 Go) et
+# ne fait jamais échouer un flash déjà réussi pour ce motif. Mockée ici --
+# couverte séparément dans `tests/test_imaging_games_partition.py`.
+
+
+@patch(
+    "r36s_studio.__main__.create_and_format_games_partition_if_worthwhile",
+    return_value=None,
+)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_logs_when_not_enough_free_space_for_games_partition(
+    mock_list, mock_confirm, mock_flash, mock_create_games, tmp_path, capsys
+):
+    """`None` = pas assez d'espace libre (moins de 1 Go, ou aucun espace du
+    tout) -- jamais un échec du flash déjà réussi et vérifié, mais jamais
+    une décision silencieuse non plus (§4.4)."""
+    mock_list.return_value = [_make_device()]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "sd.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    code = args.func(args)
+
+    assert code == 0
+    mock_create_games.assert_called_once()
+    out = capsys.readouterr().out
+    assert "Pas assez d'espace libre" in out
+    assert '"type": "done"' in out
+    assert '"ok": true' in out
+
+
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_creates_games_partition_automatically_when_worthwhile(
+    mock_list, mock_confirm, mock_flash, mock_create_games, tmp_path, capsys
+):
+    from r36s_studio.imaging.games_partition import GamesPartitionResult
+
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    mock_create_games.return_value = GamesPartitionResult(start_bytes=100, size_bytes=200, is_gpt=False)
+    image = tmp_path / "sd.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    code = args.func(args)
+
+    assert code == 0
+    mock_create_games.assert_called_once()
+    out = capsys.readouterr().out
+    assert "Espace de jeux recréé" in out
+    assert '"type": "done"' in out
+    assert '"ok": true' in out
+
+
+@patch(
+    "r36s_studio.__main__.create_and_format_games_partition_if_worthwhile",
+    side_effect=OSError("mkfs.exfat introuvable"),
+)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_games_partition_failure_is_best_effort_and_does_not_fail_the_flash(
+    mock_list, mock_confirm, mock_flash, mock_create_games, tmp_path, capsys
+):
+    """Le flash lui-même a déjà réussi et a été vérifié -- un échec de ce
+    bonus (formatage natif indisponible...) ne doit jamais renverser ce
+    résultat, même principe déjà établi pour `--eject-after`."""
+    mock_list.return_value = [_make_device()]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "sd.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    code = args.func(args)
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Espace de jeux non recréé" in out
+    assert '"level": "warning"' in out
+    assert '"type": "done"' in out
+    assert '"ok": true' in out
+
+
+# --- --eject-after (§4.6) ----------------------------------------------------
+# Firmware Android : ses partitions sont illisibles pour Windows, qui propose
+# de les formater dès qu'il les découvre -- éjecter tout de suite, dans le
+# même worker déjà élevé, réduit la fenêtre pendant laquelle ça peut arriver.
+
+
+@patch("r36s_studio.__main__.eject_device")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_without_flag_never_ejects(mock_list, mock_confirm, mock_flash, mock_eject, tmp_path):
+    mock_list.return_value = [_make_device()]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "sd.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    code = args.func(args)
+
+    assert code == 0
+    mock_eject.assert_not_called()
+
+
+@patch("r36s_studio.__main__.eject_device")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_with_eject_after_ejects_on_success(mock_list, mock_confirm, mock_flash, mock_eject, tmp_path, capsys):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "sd.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(
+        ["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--eject-after"]
+    )
+    code = args.func(args)
+
+    assert code == 0
+    mock_eject.assert_called_once_with(device.path)
+    out = capsys.readouterr().out
+    assert '"type": "done"' in out
+    assert '"ok": true' in out
+
+
+@patch(
+    "r36s_studio.__main__.eject_device",
+    side_effect=OSError("carte occupée"),
+)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_eject_after_failure_does_not_fail_the_flash(
+    mock_list, mock_confirm, mock_flash, mock_eject, tmp_path, capsys
+):
+    """Le flash lui-même a réussi -- un échec d'éjection best-effort ne
+    doit jamais rendre l'opération globale en échec (§4.6)."""
+    mock_list.return_value = [_make_device()]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "sd.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(
+        ["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--eject-after"]
+    )
+    code = args.func(args)
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"ok": true' in out
+    assert "carte occupée" in out

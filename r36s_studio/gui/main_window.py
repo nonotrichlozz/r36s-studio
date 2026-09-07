@@ -35,7 +35,6 @@ from r36s_studio.imaging import (
     estimate_total_bytes,
 )
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, set_privileged_mount_hook
-from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
 
@@ -122,6 +121,16 @@ class MainWindow(QMainWindow):
         self._device: Optional[Device] = None
         self._file_path: Optional[str] = None
         self._runner: Optional[object] = None  # WorkerRunner | PartitionJobRunner
+        # Éjection (étape F/bouton du journal/automatique en mode assisté,
+        # §4.4/§4.5) -- toujours un `WorkerRunner` dédié, distinct de
+        # `self._runner` ci-dessus pour ne jamais interférer avec le
+        # pipeline principal (`_start_worker`/`_on_worker_finished`, qui
+        # décide de la suite selon `self._mode`) : bug corrigé, confirmé
+        # sur du vrai matériel -- ouvrir `\\.\PhysicalDriveN` pour
+        # `IOCTL_STORAGE_EJECT_MEDIA` exige l'élévation, exactement comme
+        # l'écriture brute, mais l'éjection tournait jusqu'ici en
+        # privilèges normaux dans le processus GUI (`ERROR_ACCESS_DENIED`).
+        self._eject_runner: Optional[WorkerRunner] = None
         self._last_error_code: Optional[str] = None
         self._last_error_msg: Optional[str] = None
         self._last_progress_bytes = 0  # taille de l'archive créée (étapes A/B, journal de bord)
@@ -214,8 +223,8 @@ class MainWindow(QMainWindow):
         # bascule entre les deux (`MainView.show_home`/
         # `show_wizard_panel`). `_log_panel` (droite, bas) reste unique et
         # partagé entre les deux modes ; `_console_stage` (droite, haut,
-        # purement décorative -- animations mises en pause pendant une
-        # opération, §5) peut être `None` si l'image source est absente.
+        # illustration de la console + terminal d'activité disque en
+        # temps réel, §5) peut être `None` si l'image source est absente.
         # `_assisted_landing` a sa propre console, plus grande (§5 mode
         # assisté) -- MainView et AssistedLandingScreen ne sont jamais
         # affichés en même temps, donc pas de conflit de parent.
@@ -465,7 +474,7 @@ class MainWindow(QMainWindow):
         self._home.set_busy(True)
         self._assisted_landing.set_busy(True)
         if self._console_stage is not None:
-            self._console_stage.pause()
+            self._console_stage.start_activity()
         self._estimate_runner = SystemBackupEstimateRunner(device.path, parent=self)
         self._estimate_runner.finished_estimate.connect(self._on_system_backup_estimate_ready)
         self._estimate_runner.start()
@@ -483,7 +492,7 @@ class MainWindow(QMainWindow):
         self._home.set_busy(False)
         self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
-            self._console_stage.resume()
+            self._console_stage.stop_activity()
         if estimate.error:
             # Le détail brut (message de l'exception d'origine) suit
             # toujours le message principal, comme pour toute autre
@@ -545,7 +554,7 @@ class MainWindow(QMainWindow):
         self._home.set_busy(False)
         self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
-            self._console_stage.resume()
+            self._console_stage.stop_activity()
         if not ok or self._pending_estimate_size_bytes is None:
             message = friendly_error_message(self._last_error_code or "")
             self._log_panel.append_log(message)
@@ -664,10 +673,10 @@ class MainWindow(QMainWindow):
         # boutons de bascule, quel que soit l'écran effectivement visible.
         self._assisted_landing.set_busy(True)
         if self._console_stage is not None:
-            # Pas d'intérêt à faire tourner ces animations pour rien
-            # pendant une opération longue (§5) -- le journal de bord
-            # suffit comme signal d'activité.
-            self._console_stage.pause()
+            # Repart d'un terminal d'activité vierge pour cette nouvelle
+            # opération (§5) -- `_on_progress` y ajoute une ligne par
+            # événement de progression réel pendant qu'elle tourne.
+            self._console_stage.start_activity()
         self._last_error_code = None
         self._last_error_msg = None
         self._last_progress_bytes = 0
@@ -690,6 +699,32 @@ class MainWindow(QMainWindow):
             argv = ["backup", "--device", self._device.path, "--output", self._file_path, "--system-only"]
         else:
             argv = ["flash", "--image", self._file_path, "--device", self._device.path]
+            # Plus de drapeau `--create-games-partition` à construire ici
+            # (§4.3) : la décision (recréer ou non une partition de jeux
+            # sur l'espace laissé libre) est désormais entièrement
+            # automatique, prise par le worker élevé lui-même *après*
+            # l'écriture, à partir de la taille réelle de la carte -- la
+            # GUI n'a plus besoin de deviner la provenance du fichier
+            # choisi (comparaison de chemin, case à cocher : les deux
+            # ont été retirées, remplacées par `imaging.games_partition
+            # .create_and_format_games_partition_if_worthwhile`,
+            # `__main__.py::cmd_flash`). Correct pour tout flash, dans les
+            # deux modes : l'utilisateur ne peut de toute façon pas savoir
+            # à l'avance si une image donnée laissera de l'espace libre
+            # (§1 -- retour d'usage réel après une première version basée
+            # sur une case à cocher, jugée déroutante y compris pour
+            # quelqu'un qui connaît le logiciel).
+            if self._flash_may_trigger_windows_format_prompt():
+                # Au moins une de ses partitions est illisible pour Windows
+                # (le système ext4 "Linux" de tout le catalogue, plusieurs
+                # partitions en plus pour Android), qui propose de la
+                # formater dès qu'il la découvre (§4.6) -- éjecter tout de
+                # suite, dans ce même worker déjà élevé, réduit la fenêtre
+                # pendant laquelle ça peut arriver (voir le message
+                # explicite ajouté au journal par `_on_worker_finished`,
+                # qui reste le vrai filet de sécurité si l'éjection ne
+                # gagne pas la course).
+                argv.append("--eject-after")
 
         self._runner = WorkerRunner(argv, parent=self, macos_auth_session=self._get_or_create_macos_auth_session())
         self._runner.progress.connect(self._on_progress)
@@ -762,6 +797,28 @@ class MainWindow(QMainWindow):
     # octets (flash d'une carte de 32 Go).
     @Slot("qint64", "qint64", float)
     def _on_progress(self, done: int, total: int, speed: float) -> None:
+        if self._console_stage is not None:
+            # Terminal d'activité disque de l'écran de la console (§5) :
+            # une ligne par événement de progression réellement émis par
+            # `copy_range`/`copy_tree` -- jamais une ligne inventée sans
+            # écriture correspondante (§2 règle 5). Le bloc affiché est le
+            # delta depuis le dernier événement (les octets réellement
+            # transférés dans cette fenêtre), pas une taille de bloc
+            # interne supposée -- ce delta peut agréger plusieurs blocs de
+            # 4 Mio de `copy_range` entre deux événements de progression.
+            #
+            # Correction de conception, confirmée sur du vrai matériel :
+            # ce terminal a été accusé à tort d'un ralentissement de la
+            # sauvegarde système d'un facteur dix (~85 Mo/s -> 6,7 Mo/s),
+            # puis entièrement retiré -- la cause réelle, confirmée en
+            # bissectant par mesure du débit CLI pur (donc sans ce
+            # terminal), était une carte SD d'origine de console non
+            # reconnue (~6 Mo/s en lecture contre ~88 Mo/s pour une
+            # SanDisk sur le même port, capacité exposée très inférieure à
+            # celle annoncée -- §8). Rétabli : ce code n'a jamais été la
+            # cause du ralentissement rapporté.
+            block = max(0, done - self._last_progress_bytes)
+            self._console_stage.append_line(f"0x{done:010X}  +{_format_size(block)}  {_format_size(speed)}/s")
         # `done` du tout dernier événement = le compte final exact (§2 n°5,
         # `copy_range`/`copy_tree`) -- utilisé comme taille de l'archive
         # créée par les étapes A/B (journal de bord).
@@ -777,6 +834,40 @@ class MainWindow(QMainWindow):
     def _on_worker_error(self, code: str, msg: str) -> None:
         self._last_error_code = code
         self._last_error_msg = msg
+
+    def _is_flashing_android_firmware(self) -> bool:
+        """Vrai seulement pour un flash mode expert d'un firmware Android
+        (§4.6, R36Droid/andr36oid) -- jamais pour le parcours de clonage du
+        mode assisté, qui restaure la propre sauvegarde de l'utilisateur
+        sans jamais choisir de firmware (`self._app_config.firmware` n'a
+        alors aucun rapport avec ce qui est réellement écrit). Recalculée à
+        chaque appel plutôt que mise en cache dans un attribut d'instance :
+        appelée à la fois avant de lancer le worker (`_start_worker`, pour
+        `--eject-after`) et à sa fin (`_on_worker_finished`, pour le
+        message d'avertissement) -- les deux doivent s'accorder sur le
+        même résultat sans dépendre de l'ordre d'appel."""
+        if self._mode != "flash" or self._wizard_active:
+            return False
+        entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
+        return entry is not None and entry.is_android
+
+    def _flash_may_trigger_windows_format_prompt(self) -> bool:
+        """Vrai pour tout flash mode expert, quel que soit le firmware
+        choisi -- constaté en usage réel : Windows propose de formater la
+        carte après le flash d'un firmware "Linux" (ArkOS/ROCKNIX/EmuELEC/
+        AmberELEC/MinUI, une seule boîte pour leur partition ext4 illisible)
+        exactement comme pour un firmware Android (§4.6, plusieurs boîtes) --
+        pas seulement pour Android comme le supposait le premier correctif.
+        Aucune entrée du catalogue (`identify/firmware_catalog.py`) n'est
+        entièrement lisible par Windows (BOOT en FAT mis à part), donc pas
+        besoin de filtrer par firmware ici, contrairement à `_is_flashing_
+        android_firmware` (qui reste nécessaire pour choisir le message
+        détaillé propre à Android, ci-dessous, plutôt que le message
+        générique). Jamais pour le parcours de clonage du mode assisté :
+        celui-ci éjecte déjà automatiquement la carte neuve à l'étape 5
+        (`_run_wizard_eject`), immédiatement après la restauration -- une
+        seconde éjection ferait double emploi."""
+        return self._mode == "flash" and not self._wizard_active
 
     def _success_message(self) -> str:
         if self._mode == "backup":
@@ -808,7 +899,7 @@ class MainWindow(QMainWindow):
         self._home.set_busy(False)
         self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
-            self._console_stage.resume()
+            self._console_stage.stop_activity()
         if self._wizard_active:
             # Mode assisté (§5 mode assisté) : la suite (avancer/erreur)
             # est décidée par `WizardFlow`, pas par le mode expert
@@ -825,12 +916,49 @@ class MainWindow(QMainWindow):
             self._on_assisted_ad_hoc_worker_finished(ok)
             return
         if ok:
-            allow_eject = self._mode in _ALLOW_EJECT_AFTER_MODES
+            android_flash = self._is_flashing_android_firmware()
+            format_prompt_flash = self._flash_may_trigger_windows_format_prompt()
+            # Déjà éjectée par le worker lui-même (`--eject-after`, ajouté
+            # dans `_start_worker` dès que `format_prompt_flash` est vrai,
+            # donc pour tout flash mode expert désormais -- plus seulement
+            # Android) -- proposer de l'éjecter à nouveau serait redondant,
+            # voire une erreur si la carte n'est déjà plus vue par l'OS.
+            allow_eject = self._mode in _ALLOW_EJECT_AFTER_MODES and not format_prompt_flash
             archive_info = self._archive_info()
             reveal_path = self._file_path if self._mode in (_EXTRACTION_MODES | _INJECTION_MODES) else None
             if archive_info:
                 self._log_panel.append_log(archive_info)
             self._log_panel.finish_success(self._success_message(), allow_eject=allow_eject, reveal_path=reveal_path)
+            if android_flash:
+                # Windows ne sait lire aucune partition Android (boot/
+                # system/vendor/userdata...) et propose de les formater dès
+                # qu'il les découvre -- une boîte par partition illisible,
+                # qu'un débutant risque d'accepter et de détruire ce qui
+                # vient d'être écrit (§4.6). L'éjection automatique
+                # ci-dessus réduit le risque immédiat sans l'éliminer (ni
+                # garantie de gagner la course contre Windows, ni protection
+                # si la carte est un jour rebranchée ailleurs) -- ce message
+                # explicite est le vrai filet de sécurité, jamais retiré
+                # même quand l'éjection automatique a réussi.
+                self._log_panel.append_log(tr("flash_android_format_prompt_warning"))
+                # Constaté en usage réel : une image Android flashée peut
+                # démarrer sur un écran figé si l'écran ne correspond pas --
+                # le mécanisme de rechange (dossier "Panels" du BOOT, un
+                # sous-dossier par écran) existe déjà côté firmware, mais
+                # rien ne l'indiquait dans l'app avant cette ligne. Ne
+                # promet jamais que ça marchera (§4.6, ci-dessous : sur la
+                # console de test, les trois écrans compatibles essayés ont
+                # tous échoué) -- une piste à essayer, pas une garantie.
+                self._log_panel.append_log(tr("flash_android_panel_mismatch_warning"))
+            elif format_prompt_flash:
+                # Constaté en usage réel : le même genre de boîte « Vous
+                # devez formater le disque » apparaît aussi après un flash
+                # non-Android (ArkOS/ROCKNIX/EmuELEC/AmberELEC/MinUI, une
+                # seule boîte pour leur partition ext4, §4.6) -- message
+                # générique plutôt que le message Android détaillé
+                # ci-dessus (pas de partitions multiples ni de mécanisme
+                # d'écran de rechange à expliquer ici).
+                self._log_panel.append_log(tr("flash_format_prompt_warning_generic"))
         else:
             # `friendly_error_message` mappe déjà "CANCELLED" sur le
             # message d'annulation adéquat (`strings._ERROR_MESSAGE_KEYS`)
@@ -1000,7 +1128,7 @@ class MainWindow(QMainWindow):
         self._home.set_busy(True)
         self._assisted_landing.set_busy(True)
         if self._console_stage is not None:
-            self._console_stage.pause()
+            self._console_stage.start_activity()
         self._last_error_code = None
         self._last_error_msg = None
         self._runner = RocknixListRunner(parent=self)
@@ -1012,7 +1140,7 @@ class MainWindow(QMainWindow):
         self._home.set_busy(False)
         self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
-            self._console_stage.resume()
+            self._console_stage.stop_activity()
         if not variants:
             friendly = friendly_error_message(self._last_error_code or "")
             self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
@@ -1031,7 +1159,7 @@ class MainWindow(QMainWindow):
         self._home.set_busy(True)
         self._assisted_landing.set_busy(True)
         if self._console_stage is not None:
-            self._console_stage.pause()
+            self._console_stage.start_activity()
         self._last_error_code = None
         self._last_error_msg = None
         self._runner = RocknixDownloadRunner(asset, expected_sha256, parent=self)
@@ -1045,7 +1173,7 @@ class MainWindow(QMainWindow):
         self._home.set_busy(False)
         self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
-            self._console_stage.resume()
+            self._console_stage.stop_activity()
         if not ok:
             friendly = friendly_error_message(self._last_error_code or "")
             self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
@@ -1087,31 +1215,107 @@ class MainWindow(QMainWindow):
 
     # --- étape F : éjection, immédiate ou depuis le journal -----------------
 
+    def _start_eject(self, device: Device, on_finished) -> None:
+        """Lance l'éjection de `device` via un worker élevé dédié -- bug
+        corrigé, confirmé sur du vrai matériel : ouvrir `\\\\.\\
+        PhysicalDriveN` pour `IOCTL_STORAGE_EJECT_MEDIA` (Windows) exige
+        l'élévation, exactement comme l'écriture brute (§4.3) -- appeler
+        `partitions.eject.eject` directement dans le processus GUI, à
+        privilèges normaux, échouait systématiquement avec `ERROR_ACCESS_
+        DENIED` (erreur 5), silencieusement pour l'éjection automatique de
+        l'étape 3 (aucun `emit_error`/`emit_log` n'atteignait jamais le
+        journal, l'exception étant levée avant même que le protocole JSON
+        Lines n'ait quoi que ce soit à relayer) et via une simple boîte de
+        dialogue jamais journalisée pour le bouton (§4.4 : jamais un succès
+        -- ni un échec -- silencieux).
+
+        Réutilise `WorkerRunner` (`["eject", "--device", device.path]`,
+        même mécanisme que `backup`/`flash`) plutôt qu'un appel synchrone :
+        une invite d'élévation (UAC/`osascript`/`pkexec`) est de toute
+        façon nécessaire à chaque nouveau worker sur Windows (aucun
+        équivalent de `MacosAuthorizationSession` n'existe pour cet OS,
+        §3) -- accepté ici comme ailleurs dans ce projet, plutôt que de
+        chaîner l'éjection dans le worker qui vient d'écrire/de lire (ce
+        qui économiserait cette invite dans certains cas, mais ferait
+        perdre la distinction entre « l'opération a réussi » et « l'
+        éjection qui a suivi a échoué », par ex. nécessaire à l'étape 3 du
+        parcours de clonage pour bloquer la suite tant que la carte source
+        n'est pas sûre à retirer). `macOS`/Linux ne sont pas concernés par
+        cette limitation d'origine (une élévation non privilégiée y
+        fonctionnait déjà), mais passent désormais par le même chemin pour
+        rester cohérents et testables uniformément.
+
+        `on_finished(ok, code, msg)` est appelé une fois le worker
+        terminé -- jamais silencieusement : chaque appelant journalise
+        explicitement le résultat, succès comme échec (§4.4)."""
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        try:
+            runner = WorkerRunner(
+                ["eject", "--device", device.path],
+                parent=self,
+                macos_auth_session=self._get_or_create_macos_auth_session(),
+            )
+        except Exception:
+            # Ne jamais laisser l'interface bloquée « occupée » sans issue
+            # si la construction du worker échoue avant même son démarrage
+            # (ex. `device` invalide) -- l'appelant journalise l'exception
+            # qu'on relève (§4.4).
+            self._home.set_busy(False)
+            self._assisted_landing.set_busy(False)
+            raise
+        self._eject_runner = runner
+        state = {"code": None, "msg": None}
+
+        def _on_error(code: str, msg: str) -> None:
+            state["code"] = code
+            state["msg"] = msg
+
+        def _on_runner_finished(ok: bool) -> None:
+            self._home.set_busy(False)
+            self._assisted_landing.set_busy(False)
+            self._eject_runner = None
+            on_finished(ok, state["code"], state["msg"])
+
+        runner.error.connect(_on_error)
+        runner.finished.connect(_on_runner_finished)
+        runner.start()
+
     def _perform_eject(self) -> None:
         """Étape F : démonte toutes les partitions et éjecte, puis
         confirme explicitement que la carte peut être retirée (§4.5) --
         jamais un succès silencieux. Résultat affiché dans le journal de
         bord, pas un écran séparé (§5, refonte navigation)."""
         self._log_panel.append_log("Éjection de la carte…")
-        try:
-            eject_device(self._device.path)
-        except Exception as exc:
-            self._log_panel.append_log(friendly_error_message("EJECT_FAILED"))
-            self._log_panel.append_log(str(exc))
-        else:
+        self._start_eject(self._device, self._on_perform_eject_finished)
+
+    def _on_perform_eject_finished(self, ok: bool, code: Optional[str], msg: Optional[str]) -> None:
+        if ok:
             self._log_panel.append_log(f"{self._device.display} peut maintenant être retirée en toute sécurité.")
+        else:
+            self._log_panel.append_log(friendly_error_message(code or "EJECT_FAILED"))
+            if msg:
+                self._log_panel.append_log(msg)
         self._refresh_home_state()
 
     def _on_eject_requested(self) -> None:
         """Bouton Éjecter du journal de bord, proposé après une opération
         qui a écrit sur la carte (§4.5) -- distinct de `_perform_eject`
-        (l'étape F elle-même, immédiate, sans opération préalable)."""
-        try:
-            eject_device(self._device.path)
-        except Exception as exc:
-            QMessageBox.warning(self, tr("app_title"), str(exc))
-        else:
+        (l'étape F elle-même, immédiate, sans opération préalable). Bug
+        corrigé au passage : le résultat n'était auparavant journalisé
+        qu'en cas de succès, une `QMessageBox` isolée (jamais dans le
+        journal) portant l'échec -- désormais journalisé dans les deux
+        cas, comme `_perform_eject` (§4.4)."""
+        self._log_panel.append_log("Éjection de la carte…")
+        self._start_eject(self._device, self._on_eject_requested_finished)
+
+    def _on_eject_requested_finished(self, ok: bool, code: Optional[str], msg: Optional[str]) -> None:
+        if ok:
             self._log_panel.append_log(f"{self._device.display} peut maintenant être retirée en toute sécurité.")
+        else:
+            self._log_panel.append_log(friendly_error_message(code or "EJECT_FAILED"))
+            if msg:
+                self._log_panel.append_log(msg)
 
     # --- mode assisté (§5 mode assisté) : 7 étapes, une carte puis l'autre --
 
@@ -1263,18 +1467,62 @@ class MainWindow(QMainWindow):
         que de laisser l'utilisateur retirer la carte sans savoir si
         c'est sûr. Le sondage de la carte neuve (`_wizard_poll_timer`) ne
         démarre qu'une fois l'éjection effectivement réussie, pour ne
-        jamais détecter la carte source comme si c'était la neuve."""
-        title_key, instruction_key = _WIZARD_STEP_STRINGS[WizardJob.DETECT_TARGET]
-        self._wizard_panel.show_step(tr(title_key), tr("wizard_ejecting_source"), can_continue=False)
+        jamais détecter la carte source comme si c'était la neuve.
+
+        Bug corrigé, confirmé sur du vrai matériel : cette éjection
+        automatique échouait *silencieusement* sur Windows (aucune ligne
+        dans le journal entre la fin de la sauvegarde et la détection
+        suivante, ni succès ni échec) -- `eject_device` s'exécutait dans le
+        processus GUI, non élevé, et levait `ERROR_ACCESS_DENIED` avant
+        même que le protocole JSON Lines ait quoi que ce soit à relayer.
+        Passe désormais par `_start_eject` (worker élevé dédié, comme
+        `backup`/`flash`) ; le résultat n'arrive qu'une fois ce worker
+        terminé (`_on_wizard_source_eject_finished`), jamais de façon
+        synchrone.
+
+        ⚠️ **Quatrième signalement, non résolu, diagnostic ajouté en
+        attendant** : sur du vrai matériel Windows, aucune ligne d'éjection
+        n'apparaît du tout entre la fin de la sauvegarde système et la
+        détection suivante -- ni succès ni échec -- alors que l'écran
+        demande déjà « Branche la carte SD neuve ». Avant ce correctif, le
+        tout premier `append_log` de cette fonction arrivait *après*
+        `show_step(...)` et *avant* `_start_eject(...)` : une exception
+        levée par l'un ou l'autre (ex. `self._wizard_source_device` valant
+        `None`, `_start_eject` accédant alors à `device.path` sur `None`)
+        remontait alors sans jamais toucher le journal -- exactement le
+        symptôme rapporté (§4.4 : jamais un succès, ni une absence totale
+        de trace, silencieux). Journalisé désormais en tout premier, avant
+        même `show_step`, et le corps de la fonction est protégé par un
+        `try/except` qui journalise explicitement toute exception plutôt
+        que de la laisser disparaître -- si la ligne `wizard_ejecting_source`
+        n'apparaît toujours pas au prochain test réel, cette fonction n'est
+        simplement jamais atteinte (à chercher du côté de `_on_wizard_job_
+        finished`/`_enter_wizard_job`, pas ici)."""
         self._log_panel.append_log(tr("wizard_ejecting_source"))
         try:
-            eject_device(self._wizard_source_device.path)
+            title_key, instruction_key = _WIZARD_STEP_STRINGS[WizardJob.DETECT_TARGET]
+            self._wizard_panel.show_step(tr(title_key), tr("wizard_ejecting_source"), can_continue=False)
+            self._start_eject(self._wizard_source_device, self._on_wizard_source_eject_finished)
         except Exception as exc:
             self._last_error_code = "EJECT_FAILED"
             self._last_error_msg = str(exc)
-            self._log_panel.finish_error(friendly_error_message("EJECT_FAILED"), details=str(exc))
+            self._log_panel.finish_error(
+                friendly_error_message(self._last_error_code),
+                details=error_log_detail(self._last_error_code, self._last_error_msg),
+            )
+            self._wizard_panel.show_error()
+
+    def _on_wizard_source_eject_finished(self, ok: bool, code: Optional[str], msg: Optional[str]) -> None:
+        if not ok:
+            self._last_error_code = code or "EJECT_FAILED"
+            self._last_error_msg = msg or ""
+            self._log_panel.finish_error(
+                friendly_error_message(self._last_error_code),
+                details=error_log_detail(self._last_error_code, self._last_error_msg),
+            )
             self._wizard_panel.show_error()
             return
+        title_key, instruction_key = _WIZARD_STEP_STRINGS[WizardJob.DETECT_TARGET]
         self._log_panel.append_log(tr("wizard_source_ejected"))
         self._wizard_panel.show_step(tr(title_key), tr(instruction_key), can_continue=False, show_refresh=True)
         self._wizard_panel.set_status(tr("wizard_status_waiting"))
@@ -1549,16 +1797,20 @@ class MainWindow(QMainWindow):
         self._wizard_flow.mark_done(job)
         self._enter_wizard_job(self._wizard_flow.current_job())
 
-    # --- étape 5 : éjection, synchrone comme _perform_eject ------------------
+    # --- étape 5 : éjection, via le worker élevé comme _perform_eject --------
 
     def _run_wizard_eject(self) -> None:
         self._log_panel.append_log("Éjection de la carte…")
-        try:
-            eject_device(self._wizard_target_device.path)
-        except Exception as exc:
-            self._last_error_code = "EJECT_FAILED"
-            self._last_error_msg = str(exc)
-            self._log_panel.finish_error(friendly_error_message("EJECT_FAILED"), details=str(exc))
+        self._start_eject(self._wizard_target_device, self._on_wizard_eject_finished)
+
+    def _on_wizard_eject_finished(self, ok: bool, code: Optional[str], msg: Optional[str]) -> None:
+        if not ok:
+            self._last_error_code = code or "EJECT_FAILED"
+            self._last_error_msg = msg or ""
+            self._log_panel.finish_error(
+                friendly_error_message(self._last_error_code),
+                details=error_log_detail(self._last_error_code, self._last_error_msg),
+            )
             self._wizard_panel.show_error()
             return
         self._log_panel.append_log(

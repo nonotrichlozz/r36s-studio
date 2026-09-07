@@ -9,10 +9,20 @@ from datetime import datetime
 from unittest.mock import patch
 
 from r36s_studio import __main__ as cli
+from r36s_studio import protocol
 from r36s_studio.devices import Device
 from r36s_studio.imaging import OperationCancelled
 from r36s_studio.partitions.copy import MountpointNotWritable
 from r36s_studio.partitions.locate import PartitionNotFound, PartitionNotMounted
+
+
+def teardown_function() -> None:
+    # `eject --progress-file` (ci-dessous) reconfigure la destination
+    # globale du protocole JSON Lines (`protocol.py::configure`) -- la
+    # remettre à `None` évite qu'un test suivant, dans ce fichier ou un
+    # autre, écrive sans le savoir dans un fichier déjà refermé (même
+    # principe que `tests/test_cli_worker.py::teardown_function`).
+    protocol.configure(None)
 
 
 def _make_device(path="/dev/fake-disk-test-3") -> Device:
@@ -203,14 +213,50 @@ def test_cmd_eject_unsupported_os_reports_error(mock_list, mock_eject, capsys):
 
 @patch("r36s_studio.__main__.eject_device", side_effect=OSError("carte occupée"))
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_eject_io_error_reports_error(mock_list, mock_eject, capsys):
+def test_cmd_eject_os_error_reports_dedicated_eject_failed_code(mock_list, mock_eject, capsys):
+    """Bug corrigé : retombait auparavant sur le générique IO_ERROR
+    (« vérifie que la carte est branchée »), faux dans ce cas précis --
+    `EJECT_FAILED` (déjà utilisé côté GUI) invite plutôt à fermer les
+    fichiers ouverts ou à retirer la carte manuellement."""
     mock_list.return_value = [_make_device()]
 
     args = _parse(["eject", "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 1
-    assert "IO_ERROR" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert '"code": "EJECT_FAILED"' in out
+    assert "IO_ERROR" not in out
+
+
+@patch("r36s_studio.__main__.eject_device")
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_eject_supports_worker_progress_file(mock_list, mock_eject, tmp_path):
+    """Bug corrigé, confirmé sur du vrai matériel : l'éjection Windows exige
+    l'élévation (`ERROR_ACCESS_DENIED` en s'exécutant dans le processus GUI
+    à privilèges normaux) -- `eject` doit donc pouvoir tourner comme worker
+    élevé, comme `backup`/`flash` (§3), en écrivant le protocole JSON Lines
+    dans `--progress-file` plutôt que sur stdout."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    progress_file = tmp_path / "progress.jsonl"
+
+    args = _parse(
+        [
+            "eject",
+            "--device",
+            "/dev/fake-disk-test-3",
+            "--worker",
+            "--progress-file",
+            str(progress_file),
+        ]
+    )
+    code = args.func(args)
+
+    assert code == 0
+    content = progress_file.read_text(encoding="utf-8")
+    assert '"type": "done"' in content
+    assert '"ok": true' in content
 
 
 @patch("r36s_studio.__main__.eject_device")

@@ -57,7 +57,6 @@ STRINGS = {
     "home_banner_state_arkos": "Carte ArkOS reconnue",
     "home_banner_state_unprepared": "Carte non préparée",
     "home_banner_state_none": "Aucune carte détectée pour l'instant",
-    "console_animation_toggle": "Animations de la console",
     # Accueil du mode assisté (§5 mode assisté) -- écran par défaut au
     # lancement, remplacé par le mode expert (six étapes) sur demande.
     "assisted_prepare_button": "Préparer ma carte automatiquement",
@@ -183,6 +182,37 @@ STRINGS = {
     "file_firmware_r36droid_desc": "Portage communautaire d'Android (LineageOS) pour R36S/RK3326.",
     "file_firmware_andr36oid_title": "andr36oid (Android)",
     "file_firmware_andr36oid_desc": "Autre portage communautaire d'Android (LineageOS) pour R36S/RK3326.",
+    # Avertissement après un flash Android (§4.6) : contrairement au reste
+    # de l'interface (§5, jamais de jargon), ce message nomme volontairement
+    # le vrai texte de la fenêtre Windows -- c'est une vraie fenêtre système
+    # à laquelle réagir correctement, pas la description d'une action de
+    # l'app (même principe que `HelpDialog`, §3).
+    "flash_android_format_prompt_warning": (
+        "Windows va sans doute proposer de formater ta carte (« Vous devez formater le "
+        "disque… »), parfois plusieurs fois de suite — refuse à chaque fois, c'est normal : "
+        "Windows ne sait simplement pas lire le système Android que tu viens d'installer, "
+        "ce n'est pas un problème avec ta carte."
+    ),
+    # Constaté en usage réel : le même genre de boîte apparaît aussi après
+    # un flash non-Android (ArkOS/ROCKNIX/EmuELEC/AmberELEC/MinUI, une
+    # seule partition ext4 illisible plutôt que plusieurs) -- message
+    # générique, sans détailler un mécanisme (écrans de rechange...) propre
+    # à Android uniquement.
+    "flash_format_prompt_warning_generic": (
+        "Windows va peut-être proposer de formater la carte — refuse, c'est normal."
+    ),
+    # Constaté en usage réel : une image Android démarre parfois sur un
+    # écran figé si l'écran choisi ne correspond pas à celui de la console
+    # -- le mécanisme de rechange existe déjà sur le BOOT (dossier "Panels"),
+    # mais rien ne l'indiquait dans l'app avant ce message (un débutant en
+    # aurait conclu que le logiciel ne marche pas).
+    "flash_android_panel_mismatch_warning": (
+        "Si l'écran reste noir ou figé au démarrage, regarde sur le BOOT de la carte : "
+        "un dossier « Panels » contient un sous-dossier par type d'écran, chacun avec des "
+        "fichiers .dtb à copier à la racine du BOOT pour changer d'écran. Plusieurs essais "
+        "sont parfois nécessaires — et rien ne garantit qu'un de ces écrans corresponde à "
+        "ta console."
+    ),
     "file_manual_download_hint": (
         "Le fichier téléchargé peut être une archive (.7z, .zip…) : décompresse-la "
         "d'abord si besoin, puis choisis ici le fichier .img qu'elle contient."

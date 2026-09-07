@@ -902,10 +902,18 @@ def test_fda_welcome_screen_open_settings_opens_the_same_settings_pane(
     mock_run.assert_called_once_with(["open", _MACOS_FULL_DISK_ACCESS_SETTINGS_URL], check=True)
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_flash_flow_requires_confirmation_before_worker_starts(mock_list, mock_filter, mock_detect, qapp):
+def test_flash_flow_requires_confirmation_before_worker_starts(mock_list, mock_filter, mock_detect, mock_load, qapp):
+    """Firmware par défaut (`AppConfig()`) mocké explicitement -- sans quoi
+    ce test dépend du vrai fichier de configuration de la machine qui lance
+    la suite (§8, même principe que `real_fda_probe`). `--eject-after` est
+    désormais attendu pour tout flash mode expert, quel que soit le
+    firmware (§4.6, constaté en usage réel au-delà du seul cas Android) --
+    ce que ce test vérifie n'est pas cette liste précise mais que le worker
+    ne démarre qu'après la confirmation explicite (§2 règle 6)."""
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
@@ -933,7 +941,7 @@ def test_flash_flow_requires_confirmation_before_worker_starts(mock_list, mock_f
         assert window._confirm_dialog.isVisible() is False
 
     argv = runner_class.instances[0].argv
-    assert argv == ["flash", "--image", "/tmp/sd.img", "--device", "/dev/fake-disk-test-3"]
+    assert argv == ["flash", "--image", "/tmp/sd.img", "--device", "/dev/fake-disk-test-3", "--eject-after"]
 
 
 # --- une seule autorisation macOS pour tout le parcours (§5 mode assisté) --
@@ -1483,9 +1491,14 @@ def test_start_worker_disables_both_mode_switch_buttons_and_reenables_on_finish(
 
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_start_worker_pauses_console_stage_and_resumes_on_finish(mock_list, mock_filter, qapp):
-    """§5 (animations console) : mises en pause pendant une opération
-    disque pour ne pas consommer de ressources, reprises à la fin."""
+def test_start_worker_starts_and_stops_console_stage_activity(mock_list, mock_filter, qapp):
+    """§5 : le terminal d'activité de l'écran de la console repart vierge
+    au début d'une opération disque (`start_activity`) et revient à un
+    curseur seul à la fin (`stop_activity`). Correction de conception,
+    confirmée sur du vrai matériel : ce terminal avait été soupçonné (puis
+    retiré) d'un ralentissement de la sauvegarde système d'un facteur dix
+    -- la cause réelle était une carte SD d'origine de console non
+    reconnue (~6 Mo/s contre ~88 Mo/s pour une SanDisk), pas ce code."""
     window = MainWindow()
     window._mode = "backup"
     window._device = _make_device()
@@ -1495,12 +1508,53 @@ def test_start_worker_pauses_console_stage_and_resumes_on_finish(mock_list, mock
 
     with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
         window._start_worker()
-        window._console_stage.pause.assert_called_once()
-        window._console_stage.resume.assert_not_called()
+        window._console_stage.start_activity.assert_called_once()
+        window._console_stage.stop_activity.assert_not_called()
 
         window._on_worker_finished(True)
 
-    window._console_stage.resume.assert_called_once()
+    window._console_stage.stop_activity.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_on_progress_appends_a_real_activity_line_to_the_console_terminal(mock_list, mock_filter, qapp):
+    """Terminal d'activité disque de l'écran de la console (§5) : une
+    ligne par événement de progression réellement émis par
+    `copy_range`/`copy_tree` -- jamais une ligne inventée (§2 règle 5)."""
+    window = MainWindow()
+    window._console_stage = MagicMock()
+    window._last_progress_bytes = 4 * 1024 * 1024
+
+    window._on_progress(8 * 1024 * 1024, 32 * 1024 * 1024, 18_400_000.0)
+
+    window._console_stage.append_line.assert_called_once()
+    line = window._console_stage.append_line.call_args[0][0]
+    assert line.startswith("0x")
+    assert "4.0 Mo" in line  # le bloc : delta depuis le dernier événement
+    assert window._last_progress_bytes == 8 * 1024 * 1024
+
+
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_on_progress_without_console_stage_still_updates_log_panel(mock_list, mock_filter, qapp):
+    window = MainWindow()
+    window._console_stage = None
+
+    window._on_progress(100, 1000, 50.0)
+
+    assert window._last_progress_bytes == 100
+
+
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_on_progress_without_console_stage_still_updates_log_panel(mock_list, mock_filter, qapp):
+    window = MainWindow()
+    window._console_stage = None
+
+    window._on_progress(100, 1000, 50.0)
+
+    assert window._last_progress_bytes == 100
 
 
 @patch("r36s_studio.gui.main_window.filter_devices")
@@ -1521,7 +1575,11 @@ def test_cancel_requested_calls_runner_cancel(mock_list, mock_filter, qapp):
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_worker_success_logs_message_and_shows_eject_for_flash(mock_list, mock_filter, mock_load, qapp):
+def test_worker_success_logs_message_and_hides_eject_for_flash(mock_list, mock_filter, mock_load, qapp):
+    """Constaté en usage réel : tout flash mode expert déclenche
+    potentiellement une boîte Windows « Vous devez formater le disque »
+    (§4.6, pas seulement Android) -- déjà éjectée par `--eject-after`, donc
+    le bouton Éjecter du succès serait redondant."""
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché (MainWindow, pas un descendant)
     window._mode = "flash"
@@ -1530,7 +1588,7 @@ def test_worker_success_logs_message_and_shows_eject_for_flash(mock_list, mock_f
 
     window._on_worker_finished(True)
 
-    assert window._log_panel._eject_button.isVisible() is True
+    assert window._log_panel._eject_button.isVisible() is False
     assert "prête" in window._log_panel._log_view.toPlainText()
 
 
@@ -1548,16 +1606,23 @@ def test_worker_error_logs_cancelled_message(mock_list, mock_filter, qapp):
     assert "annulée" in window._log_panel._log_view.toPlainText()
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_eject_requested_calls_eject_module_with_device_path(mock_list, mock_filter, mock_eject, qapp):
+def test_eject_requested_runs_eject_command_via_elevated_worker(mock_list, mock_filter, qapp):
+    r"""Bug corrigé, confirmé sur du vrai matériel : ouvrir
+    `\\.\PhysicalDriveN` pour éjecter exige l'élévation sur Windows,
+    exactement comme l'écriture brute -- le bouton du journal ne doit donc
+    plus jamais appeler `partitions.eject.eject` directement dans le
+    processus GUI (`ERROR_ACCESS_DENIED`), mais passer par un worker élevé
+    dédié, comme `backup`/`flash` (§4.3/§4.4)."""
     window = MainWindow()
     window._device = _make_device(path="/dev/fake-disk-test-3")
+    runner_class = _mock_runner_class()
 
-    window._on_eject_requested()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._on_eject_requested()
 
-    mock_eject.assert_called_once_with("/dev/fake-disk-test-3")
+    assert runner_class.instances[0].argv == ["eject", "--device", "/dev/fake-disk-test-3"]
 
 
 # --- colonne gauche : six étapes toujours visibles, statut informatif ------
@@ -2104,40 +2169,47 @@ def test_backup_success_shows_no_reveal_button(mock_list, mock_filter, qapp):
 # --- eject (étape F) : immédiat, sans fenêtre Fichier ni opération ----------
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_eject_flow_is_immediate_and_confirms_success(mock_list, mock_filter, mock_detect, mock_eject, qapp):
+def test_eject_flow_runs_via_elevated_worker_and_confirms_success(mock_list, mock_filter, mock_detect, qapp):
+    """Bug corrigé, confirmé sur du vrai matériel : l'étape F appelait
+    `partitions.eject.eject` directement dans le processus GUI -- échoue
+    systématiquement sur Windows (élévation requise, §4.3/§4.4)."""
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
+    runner_class = _mock_runner_class()
 
     window = MainWindow()
     window.show()
     window._home.eject_selected.emit()
     window._device_dialog._list.setCurrentRow(0)
-    window._device_dialog._emit_chosen()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._device_dialog._emit_chosen()
+        assert runner_class.instances[0].argv == ["eject", "--device", device.path]
+        window._on_perform_eject_finished(True, None, None)
 
-    mock_eject.assert_called_once_with(device.path)
     assert "retirée en toute sécurité" in window._log_panel._log_view.toPlainText()
     assert window._file_dialog.isVisible() is False  # étape F : aucune fenêtre Fichier
 
 
-@patch("r36s_studio.gui.main_window.eject_device", side_effect=OSError("carte occupée"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_eject_flow_logs_friendly_error_and_raw_detail_on_failure(mock_list, mock_filter, mock_detect, mock_eject, qapp):
+def test_eject_flow_logs_friendly_error_and_raw_detail_on_failure(mock_list, mock_filter, mock_detect, qapp):
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
+    runner_class = _mock_runner_class()
 
     window = MainWindow()
     window.show()
     window._home.eject_selected.emit()
     window._device_dialog._list.setCurrentRow(0)
-    window._device_dialog._emit_chosen()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._device_dialog._emit_chosen()
+        window._on_perform_eject_finished(False, "EJECT_FAILED", "carte occupée")
 
     log_text = window._log_panel._log_view.toPlainText()
     assert "carte occupée" in log_text  # journal de bord : tout y va, plus de panneau Détails séparé (§5)
@@ -2710,9 +2782,11 @@ def test_wizard_job_finished_for_create_image_logs_created_path(mock_list, mock_
     window._wizard_flow.mark_done(WizardJob.DETECT_SOURCE)
     window._mode = "backup"
     window._device = _make_device()
+    window._wizard_source_device = window._device  # entrer dans DETECT_TARGET éjecte cette carte
     window._file_path = "/home/x/clone.img"
 
-    window._on_wizard_job_finished(True)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._on_wizard_job_finished(True)
 
     log_text = window._log_panel._log_view.toPlainText()
     assert "/home/x/clone.img" in log_text
@@ -2728,43 +2802,92 @@ def test_wizard_job_finished_for_create_image_logs_created_path(mock_list, mock_
 # --- qu'une fois cette éjection effectivement réussie. ---------------------
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_entering_detect_target_ejects_the_source_card_first(mock_list, mock_filter, mock_load, mock_eject, qapp):
+def test_entering_detect_target_ejects_the_source_card_first(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
     source = _make_device(path="/dev/fake-disk-test-source")
     window._wizard_source_device = source
+    runner_class = _mock_runner_class()
 
-    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
 
-    mock_eject.assert_called_once_with(source.path)
+    assert runner_class.instances[0].argv == ["eject", "--device", source.path]
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_detect_target_confirms_source_card_can_be_removed_after_eject(
-    mock_list, mock_filter, mock_load, mock_eject, qapp
-):
+def test_entering_detect_target_logs_before_starting_the_eject_worker(mock_list, mock_filter, mock_load, qapp):
+    """Quatrième signalement, diagnostic : sur du vrai matériel, aucune
+    ligne d'éjection n'apparaissait entre la fin de la sauvegarde et la
+    détection suivante -- ni succès ni échec. Cette ligne doit désormais
+    apparaître en tout premier, avant même que le worker élevé démarre --
+    si elle manque encore au prochain test réel, `_run_wizard_source_eject`
+    elle-même n'est jamais atteinte."""
     window = MainWindow()
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
 
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Éjection de ta carte d'origine" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_entering_detect_target_with_no_source_device_logs_instead_of_vanishing(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Si `_wizard_source_device` est `None` au moment d'entrer dans
+    DETECT_TARGET (état incohérent), `_start_eject` lèverait auparavant une
+    `AttributeError` (`None.path`) qui remontait sans jamais toucher le
+    journal ni l'écran -- exactement le symptôme du quatrième signalement
+    (aucune trace du tout). Doit désormais atterrir dans le journal et
+    l'écran d'erreur du parcours, jamais silencieusement."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._main_view.show_wizard_panel()
+    window._root_stack.setCurrentWidget(window._main_view)
+    window._wizard_source_device = None
+
     window._enter_wizard_job(WizardJob.DETECT_TARGET)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Éjection de ta carte d'origine" in log_text  # entrée, malgré tout
+    assert window._wizard_panel._resume_button.isVisible() is True  # écran d'erreur, pas un blocage muet
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_detect_target_confirms_source_card_can_be_removed_after_eject(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(True, None, None)
 
     log_text = window._log_panel._log_view.toPlainText()
     assert "toute sécurité" in log_text
 
 
-@patch("r36s_studio.gui.main_window.eject_device", side_effect=OSError("carte occupée"))
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_detect_target_eject_failure_shows_explicit_error_and_no_polling(
-    mock_list, mock_filter, mock_load, mock_eject, qapp
-):
+def test_detect_target_eject_failure_shows_explicit_error_and_no_polling(mock_list, mock_filter, mock_load, qapp):
+    """Bug corrigé, confirmé sur du vrai matériel : cette éjection
+    échouait auparavant *silencieusement* sur Windows (`eject_device`
+    exécuté dans le processus GUI, non élevé) -- aucune ligne au journal,
+    ni succès ni échec. Passe désormais par le worker élevé (`_start_
+    eject`) ; simulé ici en appelant directement le callback de fin comme
+    le ferait `WorkerRunner.error`/`.finished` une fois le worker élevé
+    terminé."""
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
     window._main_view.show_wizard_panel()
@@ -2773,7 +2896,9 @@ def test_detect_target_eject_failure_shows_explicit_error_and_no_polling(
     for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
 
-    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(False, "EJECT_FAILED", "carte occupée")
 
     log_text = window._log_panel._log_view.toPlainText()
     assert "carte occupée" in log_text  # détail brut, journal de bord (§5)
@@ -2792,31 +2917,93 @@ def test_detect_target_resume_after_eject_failure_retries_the_eject(mock_list, m
     for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
 
-    with patch("r36s_studio.gui.main_window.eject_device", side_effect=OSError("carte occupée")):
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
         window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(False, "EJECT_FAILED", "carte occupée")
     assert window._wizard_poll_timer.isActive() is False
 
-    with patch("r36s_studio.gui.main_window.eject_device") as mock_eject:
+    runner_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
         window._wizard_panel.resume_requested.emit()
+        assert runner_class.instances[0].argv == ["eject", "--device", "/dev/fake-disk-test-source"]
+        window._on_wizard_source_eject_finished(True, None, None)
 
-    mock_eject.assert_called_once_with("/dev/fake-disk-test-source")
     assert window._wizard_poll_timer.isActive() is True
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_source_card_stays_mounted_during_create_image_step(mock_list, mock_filter, mock_load, mock_eject, qapp):
+def test_source_card_stays_mounted_during_create_image_step(mock_list, mock_filter, mock_load, qapp):
     """La carte source n'est éjectée qu'à l'entrée de l'étape 3 -- elle
     reste montée pendant l'étape 2 (l'image est créée depuis cette même
     carte)."""
     window = MainWindow()
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+    runner_class = _mock_runner_class()
 
-    window._enter_wizard_job(WizardJob.CREATE_IMAGE)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._enter_wizard_job(WizardJob.CREATE_IMAGE)
 
-    mock_eject.assert_not_called()
+    runner_class.assert_not_called()
+
+
+# --- étape 5 : éjection de la carte cible, via le worker élevé -------------
+# (§4.3/§4.4 : bug corrigé, même correctif que l'étape 3 et le mode expert) -
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_run_wizard_eject_starts_elevated_worker_with_target_device(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._wizard_target_device = _make_device(path="/dev/fake-disk-test-target")
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._run_wizard_eject()
+
+    assert runner_class.instances[0].argv == ["eject", "--device", "/dev/fake-disk-test-target"]
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_eject_finished_success_marks_job_done_and_finishes_wizard(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._wizard_target_device = _make_device(path="/dev/fake-disk-test-target")
+    for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE, WizardJob.DETECT_TARGET, WizardJob.RESTORE_IMAGE):
+        window._wizard_flow.mark_done(job)
+
+    window._on_wizard_eject_finished(True, None, None)
+
+    assert window._wizard_flow.is_done(WizardJob.EJECT) is True
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "toute sécurité" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_eject_finished_failure_shows_explicit_error(mock_list, mock_filter, mock_load, qapp):
+    """Bug corrigé, confirmé sur du vrai matériel : le même échec silencieux
+    (élévation manquante) concernait aussi l'éjection finale de la carte
+    cible -- désormais journalisé explicitement, jamais un succès (ni un
+    échec) silencieux (§4.4)."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._main_view.show_wizard_panel()
+    window._root_stack.setCurrentWidget(window._main_view)
+    window._wizard_target_device = _make_device(path="/dev/fake-disk-test-target")
+    for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE, WizardJob.DETECT_TARGET, WizardJob.RESTORE_IMAGE):
+        window._wizard_flow.mark_done(job)
+
+    window._on_wizard_eject_finished(False, "EJECT_FAILED", "carte occupée")
+
+    assert window._wizard_flow.is_done(WizardJob.EJECT) is False
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "carte occupée" in log_text
+    assert window._wizard_panel._resume_button.isVisible() is True
 
 
 # --- étape 4 : garde-fou par empreinte de contenu, pas path/size_bytes -----
@@ -2833,14 +3020,13 @@ def _target_setup(window, device):
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_step_three_poll_also_starts_fingerprint_runner(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     same_card = _make_device(path="/dev/fake-disk-test-9")
     mock_list.return_value = [same_card]
@@ -2849,7 +3035,9 @@ def test_wizard_step_three_poll_also_starts_fingerprint_runner(
 
     window = MainWindow()
     _target_setup(window, same_card)
-    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(True, None, None)
 
     with patch("r36s_studio.gui.main_window.WizardFingerprintRunner", fingerprint_runner_class):
         window._on_wizard_poll()
@@ -2858,20 +3046,21 @@ def test_wizard_step_three_poll_also_starts_fingerprint_runner(
     assert window._wizard_poll_timer.isActive() is False  # pas de deuxième calcul en parallèle
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_refuses_to_continue_when_fingerprint_matches_source(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     same_card = _make_device(path="/dev/fake-disk-test-9")
 
     window = MainWindow()
     _target_setup(window, same_card)
-    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(True, None, None)
 
     window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, same_card, "fp-source")
 
@@ -2880,20 +3069,21 @@ def test_wizard_step_three_refuses_to_continue_when_fingerprint_matches_source(
     assert window._wizard_poll_timer.isActive() is True  # continue d'attendre une vraie carte différente
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_allows_continue_when_fingerprint_differs(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     new_card = _make_device(path="/dev/fake-disk-test-9")
 
     window = MainWindow()
     _target_setup(window, new_card)
-    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(True, None, None)
 
     window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, new_card, "fp-blank-or-different")
 
@@ -2909,14 +3099,13 @@ def test_wizard_step_three_allows_continue_when_fingerprint_differs(
 # le chemin, qui bloquait indéfiniment sur ce type de lecteur, §4.4) --------
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_opens_confirmation_dialog_when_unverifiable(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     """Scénario réel rapporté : carte source vierge (ou firmware non
     reconnu), carte cible détectée de même taille -- ni `is_same_card` ni
@@ -2929,7 +3118,9 @@ def test_wizard_step_three_opens_confirmation_dialog_when_unverifiable(
         window._wizard_flow.mark_done(job)
     window._wizard_source_fingerprint = None
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source", size_bytes=32_000_000_000)
-    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(True, None, None)
     candidate = _make_device(path="/dev/fake-disk-test-target", size_bytes=32_000_000_000)
 
     window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, candidate, None)
@@ -2941,14 +3132,13 @@ def test_wizard_step_three_opens_confirmation_dialog_when_unverifiable(
     assert window._wizard_poll_timer.isActive() is False  # pas de deuxième calcul en parallèle
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_confirming_dialog_accepts_the_candidate(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     window = MainWindow()
     window._wizard_flow.reset()
@@ -2956,7 +3146,9 @@ def test_wizard_step_three_confirming_dialog_accepts_the_candidate(
         window._wizard_flow.mark_done(job)
     window._wizard_source_fingerprint = None
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source", size_bytes=32_000_000_000)
-    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(True, None, None)
     candidate = _make_device(path="/dev/fake-disk-test-target", size_bytes=32_000_000_000)
     window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, candidate, None)
 
@@ -2968,14 +3160,13 @@ def test_wizard_step_three_confirming_dialog_accepts_the_candidate(
     assert window._wizard_panel._continue_button.isEnabled() is True
 
 
-@patch("r36s_studio.gui.main_window.eject_device")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_allows_continue_without_confirmation_when_sizes_differ(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_eject, qapp
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
 ):
     """Une différence de taille est une preuve positive (une carte ne
     change jamais de capacité) -- ne doit pas ouvrir la fenêtre de
@@ -2986,7 +3177,9 @@ def test_wizard_step_three_allows_continue_without_confirmation_when_sizes_diffe
         window._wizard_flow.mark_done(job)
     window._wizard_source_fingerprint = None
     window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source", size_bytes=128_000_000_000)
-    window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(True, None, None)
     candidate = _make_device(path="/dev/fake-disk-test-target", size_bytes=32_000_000_000)
 
     window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, candidate, None)
@@ -3176,6 +3369,272 @@ def test_wizard_restore_image_step_skips_file_dialog_and_uses_own_created_image(
     assert window._mode == "flash"
     assert window._file_dialog.isVisible() is False
     assert window._confirm_dialog.isVisible() is True
+
+
+# --- partition de jeux, décision automatique post-écriture (§4.3) ----------
+# Retour d'usage réel : la GUI devinait auparavant s'il fallait recréer un
+# espace de jeux (comparaison de chemin avec la dernière sauvegarde système
+# de la session, puis une case à cocher explicite en mode expert) -- les
+# deux ont été retirées. L'app ne demande plus jamais à l'utilisateur une
+# information qu'il n'a pas (est-ce que cette image laissera de l'espace
+# libre ?) : `__main__.py::cmd_flash` décide seul, après l'écriture, à
+# partir de la taille réelle de la carte (`imaging.games_partition.
+# create_and_format_games_partition_if_worthwhile`, couvert dans `tests/
+# test_imaging_games_partition.py` et `tests/test_cli_flash.py`). Ici, on
+# vérifie seulement que la GUI ne construit plus jamais elle-même ce
+# drapeau ni cette case.
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_worker_never_builds_a_games_partition_flag(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._device = _make_device()
+    window._mode = "flash"
+    window._file_path = "/tmp/systeme.img"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--create-games-partition" not in runner_class.instances[0].argv
+
+
+def test_confirm_dialog_has_no_games_partition_checkbox(qapp):
+    from r36s_studio.gui.screens import ConfirmDialog
+
+    dialog = ConfirmDialog()
+
+    assert not hasattr(dialog, "_games_partition_checkbox")
+    assert not hasattr(dialog, "set_games_partition_option")
+    assert not hasattr(dialog, "games_partition_requested")
+
+
+# --- flash Android : avertissement + éjection automatique (§4.6) -----------
+# Windows ne sait lire aucune partition d'une image Android (boot/system/
+# vendor/userdata...) et propose de les formater dès qu'il les découvre --
+# un débutant risque d'accepter et de détruire ce qui vient d'être écrit.
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_is_flashing_android_firmware_true_for_android_entries(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._mode = "flash"
+
+    for firmware_id in ("r36droid", "andr36oid"):
+        window._app_config.firmware = firmware_id
+        assert window._is_flashing_android_firmware() is True
+
+    window._app_config.firmware = "rocknix"
+    assert window._is_flashing_android_firmware() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_is_flashing_android_firmware_false_outside_flash_mode(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._app_config.firmware = "r36droid"
+    window._mode = "backup"
+
+    assert window._is_flashing_android_firmware() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_is_flashing_android_firmware_false_during_wizard(mock_list, mock_filter, mock_load, qapp):
+    """Le parcours de clonage du mode assisté n'a pas de choix de firmware
+    (il restaure la propre sauvegarde de l'utilisateur, §5) --
+    `_app_config.firmware` n'a alors aucun rapport avec ce qui est
+    réellement écrit, même si sa valeur mémorisée est un firmware
+    Android d'une session précédente en mode expert."""
+    window = MainWindow()
+    window._app_config.firmware = "r36droid"
+    window._mode = "flash"
+    window._wizard_active = True
+
+    assert window._is_flashing_android_firmware() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_flash_may_trigger_windows_format_prompt_true_for_any_expert_flash(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Aucune entrée du catalogue n'est entièrement lisible par Windows
+    (§4.6) -- vrai pour tout flash mode expert, pas seulement Android,
+    contrairement à `_is_flashing_android_firmware`."""
+    window = MainWindow()
+    window._mode = "flash"
+
+    for firmware_id in ("rocknix", "arkos", "emuelec", "amberelec", "minui", "r36droid", "andr36oid"):
+        window._app_config.firmware = firmware_id
+        assert window._flash_may_trigger_windows_format_prompt() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_flash_may_trigger_windows_format_prompt_false_outside_flash_mode(
+    mock_list, mock_filter, mock_load, qapp
+):
+    window = MainWindow()
+    window._mode = "backup"
+
+    assert window._flash_may_trigger_windows_format_prompt() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_flash_may_trigger_windows_format_prompt_false_during_wizard(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Le parcours de clonage éjecte déjà la carte neuve à l'étape 5,
+    immédiatement après la restauration -- pas besoin de ce mécanisme en
+    plus."""
+    window = MainWindow()
+    window._mode = "flash"
+    window._wizard_active = True
+
+    assert window._flash_may_trigger_windows_format_prompt() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_worker_appends_eject_after_for_android_firmware(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/r36droid.img"
+    window._app_config.firmware = "r36droid"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--eject-after" in runner_class.instances[0].argv
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_worker_appends_eject_after_for_non_android_firmware_too(mock_list, mock_filter, mock_load, qapp):
+    """Constaté en usage réel : la même boîte « Vous devez formater le
+    disque » apparaît aussi après un flash ROCKNIX/ArkOS/EmuELEC/AmberELEC/
+    MinUI (une seule boîte, pour leur partition ext4 -- §4.6), pas
+    seulement pour Android. Toute entrée du catalogue en bénéficie
+    désormais, `_is_flashing_android_firmware` restant réservé au choix du
+    message (détaillé pour Android, générique sinon)."""
+    window = MainWindow()
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/rocknix.img"
+    window._app_config.firmware = "rocknix"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--eject-after" in runner_class.instances[0].argv
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_worker_does_not_append_eject_after_outside_flash_mode(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._mode = "backup"
+    window._device = _make_device()
+    window._file_path = "/tmp/out.img"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--eject-after" not in runner_class.instances[0].argv
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_worker_does_not_append_eject_after_during_wizard(mock_list, mock_filter, mock_load, qapp):
+    """Le parcours de clonage éjecte déjà la carte neuve à l'étape 5
+    (`_run_wizard_eject`), immédiatement après la restauration -- une
+    seconde éjection via `--eject-after` ferait double emploi."""
+    window = MainWindow()
+    window._mode = "flash"
+    window._wizard_active = True
+    window._device = _make_device()
+    window._file_path = "/tmp/clone.img"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--eject-after" not in runner_class.instances[0].argv
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_android_flash_success_warns_and_hides_eject_button(mock_list, mock_filter, mock_load, qapp):
+    """Éjectée automatiquement par le worker (`--eject-after`) -- proposer
+    de l'éjecter à nouveau serait redondant. Le message d'avertissement,
+    lui, reste affiché même si l'éjection automatique a réussi (§4.6 :
+    aucune garantie de gagner la course contre les fenêtres de Windows, et
+    aucune protection si la carte est un jour rebranchée ailleurs). Le
+    message sur les écrans de rechange (dossier "Panels" du BOOT, §4.6)
+    doit aussi apparaître -- constaté en usage réel qu'un écran figé sans
+    cette explication laisse un débutant croire que le logiciel ne marche
+    pas."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/r36droid.img"
+    window._app_config.firmware = "r36droid"
+
+    window._on_worker_finished(True)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "formater" in log_text.lower()
+    assert "panels" in log_text.lower()
+    assert window._log_panel._eject_button.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_non_android_flash_success_warns_generically_and_hides_eject_button(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Constaté en usage réel : la même boîte « Vous devez formater le
+    disque » apparaît aussi après un flash ROCKNIX (une seule boîte, pour
+    sa partition ext4, §4.6) -- pas seulement Android. Message générique
+    (sans le détail des partitions multiples ni le mécanisme d'écran de
+    rechange, propres à Android), et bouton Éjecter masqué comme pour
+    Android : déjà éjectée par `--eject-after`."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/rocknix.img"
+    window._app_config.firmware = "rocknix"
+
+    window._on_worker_finished(True)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "formater" in log_text.lower()
+    assert "panels" not in log_text.lower()  # mécanisme propre à Android, pas ici
+    assert window._log_panel._eject_button.isVisible() is False
+
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))

@@ -55,6 +55,15 @@ class FirmwareEntry:
     desc_key: str
     status: str  # "maintained" | "archived" | "experimental"
     is_clone_safe: bool = False
+    # Constaté sur du vrai matériel : Windows ne sait lire aucune des
+    # partitions d'une image Android (boot/system/vendor/userdata...) et
+    # propose de les formater dès qu'il les découvre -- une par partition
+    # illisible (quatre boîtes « Vous devez formater le disque » observées
+    # pour R36Droid), qu'un débutant risque d'accepter et de détruire ce
+    # qui vient d'être écrit (§4.6/§5 : `MainWindow` en tire un
+    # avertissement explicite dans le journal après le flash, et un
+    # `--eject-after` best-effort côté CLI).
+    is_android: bool = False
     # None = ROCKNIX (téléchargement automatique, identify/rocknix.py) --
     # le seul cas à ce jour, voir docstring de module.
     releases_url: Optional[str] = None
@@ -106,6 +115,7 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
         "file_firmware_r36droid_title",
         "file_firmware_r36droid_desc",
         status="experimental",
+        is_android=True,
         releases_url=R36DROID_RELEASES_URL,
     ),
     FirmwareEntry(
@@ -113,6 +123,7 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
         "file_firmware_andr36oid_title",
         "file_firmware_andr36oid_desc",
         status="experimental",
+        is_android=True,
         releases_url=ANDR36OID_RELEASES_URL,
     ),
 )

@@ -55,6 +55,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from ctypes import wintypes
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -64,6 +65,7 @@ from typing import Callable, List, Optional
 # macOS/Linux (utile pour les tests).
 SEE_MASK_NOCLOSEPROCESS = 0x00000040
 SW_SHOWNORMAL = 1
+SW_HIDE = 0
 STILL_ACTIVE = 259
 WAIT_INFINITE = 0xFFFFFFFF
 
@@ -90,6 +92,75 @@ class _SHELLEXECUTEINFOW(ctypes.Structure):
     ]
 
 
+def _get_last_error() -> Optional[int]:
+    """`ctypes.get_last_error`/`ctypes.FormatError` n'existent que sous
+    Windows -- absents du module sur macOS/Linux (même piège que
+    `imaging/winlock.py::_last_error`, ce fichier devant lui aussi rester
+    importable et testable sur les trois OS, voir le docstring de
+    module)."""
+    get_last_error = getattr(ctypes, "get_last_error", None)
+    return get_last_error() if get_last_error is not None else None
+
+
+def _format_windows_error(code: Optional[int]) -> str:
+    if code is None:
+        return ""
+    format_error = getattr(ctypes, "FormatError", None)
+    if format_error is None:
+        return ""
+    try:
+        return format_error(code)
+    except OSError:
+        return ""
+
+
+def _log_windows_diagnostic(stderr_log: Optional[Path], message: str, truncate: bool = False) -> None:
+    """Diagnostic de l'élévation Windows elle-même (`ShellExecuteExW`,
+    avant même que le worker élevé n'ait la moindre chance d'écrire quoi
+    que ce soit dans le fichier de progression du protocole, §3) --
+    ajouté pour investiguer `ELEVATION_FAILED` sur Windows sans aucune
+    trace exploitable (rapport réel : ~12 s d'attente avant l'échec,
+    aucune trace Python sur le `stderr` du processus GUI).
+
+    Deux destinations, toutes deux best-effort (un échec d'écriture ici
+    ne doit jamais faire échouer l'élévation elle-même) :
+    1. Le `stderr` du processus GUI lui-même -- immédiatement visible
+       dans le terminal qui a lancé la GUI (`ShellExecuteW` ne fournit
+       aucun tube vers le `stderr` du worker élevé, contrairement à
+       `osascript`/`pkexec`/`sudo`, donc c'est le seul `stderr` que ce
+       module puisse jamais alimenter côté Windows).
+    2. `stderr_log` (`logs.elevation_log_path()`, même fichier que
+       macOS/Linux, §3) quand fourni -- tronqué au tout début d'un
+       nouveau lancement élevé (`truncate=True`, un seul appel par
+       `_launch_windows`), puis complété au fil des événements. Une fois
+       alimenté, `WorkerRunner._read_elevation_log()` l'inclut déjà
+       automatiquement dans le message `ELEVATION_FAILED` affiché dans le
+       journal de bord -- ce diagnostic devient donc visible aussi bien
+       en terminal qu'en conditions réelles d'usage de la GUI, sans
+       changement côté `worker_runner.py`."""
+    print(f"[r36s_studio] elevate (Windows) : {message}", file=sys.stderr, flush=True)
+    if stderr_log is None:
+        return
+    mode = "w" if truncate else "a"
+    try:
+        with open(stderr_log, mode, encoding="utf-8") as f:
+            f.write(message + "\n")
+    except OSError:
+        pass
+
+
+def _windows_process_id(h_process: int) -> Optional[int]:
+    """PID du processus derrière `h_process` -- best-effort, `None` si
+    `GetProcessId` échoue (jamais rencontré en pratique, mais ne doit
+    jamais faire lever le diagnostic lui-même)."""
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        pid = kernel32.GetProcessId(h_process)
+    except OSError:
+        return None
+    return pid or None
+
+
 class WindowsElevatedProcess:
     """Enveloppe minimale autour du handle retourné par `ShellExecuteExW`
     (verbe `runas`), exposant juste ce dont `worker_runner.py` a besoin.
@@ -99,18 +170,56 @@ class WindowsElevatedProcess:
     `subprocess.Popen`) — le fichier de progression et le journal
     d'élévation (`logs.py`) ne sont donc pas alimentés sous Windows dans ce
     squelette ; une implémentation complète demanderait `CreateProcessW`
-    avec des handles de tube explicites plutôt que `ShellExecuteExW`."""
+    avec des handles de tube explicites plutôt que `ShellExecuteExW`.
 
-    def __init__(self, h_process: int):
+    Trace, en revanche, ce qu'elle observe elle-même du cycle de vie du
+    processus élevé (`_log_windows_diagnostic`, ci-dessus) : le code de
+    sortie réel dès qu'il cesse d'être `STILL_ACTIVE` (jamais examiné
+    auparavant -- `worker_runner.py` ne teste que None/non-None) et le
+    délai écoulé depuis le lancement, pour distinguer un processus qui ne
+    démarre jamais d'un processus qui démarre puis meurt après un
+    certain délai (ex. un antivirus/SmartScreen qui retient l'exécution
+    le temps d'une vérification réseau, souvent dans les 10-15 s -- une
+    hypothèse plausible pour un délai d'environ 12 s avant l'échec, à
+    confirmer par ce diagnostic plutôt que supposée)."""
+
+    def __init__(self, h_process: int, stderr_log: Optional[Path] = None, pid: Optional[int] = None):
         self._h_process = h_process
+        self._stderr_log = stderr_log
+        self._pid = pid
+        self._launched_at = time.monotonic()
+        self._exit_logged = False
 
     def poll(self) -> Optional[int]:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         exit_code = wintypes.DWORD()
-        kernel32.GetExitCodeProcess(self._h_process, ctypes.byref(exit_code))
+        ok = kernel32.GetExitCodeProcess(self._h_process, ctypes.byref(exit_code))
+        if not ok:
+            # Jamais rencontré en pratique (handle invalide) -- ne doit
+            # pas empêcher `worker_runner.py` de conclure à un échec :
+            # un poll() qui ne peut plus interroger le processus est
+            # traité comme "terminé", pas comme "encore actif".
+            last_error = _get_last_error()
+            self._log_exit_once(f"GetExitCodeProcess a échoué (GetLastError={last_error})")
+            return 1
         if exit_code.value == STILL_ACTIVE:
             return None
+        self._log_exit_once(f"code de sortie {exit_code.value} (0x{exit_code.value:08X})")
         return exit_code.value
+
+    def _log_exit_once(self, detail: str) -> None:
+        """N'écrit qu'une seule fois par processus (`worker_runner.py`
+        interroge `poll()` toutes les 200 ms, §3 -- répéter ce diagnostic
+        à chaque tick noierait le journal sans rien ajouter)."""
+        if self._exit_logged:
+            return
+        self._exit_logged = True
+        elapsed = time.monotonic() - self._launched_at
+        pid_text = f"PID {self._pid}" if self._pid else "PID inconnu"
+        _log_windows_diagnostic(
+            self._stderr_log,
+            f"processus élevé terminé après {elapsed:.1f} s ({pid_text}) : {detail}",
+        )
 
     def wait(self) -> Optional[int]:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -176,7 +285,7 @@ def launch_elevated_worker(
     if system == "Linux":
         return _launch_linux(command, stderr_log)
     if system == "Windows":
-        return _launch_windows(command)
+        return _launch_windows(command, stderr_log)
     raise NotImplementedError(f"OS non supporté pour l'élévation : {system}")
 
 
@@ -472,9 +581,11 @@ def _launch_linux(command: List[str], stderr_log: Optional[Path]) -> subprocess.
             stderr_file.close()
 
 
-def _launch_windows(command: List[str]) -> WindowsElevatedProcess:
+def _launch_windows(command: List[str], stderr_log: Optional[Path] = None) -> WindowsElevatedProcess:
     exe, *rest = command
     params = subprocess.list2cmdline(rest)
+
+    _log_windows_diagnostic(stderr_log, f"ShellExecuteExW(runas) : lpFile={exe!r} lpParameters={params!r}", truncate=True)
 
     info = _SHELLEXECUTEINFOW()
     info.cbSize = ctypes.sizeof(_SHELLEXECUTEINFOW)
@@ -484,14 +595,37 @@ def _launch_windows(command: List[str]) -> WindowsElevatedProcess:
     info.lpFile = exe
     info.lpParameters = params
     info.lpDirectory = None
-    info.nShow = SW_SHOWNORMAL
+    # `SW_HIDE`, pas `SW_SHOWNORMAL` : `ShellExecuteW` ne fournit aucun tube
+    # stdout/stderr vers le worker élevé (§3) -- toute la communication
+    # passe déjà par `--progress-file`/le journal d'élévation (`stderr_log`
+    # ci-dessus), cette fenêtre de console est donc vide en pratique.
+    # L'afficher contredit §1 (« aucune ligne de commande, jamais, à
+    # aucune étape ») pour un néophyte qui la verrait clignoter à chaque
+    # opération élevée.
+    info.nShow = SW_HIDE
 
     shell32 = ctypes.WinDLL("shell32", use_last_error=True)
     ok = shell32.ShellExecuteExW(ctypes.byref(info))
     if not ok:
-        raise OSError("ShellExecuteW (runas) a échoué : élévation refusée ou annulée")
+        last_error = _get_last_error()
+        # `hInstApp` reste rempli d'un code SE_ERR_* pour compatibilité
+        # historique même en échec -- une seconde source d'information
+        # quand `GetLastError()` ne suffit pas à distinguer la cause
+        # (élévation refusée par l'utilisateur, exécutable introuvable,
+        # SmartScreen qui bloque plutôt qu'il ne demande...).
+        _log_windows_diagnostic(
+            stderr_log,
+            f"ShellExecuteExW a échoué : retour=False, GetLastError={last_error} "
+            f"({_format_windows_error(last_error)!r}), hInstApp={info.hInstApp}",
+        )
+        raise OSError(
+            f"ShellExecuteW (runas) a échoué : élévation refusée ou annulée (GetLastError={last_error})"
+        )
 
-    return WindowsElevatedProcess(info.hProcess)
+    pid = _windows_process_id(info.hProcess)
+    _log_windows_diagnostic(stderr_log, f"ShellExecuteExW a réussi : hProcess={info.hProcess}, PID={pid}")
+
+    return WindowsElevatedProcess(info.hProcess, stderr_log=stderr_log, pid=pid)
 
 
 # --- montage forcé élevé (macOS, cartes GPT/EFI -- §4.4) -------------------

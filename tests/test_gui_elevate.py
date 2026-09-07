@@ -585,6 +585,31 @@ def test_windows_uses_shell_execute_ex_with_runas(mock_system, mock_windll):
 
 @patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_hides_the_worker_console_window(mock_system, mock_windll):
+    """`ShellExecuteW` ne fournit aucun tube stdout/stderr vers le worker
+    élevé (§3) -- toute la communication passe déjà par `--progress-file`,
+    cette fenêtre de console est donc vide en pratique et contraire à §1
+    (« aucune ligne de commande, jamais »). `nShow` doit valoir `SW_HIDE`,
+    pas `SW_SHOWNORMAL`."""
+    shell32 = MagicMock()
+    captured = {}
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        info.hProcess = 4242
+        captured["nShow"] = info.nShow
+        return 1
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    mock_windll.return_value = shell32
+
+    elevate.launch_elevated_worker(["backup", "--device", "/dev/whatever"])
+
+    assert captured["nShow"] == elevate.SW_HIDE
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
 def test_windows_raises_when_shell_execute_fails(mock_system, mock_windll):
     shell32 = MagicMock()
     shell32.ShellExecuteExW.return_value = 0  # échec (annulé par l'utilisateur, etc.)
@@ -598,11 +623,92 @@ def test_windows_raises_when_shell_execute_fails(mock_system, mock_windll):
 
 
 @patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_launch_success_logs_pid_to_stderr_log(mock_system, mock_windll, tmp_path):
+    """Journalise gui/elevate.py : le PID obtenu (`GetProcessId`) et le
+    handle retourné par `ShellExecuteExW` sur un lancement réussi --
+    testable sans la GUI en appelant `launch_elevated_worker` directement
+    (voir aussi le script autonome en fin de fichier)."""
+    shell32 = MagicMock()
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        info.hProcess = 4242
+        return 1  # succès
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    shell32.GetProcessId.return_value = 9001
+    mock_windll.return_value = shell32
+    log_path = tmp_path / "elevation.log"
+
+    elevate.launch_elevated_worker(["backup", "--device", "/dev/whatever"], stderr_log=log_path)
+
+    content = log_path.read_text(encoding="utf-8")
+    assert "9001" in content
+    assert "4242" in content
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_launch_failure_logs_last_error_to_stderr_log(mock_system, mock_windll, tmp_path):
+    """Journalise gui/elevate.py : `GetLastError` et `hInstApp` sur un
+    échec de `ShellExecuteExW` -- le seul indice disponible côté GUI
+    quand l'élévation échoue avant même que le worker élevé n'existe."""
+    shell32 = MagicMock()
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        info.hInstApp = 5  # SE_ERR_ACCESSDENIED
+        return 0  # échec
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    mock_windll.return_value = shell32
+    log_path = tmp_path / "elevation.log"
+
+    with patch("r36s_studio.gui.elevate.ctypes.get_last_error", create=True, return_value=1223):
+        try:
+            elevate.launch_elevated_worker(["backup"], stderr_log=log_path)
+            assert False, "aurait dû lever OSError"
+        except OSError as exc:
+            assert "1223" in str(exc)
+
+    content = log_path.read_text(encoding="utf-8")
+    assert "1223" in content
+    assert "5" in content  # hInstApp
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_launch_truncates_stderr_log_at_start_of_each_attempt(mock_system, mock_windll, tmp_path):
+    """`stderr_log` reflète toujours la dernière tentative, jamais un
+    historique qui s'accumule (même principe que macOS/Linux, `elevate.py`
+    docstring)."""
+    shell32 = MagicMock()
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        info.hProcess = 1
+        return 1
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    shell32.GetProcessId.return_value = 1
+    mock_windll.return_value = shell32
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text("contenu d'une tentative précédente, très longue" * 50, encoding="utf-8")
+
+    elevate.launch_elevated_worker(["backup"], stderr_log=log_path)
+
+    content = log_path.read_text(encoding="utf-8")
+    assert "tentative précédente" not in content
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
 def test_windows_elevated_process_poll_reports_still_active(mock_windll):
     kernel32 = MagicMock()
 
     def _get_exit_code(handle, ref):
         ref._obj.value = elevate.STILL_ACTIVE
+        return 1  # BOOL Win32 : succès
 
     kernel32.GetExitCodeProcess.side_effect = _get_exit_code
     mock_windll.return_value = kernel32
@@ -617,12 +723,70 @@ def test_windows_elevated_process_poll_reports_exit_code(mock_windll):
 
     def _get_exit_code(handle, ref):
         ref._obj.value = 0
+        return 1  # BOOL Win32 : succès
 
     kernel32.GetExitCodeProcess.side_effect = _get_exit_code
     mock_windll.return_value = kernel32
 
     process = elevate.WindowsElevatedProcess(h_process=123)
     assert process.poll() == 0
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+def test_windows_elevated_process_poll_reports_exit_code_only_once(mock_windll):
+    """`_log_exit_once` ne doit journaliser qu'un seul diagnostic même si
+    `poll()` est rappelé après la fin du processus (`worker_runner.py`
+    interroge toutes les 200 ms, §3 -- répéter noierait le journal)."""
+    kernel32 = MagicMock()
+
+    def _get_exit_code(handle, ref):
+        ref._obj.value = 1
+        return 1
+
+    kernel32.GetExitCodeProcess.side_effect = _get_exit_code
+    mock_windll.return_value = kernel32
+
+    process = elevate.WindowsElevatedProcess(h_process=123)
+    process.poll()
+    process.poll()
+
+    assert process._exit_logged is True
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+def test_windows_elevated_process_poll_getexitcodeprocess_failure_treated_as_exited(mock_windll):
+    """Un `GetExitCodeProcess` qui échoue lui-même (jamais rencontré en
+    pratique, handle invalide) ne doit jamais faire croire que le
+    processus est encore actif -- `worker_runner.py` interprète déjà
+    `poll() is not None` comme "terminé"."""
+    kernel32 = MagicMock()
+    kernel32.GetExitCodeProcess.return_value = 0  # BOOL Win32 : échec
+
+    mock_windll.return_value = kernel32
+
+    process = elevate.WindowsElevatedProcess(h_process=123)
+    assert process.poll() is not None
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+def test_windows_elevated_process_logs_pid_and_elapsed_time_on_exit(mock_windll, tmp_path):
+    kernel32 = MagicMock()
+
+    def _get_exit_code(handle, ref):
+        ref._obj.value = 3
+        return 1
+
+    kernel32.GetExitCodeProcess.side_effect = _get_exit_code
+    mock_windll.return_value = kernel32
+    log_path = tmp_path / "elevation.log"
+    log_path.write_text("", encoding="utf-8")
+
+    process = elevate.WindowsElevatedProcess(h_process=123, stderr_log=log_path, pid=4242)
+    process.poll()
+
+    content = log_path.read_text(encoding="utf-8")
+    assert "4242" in content
+    assert "3" in content  # code de sortie
 
 
 # --- run_privileged_mount : montage forcé élevé (macOS, cartes GPT/EFI, ----

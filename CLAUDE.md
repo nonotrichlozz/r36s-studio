@@ -1143,6 +1143,90 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > libre restant (… octets) » doit apparaître dans le journal, sans aucune
 > action de l'utilisateur.
 
+> **Ligne de commande complète journalisée au lancement de tout worker
+> élevé (§4.4), pour vérifier ce genre de chose sans avoir à instrumenter
+> le worker à chaque doute.** Redemandé après le correctif ci-dessus :
+> vérifier depuis les traces d'élévation elles-mêmes qu'un drapeau donné
+> est bien transmis (`--create-games-partition`, entre autres, avant
+> d'être retiré) n'était possible qu'en lisant le code, jamais en
+> observant ce que l'app avait réellement lancé. `gui/main_window.py::
+> _start_worker`/`_start_eject` journalisent désormais, juste avant de
+> construire le `WorkerRunner`, une ligne `[diagnostic] worker : …` avec
+> l'argv complet joint par des espaces (se lit comme la ligne qu'un
+> utilisateur pourrait retaper lui-même) -- pour *tout* lancement
+> (backup/flash/éjection), pas seulement celui suspecté à l'origine de la
+> demande. Généralisé volontairement plutôt que limité au seul cas du
+> moment : la même question (« qu'est-ce qui a été lancé, exactement ? »)
+> se reposera pour d'autres drapeaux à l'avenir.
+
+> ⚠️ **Audit multi-plateforme (demandé explicitement) : `create_and_
+> format_games_partition_if_worthwhile` n'a jamais été validée sur du vrai
+> matériel, sur aucun OS -- et sa partie interne réellement confirmée un
+> jour (Windows, avant l'ajout du seuil automatique) ne représente qu'une
+> moitié du chemin.**
+>
+> **Code commun aux trois OS, testé (reparsing indépendant, pas seulement
+> "ne lève pas"), jamais sur du vrai matériel** : `_peek_free_games_
+> partition_bytes` (lecture seule des premiers secteurs) et `create_games_
+> partition` (calcul de plan + réécriture MBR/GPT) ne font que de la
+> manipulation d'octets sur un chemin de fichier ouvert en binaire --
+> aucune branche par OS, un bug ici toucherait les trois de façon
+> identique. C'est la partie qui a le plus de tests (`tests/test_imaging_
+> games_partition.py`, reparsing indépendant comme `test_imaging_system_
+> backup.py`), mais jamais exécutée contre un vrai périphérique bloc, sur
+> aucun OS -- seulement contre des fichiers factices.
+>
+> **Ce qui diverge ensuite, par OS, dans `format_games_partition`** :
+> - **Windows** (`_format_windows`, `Get-Partition | Get-Volume | Format-
+>   Volume` en PowerShell) : **seule branche jamais confirmée sur du vrai
+>   matériel** -- mais cette validation (§4.3 ci-dessus, « partition de
+>   20 406 861 824 octets créée, exFAT, étiquetée EASYROMS ») a eu lieu
+>   *avant* l'ajout du seuil automatique de 1 Go et de `_peek_free_games_
+>   partition_bytes` -- elle a validé `create_games_partition` +
+>   `_format_windows` ensemble via l'ancien drapeau `--create-games-
+>   partition`, jamais le nouveau chemin `if_worthwhile` (calcul préalable
+>   en lecture seule, puis décision, puis appel) dans son intégralité.
+> - **macOS** (`_format_macos`, `diskutil eraseVolume ExFAT|MS-DOS\ FAT32
+>   <label> <partition>`) -- **jamais exécutée sur du vrai matériel**,
+>   dans ce projet, à aucun moment.
+> - **Linux** (`_format_linux`, `mkfs.exfat`/`mkfs.vfat -F 32`) --
+>   **jamais exécutée sur du vrai matériel** non plus. ⚠️ Écart documentation/
+>   code corrigé au passage (`imaging/games_partition.py::format_games_
+>   partition`, docstring) : une version antérieure affirmait un repli
+>   automatique vers `"fat32"` quand les outils exFAT sont absents --
+>   **ce repli n'existe pas dans le code**, `_format_linux` choisit
+>   seulement l'outil selon la valeur de `filesystem` déjà reçue, rien ne
+>   détecte la disponibilité de `mkfs.exfat` ni ne change ce paramètre.
+>   Sur une machine sans `mkfs.exfat` (plausible sur une distribution
+>   minimale, ex. antiX -- machine de test Linux disponible pour ce
+>   projet, i686, sans PySide6 donc sans GUI, mais le CLI/worker suffit
+>   pour tester ce chemin précis), le formatage échoue avec
+>   `FileNotFoundError`/`CalledProcessError`, rattrapée en best-effort par
+>   `cmd_flash` (§4.3 : jamais un échec du flash déjà réussi, seulement un
+>   avertissement journalisé) -- pas par un changement silencieux de
+>   système de fichiers. Précondition à vérifier avant tout test réel sur
+>   une telle machine : `mkfs.exfat` (paquet `exfatprogs` ou `exfat-utils`
+>   selon la distribution) est-il installé, sinon le test validera surtout
+>   le repli best-effort plutôt que la création réelle.
+>
+> **`_wait_for_new_partition`** (macOS/Linux uniquement, ignorée sous
+> Windows qui retrouve la partition par position) : ré-interroge `list_
+> partitions` jusqu'à ce qu'un chemin absent de `known_partition_paths`
+> apparaisse, `PARTITION_WAIT_SECONDS` (15 s) au plus -- le délai qu'un OS
+> met réellement à reprendre en compte une table de partitions modifiée
+> sous lui n'a jamais été mesuré sur du vrai matériel, sur aucun des deux
+> OS (déjà signalé dans la docstring de module depuis l'écriture de ce
+> fichier, toujours vrai).
+>
+> **Reste à vérifier sur du vrai matériel macOS/Linux** : que la partition
+> est effectivement créée et formatée (montable, bon système de fichiers,
+> bonne étiquette EASYROMS) sur les deux OS ; sur Linux spécifiquement,
+> avec et sans `mkfs.exfat` installé, pour confirmer que l'absence de
+> l'outil dégrade proprement vers l'avertissement best-effort plutôt que
+> de planter ailleurs ; que `_wait_for_new_partition` trouve bien la
+> nouvelle partition dans les 15 s sans éjection/réinsertion physique de
+> la carte.
+
 **Formats source acceptés au flash :** `.img`, `.img.gz`, `.img.xz`, `.img.zip`
 (décompression en flux, sans fichier temporaire).
 
@@ -1761,6 +1845,65 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > vanishing`) qui simulent l'état incohérent plutôt que de le reproduire
 > sur un vrai lecteur.
 
+> ⚠️ **Audit multi-plateforme (demandé explicitement) : tout le travail
+> d'éjection de ces derniers jours n'a été validé que sur Windows --
+> revue de ce qui est commun aux trois OS et de ce qui reste propre à
+> chacun, pour ne présenter comme acquis que ce qui l'est vraiment.**
+>
+> **Code commun aux trois OS (`eject()`, `partitions/eject.py`,
+> `cmd_eject`, `__main__.py`)** : le dispatch par `platform.system()`, et
+> tout le mystère du quatrième signalement ci-dessus (`_run_wizard_source_
+> eject`/`_enter_wizard_job`/`_on_wizard_job_finished`, `gui/main_
+> window.py`) -- aucune branche par OS avant d'atteindre `eject_device()`.
+> Si la cause réelle de « la fonction ne semble jamais appelée » s'avère
+> être dans cette partie commune (état incohérent, transition de job
+> ratée...), elle concernerait les trois OS de la même façon -- mais
+> aucun rapport ni aucun test réel n'existe à ce jour pour macOS/Linux sur
+> ce point précis : les quatre signalements disponibles viennent tous du
+> même poste Windows. `_start_eject`/`WorkerRunner` (§3) sont eux aussi
+> entièrement communs -- invoquer `python -m r36s_studio eject --device
+> <chemin> --worker --progress-file <fichier>` (élevé, ex. via `sudo` sur
+> Linux) exerce exactement le même chemin que la GUI, sans avoir besoin de
+> PySide6 pour le tester.
+>
+> **Ce qui diverge ensuite, par OS, dans `eject()` lui-même** :
+> - **Windows** (`_windows_eject`, `imaging/winlock.py`) : de loin le plus
+>   travaillé -- verrouillage par volume, réessais sur `ERROR_ACCESS_
+>   DENIED`, gestion des partitions sans lettre de lecteur, `IOCTL_
+>   STORAGE_EJECT_MEDIA`... **confirmé sur du vrai matériel**, à plusieurs
+>   reprises, avec le détail exact de chaque échec rencontré (§4.3/§4.4
+>   ci-dessus).
+> - **macOS** (`subprocess.run(["diskutil", "eject", device_path], ...)`)
+>   -- une seule commande, jamais modifiée pendant toute cette série de
+>   correctifs. **Jamais confirmée sur du vrai matériel** dans ce projet,
+>   à aucun moment -- aucune trace d'un test réel dans cet historique,
+>   contrairement à Windows. Risque plausible, non vérifié : si la carte a
+>   plusieurs volumes montés séparément (BOOT visible mais monté de façon
+>   inhabituelle, §4.4), `diskutil eject` sur le disque entier devrait
+>   suffire (il démonte tous les volumes du disque avant d'éjecter,
+>   d'après sa documentation), mais ça n'a jamais été observé en pratique
+>   ici.
+> - **Linux** (`subprocess.run(["udisksctl", "power-off", "-b",
+>   device_path], ...)`) -- une seule commande également, jamais modifiée
+>   non plus. **Jamais confirmée sur du vrai matériel.** Précondition non
+>   vérifiée : `udisksctl` (paquet `udisks2`) doit être installé et son
+>   service tourner -- pas garanti sur une distribution minimale (ex.
+>   antiX, mentionnée explicitement comme banc de test disponible pour ce
+>   projet, machine i686 sans environnement de bureau complet) ; si absent,
+>   `subprocess.run` lève `FileNotFoundError`, jamais testé ni géré
+>   spécifiquement ici (retombe sur le comportement générique du code
+>   appelant : `EJECT_FAILED` côté CLI élevé, §4.4).
+>
+> **Reste à vérifier sur du vrai matériel macOS/Linux** : que `eject()`
+> réussit réellement (la carte disparaît du système) sur les deux OS,
+> pour un cas simple (une seule partition montée) et pour une carte R36S
+> réelle (BOOT + root + EASYROMS/STORAGE, plusieurs volumes) ; que
+> `udisksctl` est bien présent sur l'environnement Linux visé, ou sinon
+> quel message l'utilisateur voit réellement. La partie « pourquoi la
+> fonction ne semble parfois jamais appelée » (quatrième signalement,
+> code commun) reste ouverte sur les trois OS, faute de rapport ou de
+> test réel en dehors de Windows.
+
 ⚠️ **Bug corrigé, confirmé en relisant le code après le rapport
 > ci-dessus : le Continuer du vrai parcours guidé pouvait afficher la
 > fenêtre Confirmation avec la mauvaise carte, court-circuitant la
@@ -2291,6 +2434,66 @@ sérieux d'un script.
 > sur le `.dtb` extrait à l'étape A pour produire automatiquement l'overlay
 > d'écran ROCKNIX correspondant — mais ceci reste une piste, à explorer
 > seulement si l'utilisateur en a besoin.
+
+> ⚠️ **Investigation clôturée, confirmée sur du vrai matériel : ce build
+> Android/LineageOS (R36Droid/andr36oid) ne démarre pas sur cette console,
+> et ce n'est pas une histoire de panel.** Deuxième round de test complet,
+> sur une carte différente de celle du round précédent (ci-dessus, 3
+> panels compatibles testés) : cette fois, **les huit variantes distinctes
+> de `Panels/` compatibles `rockchip,rk3326-rg351mp-linux` (après
+> dédoublonnage par timing exact) ont toutes figé** -- écran noir ou allumé
+> puis gelé/frisant selon le candidat, jamais un démarrage complet.
+>
+> **Isolation de la cause, méthodique :**
+> 1. Premier piège rencontré pendant ce round : `identify --boot-dir`
+>    identifie toujours le **premier `.dtb` par ordre alphabétique** d'un
+>    dossier (§4.5) -- sur cette image, c'est `rg351mp-kernel.dtb`/
+>    `rg351v-kernel.dtb`, jamais celui que `boot.ini` charge réellement au
+>    boot (`load mmc 1:1 ${fdt_addr_r} rk3326-r36s-android.dtb`, vérifié en
+>    lisant `boot.ini` directement). Un premier essai basé sur le mauvais
+>    fichier n'a donc rien changé au boot réel -- corrigé en cours de route
+>    en parsant directement `rk3326-r36s-android.dtb` de chaque dossier
+>    (`identify.dtb.parse_dtb_file`, appelable directement sur un fichier
+>    précis, pas seulement via `--boot-dir` sur un dossier entier).
+> 2. Une fois sur le bon fichier : son `board_compatible` racine ne
+>    correspond **jamais** à `rg351mp`/`r36s` -- systématiquement
+>    `odroidgo3`, `g80ca`, ou `type3` selon le dossier. Seul le nœud panel
+>    (timings d'écran) semble avoir été retouché par variante ; le
+>    compatible racine reste celui de la base clonée par le porteur
+>    communautaire. Filtrer sur ce champ pour ce fichier précis n'a donc
+>    aucun sens ici (contrairement à l'usage habituel de ce module sur un
+>    BOOT ArkOS/ROCKNIX, §4.5) -- seul le dédoublonnage par timing exact et
+>    le contrôleur d'écran (`elida,kd35t133` vs `sitronix,st7703` pour un
+>    seul candidat) restent des signaux valides.
+> 3. **Test décisif** : même après avoir restauré le fichier *d'origine*,
+>    jamais modifié, la console fige exactement pareil -- et, câble/port
+>    USB confirmés fonctionnels (même câble, même port, ROCKNIX sur la même
+>    console reconnue instantanément par le PC juste après), **aucun
+>    périphérique n'apparaît côté PC** (`adb devices` vide, aucune entrée
+>    même en échec dans le Gestionnaire de périphériques Windows) pendant
+>    le freeze -- ni avec l'original, ni avec aucun des huit candidats.
+>    Le blocage survient donc **avant l'initialisation USB du noyau**,
+>    un point commun à toutes les configurations testées, écran compris ou
+>    non -- la preuve que le panel n'est pour rien dans ce freeze.
+>
+> **Conclusion, non résolue plus loin faute de matériel** : ce build
+> Android ne s'initialise pas correctement sur ce clone, indépendamment du
+> panel choisi. Voir le point précis où ça bloque demanderait une capture
+> UART (`boot.ini` route la console noyau sur `ttyS2, 115200n8` -- la seule
+> fenêtre sur ce qui se passe avant l'USB), non disponible lors de cette
+> investigation. `adb`/USB ne peuvent structurellement rien montrer ici,
+> quel que soit le câble : le point de blocage est en amont de leur
+> initialisation.
+>
+> **Implication pour une future automatisation de sélection de panel**
+> (idée envisagée à ce moment, jamais implémentée en conséquence) : un tel
+> outil (détection automatique d'un dossier `Panels/` au flash, application
+> du candidat suivant sans reflasher) n'aurait rien résolu pour ce cas
+> précis -- le problème n'est pas le choix du panel. Reste potentiellement
+> utile pour un autre build Android qui, lui, initialiserait correctement
+> le matériel mais afficherait sur le mauvais écran -- mais ne plus jamais
+> le présenter comme la réponse à un simple freeze sans d'abord vérifier,
+> comme ici, que la configuration d'origine ne fige pas elle aussi.
 
 ---
 
@@ -3092,6 +3295,42 @@ chaque tag. C'est gratuit pour un dépôt public et ça règle le problème déf
 > réelles ici) — à corriger au premier échec CI si la liste s'avère
 > incomplète.
 >
+> ⚠️ **Bug corrigé, confirmé sur les vrais runners GitHub Actions : Linux
+> et macOS échouaient tous les deux (Windows passait), en 51 s et 41 s
+> respectivement -- des échecs trop rapides pour être liés aux paquets
+> `apt` ci-dessus (déjà installés à ce stade).** Logs des deux jobs
+> récupérés via l'API GitHub (`gh` non installé sur cette machine --
+> `curl` avec un token pris via `git credential fill`, le même que celui
+> déjà utilisé par `git push`) : même échec, mot pour mot, sur les deux
+> OS -- `tests/test_partitions_eject.py::test_windows_eject_media_
+> failure_propagates`, `AttributeError: module 'ctypes' has no attribute
+> 'WinDLL'`.
+>
+> **Cause** : ce test simule un échec Windows (`platform.system` mocké à
+> `"Windows"`, `winlock.eject_media` levant `OSError`) pour vérifier que
+> `_windows_eject` (`partitions/eject.py`) laisse bien remonter
+> l'exception plutôt que de l'avaler. Mais `_windows_eject` appelle
+> `winlock.unlock_volumes(handles)` dans un `finally` -- exécuté même
+> quand `eject_media` a levé -- et ce test-là, contrairement à ses deux
+> voisins immédiats (`test_windows_dismounts_volumes_then_ejects_media`,
+> `test_windows_ejects_without_dismounting_when_no_drive_letters`, tous
+> deux corrects), ne mockait pas `winlock.unlock_volumes`. Sur la vraie
+> `unlock_volumes` (`imaging/winlock.py`), même avec `handles=[]`,
+> `_kernel32()` est appelé *avant* la boucle sur les handles -- et
+> `ctypes.WinDLL` n'existe que sur un vrai interpréteur Windows,
+> inexistant sur Ubuntu/macOS (`AttributeError` immédiate). Ce test n'a
+> donc jamais pu tourner ailleurs que sur un poste Windows avant l'ajout
+> de la CI multi-OS -- oubli d'un mock lors de son écriture, pas un défaut
+> du comportement Windows lui-même (déjà validé sur du vrai matériel,
+> §4.4/§4.5, inchangé par ce correctif).
+>
+> **Corrigé** : `@patch("r36s_studio.imaging.winlock.unlock_volumes")`
+> ajouté à ce seul test (`tests/test_partitions_eject.py`), exactement
+> comme ses deux voisins -- aucun code de production touché. Assertion
+> `mock_unlock.assert_called_once_with([])` ajoutée au passage, pour
+> couvrir explicitement que le `finally` s'exécute bien même après une
+> exception, pas seulement que l'exception remonte.
+>
 > **Linux, `.tar.gz` plutôt qu'AppImage** : le brief (§6 ci-dessous)
 > évoque un AppImage pour Linux, mais un AppImage complet demande au
 > minimum une icône dédiée et un fichier `.desktop` — ni l'un ni l'autre
@@ -3153,6 +3392,25 @@ d'écriture ne doit être écrite.
   commits ou de soupçonner `imaging/copy.py`, comparer le débit obtenu
   avec une carte connue bonne (SanDisk ou équivalent) sur le même port et
   la même machine.
+- **Banc de test Linux CLI disponible : l'Eee PC i686 (§6, déjà utilisé pour
+  la limite de compilation croisée) tourne antiX** — pas de GUI possible
+  (PySide6 n'a pas de roue pour i686), mais le worker élevé (`backup`/
+  `flash`/`eject`) est un simple CLI Python, testable directement sans
+  passer par la GUI ni par `gui/elevate.py` : invoquer `python -m
+  r36s_studio eject --device <chemin>` (ou `flash`) directement dans un
+  terminal déjà élevé (`sudo`) exerce exactement le même code que le
+  worker lancé par la GUI (`cmd_eject`/`cmd_flash`, `__main__.py`).
+  `pkexec` n'est pas installé sur cette machine — `gui/elevate.py::
+  _launch_linux` bascule déjà sur `sudo` quand `shutil.which("pkexec")` ne
+  trouve rien, mais ce repli n'est pertinent que pour une future machine
+  Linux *avec* GUI ; sur l'Eee PC lui-même (pas de GUI du tout), c'est
+  l'utilisateur qui invoque directement `sudo python -m r36s_studio ...`
+  dans son propre terminal, sans passer par ce module. Utile en priorité
+  pour combler les zones jamais testées sur Linux identifiées ailleurs
+  dans ce document (éjection `udisksctl`, §4.4 ; création automatique de
+  la partition de jeux `mkfs.exfat`/`mkfs.vfat`, §4.3) — vérifier d'abord
+  que `udisksctl`/`mkfs.exfat` sont bien installés sur cette machine avant
+  de conclure quoi que ce soit d'un échec.
 - Jeu de données de test : tables de partitions MBR et GPT factices.
 - Test manuel obligatoire avant chaque release : brancher un disque dur externe et
   vérifier qu'il **n'apparaît pas** comme carte SD si les critères l'excluent.

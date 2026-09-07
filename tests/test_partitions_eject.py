@@ -63,12 +63,24 @@ def test_windows_ejects_without_dismounting_when_no_drive_letters(
 
 
 @patch("r36s_studio.partitions.eject.platform.system", return_value="Windows")
+@patch("r36s_studio.imaging.winlock.unlock_volumes")
 @patch("r36s_studio.imaging.winlock.eject_media", side_effect=OSError("device busy"))
 @patch("r36s_studio.imaging.winlock.lock_and_dismount_volumes", return_value=[])
 @patch("r36s_studio.partitions.eject._windows_drive_letters", return_value=[])
-def test_windows_eject_media_failure_propagates(mock_letters, mock_lock, mock_eject_media, mock_platform):
+def test_windows_eject_media_failure_propagates(
+    mock_letters, mock_lock, mock_eject_media, mock_unlock, mock_platform
+):
+    """`_windows_eject` appelle `winlock.unlock_volumes(handles)` dans un
+    `finally`, même quand `eject_media` lève -- `unlock_volumes` doit donc
+    être mockée ici comme dans les deux tests Windows voisins (sans quoi
+    elle appelle la vraie `ctypes.WinDLL`, absente sur macOS/Linux : bug
+    corrigé, confirmé cassant la CI sur ces deux OS alors que Windows
+    passait -- ce test n'avait jamais été exécuté ailleurs que sur un
+    vrai poste Windows avant l'ajout de la CI multi-OS)."""
     with pytest.raises(OSError):
         eject(r"\\.\PhysicalDrive9902")
+
+    mock_unlock.assert_called_once_with([])
 
 
 @patch("r36s_studio.partitions.eject.platform.system", return_value="Windows")

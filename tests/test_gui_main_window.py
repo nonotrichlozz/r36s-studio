@@ -3411,6 +3411,46 @@ def test_confirm_dialog_has_no_games_partition_checkbox(qapp):
     assert not hasattr(dialog, "games_partition_requested")
 
 
+# --- ligne de commande complète journalisée au lancement (§4.4) ------------
+# Signalé sur du vrai matériel : impossible de vérifier depuis les traces
+# d'élévation ce que l'app avait réellement lancé (un drapeau donné était-il
+# bien présent ?), sans instrumenter le worker élevé lui-même. La ligne de
+# commande complète (argv) doit désormais apparaître dans le journal de bord
+# à chaque lancement, backup/flash comme éjection.
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_worker_logs_the_full_command_line(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._device = _make_device()
+    window._mode = "flash"
+    window._file_path = "/tmp/rocknix.img"
+    window._app_config.firmware = "rocknix"
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._start_worker()
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "flash --image /tmp/rocknix.img --device /dev/fake-disk-test-3" in log_text
+    assert "--eject-after" in log_text  # ROCKNIX déclenche aussi ce drapeau (§4.6)
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_eject_logs_the_full_command_line(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    device = _make_device()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._start_eject(device, lambda ok, code, msg: None)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert f"eject --device {device.path}" in log_text
+
+
 # --- flash Android : avertissement + éjection automatique (§4.6) -----------
 # Windows ne sait lire aucune partition d'une image Android (boot/system/
 # vendor/userdata...) et propose de les formater dès qu'il les découvre --

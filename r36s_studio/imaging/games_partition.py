@@ -449,10 +449,19 @@ def format_games_partition(
     known_partition_paths: Optional[set] = None,
 ) -> None:
     """Formate nativement la partition de jeux fraîchement créée par
-    `create_games_partition` -- `filesystem` : `"exfat"` (par défaut,
-    système de fichiers observé sur la carte source, §4.4) ou `"fat32"` en
-    repli si les outils exFAT ne sont pas disponibles sur cette machine
-    (Linux uniquement, voir `_format_linux`). `known_partition_paths` : les
+    `create_games_partition` -- `filesystem` : `"exfat"` par défaut (système
+    de fichiers observé sur la carte source, §4.4) ou `"fat32"` si
+    explicitement demandé par l'appelant. ⚠️ Contrairement à ce qu'une
+    version antérieure de cette docstring affirmait, il n'existe **aucun
+    repli automatique** vers `"fat32"` quand `mkfs.exfat` est absent
+    (Linux) -- `_format_linux` ne fait que choisir l'outil selon la valeur
+    déjà reçue, rien ne détecte sa disponibilité ni ne change `filesystem`
+    en conséquence. Sur une machine sans `mkfs.exfat` (ex. une distribution
+    Linux minimale), le formatage échoue avec `FileNotFoundError`/
+    `CalledProcessError` -- rattrapé en best-effort par l'appelant
+    (`create_and_format_games_partition_if_worthwhile`/`__main__.py::
+    cmd_flash`, §4.3 : jamais un échec du flash déjà réussi), pas par un
+    changement silencieux de système de fichiers. `known_partition_paths` : les
     chemins de partitions déjà connus *avant* `create_games_partition`
     (relevés par l'appelant) -- sert à distinguer la nouvelle partition des
     partitions système sur macOS/Linux ; ignoré sous Windows, qui la

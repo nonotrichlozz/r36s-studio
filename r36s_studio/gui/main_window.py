@@ -726,6 +726,16 @@ class MainWindow(QMainWindow):
                 # gagne pas la course).
                 argv.append("--eject-after")
 
+        # Journalise la ligne de commande complète au lancement de tout
+        # worker élevé (backup/flash) -- signalé sur du vrai matériel :
+        # sans ça, impossible de vérifier depuis les traces d'élévation
+        # elles-mêmes ce que l'app a réellement lancé (ex. la présence ou
+        # non d'un drapeau donné), sans devoir instrumenter le worker
+        # élevé lui-même à chaque doute (§4.4 : jamais une décision
+        # silencieuse). `join` plutôt que la liste Python brute -- se lit
+        # comme la vraie ligne de commande qu'un utilisateur pourrait
+        # retaper à la main.
+        self._log_panel.append_log(f"[diagnostic] worker : {' '.join(argv)}")
         self._runner = WorkerRunner(argv, parent=self, macos_auth_session=self._get_or_create_macos_auth_session())
         self._runner.progress.connect(self._on_progress)
         self._runner.log.connect(lambda level, msg: self._log_panel.append_log(msg))
@@ -1250,9 +1260,11 @@ class MainWindow(QMainWindow):
         explicitement le résultat, succès comme échec (§4.4)."""
         self._home.set_busy(True)
         self._assisted_landing.set_busy(True)
+        eject_argv = ["eject", "--device", device.path]
+        self._log_panel.append_log(f"[diagnostic] worker : {' '.join(eject_argv)}")
         try:
             runner = WorkerRunner(
-                ["eject", "--device", device.path],
+                eject_argv,
                 parent=self,
                 macos_auth_session=self._get_or_create_macos_auth_session(),
             )

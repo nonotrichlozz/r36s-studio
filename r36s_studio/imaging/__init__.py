@@ -19,6 +19,7 @@ from .games_partition import (
     NoFreeSpaceForGamesPartition,
     create_and_format_games_partition,
     create_and_format_games_partition_if_worthwhile,
+    format_games_partition,
 )
 from .image_source import (
     SevenZipArchiveError,
@@ -28,6 +29,12 @@ from .image_source import (
     open_image_source,
 )
 from .mbr import MbrPartition, is_gpt_protective, last_used_byte, parse_mbr
+from .reset_card import (
+    DEFAULT_RESET_LABEL,
+    CardTooSmallForReset,
+    create_single_partition,
+    erase_partition_table,
+)
 from .source import prepared_source, raw_read_path
 from .system_backup import (
     GamesPartitionNotFound,
@@ -72,4 +79,9 @@ __all__ = [
     "NoFreeSpaceForGamesPartition",
     "create_and_format_games_partition",
     "create_and_format_games_partition_if_worthwhile",
+    "format_games_partition",
+    "DEFAULT_RESET_LABEL",
+    "CardTooSmallForReset",
+    "erase_partition_table",
+    "create_single_partition",
 ]

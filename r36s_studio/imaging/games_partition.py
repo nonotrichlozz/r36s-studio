@@ -155,6 +155,14 @@ class GamesPartitionResult:
     start_bytes: int
     size_bytes: int
     is_gpt: bool
+    # Lettre de lecteur attribuée sur Windows (§4.3 bis, bug corrigé : un
+    # volume exFAT fraîchement formaté n'apparaît pas dans l'Explorateur
+    # sans elle) -- toujours `None` sur macOS/Linux, ou si aucune lettre
+    # n'a pu être attribuée. Rempli par `create_and_format_games_
+    # partition`, pas par `create_games_partition` seule (qui ne formate
+    # rien -- valeur par défaut `None` pour ne rien changer à ses usages
+    # existants).
+    drive_letter: Optional[str] = None
 
 
 def _align_up(lba: int, alignment: int) -> int:
@@ -404,18 +412,62 @@ def _wait_for_new_partition(
 
 
 def _format_macos(partition_path: str, label: str, filesystem: str) -> None:
+    """`diskutil eraseVolume` laisse normalement le volume monté (Disk
+    Arbitration monte automatiquement tout système de fichiers reconnu --
+    comportement documenté de `diskutil`, mais jamais vérifié sur du vrai
+    matériel dans ce projet, aucun Mac disponible ici, §4.3 bis : « à
+    vérifier plutôt qu'à supposer »). `diskutil mount` ensuite, en
+    best-effort, ne fait donc rien de plus dans le cas normal -- filet de
+    sécurité seulement si l'hypothèse ci-dessus s'avérait fausse dans un
+    cas non couvert ici (même principe que le correctif Windows ci-dessous
+    : ne jamais se contenter de supposer qu'un volume fraîchement formaté
+    est bien accessible)."""
     fs_name = "ExFAT" if filesystem == "exfat" else "MS-DOS FAT32"
     subprocess.run(["diskutil", "eraseVolume", fs_name, label, partition_path], check=True, capture_output=True)
+    try:
+        subprocess.run(["diskutil", "mount", partition_path], check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError):
+        pass
 
 
 def _format_linux(partition_path: str, label: str, filesystem: str) -> None:
+    """Contrairement à macOS, `mkfs.exfat`/`mkfs.vfat` ne montent jamais le
+    système de fichiers qu'ils créent -- que le montage suive ensuite
+    dépend entièrement d'un service d'automontage (udisks2 + un
+    gestionnaire de fichiers de bureau) qui n'est pas garanti présent sur
+    toute installation Linux (ex. une distribution minimale sans
+    environnement de bureau complet, §8 -- « à vérifier plutôt qu'à
+    supposer »). `udisksctl mount` ensuite, en best-effort : sans droits
+    root nécessaires (comme le reste des montages `udisksctl` de ce
+    projet, §4.4), et sans effet nuisible si déjà monté par l'automontage
+    (rapporte juste que c'est déjà fait)."""
     if filesystem == "exfat":
         subprocess.run(["mkfs.exfat", "-n", label, partition_path], check=True, capture_output=True)
     else:
         subprocess.run(["mkfs.vfat", "-F", "32", "-n", label, partition_path], check=True, capture_output=True)
+    try:
+        subprocess.run(["udisksctl", "mount", "-b", partition_path], check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError):
+        pass
 
 
-def _format_windows(device_path: str, label: str, filesystem: str) -> None:
+# Bug corrigé, confirmé sur du vrai matériel (« Remettre la carte à zéro »,
+# §4.3 bis) : `Get-Partition -DiskNumber N` peut ne pas encore voir une
+# table de partitions tout juste écrite -- avant ce correctif, un pipeline
+# PowerShell dont le tout premier maillon ne renvoie rien ne lève *aucune*
+# erreur (rien à formater, mais rien qui échoue non plus) : `Format-Volume`
+# n'était simplement jamais invoqué, `subprocess.run(check=True)` voyait un
+# code de sortie 0 malgré tout, et l'appelant croyait le formatage réussi
+# alors qu'aucune partition exFAT n'avait été créée -- la carte restait
+# brute. Réessayé plusieurs fois avec une courte pause (ci-dessous), et
+# transformé en échec explicite (`exit 1`) si toujours introuvable après
+# ces tentatives, pour que ce cas ne puisse plus jamais ressembler à un
+# succès.
+_WINDOWS_PARTITION_RETRY_COUNT = 10
+_WINDOWS_PARTITION_RETRY_DELAY_MS = 500
+
+
+def _format_windows(device_path: str, label: str, filesystem: str) -> Optional[str]:
     """`partition_path` est ici le disque (`\\\\.\\PhysicalDriveN`), pas la
     partition elle-même -- contrairement à macOS/Linux, la partition
     nouvellement créée n'a pas forcément de lettre de lecteur ni de volume
@@ -426,7 +478,30 @@ def _format_windows(device_path: str, label: str, filesystem: str) -> None:
     déjà un volume "RAW" sur une partition fraîchement créée, non formatée
     (confirmé ailleurs dans ce projet pour une partition ext4 non reconnue,
     §4.4) -- pas besoin qu'un système de fichiers existe déjà pour la
-    trouver."""
+    trouver.
+
+    Réessaie `Get-Partition` plusieurs fois (`_WINDOWS_PARTITION_RETRY_
+    COUNT`, espacées de `_WINDOWS_PARTITION_RETRY_DELAY_MS`) avant
+    d'abandonner -- Windows peut ne pas avoir encore repris en compte une
+    table de partitions tout juste écrite (§ voir `reset_card.py::create_
+    single_partition`, qui attend déjà un court instant de son côté avant
+    d'appeler cette fonction -- défense en profondeur, aucun des deux
+    délais n'a besoin d'être suffisant à lui seul). Lève `OSError`
+    explicitement si la partition ou son volume restent introuvables, ou si
+    `Format-Volume` échoue -- jamais un succès silencieux (§4.4).
+
+    Bug corrigé, confirmé sur du vrai matériel (« Remettre la carte à
+    zéro », §4.3 bis) : `Format-Volume` seul ne suffit pas -- `Get-Volume`
+    montre bien le volume exFAT fraîchement formaté (bonne taille, bonne
+    étiquette), mais sans lettre de lecteur il n'apparaît pas dans
+    l'Explorateur, laissant croire à tort que la carte n'est pas reconnue.
+    `Add-PartitionAccessPath -AssignDriveLetter` attribue la première
+    lettre libre après le formatage ; la lettre effectivement attribuée
+    est renvoyée à l'appelant (`format_games_partition`, `None` si aucune
+    n'a pu être attribuée) pour être journalisée -- exige l'élévation
+    (« Access denied » sans, même piège que `IOCTL_STORAGE_EJECT_MEDIA`
+    pour l'éjection, §4.4) : cette fonction n'est jamais appelée en dehors
+    du worker élevé (§3), donc toujours dans le bon contexte."""
     import re
 
     match = re.search(r"PhysicalDrive(\d+)", device_path)
@@ -435,11 +510,40 @@ def _format_windows(device_path: str, label: str, filesystem: str) -> None:
     disk_number = match.group(1)
     fs_name = "exFAT" if filesystem == "exfat" else "FAT32"
     command = (
-        f"Get-Partition -DiskNumber {disk_number} | Sort-Object PartitionNumber | "
-        "Select-Object -Last 1 | Get-Volume | "
-        f"Format-Volume -FileSystem {fs_name} -NewFileSystemLabel '{label}' -Confirm:$false"
+        "$diskNumber = %s\n"
+        "$partition = $null\n"
+        "for ($i = 0; $i -lt %d; $i++) {\n"
+        "    $partition = Get-Partition -DiskNumber $diskNumber -ErrorAction SilentlyContinue |"
+        " Sort-Object PartitionNumber | Select-Object -Last 1\n"
+        "    if ($partition) { break }\n"
+        "    Start-Sleep -Milliseconds %d\n"
+        "}\n"
+        "if (-not $partition) {\n"
+        "    Write-Error \"Aucune partition trouvee sur le disque $diskNumber apres plusieurs tentatives.\"\n"
+        "    exit 1\n"
+        "}\n"
+        "$volume = $partition | Get-Volume -ErrorAction SilentlyContinue\n"
+        "if (-not $volume) {\n"
+        "    Write-Error \"Volume introuvable pour la nouvelle partition sur le disque $diskNumber.\"\n"
+        "    exit 1\n"
+        "}\n"
+        "$volume | Format-Volume -FileSystem %s -NewFileSystemLabel '%s' -Confirm:$false\n"
+        "if (-not $?) { exit 1 }\n"
+        "$partition | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction SilentlyContinue\n"
+        "$updated = Get-Partition -DiskNumber $diskNumber -PartitionNumber $partition.PartitionNumber"
+        " -ErrorAction SilentlyContinue\n"
+        "if ($updated -and $updated.DriveLetter) {\n"
+        "    Write-Output \"DRIVE_LETTER=$($updated.DriveLetter)\"\n"
+        "}\n"
+    ) % (disk_number, _WINDOWS_PARTITION_RETRY_COUNT, _WINDOWS_PARTITION_RETRY_DELAY_MS, fs_name, label)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command], capture_output=True, text=True
     )
-    subprocess.run(["powershell", "-NoProfile", "-Command", command], check=True, capture_output=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise OSError(f"Format-Volume a échoué (code {result.returncode})" + (f" : {detail}" if detail else ""))
+    match_letter = re.search(r"^DRIVE_LETTER=(\S)$", result.stdout or "", re.MULTILINE)
+    return match_letter.group(1) if match_letter else None
 
 
 def format_games_partition(
@@ -447,7 +551,7 @@ def format_games_partition(
     label: str = GAMES_PARTITION_LABEL,
     filesystem: str = "exfat",
     known_partition_paths: Optional[set] = None,
-) -> None:
+) -> Optional[str]:
     """Formate nativement la partition de jeux fraîchement créée par
     `create_games_partition` -- `filesystem` : `"exfat"` par défaut (système
     de fichiers observé sur la carte source, §4.4) ou `"fat32"` si
@@ -465,11 +569,18 @@ def format_games_partition(
     chemins de partitions déjà connus *avant* `create_games_partition`
     (relevés par l'appelant) -- sert à distinguer la nouvelle partition des
     partitions système sur macOS/Linux ; ignoré sous Windows, qui la
-    retrouve par position (`_format_windows`)."""
+    retrouve par position (`_format_windows`).
+
+    Retourne la lettre de lecteur attribuée sur Windows (bug corrigé,
+    confirmé sur du vrai matériel : un volume exFAT fraîchement formaté
+    n'apparaît pas dans l'Explorateur tant qu'aucune lettre ne lui est
+    attribuée, même formaté correctement -- §4.3 bis), ou `None` sur
+    macOS/Linux (aucune notion de lettre de lecteur ; ces deux OS tentent
+    déjà un montage explicite en best-effort de leur côté, `_format_
+    macos`/`_format_linux`) ou si aucune lettre n'a pu être attribuée."""
     system = platform.system()
     if system == "Windows":
-        _format_windows(device.path, label, filesystem)
-        return
+        return _format_windows(device.path, label, filesystem)
 
     known = known_partition_paths or set()
     partition = _wait_for_new_partition(device.path, known)
@@ -479,6 +590,7 @@ def format_games_partition(
         _format_linux(partition.device_path, label, filesystem)
     else:
         raise NotImplementedError(f"OS non supporté pour le formatage : {system}")
+    return None
 
 
 def create_and_format_games_partition(
@@ -491,7 +603,7 @@ def create_and_format_games_partition(
     ces deux cas sans jamais lever)."""
     known_paths = {p.device_path for p in list_partitions(device.path) if p.device_path}
     result = create_games_partition(device, label)
-    format_games_partition(device, label, filesystem, known_partition_paths=known_paths)
+    result.drive_letter = format_games_partition(device, label, filesystem, known_partition_paths=known_paths)
     return result
 
 

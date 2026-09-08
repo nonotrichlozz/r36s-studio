@@ -1275,6 +1275,127 @@ def test_confirm_dialog_cancel_never_starts_the_worker(mock_list, mock_filter, m
     runner_class.assert_not_called()
 
 
+# --- « Remettre la carte à zéro » (§4.3 bis, mode expert uniquement) -------
+# Sous « Par sécurité », à côté des sauvegardes -- jamais dans le parcours
+# assisté. Pas de fichier à choisir : carte -> étiquette (ResetCardLabel
+# Dialog) -> confirmation obligatoire (§2 n°6) -> worker.
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_reset_card_flow_goes_from_device_to_label_to_confirmation(mock_list, mock_filter, mock_detect, qapp):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+
+    window = MainWindow()
+    window._home.reset_card_selected.emit()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
+
+    assert window._file_dialog.isVisible() is False  # jamais de fichier à choisir
+    assert window._reset_card_label_dialog.isVisible() is True
+    assert window._reset_card_label_dialog._label_edit.text() == "SDCARD"  # valeur par défaut simple
+
+    window._reset_card_label_dialog._label_edit.setText("MACARTE")
+    window._reset_card_label_dialog._continue_button.click()
+
+    assert window._reset_card_label_dialog.isVisible() is False
+    assert window._confirm_dialog.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_reset_card_start_worker_builds_the_expected_argv(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._device = _make_device()
+    window._mode = "reset_card"
+    window._reset_card_label = "MACARTE"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert runner_class.instances[0].argv == [
+        "reset-card",
+        "--device",
+        window._device.path,
+        "--label",
+        "MACARTE",
+    ]
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_reset_card_never_gets_eject_after_flag(mock_list, mock_filter, mock_load, qapp):
+    """`--eject-after` existe pour un risque propre au flash d'un
+    firmware (Windows propose de formater des partitions illisibles,
+    §4.6) -- une partition exFAT neuve ne pose pas ce problème."""
+    window = MainWindow()
+    window._device = _make_device()
+    window._mode = "reset_card"
+    window._reset_card_label = "SDCARD"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--eject-after" not in runner_class.instances[0].argv
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_on_step_progress_forwards_to_log_panel(mock_list, mock_filter, qapp):
+    """Progression par étapes réelles (§2 n°5, §4.3 bis) -- distincte de
+    `_on_progress` (bytes/débit), pour une opération qui n'a rien à
+    copier."""
+    window = MainWindow()
+
+    window._on_step_progress(2, 4, "Formatage exFAT…")
+
+    assert window._log_panel._bar.value() == 50
+    assert window._log_panel._speed_label.text() == "Formatage exFAT…"
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_reset_card_start_worker_connects_step_progress_signal(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._device = _make_device()
+    window._mode = "reset_card"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    runner_class.instances[0].step_progress.connect.assert_called_once_with(window._on_step_progress)
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_reset_card_success_hides_eject_button_since_already_ejected(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """La remise à zéro éjecte déjà automatiquement à sa dernière étape
+    (§4.3 bis, suivie par la barre de progression) -- un bouton en plus
+    serait redondant, même principe qu'un flash Android (§4.6)."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._device = _make_device()
+    window._mode = "reset_card"
+
+    window._on_worker_finished(True)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "remise à zéro" in log_text
+    assert window._log_panel._eject_button.isVisible() is False
+
+
 # --- câblage réel signal/slot, pas un WorkerRunner mocké --------------------
 #
 # Toutes les autres traversées du flash/backup passent par `_mock_runner_class`

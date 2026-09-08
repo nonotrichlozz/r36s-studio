@@ -297,12 +297,17 @@ def test_format_games_partition_macos_erases_new_partition_as_exfat(mock_system,
 
     format_games_partition(device, known_partition_paths={"/dev/fake-disk-test-1s1"})
 
-    mock_run.assert_called_once()
-    args = mock_run.call_args[0][0]
+    # Deux appels : le formatage, puis un montage best-effort (§4.3 bis --
+    # « à vérifier plutôt qu'à supposer » que diskutil laisse le volume
+    # monté).
+    assert mock_run.call_count == 2
+    args = mock_run.call_args_list[0][0][0]
     assert args[:2] == ["diskutil", "eraseVolume"]
     assert args[2] == "ExFAT"
     assert args[3] == GAMES_PARTITION_LABEL
     assert args[4] == "/dev/fake-disk-test-1s2"
+    mount_args = mock_run.call_args_list[1][0][0]
+    assert mount_args == ["diskutil", "mount", "/dev/fake-disk-test-1s2"]
 
 
 @patch("r36s_studio.imaging.games_partition.subprocess.run")
@@ -314,9 +319,15 @@ def test_format_games_partition_linux_uses_mkfs_exfat(mock_system, mock_list, mo
 
     format_games_partition(device, known_partition_paths=set())
 
-    args = mock_run.call_args[0][0]
+    # Deux appels : le formatage, puis un montage best-effort (§4.3 bis --
+    # mkfs.exfat/mkfs.vfat ne montent jamais eux-mêmes, contrairement à
+    # `diskutil eraseVolume` sur macOS).
+    assert mock_run.call_count == 2
+    args = mock_run.call_args_list[0][0][0]
     assert args[0] == "mkfs.exfat"
     assert "/dev/fake-loop-test-1p2" in args
+    mount_args = mock_run.call_args_list[1][0][0]
+    assert mount_args == ["udisksctl", "mount", "-b", "/dev/fake-loop-test-1p2"]
 
 
 @patch("r36s_studio.imaging.games_partition.subprocess.run")
@@ -324,8 +335,12 @@ def test_format_games_partition_linux_uses_mkfs_exfat(mock_system, mock_list, mo
 @patch("r36s_studio.imaging.games_partition.platform.system", return_value="Windows")
 def test_format_games_partition_windows_uses_powershell_format_volume(mock_system, mock_list, mock_run):
     device = _make_device("\\\\.\\PhysicalDrive9903", 1_000_000)
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "DRIVE_LETTER=K\n"
 
-    format_games_partition(device)
+    letter = format_games_partition(device)
+
+    assert letter == "K"
 
     mock_list.assert_not_called()  # retrouvée par position (dernière partition), pas via list_partitions
     args = mock_run.call_args[0][0]
@@ -336,6 +351,55 @@ def test_format_games_partition_windows_uses_powershell_format_volume(mock_syste
     assert "Format-Volume" in command
     assert "exFAT" in command
     assert GAMES_PARTITION_LABEL in command
+    assert "Get-Partition" in command
+    # Réessaie plusieurs fois avant d'abandonner -- Windows peut ne pas
+    # avoir encore repris en compte une table de partitions tout juste
+    # écrite (bug corrigé, confirmé sur du vrai matériel -- « Remettre la
+    # carte à zéro », §4.3 bis).
+    assert "for (" in command
+    # Bug corrigé, confirmé sur du vrai matériel : `Get-Volume` montrait
+    # déjà un volume exFAT correctement formaté, mais sans lettre de
+    # lecteur il n'apparaissait pas dans l'Explorateur.
+    assert "Add-PartitionAccessPath" in command
+    assert "AssignDriveLetter" in command
+
+
+@patch("r36s_studio.imaging.games_partition.subprocess.run")
+@patch("r36s_studio.imaging.games_partition.list_partitions")
+@patch("r36s_studio.imaging.games_partition.platform.system", return_value="Windows")
+def test_format_games_partition_windows_returns_none_when_no_letter_could_be_assigned(
+    mock_system, mock_list, mock_run
+):
+    """Rare (les 26 lettres déjà toutes utilisées) -- ne doit jamais faire
+    planter le formatage, qui a par ailleurs réussi : `None` plutôt qu'une
+    levée, à l'appelant de décider s'il journalise ce cas."""
+    device = _make_device("\\\\.\\PhysicalDrive9903", 1_000_000)
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = ""
+
+    letter = format_games_partition(device)
+
+    assert letter is None
+
+
+@patch("r36s_studio.imaging.games_partition.subprocess.run")
+@patch("r36s_studio.imaging.games_partition.list_partitions")
+@patch("r36s_studio.imaging.games_partition.platform.system", return_value="Windows")
+def test_format_games_partition_windows_raises_when_powershell_exits_non_zero(mock_system, mock_list, mock_run):
+    """Bug corrigé, confirmé sur du vrai matériel : un pipeline PowerShell
+    dont `Get-Partition` ne renvoie rien ne lève auparavant *aucune*
+    erreur (rien à formater, mais rien qui échoue non plus) -- `subprocess
+    .run(check=True)` voyait un code de sortie 0 malgré tout, et l'appelant
+    croyait le formatage réussi alors qu'aucune partition exFAT n'avait
+    été créée. Un code de sortie non nul doit désormais toujours lever,
+    avec le détail (stderr) inclus dans le message."""
+    device = _make_device("\\\\.\\PhysicalDrive9903", 1_000_000)
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stderr = "Aucune partition trouvee sur le disque 9903."
+    mock_run.return_value.stdout = ""
+
+    with pytest.raises(OSError, match="Aucune partition trouvee"):
+        format_games_partition(device)
 
 
 @patch("r36s_studio.imaging.games_partition.list_partitions")

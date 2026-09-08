@@ -6,6 +6,12 @@
 - `python -m r36s_studio flash --image X --device Y` (phase 3) — écrit une
   image (`.img`, `.img.gz`, `.img.xz`) sur une carte SD, avec confirmation
   explicite (règle §2 n°6) et vérification SHA-256.
+- `python -m r36s_studio reset-card --device X [--label ÉTIQUETTE]` (§4.3
+  bis, mode expert uniquement, sous « Par sécurité ») — « Remettre la
+  carte à zéro » : efface toute la table de partitions et recrée une seule
+  partition exFAT occupant toute la carte, pour une carte laissée en
+  plusieurs partitions illisibles après des essais de firmware. Même
+  confirmation explicite obligatoire que `flash` (règle §2 n°6).
 - `python -m r36s_studio gui` (phase 4) — assistant graphique PySide6,
   branché sur `backup`/`flash` via un worker élevé (§3).
 - `python -m r36s_studio inject-boot --device X --boot-source Y` et
@@ -65,6 +71,8 @@ from typing import List, Optional, TextIO
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify import identify_from_boot_directory
 from r36s_studio.imaging import (
+    DEFAULT_RESET_LABEL,
+    CardTooSmallForReset,
     GamesPartitionNotFound,
     OperationCancelled,
     ProgressEvent,
@@ -73,10 +81,13 @@ from r36s_studio.imaging import (
     backup_device,
     backup_system_only,
     create_and_format_games_partition_if_worthwhile,
+    create_single_partition,
+    erase_partition_table,
     estimate_system_backup_size,
     estimate_system_backup_size_unprivileged,
     estimate_total_bytes,
     flash_device,
+    format_games_partition,
 )
 from r36s_studio.imaging.winlock import VolumeInUseError
 from r36s_studio.partitions import (
@@ -94,7 +105,7 @@ from r36s_studio.partitions import (
 )
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.protocol import configure as configure_protocol
-from r36s_studio.protocol import emit_done, emit_error, emit_estimate, emit_log, emit_progress
+from r36s_studio.protocol import emit_done, emit_error, emit_estimate, emit_log, emit_progress, emit_step_progress
 from r36s_studio.safety import DEFAULT_MAX_SIZE_BYTES, SafetyConfig, filter_devices
 
 DEV_MODE_ENV_VAR = "R36S_STUDIO_DEV"
@@ -474,24 +485,42 @@ def cmd_flash(args: argparse.Namespace) -> int:
                 emit_log("Pas assez d'espace libre restant pour créer un espace de jeux supplémentaire.")
             else:
                 emit_log(f"Espace de jeux recréé sur l'espace libre restant ({games_result.size_bytes} octets).")
+                if games_result.drive_letter:
+                    # Bug corrigé, confirmé sur du vrai matériel (§4.3
+                    # bis) : sans lettre de lecteur, un volume exFAT
+                    # fraîchement formaté n'apparaît pas dans
+                    # l'Explorateur malgré un formatage réussi.
+                    emit_log(f"La carte est disponible sous {games_result.drive_letter}:.")
 
         if args.eject_after:
-            # Firmware Android (§4.6) : ses partitions (boot/system/vendor/
-            # userdata...) sont illisibles pour Windows, qui propose alors
-            # de les formater dès qu'il les remarque -- ce qui arrive
-            # généralement tout de suite après l'écriture, dès que
-            # `prepared_write_target` relâche le disque (§4.3,
-            # `IOCTL_DISK_UPDATE_PROPERTIES`, qui force justement Windows à
-            # les re-découvrir). Éjecter tout de suite, dans ce même worker
-            # déjà élevé (pas de nouvelle invite), réduit la fenêtre pendant
-            # laquelle ces propositions de formatage peuvent apparaître --
-            # sans garantie de gagner la course à chaque fois (non vérifié
-            # sur du vrai matériel, §5 : le message explicite du journal de
-            # bord reste le filet de sécurité qui compte vraiment, y
-            # compris si la carte est un jour rebranchée ailleurs). Un
-            # échec d'éjection ici ne remet jamais en cause le flash déjà
-            # réussi -- best-effort, seulement journalisé.
-            emit_log("Éjection automatique de la carte (firmware Android)...")
+            # Généralisé au-delà d'Android (§4.6) : au moins une partition
+            # de tout firmware du catalogue est illisible pour Windows (le
+            # système ext4 "Linux" pour ArkOS/ROCKNIX/EmuELEC/AmberELEC/
+            # MinUI, plusieurs partitions en plus pour Android), qui
+            # propose alors de la formater dès qu'il la remarque -- ce qui
+            # arrive généralement tout de suite après l'écriture, dès que
+            # `prepared_write_target` relâche le disque (§4.3, `IOCTL_
+            # DISK_UPDATE_PROPERTIES`, qui force justement Windows à
+            # redécouvrir les partitions). Éjecter tout de suite, dans ce
+            # même worker déjà élevé (pas de nouvelle invite), réduit la
+            # fenêtre pendant laquelle ces propositions de formatage
+            # peuvent apparaître -- sans garantie de gagner la course à
+            # chaque fois (non vérifié sur du vrai matériel, §5 : le
+            # message explicite du journal de bord reste le filet de
+            # sécurité qui compte vraiment, y compris si la carte est un
+            # jour rebranchée ailleurs). Un échec d'éjection ici ne remet
+            # jamais en cause le flash déjà réussi -- best-effort,
+            # seulement journalisé.
+            #
+            # Bug corrigé, signalé sur du vrai matériel : ce message
+            # affichait « (firmware Android) » y compris après un flash
+            # ArkOS -- resté d'avant la généralisation de `--eject-after`
+            # à tout le catalogue (§4.6), jamais mis à jour alors que ce
+            # drapeau n'est plus spécifique à Android depuis. Message
+            # neutre désormais, sans conséquence fonctionnelle (l'éjection
+            # elle-même n'a jamais dépendu de ce texte) mais trompeur pour
+            # qui lit le journal.
+            emit_log("Éjection automatique de la carte...")
             try:
                 eject_device(device.path)
             except Exception as exc:
@@ -499,6 +528,104 @@ def cmd_flash(args: argparse.Namespace) -> int:
             else:
                 emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
 
+        emit_done(True)
+        return 0
+    finally:
+        if progress_file is not None:
+            progress_file.close()
+
+
+_RESET_CARD_STEP_COUNT = 4
+
+
+def cmd_reset_card(args: argparse.Namespace) -> int:
+    """« Remettre la carte à zéro » (§4.3 bis) : après des essais de
+    firmware, une carte peut rester en trois à cinq partitions illisibles
+    pour un PC (constaté en usage réel) -- Windows ne sait pas la remettre
+    simplement en état de carte de stockage normale. Efface toute la table
+    de partitions et recrée une seule partition exFAT occupant toute la
+    carte, en quatre étapes réelles (`imaging/reset_card.py`, qui réutilise
+    le verrouillage/démontage de `imaging/winlock.py`, et le formatage
+    natif déjà en place pour la partition de jeux, `imaging/games_
+    partition.py::format_games_partition`). Écrit sur le périphérique
+    brut, exactement comme `flash` : même confirmation explicite
+    obligatoire (règle §2 n°6) -- réutilise `_confirm_flash`, son texte
+    générique s'applique tel quel ici.
+
+    Bug corrigé, confirmé sur du vrai matériel : le formatage échouait
+    *silencieusement* (aucune partition exFAT créée, carte restée brute)
+    -- chaque étape est désormais journalisée avant et après (`emit_log`)
+    et suivie d'une progression réelle (`emit_step_progress`, jamais un
+    minuteur, §2 n°5 -- la barre n'avance qu'à chaque étape effectivement
+    terminée, avec son nom affiché à la place d'un débit/temps restant qui
+    n'auraient pas de sens ici) : un échec à mi-parcours ne peut plus
+    ressembler à un succès, ni rester muet sur l'étape en cause.
+
+    Éjecte automatiquement à la fin (dernière étape suivie par la barre)
+    -- contrairement à la première version de cette commande : bien
+    qu'une partition exFAT neuve ne déclenche pas le risque de
+    proposition de formatage propre à `--eject-after` (§4.6), l'éjection
+    reste une étape réelle et attendue de l'opération elle-même, pas une
+    action facultative proposée après coup. Best-effort (comme `--eject-
+    after`) : un échec d'éjection ne remet jamais en cause la remise à
+    zéro déjà réussie."""
+    progress_file = _open_progress_file(args)
+    try:
+        device = _resolve_device_or_report(args)
+        if device is None:
+            return 1
+
+        if not args.worker and not _confirm_flash(device):
+            emit_error("CONFIRMATION_REFUSED", "Remise à zéro annulée : confirmation non reçue.")
+            return 1
+
+        label = args.label or DEFAULT_RESET_LABEL
+
+        emit_step_progress(0, _RESET_CARD_STEP_COUNT, "Effacement de la table de partitions…")
+        emit_log(f"Effacement de la table de partitions de {device.display} ({device.path})...")
+        try:
+            erase_partition_table(device)
+        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+            emit_error("RESET_CARD_FAILED", f"Effacement de la table de partitions : {exc}")
+            emit_done(False)
+            return 1
+        emit_log("Table de partitions effacée.")
+
+        emit_step_progress(1, _RESET_CARD_STEP_COUNT, "Création de la partition…")
+        try:
+            plan = create_single_partition(device)
+        except (CardTooSmallForReset, OSError, subprocess.CalledProcessError, ValueError) as exc:
+            emit_error("RESET_CARD_FAILED", f"Création de la partition : {exc}")
+            emit_done(False)
+            return 1
+        emit_log(f"Nouvelle partition créée ({plan.size_bytes} octets).")
+
+        emit_step_progress(2, _RESET_CARD_STEP_COUNT, "Formatage exFAT…")
+        try:
+            drive_letter = format_games_partition(device, label, "exfat", known_partition_paths=set())
+        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+            emit_error("RESET_CARD_FAILED", f"Formatage exFAT : {exc}")
+            emit_done(False)
+            return 1
+        emit_log(f"Partition formatée en exFAT, étiquette « {label} » posée.")
+        if drive_letter:
+            # Bug corrigé, confirmé sur du vrai matériel : `Get-Volume`
+            # montrait déjà un volume exFAT correctement formaté, mais
+            # sans lettre de lecteur il n'apparaissait pas dans
+            # l'Explorateur -- la carte semblait non reconnue alors
+            # qu'elle était parfaitement formatée.
+            emit_log(f"La carte est disponible sous {drive_letter}:.")
+
+        emit_step_progress(3, _RESET_CARD_STEP_COUNT, "Éjection de la carte…")
+        emit_log("Éjection automatique de la carte...")
+        try:
+            eject_device(device.path)
+        except Exception as exc:
+            emit_log(f"Éjection automatique impossible : {exc}", level="warning")
+        else:
+            emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
+
+        emit_step_progress(_RESET_CARD_STEP_COUNT, _RESET_CARD_STEP_COUNT, "Terminé.")
         emit_done(True)
         return 0
     finally:
@@ -846,13 +973,39 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Éjecte la carte automatiquement après l'écriture et la vérification (§4.6 -- "
-            "pour un firmware Android, dont les partitions illisibles pour Windows "
-            "déclenchent sinon des propositions de formatage)"
+            "au moins une partition de tout firmware du catalogue est illisible pour "
+            "Windows, qui propose sinon de la formater)"
         ),
     )
     _add_worker_args(flash_parser)
     _add_dev_args(flash_parser)
     flash_parser.set_defaults(func=cmd_flash)
+
+    reset_card_parser = subparsers.add_parser(
+        "reset-card",
+        help=(
+            "Efface toute la table de partitions et recrée une seule partition exFAT "
+            "occupant toute la carte -- pour une carte laissée en plusieurs partitions "
+            "illisibles après des essais de firmware"
+        ),
+    )
+    reset_card_parser.add_argument(
+        "--device", required=True, help="Chemin du périphérique cible (voir `list`)"
+    )
+    reset_card_parser.add_argument(
+        "--label",
+        default=DEFAULT_RESET_LABEL,
+        help=f"Étiquette du volume créé (défaut : {DEFAULT_RESET_LABEL})",
+    )
+    reset_card_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    _add_worker_args(reset_card_parser)
+    _add_dev_args(reset_card_parser)
+    reset_card_parser.set_defaults(func=cmd_reset_card)
 
     inject_boot_parser = subparsers.add_parser(
         "inject-boot",

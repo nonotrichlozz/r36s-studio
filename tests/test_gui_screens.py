@@ -24,6 +24,7 @@ from r36s_studio.gui.screens import (
     HomeScreen,
     LogPanel,
     MainView,
+    ResetCardLabelDialog,
     RocknixVariantDialog,
     WindowBackdrop,
     WizardStepPanel,
@@ -75,6 +76,16 @@ def test_home_screen_backup_system_tile_emits_signal(qapp):
     screen.backup_system_selected.connect(lambda: received.append(True))
 
     screen.backup_system_selected.emit()
+
+    assert received == [True]
+
+
+def test_home_screen_reset_card_tile_emits_signal(qapp):
+    screen = HomeScreen()
+    received = []
+    screen.reset_card_selected.connect(lambda: received.append(True))
+
+    screen.reset_card_selected.emit()
 
     assert received == [True]
 
@@ -258,6 +269,7 @@ def test_home_screen_set_busy_disables_steps_and_backup_row(qapp):
         assert row.isEnabled() is False
     assert screen._backup_row.isEnabled() is False
     assert screen._backup_system_row.isEnabled() is False
+    assert screen._reset_card_row.isEnabled() is False
 
 
 def test_home_screen_set_busy_false_reenables_steps_and_backup_row(qapp):
@@ -270,6 +282,7 @@ def test_home_screen_set_busy_false_reenables_steps_and_backup_row(qapp):
         assert row.isEnabled() is True
     assert screen._backup_row.isEnabled() is True
     assert screen._backup_system_row.isEnabled() is True
+    assert screen._reset_card_row.isEnabled() is True
 
 
 def test_home_screen_set_status_disables_backup_rows_without_a_device(qapp):
@@ -285,6 +298,7 @@ def test_home_screen_set_status_disables_backup_rows_without_a_device(qapp):
 
     assert screen._backup_row.isEnabled() is False
     assert screen._backup_system_row.isEnabled() is False
+    assert screen._reset_card_row.isEnabled() is False
     for row in screen._tiles.values():
         assert row.isEnabled() is True  # les six étapes, elles, restent cliquables
 
@@ -297,6 +311,7 @@ def test_home_screen_set_status_enables_backup_rows_with_a_device(qapp):
 
     assert screen._backup_row.isEnabled() is True
     assert screen._backup_system_row.isEnabled() is True
+    assert screen._reset_card_row.isEnabled() is True
 
 
 def test_home_screen_set_status_without_has_device_argument_leaves_backup_rows_enabled(qapp):
@@ -309,6 +324,7 @@ def test_home_screen_set_status_without_has_device_argument_leaves_backup_rows_e
 
     assert screen._backup_row.isEnabled() is True
     assert screen._backup_system_row.isEnabled() is True
+    assert screen._reset_card_row.isEnabled() is True
 
 
 def test_home_screen_busy_state_overrides_device_presence_for_backup_rows(qapp):
@@ -323,6 +339,7 @@ def test_home_screen_busy_state_overrides_device_presence_for_backup_rows(qapp):
 
     assert screen._backup_row.isEnabled() is False
     assert screen._backup_system_row.isEnabled() is False
+    assert screen._reset_card_row.isEnabled() is False
 
 
 def test_home_screen_set_busy_also_disables_assisted_mode_button(qapp):
@@ -1839,6 +1856,57 @@ def test_backup_kind_dialog_full_copy_is_the_default_action(qapp):
     assert dialog._full_button.property("role") == "primary"
 
 
+# --- ResetCardLabelDialog : « Remettre la carte à zéro » (§4.3 bis) -------
+
+
+def test_reset_card_label_dialog_set_default_label_prefills_the_field(qapp):
+    dialog = ResetCardLabelDialog()
+
+    dialog.set_default_label("SDCARD")
+
+    assert dialog._label_edit.text() == "SDCARD"
+
+
+def test_reset_card_label_dialog_continue_emits_the_trimmed_label_and_closes(qapp):
+    dialog = ResetCardLabelDialog()
+    dialog.show()
+    dialog._label_edit.setText("  MACARTE  ")
+    received = []
+    dialog.label_chosen.connect(received.append)
+
+    dialog._continue_button.click()
+
+    assert received == ["MACARTE"]
+    assert dialog.isVisible() is False
+
+
+def test_reset_card_label_dialog_never_emits_an_empty_label(qapp):
+    """Une étiquette vide n'a pas de sens pour un formatage natif -- ne
+    doit jamais atteindre `_start_worker` (§4.3 bis)."""
+    dialog = ResetCardLabelDialog()
+    dialog.show()
+    dialog._label_edit.setText("   ")
+    received = []
+    dialog.label_chosen.connect(received.append)
+
+    dialog._continue_button.click()
+
+    assert received == []
+    assert dialog.isVisible() is True  # reste ouverte, pas de fermeture silencieuse
+
+
+def test_reset_card_label_dialog_return_pressed_also_continues(qapp):
+    dialog = ResetCardLabelDialog()
+    dialog.show()
+    dialog._label_edit.setText("MACARTE")
+    received = []
+    dialog.label_chosen.connect(received.append)
+
+    dialog._label_edit.returnPressed.emit()
+
+    assert received == ["MACARTE"]
+
+
 # --- LogPanel (§5, refonte navigation -- remplace Exécution + Résultat) ----
 
 
@@ -1894,6 +1962,44 @@ def test_log_panel_unknown_total_shows_indeterminate_bar(qapp):
     panel.update_progress(done=50, total=0, speed=1_000_000)
 
     assert panel._bar.minimum() == 0 and panel._bar.maximum() == 0
+
+
+# --- progression par étapes réelles (§2 n°5, §4.3 bis « Remettre la carte
+# à zéro ») -- jamais un minuteur : la barre n'avance qu'à chaque étape
+# effectivement terminée, avec son nom affiché plutôt qu'un débit/temps
+# restant inventés.
+
+
+def test_log_panel_update_step_progress_sets_percentage_from_step_count(qapp):
+    panel = LogPanel()
+    panel.start_operation("Remise à zéro en cours…")
+
+    panel.update_step_progress(step_index=1, step_count=4, step_name="Création de la partition…")
+
+    assert panel._bar.value() == 25
+    assert panel._bar.minimum() == 0 and panel._bar.maximum() == 100
+
+
+def test_log_panel_update_step_progress_shows_step_name_not_a_fabricated_eta(qapp):
+    """Le temps restant n'a pas de sens pour une opération de quelques
+    secondes et non prévisible (§ demande explicite) -- le nom de l'étape
+    remplace le débit/l'estimation, jamais affichés côte à côte."""
+    panel = LogPanel()
+    panel.start_operation("Remise à zéro en cours…")
+
+    panel.update_step_progress(step_index=2, step_count=4, step_name="Formatage exFAT…")
+
+    assert panel._speed_label.text() == "Formatage exFAT…"
+    assert panel._eta_label.isVisible() is False
+
+
+def test_log_panel_update_step_progress_reaches_100_percent_on_the_last_step(qapp):
+    panel = LogPanel()
+    panel.start_operation("Remise à zéro en cours…")
+
+    panel.update_step_progress(step_index=4, step_count=4, step_name="Terminé.")
+
+    assert panel._bar.value() == 100
 
 
 def test_log_panel_append_log_prefixes_a_timestamp(qapp):

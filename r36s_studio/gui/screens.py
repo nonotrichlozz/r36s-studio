@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
@@ -544,6 +545,7 @@ class HomeScreen(Screen):
     eject_selected = Signal()
     backup_selected = Signal()
     backup_system_selected = Signal()
+    reset_card_selected = Signal()
     refresh_requested = Signal()
     help_requested = Signal()
     assisted_mode_requested = Signal()
@@ -650,6 +652,17 @@ class HomeScreen(Screen):
         )
         backup_system_badge.setVisible(False)  # jamais de badge de statut pour la sauvegarde (§5)
         layout.addWidget(self._backup_system_row)
+        # Remise à zéro (§4.3 bis) : sous « Par sécurité » comme les deux
+        # sauvegardes ci-dessus, jamais dans le parcours assisté -- une
+        # opération destructrice qui n'en fait pas partie (§5).
+        self._reset_card_row, reset_card_badge = self._build_row(
+            "◆",
+            tr("home_tile_reset_card"),
+            tr("home_tile_reset_card_desc"),
+            self.reset_card_selected,
+        )
+        reset_card_badge.setVisible(False)  # jamais de badge de statut pour cette ligne (§5)
+        layout.addWidget(self._reset_card_row)
 
         layout.addStretch()
 
@@ -693,6 +706,7 @@ class HomeScreen(Screen):
         enabled = self._has_device and not self._busy
         self._backup_row.setEnabled(enabled)
         self._backup_system_row.setEnabled(enabled)
+        self._reset_card_row.setEnabled(enabled)
 
     def _build_row(self, letter: str, title: str, desc: str, signal: Signal) -> Tuple[ClickableFrame, QLabel]:
         """Une ligne d'étape : icône (lettre) à gauche, titre + description
@@ -1379,10 +1393,65 @@ class BackupKindDialog(Dialog):
         self.cancelled.emit()
 
 
+class ResetCardLabelDialog(Dialog):
+    """« Remettre la carte à zéro » (§4.3 bis, mode expert uniquement) --
+    choisit l'étiquette du volume avant la fenêtre Confirmation
+    obligatoire (§2 n°6, ouverte ensuite par l'appelant). `set_default_
+    label` pré-remplit une valeur simple à chaque ouverture -- jamais
+    imposée, toujours remplaçable, même principe que les chemins par
+    défaut proposés ailleurs dans ce projet (§4.4)."""
+
+    label_chosen = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("reset_card_label_title"))
+
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("reset_card_label_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+
+        instruction = QLabel(tr("reset_card_label_instruction"))
+        instruction.setWordWrap(True)
+        instruction.setProperty("role", "secondary")
+        layout.addWidget(instruction)
+
+        self._label_edit = QLineEdit()
+        self._label_edit.returnPressed.connect(self._on_continue)
+        layout.addWidget(self._label_edit)
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        cancel_button = QPushButton(tr("confirm_cancel"))
+        cancel_button.clicked.connect(self.close)
+        self._continue_button = QPushButton(tr("reset_card_label_continue"))
+        self._continue_button.setProperty("role", "primary")
+        self._continue_button.setDefault(True)
+        self._continue_button.clicked.connect(self._on_continue)
+        buttons.addWidget(cancel_button)
+        buttons.addStretch()
+        buttons.addWidget(self._continue_button)
+        layout.addLayout(buttons)
+
+        self.resize(420, 220)
+
+    def set_default_label(self, label: str) -> None:
+        self._label_edit.setText(label)
+
+    def _on_continue(self) -> None:
+        label = self._label_edit.text().strip()
+        if not label:
+            return
+        self.close()
+        self.label_chosen.emit(label)
+
+
 _OPERATION_TITLE_KEYS = {
     "backup": "execute_title_backup",
     "backup_system": "execute_title_backup_system",
     "flash": "execute_title_flash",
+    "reset_card": "execute_title_reset_card",
     "extract_boot": "execute_title_extract_boot",
     "extract_easyroms": "execute_title_extract_easyroms",
     "inject_boot": "execute_title_inject_boot",
@@ -1512,6 +1581,22 @@ class LogPanel(QFrame):
             self._eta_label.setText(tr("execute_eta", eta=_format_duration(remaining_seconds)))
         else:
             self._eta_label.setText(tr("execute_eta_unknown"))
+
+    def update_step_progress(self, step_index: int, step_count: int, step_name: str) -> None:
+        """Progression par étapes réelles plutôt que par octets (§2 n°5 :
+        jamais une progression simulée) -- « Remettre la carte à zéro »
+        (§4.3 bis) n'a rien à copier, mais chaque étape terminée
+        (effacement, création, formatage, éjection) est un jalon réel : la
+        barre n'avance qu'à chaque étape effectivement terminée, jamais à
+        un minuteur. `step_index` : nombre d'étapes déjà terminées (0 au
+        tout début, `step_count` à la toute fin -- 100 %). Le débit/temps
+        restant n'ont pas de sens ici (quelques secondes, non
+        prévisibles) : `step_name` (l'étape EN COURS) les remplace."""
+        self._bar.setRange(0, 100)
+        self._bar.setValue(int(step_index * 100 / step_count) if step_count else 0)
+        self._speed_label.setText(step_name)
+        self._speed_label.setVisible(True)
+        self._eta_label.setVisible(False)
 
     def append_log(self, msg: str) -> None:
         """Ajoute une ligne horodatée (`21:44:02 - {msg}`) au journal de

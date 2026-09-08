@@ -29,6 +29,7 @@ from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.imaging import (
+    DEFAULT_RESET_LABEL,
     SevenZipArchiveError,
     UnsupportedImageFormatError,
     check_image_format,
@@ -59,6 +60,7 @@ from .screens import (
     HomeScreen,
     LogPanel,
     MainView,
+    ResetCardLabelDialog,
     RocknixVariantDialog,
     SameCardUnverifiedDialog,
     WizardStepPanel,
@@ -101,6 +103,10 @@ _ALLOW_EJECT_AFTER_MODES = {
     "copy_games",
     "extract_boot",
     "extract_easyroms",
+    # "reset_card" volontairement absent : § éjecte déjà automatiquement à
+    # la fin (dernière étape suivie par la barre de progression, §4.3 bis)
+    # -- un bouton en plus serait redondant, même principe qu'un flash
+    # Android (`android_flash`, ci-dessous).
 }
 _PARTITION_JOB_MODES = {"extract_boot", "extract_easyroms", "inject_boot", "copy_games"}
 _ARCHIVE_LABEL_BY_MODE = {
@@ -120,6 +126,10 @@ class MainWindow(QMainWindow):
         self._mode: Optional[str] = None
         self._device: Optional[Device] = None
         self._file_path: Optional[str] = None
+        # Étiquette du volume pour « Remettre la carte à zéro » (§4.3 bis,
+        # mode expert uniquement) -- choisie via `ResetCardLabelDialog`,
+        # jamais utilisée en dehors de `self._mode == "reset_card"`.
+        self._reset_card_label: str = DEFAULT_RESET_LABEL
         self._runner: Optional[object] = None  # WorkerRunner | PartitionJobRunner
         # Éjection (étape F/bouton du journal/automatique en mode assisté,
         # §4.4/§4.5) -- toujours un `WorkerRunner` dédié, distinct de
@@ -257,6 +267,7 @@ class MainWindow(QMainWindow):
         self._rocknix_variant_dialog = RocknixVariantDialog(self)
         self._backup_kind_dialog = BackupKindDialog(self)
         self._same_card_unverified_dialog = SameCardUnverifiedDialog(self)
+        self._reset_card_label_dialog = ResetCardLabelDialog(self)
 
         self._wire_signals()
         self._refresh_home_state()
@@ -292,6 +303,7 @@ class MainWindow(QMainWindow):
         self._home.eject_selected.connect(lambda: self._start_flow("eject"))
         self._home.backup_selected.connect(lambda: self._start_flow("backup"))
         self._home.backup_system_selected.connect(lambda: self._start_flow("backup_system"))
+        self._home.reset_card_selected.connect(lambda: self._start_flow("reset_card"))
         self._home.refresh_requested.connect(self._refresh_home_state)
         self._home.help_requested.connect(self._help_dialog.open)
         self._home.assisted_mode_requested.connect(self._switch_to_assisted_mode)
@@ -311,6 +323,7 @@ class MainWindow(QMainWindow):
         self._backup_kind_dialog.full_copy_requested.connect(lambda: self._on_backup_kind_chosen("full"))
         self._backup_kind_dialog.system_only_requested.connect(lambda: self._on_backup_kind_chosen("system"))
         self._backup_kind_dialog.cancelled.connect(self._cancel_wizard)
+        self._reset_card_label_dialog.label_chosen.connect(self._on_reset_card_label_chosen)
 
         self._confirm_dialog.confirmed.connect(self._on_confirmed)
         self._same_card_unverified_dialog.confirmed.connect(self._on_same_card_unverified_confirmed)
@@ -425,6 +438,15 @@ class MainWindow(QMainWindow):
             # Étape F : ni fichier ni opération suivie de progression,
             # l'éjection est immédiate (§4.5).
             self._perform_eject()
+            return
+
+        if self._mode == "reset_card":
+            # « Remettre la carte à zéro » (§4.3 bis, mode expert) : pas de
+            # fichier à choisir -- l'étiquette du volume d'abord
+            # (`ResetCardLabelDialog`), puis la fenêtre Confirmation
+            # obligatoire (§2 n°6), jamais l'inverse.
+            self._reset_card_label_dialog.set_default_label(self._reset_card_label)
+            self._reset_card_label_dialog.open()
             return
 
         if self._mode == "backup_system":
@@ -652,6 +674,16 @@ class MainWindow(QMainWindow):
         self._confirm_dialog.set_device(self._device)
         self._confirm_dialog.open()
 
+    def _on_reset_card_label_chosen(self, label: str) -> None:
+        """Réponse de `ResetCardLabelDialog` (§4.3 bis) -- mémorisée pour
+        `_start_worker` (`--label`) et pour repré-remplir la fenêtre la
+        prochaine fois, avant la fenêtre Confirmation obligatoire (§2
+        n°6, jamais sautée -- cette opération efface toute la carte, tout
+        aussi destructrice qu'un flash)."""
+        self._reset_card_label = label
+        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.open()
+
     def _on_confirmed(self) -> None:
         self._confirm_dialog.close()
         self._start_worker()
@@ -697,6 +729,8 @@ class MainWindow(QMainWindow):
             argv = ["backup", "--device", self._device.path, "--output", self._file_path]
         elif self._mode == "backup_system":
             argv = ["backup", "--device", self._device.path, "--output", self._file_path, "--system-only"]
+        elif self._mode == "reset_card":
+            argv = ["reset-card", "--device", self._device.path, "--label", self._reset_card_label]
         else:
             argv = ["flash", "--image", self._file_path, "--device", self._device.path]
             # Plus de drapeau `--create-games-partition` à construire ici
@@ -738,6 +772,7 @@ class MainWindow(QMainWindow):
         self._log_panel.append_log(f"[diagnostic] worker : {' '.join(argv)}")
         self._runner = WorkerRunner(argv, parent=self, macos_auth_session=self._get_or_create_macos_auth_session())
         self._runner.progress.connect(self._on_progress)
+        self._runner.step_progress.connect(self._on_step_progress)
         self._runner.log.connect(lambda level, msg: self._log_panel.append_log(msg))
         self._runner.error.connect(self._on_worker_error)
         self._runner.finished.connect(self._on_worker_finished)
@@ -835,6 +870,12 @@ class MainWindow(QMainWindow):
         self._last_progress_bytes = done
         self._log_panel.update_progress(done, total, speed)
 
+    def _on_step_progress(self, step_index: int, step_count: int, step_name: str) -> None:
+        """Progression par étapes réelles (§2 n°5, §4.3 bis « Remettre la
+        carte à zéro ») -- distinct de `_on_progress` ci-dessus (bytes/
+        débit), pour une opération qui n'a rien à copier."""
+        self._log_panel.update_step_progress(step_index, step_count, step_name)
+
     def _on_cancel_requested(self) -> None:
         if self._runner is not None:
             self._log_panel.set_cancel_enabled(False)
@@ -892,6 +933,8 @@ class MainWindow(QMainWindow):
             return f"{self._device.display} a retrouvé son écran d'origine."
         if self._mode == "copy_games":
             return f"Les jeux ont été copiés sur {self._device.display}."
+        if self._mode == "reset_card":
+            return f"{self._device.display} a été remise à zéro."
         return f"{self._device.display} est prête."  # flash
 
     def _archive_info(self) -> str:

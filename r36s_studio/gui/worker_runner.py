@@ -93,6 +93,11 @@ class WorkerRunner(QObject):
     # (§4.3, `backup --system-only --estimate-only`) -- `"qint64"` pour la
     # même raison que `progress` ci-dessus (une taille peut dépasser 2 Go).
     estimate = Signal("qint64")  # size_bytes
+    # Progression par étapes réelles (§2 n°5, §4.3 bis « Remettre la carte
+    # à zéro ») -- distinct de `progress` ci-dessus (bytes/débit), pour une
+    # opération qui n'a rien à copier mais dont chaque étape terminée est
+    # un jalon réel.
+    step_progress = Signal(int, int, str)  # step_index, step_count, step_name
 
     def __init__(self, argv: List[str], parent=None, macos_auth_session=None):
         """`argv` : la commande worker sans `--worker`/`--progress-file`/
@@ -244,6 +249,8 @@ class WorkerRunner(QObject):
             self.error.emit(event.get("code", ""), event.get("msg", ""))
         elif etype == "estimate":
             self.estimate.emit(event.get("size_bytes", 0))
+        elif etype == "step_progress":
+            self.step_progress.emit(event.get("step_index", 0), event.get("step_count", 0), event.get("step_name", ""))
         elif etype == "done":
             self._done_emitted = True
             self.finished.emit(bool(event.get("ok")))

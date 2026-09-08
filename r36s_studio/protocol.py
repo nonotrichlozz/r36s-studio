@@ -52,6 +52,18 @@ def emit_done(ok: bool) -> None:
     emit({"type": "done", "ok": ok})
 
 
+def emit_step_progress(step_index: int, step_count: int, step_name: str) -> None:
+    """Progression par étapes réelles plutôt que par octets (§2 n°5 :
+    jamais une progression simulée) -- pour une opération qui n'a rien à
+    copier (« Remettre la carte à zéro », §4.3 bis) mais dont chaque étape
+    est un jalon réel (effacement, création, formatage, éjection).
+    `step_index` : nombre d'étapes déjà terminées (0 au tout début,
+    `step_count` à la toute fin). `step_name` : l'étape EN COURS, affichée
+    à la place d'un débit/temps restant qui n'auraient aucun sens ici
+    (quelques secondes, non prévisibles)."""
+    emit({"type": "step_progress", "step_index": step_index, "step_count": step_count, "step_name": step_name})
+
+
 def emit_estimate(size_bytes: int) -> None:
     """Résultat d'un calcul de taille élevé (`backup --system-only
     --estimate-only`, §4.3) -- repli quand `partitions/locate.py::

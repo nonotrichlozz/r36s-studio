@@ -44,6 +44,14 @@ STRINGS = {
         "Enregistre l'écran et les réglages de ta carte, sans tes jeux — "
         "un fichier bien plus petit qu'une sauvegarde complète."
     ),
+    # Remise à zéro (§4.3 bis) : pour une carte laissée en plusieurs
+    # partitions illisibles après des essais de firmware -- efface tout et
+    # recrée un seul espace de stockage normal, comme une carte SD neuve.
+    "home_tile_reset_card": "Remettre la carte à zéro",
+    "home_tile_reset_card_desc": (
+        "Efface tout sur cette carte et la remet en un seul espace de stockage normal — "
+        "utile après avoir essayé plusieurs firmwares."
+    ),
     # Aide macOS uniquement (§3/§5 -- HomeScreen n'ajoute ce bouton que sur
     # macOS, seul OS concerné par cette autorisation).
     "home_help": "Aide : autoriser l'accès à la carte (Mac)",
@@ -119,6 +127,15 @@ STRINGS = {
     "wizard_backup_kind_system": "Système seul, sans les jeux",
     "wizard_backup_kind_system_desc": "L'écran et les réglages seulement — un fichier bien plus petit.",
     "wizard_create_image_size_hint": "Taille maximale de la copie : environ {size}.",
+    # Remise à zéro (§4.3 bis, mode expert uniquement) -- choix de
+    # l'étiquette du volume avant la fenêtre Confirmation, valeur par
+    # défaut simple toujours remplaçable.
+    "reset_card_label_title": "Nom de la carte",
+    "reset_card_label_instruction": (
+        "Choisis le nom qui s'affichera pour cette carte une fois vide — "
+        "tu peux garder celui-ci."
+    ),
+    "reset_card_label_continue": "Continuer",
     "wizard_image_created_log": "Image créée : {path}",
     "wizard_step3_title": "3. Insère ta carte neuve",
     "wizard_step3_instruction": "Branche maintenant la carte neuve à préparer.",
@@ -282,6 +299,7 @@ STRINGS = {
     "execute_title_extract_easyroms": "Copie des jeux en cours…",
     "execute_title_inject_boot": "Remise en place de l'écran d'origine…",
     "execute_title_copy_games": "Copie des jeux en cours…",
+    "execute_title_reset_card": "Remise à zéro de la carte en cours…",
     "execute_title_list_rocknix": "Recherche des versions ROCKNIX en ligne…",
     "execute_title_download_rocknix": "Téléchargement de ROCKNIX en cours…",
     "rocknix_download_success": "La dernière version de ROCKNIX a été téléchargée : {path}",
@@ -374,6 +392,10 @@ STRINGS = {
     "error_eject_failed": (
         "Impossible d'éjecter la carte. Ferme les fichiers ouverts dessus, puis réessaie, "
         "ou retire-la manuellement."
+    ),
+    "error_reset_card_failed": (
+        "Impossible de remettre cette carte à zéro. Débranche-la puis rebranche-la, "
+        "ferme les fenêtres qui l'affichent, puis réessaie."
     ),
     "error_macos_tcc_blocked": (
         "Ton Mac empêche l'accès à la carte SD tant que R36S Studio n'a pas la permission "
@@ -477,6 +499,7 @@ _ERROR_MESSAGE_KEYS = {
     "SOURCE_NOT_FOUND": "error_source_not_found",
     "VERIFY_FAILED": "error_verify_failed",
     "EJECT_FAILED": "error_eject_failed",
+    "RESET_CARD_FAILED": "error_reset_card_failed",
     "MACOS_TCC_BLOCKED": "error_macos_tcc_blocked",
     "MACOS_TCC_PROTECTED_FOLDER": "error_macos_tcc_protected_folder",
     "SEVEN_ZIP_ARCHIVE": "error_seven_zip_archive",

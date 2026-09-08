@@ -1227,6 +1227,234 @@ utilisé, et ne sauvegarder que jusque-là. Proposer une compression `.img.gz` o
 > nouvelle partition dans les 15 s sans éjection/réinsertion physique de
 > la carte.
 
+**« Remettre la carte à zéro » (§4.3 bis, mode expert uniquement).** Besoin
+constaté en usage réel : après des essais de firmware, une carte peut
+rester en trois à cinq partitions illisibles pour un PC -- Windows ne sait
+pas la remettre simplement en état de carte de stockage normale. Nouvelle
+opération : efface toute la table de partitions existante (MBR ou GPT) et
+recrée une seule partition exFAT occupant toute la carte.
+
+`imaging/reset_card.py` (nouveau module, délibérément distinct de
+`games_partition.py` -- celui-ci *ajoute* une partition à une table
+existante, celui-là *remplace* toute la table par une seule partition
+neuve, la planification n'a donc pas besoin de lire de table existante)
+réutilise les briques déjà en place plutôt que d'en écrire de nouvelles :
+`imaging/write_target.py::prepared_write_target` (verrouillage/démontage
+par OS, §4.3, identique à `flash_device`/`create_games_partition`) pour
+l'écriture, et `imaging/games_partition.py::format_games_partition` (déjà
+multiplateforme : `diskutil eraseVolume`/`mkfs.exfat`/PowerShell `Format-
+Volume`) pour le formatage natif -- rien de nouveau à maintenir par OS
+pour cette dernière étape. Exposé en deux fonctions distinctes plutôt
+qu'une seule combinée (§ correctif ci-dessous) :
+1. `erase_partition_table` -- efface (zéros) une marge de 1 Mio
+   (`ALIGNMENT_SECTORS`) en tête *et* en fin de disque -- une éventuelle
+   signature GPT (« EFI PART », LBA1) ou une table secondaire en fin de
+   disque ne doit pas pouvoir resurgir une fois le nouveau MBR écrit
+   par-dessus le seul LBA0 (un outil qui la retrouverait malgré un MBR
+   neuf continuerait de rapporter l'ancien schéma GPT).
+2. `create_single_partition` -- écrit un MBR neuf (`build_full_disk_mbr_
+   sector` -- contrairement à `rewrite_mbr_with_games_partition`, ne lit
+   jamais de secteur existant : tout le reste de la table précédente doit
+   disparaître, pas gagner une entrée de plus) avec une unique partition
+   alignée occupant tout l'espace restant. Sur Windows uniquement, attend
+   ensuite un court instant (§ correctif ci-dessous).
+
+CLI : `python -m r36s_studio reset-card --device X [--label ÉTIQUETTE]`
+(`__main__.py::cmd_reset_card`) -- écrit sur le périphérique brut comme
+`flash` : même confirmation explicite obligatoire (règle §2 n°6,
+réutilise `_confirm_flash` tel quel, son texte générique s'applique sans
+changement). Quatre étapes réelles, chacune journalisée avant et après
+(effacement, création, formatage, éjection -- voir le correctif
+ci-dessous) ; nouveau code d'erreur dédié, `RESET_CARD_FAILED` (carte
+trop petite, ou une vraie erreur d'écriture/formatage, avec l'étape en
+cause dans le message).
+
+GUI (mode expert uniquement, §5) : troisième ligne sous « Par sécurité »,
+à côté des deux sauvegardes -- jamais dans le parcours assisté, une
+opération destructrice qui n'en fait pas partie. Carte choisie (fenêtre
+habituelle) puis, avant même la fenêtre Confirmation, `screens.
+ResetCardLabelDialog` (nouvelle fenêtre) demande l'étiquette du volume --
+un champ de texte pré-rempli avec une valeur simple par défaut
+(`DEFAULT_RESET_LABEL = "SDCARD"`), jamais imposée, jamais vide (le
+bouton Continuer n'émet rien tant que le champ est vide plutôt que de
+laisser passer une étiquette vide vers le formatage natif). Fenêtre
+Confirmation ensuite, obligatoire, avant toute écriture réelle -- jamais
+sautée, exactement comme pour un flash.
+
+> ⚠️ **Bug corrigé, confirmé sur du vrai matériel : le formatage ne se
+> terminait pas -- aucune partition exFAT n'était créée, la carte
+> réinsérée restait brute (non reconnue par Windows), l'exact inverse du
+> but de la fonctionnalité -- sans qu'aucune erreur ne soit journalisée.**
+> L'effacement de la table fonctionnait ; rien après.
+>
+> **Cause** : `_format_windows` (`games_partition.py`) interroge
+> `Get-Partition -DiskNumber N` pour retrouver la partition tout juste
+> créée -- mais Windows n'avait pas encore repris en compte le MBR tout
+> juste écrit par `create_single_partition` au moment de cette requête.
+> Un pipeline PowerShell dont le tout premier maillon ne renvoie rien
+> (`Get-Partition` vide) ne lève **aucune erreur** : il n'y a simplement
+> rien à faire suivre à `Get-Volume`/`Format-Volume`, qui ne sont donc
+> jamais invoqués -- mais `powershell.exe` sort quand même avec le code 0,
+> et l'ancien `subprocess.run(check=True)` ne voyait donc rien d'anormal.
+> Un échec à mi-parcours ressemblait alors exactement à un succès --
+> exactement le défaut signalé : « un échec silencieux à mi-parcours est
+> indistinguable d'un succès ».
+>
+> **Corrigé en trois temps, complémentaires** :
+> 1. **Timing** : `create_single_partition` attend désormais un court
+>    instant (`_WINDOWS_TABLE_REFRESH_DELAY_SECONDS`, 1 s, Windows
+>    uniquement) après avoir écrit le nouveau MBR -- `prepared_write_
+>    target` déclenche déjà `IOCTL_DISK_UPDATE_PROPERTIES` en quittant son
+>    bloc `with` (`winlock.refresh_disk_properties`, §4.3, réutilisé tel
+>    quel plutôt que dupliqué) ; ce délai laisse le temps à Windows de
+>    terminer cette reprise en compte avant l'étape suivante.
+> 2. **Défense en profondeur** : `_format_windows` réessaie en plus
+>    `Get-Partition` plusieurs fois de son côté (`_WINDOWS_PARTITION_
+>    RETRY_COUNT` = 10, espacées de `_WINDOWS_PARTITION_RETRY_DELAY_MS` =
+>    500 ms, dans le script PowerShell lui-même) -- ni le délai côté
+>    Python ni les réessais côté PowerShell n'ont besoin d'être suffisants
+>    à eux seuls.
+> 3. **Échec rendu bruyant** : si la partition ou son volume restent
+>    introuvables après ces réessais, le script PowerShell sort
+>    maintenant explicitement en erreur (`exit 1`) au lieu de ne rien
+>    faire silencieusement -- `_format_windows` lève alors `OSError` avec
+>    le détail (stderr) inclus dans le message, jamais un succès muet.
+>    Bénéficie aussi bien à « Remettre la carte à zéro » qu'à la création
+>    de partition de jeux existante (`create_and_format_games_partition`,
+>    ci-dessus) : les deux utilisent la même fonction.
+>
+> **Journalisation par étape, à la demande explicite** (« un échec
+> silencieux à mi-parcours est indistinguable d'un succès aujourd'hui ») :
+> `cmd_reset_card` journalise désormais chacune des quatre étapes avant et
+> après (« Effacement de la table de partitions... » / « Table de
+> partitions effacée. », etc.) -- plus aucune étape ne peut échouer sans
+> laisser de trace, ni réussir sans confirmation explicite dans le journal.
+>
+> **Barre de progression par étapes réelles, jamais un minuteur (§2 n°5,
+> demande explicite).** Un formatage exFAT prend quelques secondes, sans
+> estimation de temps restant qui aurait un sens (contrairement au débit
+> d'une copie d'image) -- plutôt qu'une fausse barre qui avancerait avec
+> le temps, `protocol.py::emit_step_progress(step_index, step_count,
+> step_name)` (nouvel événement JSON Lines, `{"type": "step_progress",
+> ...}`) n'avance qu'à chaque étape *effectivement terminée* parmi les
+> quatre (effacement, création, formatage, éjection) -- jamais simulée.
+> `WorkerRunner.step_progress` (nouveau signal Qt, `Signal(int, int,
+> str)`) relaie l'événement ; `LogPanel.update_step_progress` fixe la
+> barre à `step_index / step_count` et affiche `step_name` **à la place**
+> du débit/temps restant habituels (`_speed_label` réutilisé, `_eta_label`
+> masqué) -- ces deux derniers n'ont aucun sens pour une progression par
+> étapes. Atteint 100 % à la toute fin (`step_index == step_count`, juste
+> avant `emit_done(True)`), comme pour le flash.
+>
+> **Éjection automatique à la dernière étape, revenu sur la conception
+> initiale (bouton après succès) suite à une demande explicite.** Une
+> partition exFAT neuve ne déclenche aucune proposition de formatage
+> Windows (contrairement à `--eject-after` sur `flash`, §4.6, dont le
+> risque ne s'applique pas ici) -- mais l'éjection reste listée comme
+> l'une des quatre étapes réelles de l'opération elle-même, pas une action
+> facultative proposée après coup : `cmd_reset_card` éjecte donc
+> automatiquement à sa dernière étape, en best-effort (un échec d'éjection
+> ne remet jamais en cause la remise à zéro déjà réussie, même principe
+> que `--eject-after`). `"reset_card"` a été retiré de `_ALLOW_EJECT_
+> AFTER_MODES` (`gui/main_window.py`) en conséquence -- un bouton Éjecter
+> après coup serait redondant, même principe qu'un flash Android
+> (`android_flash`) qui masque déjà ce bouton pour la même raison.
+
+> ⚠️ **Deuxième bug corrigé, confirmé sur du vrai matériel après le
+> correctif ci-dessus : le formatage se termine bien (`Get-Volume` montre
+> un volume exFAT correctement formaté, bonne taille, bonne étiquette),
+> mais sans lettre de lecteur il n'apparaît pas dans l'Explorateur -- la
+> carte semble non reconnue alors qu'elle est parfaitement formatée.**
+> Attribuer une lettre à la main (`Set-Partition -NewDriveLetter K`) la
+> fait apparaître immédiatement -- confirmant que le formatage
+> lui-même n'était pas en cause, seule l'étape suivante manquait.
+>
+> **Corrigé** : `_format_windows` (`games_partition.py`) attribue
+> désormais la première lettre libre juste après `Format-Volume`
+> (`Add-PartitionAccessPath -AssignDriveLetter`, dans le même script
+> PowerShell -- exige l'élévation, « Access denied » sans, même piège que
+> `IOCTL_STORAGE_EJECT_MEDIA` pour l'éjection, §4.4 : cette fonction n'est
+> jamais appelée en dehors du worker élevé, §3, donc toujours dans le bon
+> contexte), puis relit la lettre effectivement attribuée
+> (`Get-Partition ... | Select DriveLetter`) et la fait remonter à
+> l'appelant via la sortie standard (`DRIVE_LETTER=K`, parsée côté
+> Python). `format_games_partition` retourne désormais cette lettre
+> (`Optional[str]`, toujours `None` sur macOS/Linux -- aucune notion de
+> lettre de lecteur là-bas) plutôt que `None` inconditionnellement ;
+> `GamesPartitionResult` gagne un champ `drive_letter` du même nom, rempli
+> par `create_and_format_games_partition`. `cmd_reset_card` (nouvelle
+> étape journalisée, « La carte est disponible sous K:. ») et `cmd_flash`
+> (création automatique de la partition de jeux, §4.3) journalisent tous
+> les deux cette lettre quand elle est connue -- le même bug aurait
+> affecté les deux fonctionnalités de façon identique, `_format_windows`
+> étant partagée entre les deux.
+>
+> **macOS/Linux, vérifié plutôt que supposé (demande explicite).** Aucune
+> notion de lettre de lecteur sur ces deux OS, mais la question sous-
+> jacente (le volume fraîchement formaté est-il seulement *accessible* ?)
+> se pose tout autant :
+> - **macOS** : `diskutil eraseVolume` est documenté pour laisser le
+>   volume monté (Disk Arbitration monte automatiquement tout système de
+>   fichiers reconnu) -- comportement connu, mais **non vérifié sur du
+>   vrai matériel dans ce projet** (aucun Mac disponible ici). `_format_
+>   macos` tente désormais en plus un `diskutil mount` explicite en
+>   best-effort après l'effacement -- sans effet dans le cas normal
+>   (déjà monté), filet de sécurité si l'hypothèse s'avérait fausse dans
+>   un cas non couvert ici.
+> - **Linux** : contrairement à macOS, `mkfs.exfat`/`mkfs.vfat` ne
+>   montent jamais eux-mêmes le système de fichiers qu'ils créent -- que
+>   le montage suive ensuite dépend entièrement d'un service
+>   d'automontage (udisks2 + un gestionnaire de fichiers de bureau) qui
+>   n'est pas garanti présent sur toute installation Linux (ex. une
+>   distribution minimale sans environnement de bureau complet -- même
+>   machine de test évoquée au §8, Eee PC/antiX). **Écart réel et non
+>   théorique, non vérifié faute de matériel Linux disponible ici** :
+>   contrairement à macOS, l'hypothèse « ça se monte tout seul » n'a
+>   jamais été une garantie documentée du côté de `mkfs.*`. `_format_
+>   linux` tente donc désormais un `udisksctl mount -b` explicite en
+>   best-effort après le formatage (même mécanisme non privilégié déjà
+>   utilisé ailleurs dans ce projet pour le montage, §4.4) -- sans
+>   effet si l'automontage a déjà fait le travail, mais comble le cas où
+>   il est absent.
+>
+> Les deux tentatives macOS/Linux sont volontairement best-effort (jamais
+> un échec de l'opération globale) et ne remontent aucune information de
+> résultat à l'appelant (contrairement à Windows, aucun équivalent de
+> "lettre de lecteur" à journaliser côté succès) -- seule la lettre
+> Windows est explicitement confirmée et journalisée, comme demandé.
+
+**Non confirmé sur du vrai matériel au moment d'écrire cette note**
+(aucune carte physique disponible ici) : ces deux correctifs réparent des
+bugs *rapportés* sur du vrai matériel, mais n'ont pas encore été retestés
+sur ce même matériel une fois corrigés -- en particulier l'hypothèse
+macOS (jamais vérifiée dans ce projet) et le correctif Linux (écrit sans
+aucun accès à une machine Linux ici). La logique bas niveau est testée
+bout en bout (reparsing indépendant du secteur produit, comme `test_
+imaging_games_partition.py`), et le CLI/la GUI sont couverts par des
+tests qui mockent `erase_partition_table`/`create_single_partition`/
+`format_games_partition`/`WorkerRunner` -- mais jamais contre un vrai
+périphérique bloc, sur aucun OS. Le formatage natif hérite des mêmes
+zones d'ombre déjà documentées pour `create_and_format_games_partition_
+if_worthwhile` ci-dessus (seule la branche Windows a été validée sur du
+vrai matériel pour l'ancien mécanisme `--create-games-partition`, jamais
+pour celui-ci ni pour macOS/Linux).
+
+> ⚠️ **Défaut corrigé au passage, signalé comme sans conséquence
+> fonctionnelle : le journal affichait « Éjection automatique de la carte
+> (firmware Android)… » après un flash ArkOS.** Cause : `--eject-after`
+> a été généralisé à tout le catalogue (§4.6, au moins une partition de
+> tout firmware -- pas seulement Android -- est illisible pour Windows),
+> mais le message correspondant dans `__main__.py::cmd_flash` était resté
+> celui d'avant cette généralisation, jamais mis à jour. L'éjection
+> elle-même se déclenchait déjà correctement pour ArkOS (comportement
+> voulu depuis la généralisation) -- seul le texte affiché était trompeur,
+> laissant croire à une erreur de détection de firmware qui n'existait pas.
+> **Corrigé** : message neutre, « Éjection automatique de la carte… »,
+> sans mention d'un firmware précis -- cohérent avec le fait que ce
+> drapeau s'applique désormais à tout le catalogue. Corrigé au passage
+> dans l'aide `--eject-after` du parser (`--help`), qui portait la même
+> affirmation obsolète.
+
 **Formats source acceptés au flash :** `.img`, `.img.gz`, `.img.xz`, `.img.zip`
 (décompression en flux, sans fichier temporaire).
 

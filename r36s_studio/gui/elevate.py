@@ -68,6 +68,21 @@ SW_SHOWNORMAL = 1
 SW_HIDE = 0
 STILL_ACTIVE = 259
 WAIT_INFINITE = 0xFFFFFFFF
+# `GetLastError()` quand l'utilisateur refuse ou ferme l'invite UAC --
+# distinct de tout autre échec de `ShellExecuteExW` (exécutable introuvable,
+# SmartScreen qui bloque...), voir `ElevationRefusedError` ci-dessous.
+ERROR_CANCELLED = 1223
+
+
+class ElevationRefusedError(OSError):
+    """Levée par `_launch_windows` quand `ShellExecuteExW` échoue
+    précisément parce que l'utilisateur a refusé ou fermé l'invite UAC
+    (`GetLastError() == ERROR_CANCELLED`) -- distincte d'un `OSError`
+    générique pour que l'appelant puisse afficher un message dédié
+    (« l'autorisation Windows a été refusée ») plutôt qu'un message pensé
+    pour une tout autre cause (bug corrigé, confirmé sur du vrai matériel :
+    voir CLAUDE.md, une invite UAC refusée pendant l'éjection affichait le
+    message générique « ferme les fichiers ouverts... »)."""
 
 _BOOTSTRAP = "import sys; sys.path.insert(0, {root!r}); from r36s_studio.__main__ import main; sys.exit(main(sys.argv[1:]))"
 
@@ -618,6 +633,17 @@ def _launch_windows(command: List[str], stderr_log: Optional[Path] = None) -> Wi
             f"ShellExecuteExW a échoué : retour=False, GetLastError={last_error} "
             f"({_format_windows_error(last_error)!r}), hInstApp={info.hInstApp}",
         )
+        if last_error == ERROR_CANCELLED:
+            # Bug corrigé, confirmé sur du vrai matériel : ce cas précis se
+            # confondait avec n'importe quel autre échec de démarrage du
+            # worker élevé (`OSError` générique) une fois remonté jusqu'à
+            # l'appelant -- `ElevationRefusedError` lui donne une identité
+            # propre pour que `WorkerRunner`/`gui/main_window.py` puissent
+            # afficher un message dédié plutôt qu'un message pensé pour une
+            # tout autre cause.
+            raise ElevationRefusedError(
+                f"Invite UAC refusée ou fermée (GetLastError={last_error} = ERROR_CANCELLED)"
+            )
         raise OSError(
             f"ShellExecuteW (runas) a échoué : élévation refusée ou annulée (GetLastError={last_error})"
         )

@@ -112,6 +112,12 @@ STRINGS = {
     # que là) -- combien de périphériques retenus/écartés à un sondage du
     # mode assisté, avec la raison de chaque exclusion.
     "wizard_diagnostic_summary": "Détection : {accepted} carte(s) retenue(s), {rejected} écartée(s)",
+    # Diagnostic pur (§5 mode assisté, `_check_wizard_poll_stall`) : signale
+    # un sondage automatique resté silencieux anormalement longtemps --
+    # bug rapporté, non reproduit en isolation, voir la note dédiée.
+    "wizard_poll_stall_detected": (
+        "Le sondage automatique de la carte semblait interrompu depuis {seconds} s."
+    ),
     "wizard_step1_title": "1. Insère ta carte SD d'origine",
     "wizard_step1_instruction": "Branche l'ancienne carte SD de ta console sur ton ordinateur.",
     "wizard_step2_title": "2. Copie de ta carte sur l'ordinateur",
@@ -393,6 +399,10 @@ STRINGS = {
         "Impossible d'éjecter la carte. Ferme les fichiers ouverts dessus, puis réessaie, "
         "ou retire-la manuellement."
     ),
+    # Bug corrigé (§4.4/§5) : distinct d'`error_eject_failed` -- une invite
+    # UAC refusée ou fermée n'a rien à voir avec des fichiers ouverts sur
+    # la carte, message dédié plutôt que le générique ci-dessus.
+    "error_elevation_refused": "L'autorisation Windows a été refusée. Réessaie et accepte l'invite.",
     "error_reset_card_failed": (
         "Impossible de remettre cette carte à zéro. Débranche-la puis rebranche-la, "
         "ferme les fenêtres qui l'affichent, puis réessaie."
@@ -499,6 +509,7 @@ _ERROR_MESSAGE_KEYS = {
     "SOURCE_NOT_FOUND": "error_source_not_found",
     "VERIFY_FAILED": "error_verify_failed",
     "EJECT_FAILED": "error_eject_failed",
+    "ELEVATION_REFUSED": "error_elevation_refused",
     "RESET_CARD_FAILED": "error_reset_card_failed",
     "MACOS_TCC_BLOCKED": "error_macos_tcc_blocked",
     "MACOS_TCC_PROTECTED_FOLDER": "error_macos_tcc_protected_folder",

@@ -105,11 +105,31 @@ from r36s_studio.partitions import (
 )
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.protocol import configure as configure_protocol
-from r36s_studio.protocol import emit_done, emit_error, emit_estimate, emit_log, emit_progress, emit_step_progress
+from r36s_studio.protocol import (
+    emit_done,
+    emit_eject_result,
+    emit_error,
+    emit_estimate,
+    emit_log,
+    emit_progress,
+    emit_step_progress,
+)
 from r36s_studio.safety import DEFAULT_MAX_SIZE_BYTES, SafetyConfig, filter_devices
 
 DEV_MODE_ENV_VAR = "R36S_STUDIO_DEV"
 _DEV_MODE_FALSY = {"", "0", "false", "False"}
+
+
+def _capacity_go(size_bytes: int) -> float:
+    """Capacité d'une carte entière, en « Go », calculée en base 1024 --
+    même choix et même raison que `gui/screens.py::_capacity_go` (bug
+    corrigé, signalé sur du vrai matériel : l'app affichait « 31,9 Go » là
+    où l'Explorateur Windows affiche « 29,7 Go » pour la même carte,
+    calculée elle aussi en base 1024 sous l'étiquette « Go »). Dupliquée
+    ici plutôt qu'importée de `gui/` : trop petite pour justifier un
+    module utilitaire partagé, et `__main__.py` ne doit pas dépendre de
+    `gui/` (§3 : le CLI fonctionne sans PySide6)."""
+    return size_bytes / (1024**3)
 
 
 def _resolve_device(
@@ -221,7 +241,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 0
 
     for device in safe_devices:
-        size_go = device.size_bytes / 1_000_000_000
+        size_go = _capacity_go(device.size_bytes)
         mounts = ", ".join(device.mountpoints) if device.mountpoints else "-"
         print(f"{device.path}\t{device.display}\t{size_go:.1f} Go\t{device.bus}\t{mounts}")
 
@@ -342,6 +362,30 @@ def cmd_backup(args: argparse.Namespace) -> int:
             return 1
 
         emit_log(f"{copied} octets copiés")
+
+        if args.eject_after:
+            # Chaîne l'éjection de la carte source dans ce même worker déjà
+            # élevé (§5 mode assisté, `_run_wizard_source_eject`) plutôt que
+            # d'en relancer un second dédié -- évite une invite UAC
+            # supplémentaire dans le cas courant. Contrairement à
+            # `--eject-after` de `cmd_flash` (best-effort, jamais fatal),
+            # `emit_eject_result` rapporte le résultat séparément :
+            # `_start_worker`/`_on_wizard_source_eject_result` (GUI) s'en
+            # servent pour décider d'enchaîner directement sur la détection
+            # de la carte neuve ou de retomber sur le worker d'éjection
+            # dédié -- mais la sauvegarde elle-même, déjà réussie et
+            # vérifiée à ce stade, ne doit jamais échouer à cause d'un
+            # échec d'éjection qui la suivrait.
+            emit_log("Éjection automatique de la carte source...")
+            try:
+                eject_device(device.path)
+            except Exception as exc:
+                emit_log(f"Éjection automatique impossible : {exc}", level="warning")
+                emit_eject_result(False, str(exc))
+            else:
+                emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
+                emit_eject_result(True)
+
         emit_done(True)
         return 0
     finally:
@@ -356,7 +400,7 @@ def _confirm_flash(device: Device, prompt=input) -> bool:
     par défaut. En mode worker (`--worker`), la GUI a déjà obtenu cette
     confirmation sur son propre écran (§5 point 4) : `cmd_flash` ne
     rappelle pas cette fonction dans ce cas."""
-    size_go = device.size_bytes / 1_000_000_000
+    size_go = _capacity_go(device.size_bytes)
     print(
         f"⚠️  Toutes les données de « {device.display} » "
         f"({size_go:.1f} Go, {device.path}) seront définitivement effacées."
@@ -947,6 +991,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MAX_SIZE_BYTES,
         help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    backup_parser.add_argument(
+        "--eject-after",
+        action="store_true",
+        help=(
+            "Éjecte la carte source automatiquement après la sauvegarde, dans ce même "
+            "worker déjà élevé (§5 mode assisté, parcours de clonage) -- évite une "
+            "seconde invite d'élévation dédiée juste pour l'éjection. Contrairement au "
+            "`--eject-after` de `flash` (best-effort, ne fait jamais échouer l'opération), "
+            "le résultat est rapporté séparément (événement `eject_result`) sans jamais "
+            "faire échouer la sauvegarde elle-même, déjà réussie à ce stade"
+        ),
     )
     _add_worker_args(backup_parser)
     _add_dev_args(backup_parser)

@@ -26,6 +26,22 @@ def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000) -> Dev
     )
 
 
+# --- capacité affichée (_capacity_go) ---------------------------------------
+# Bug corrigé, signalé sur du vrai matériel : la capacité d'une carte était
+# calculée en base 1000 (`/ 1_000_000_000`) alors que `gui/screens.py::
+# _format_size` (octets copiés/archivés) utilise déjà la base 1024, tout
+# comme l'Explorateur Windows -- deux conventions différentes dans la même
+# app, en plus du désaccord avec Windows.
+
+
+def test_capacity_go_uses_base_1024():
+    assert cli._capacity_go(2 * 1024**3) == 2.0
+    # Carte réelle "32 Go" -- 31,9 Go en base 1000 (l'ancien calcul), 29,7
+    # Go en base 1024 (Explorateur Windows, valeur confirmée sur du vrai
+    # matériel).
+    assert round(cli._capacity_go(31_914_983_424), 1) == 29.7
+
+
 # --- confirmation (_confirm_flash) -----------------------------------------
 
 
@@ -42,13 +58,17 @@ def test_confirm_flash_rejects_anything_else():
 
 
 def test_confirm_flash_shows_model_and_size(capsys):
+    """Base 1024 (comme l'Explorateur Windows), pas 1000 -- bug corrigé,
+    signalé sur du vrai matériel : ce même compte d'octets s'affichait
+    « 31,9 Go » ici contre « 29,7 Go » dans l'Explorateur pour la même
+    carte."""
     device = _make_device(size_bytes=31_914_983_424)
     device.display = "SanDisk Ultra 128 Go"
     cli._confirm_flash(device, prompt=lambda _msg: "OUI")
 
     out = capsys.readouterr().out
     assert "SanDisk Ultra 128 Go" in out
-    assert "31.9 Go" in out
+    assert "29.7 Go" in out
     assert device.path in out
 
 

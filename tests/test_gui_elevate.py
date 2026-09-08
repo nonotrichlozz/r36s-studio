@@ -679,6 +679,51 @@ def test_windows_launch_failure_logs_last_error_to_stderr_log(mock_system, mock_
 
 @patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_shell_execute_failure_with_error_cancelled_raises_elevation_refused_error(
+    mock_system, mock_windll
+):
+    """Bug corrigé, confirmé sur du vrai matériel : une invite UAC refusée
+    (`GetLastError() == ERROR_CANCELLED`, 1223) se confondait avec
+    n'importe quel autre échec de `ShellExecuteExW` une fois remontée à
+    l'appelant -- affichée côté GUI avec le message pensé pour l'éjection
+    en général (« ferme les fichiers ouverts... »), sans rapport avec un
+    refus d'élévation. `ElevationRefusedError` (sous-classe d'`OSError`,
+    rien ne casse côté code qui attrape `OSError` génériquement, ex. le
+    test ci-dessus) permet à l'appelant de distinguer ce cas précis."""
+    shell32 = MagicMock()
+    shell32.ShellExecuteExW.return_value = 0
+    mock_windll.return_value = shell32
+
+    with patch("r36s_studio.gui.elevate.ctypes.get_last_error", create=True, return_value=1223):
+        try:
+            elevate.launch_elevated_worker(["backup"])
+            assert False, "aurait dû lever ElevationRefusedError"
+        except elevate.ElevationRefusedError:
+            pass
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_shell_execute_failure_with_other_error_raises_plain_oserror(mock_system, mock_windll):
+    """Symétrique du test ci-dessus : un échec `ShellExecuteExW` pour une
+    tout autre cause (ex. `ERROR_FILE_NOT_FOUND`, 2 -- exécutable
+    introuvable) ne doit jamais être confondu avec un refus d'élévation."""
+    shell32 = MagicMock()
+    shell32.ShellExecuteExW.return_value = 0
+    mock_windll.return_value = shell32
+
+    with patch("r36s_studio.gui.elevate.ctypes.get_last_error", create=True, return_value=2):
+        try:
+            elevate.launch_elevated_worker(["backup"])
+            assert False, "aurait dû lever OSError"
+        except elevate.ElevationRefusedError:
+            assert False, "ne doit pas être ElevationRefusedError pour ce code"
+        except OSError:
+            pass
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
 def test_windows_launch_truncates_stderr_log_at_start_of_each_attempt(mock_system, mock_windll, tmp_path):
     """`stderr_log` reflète toujours la dernière tentative, jamais un
     historique qui s'accumule (même principe que macOS/Linux, `elevate.py`

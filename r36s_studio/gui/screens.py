@@ -783,7 +783,7 @@ class HomeScreen(Screen):
             self._banner_device_label.setText(tr("home_banner_state_none"))
             self._banner_state_label.setText("")
             return
-        size_go = device.size_bytes / 1_000_000_000
+        size_go = _capacity_go(device.size_bytes)
         self._banner_device_label.setText(tr("home_banner_line_device", display=device.display, size_go=size_go))
         # Le flash marqué "déjà faite" est le seul signal fiable déjà
         # calculé par `detect_workflow_status` pour "cette carte est déjà
@@ -841,7 +841,7 @@ class DeviceDialog(Dialog):
         self._devices = devices
         self._list.clear()
         for device in devices:
-            size_go = device.size_bytes / 1_000_000_000
+            size_go = _capacity_go(device.size_bytes)
             item = QListWidgetItem(f"{device.display} — {size_go:.1f} Go — {device.bus}")
             item.setData(Qt.UserRole, device)
             self._list.addItem(item)
@@ -1262,7 +1262,7 @@ class ConfirmDialog(Dialog):
         self.resize(440, 300)
 
     def set_device(self, device: Device) -> None:
-        size_go = device.size_bytes / 1_000_000_000
+        size_go = _capacity_go(device.size_bytes)
         self._message.setText(tr("confirm_erase", display=device.display, size_go=size_go))
         self._checkbox.setChecked(False)
 
@@ -1320,7 +1320,7 @@ class SameCardUnverifiedDialog(Dialog):
         self.resize(460, 320)
 
     def set_device(self, device: Device) -> None:
-        size_go = device.size_bytes / 1_000_000_000 if device.size_bytes else 0.0
+        size_go = _capacity_go(device.size_bytes) if device.size_bytes else 0.0
         self._message.setText(tr("same_card_unverified_message", display=device.display, size_go=size_go))
         self._checkbox.setChecked(False)
 
@@ -1654,6 +1654,46 @@ def _format_size(num_bytes: int) -> str:
             return f"{int(size)} {unit}" if unit == "o" else f"{size:.1f} {unit}"
         size /= 1024
     return f"{size:.1f} To"
+
+
+def _capacity_go(size_bytes: int) -> float:
+    """Capacité d'une carte entière, en « Go » -- calculée en base 1024
+    (comme `_format_size` ci-dessus), pas en base 1000. Signalé sur du
+    vrai matériel : l'app affichait « 31,9 Go » (alors calculée en base
+    1000, `/ 1_000_000_000`) là où l'Explorateur Windows affiche « 29,7
+    Go » pour la même carte -- au point qu'un utilisateur pouvait croire à
+    une perte de capacité.
+
+    Vérifié plutôt que supposé (les trois OS n'ont *pas* la même
+    convention, aucune ne fait consensus) :
+    - **Windows** (Explorateur) : base 1024, étiqueté « Go » -- c'est la
+      source de l'écart signalé (31 907 643 392 octets -> 29,7 « Go »).
+    - **macOS** (Finder) : base 1000 depuis Snow Leopard (10.6, 2009),
+      étiqueté « Go » correctement -- ce que l'app calculait déjà pour la
+      capacité d'une carte, mais pas pour les octets copiés/archivés
+      (`_format_size`, toujours en base 1024). L'app avait donc déjà DEUX
+      conventions différentes en interne, pas seulement un désaccord avec
+      Windows.
+    - **Linux** : mélangé selon le gestionnaire de fichiers -- GNOME
+      Fichiers (Nautilus) suit la même convention que macOS (base 1000,
+      « Go » correctement étiqueté) ; les outils historiques en ligne de
+      commande (`df`, `lsblk`) utilisent traditionnellement la base 1024
+      avec un « G » tout aussi ambigu que celui de Windows. Aucune
+      convention unique ne fait donc consensus sur Linux non plus.
+
+    Choix retenu, faute de convention qui satisferait les trois OS à la
+    fois : aligner **toute** l'app sur une seule et même base -- celle
+    déjà utilisée par `_format_size` (base 1024), pour ne plus jamais
+    avoir deux nombres différents pour la même carte selon l'écran
+    consulté au sein de cette app. Ce choix rapproche aussi l'affichage de
+    Windows, la plateforme la plus testée sur du vrai matériel dans ce
+    projet -- au prix d'un désaccord avec le Finder macOS/Nautilus (une
+    carte annoncée « 128 Go » par son fabricant, et vue comme telle dans
+    Finder, s'affichera ici autour de 119 Go, comme dans l'Explorateur
+    Windows) : aucune option n'évite complètement l'écart, celle-ci
+    l'élimine au moins entre les propres écrans de l'app, et avec la
+    plateforme la plus vérifiée ici."""
+    return size_bytes / (1024**3)
 
 
 class HelpDialog(Dialog):

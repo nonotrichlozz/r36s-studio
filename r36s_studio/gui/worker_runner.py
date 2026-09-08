@@ -98,6 +98,13 @@ class WorkerRunner(QObject):
     # opération qui n'a rien à copier mais dont chaque étape terminée est
     # un jalon réel.
     step_progress = Signal(int, int, str)  # step_index, step_count, step_name
+    # Résultat d'une éjection chaînée dans ce même worker (§5 mode assisté,
+    # `backup --eject-after`) -- distinct de `error`/`finished` : la
+    # sauvegarde elle-même peut réussir même si cette éjection échoue,
+    # `_on_wizard_source_eject_result` (main_window.py) en a besoin
+    # séparément pour décider d'enchaîner ou de retomber sur un worker
+    # d'éjection dédié.
+    eject_result = Signal(bool, str)  # ok, msg
 
     def __init__(self, argv: List[str], parent=None, macos_auth_session=None):
         """`argv` : la commande worker sans `--worker`/`--progress-file`/
@@ -251,6 +258,8 @@ class WorkerRunner(QObject):
             self.estimate.emit(event.get("size_bytes", 0))
         elif etype == "step_progress":
             self.step_progress.emit(event.get("step_index", 0), event.get("step_count", 0), event.get("step_name", ""))
+        elif etype == "eject_result":
+            self.eject_result.emit(bool(event.get("ok")), event.get("msg", ""))
         elif etype == "done":
             self._done_emitted = True
             self.finished.emit(bool(event.get("ok")))

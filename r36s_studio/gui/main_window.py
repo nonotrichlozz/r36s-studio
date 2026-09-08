@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -73,6 +74,19 @@ from .wizard_flow import WizardFlow, WizardJob
 from .worker_runner import WorkerRunner
 
 _WIZARD_POLL_INTERVAL_MS = 1500
+# Bug rapporté, non reproduit en isolation (voir _on_wizard_poll) : le
+# sondage automatique de l'étape 1/4 semblerait parfois s'arrêter de
+# lui-même après un retour à l'accueil puis un nouveau lancement du
+# parcours, sans qu'aucun mécanisme de remise à zéro en défaut n'ait été
+# trouvé en relisant `_start_wizard`/`_cancel_wizard` ni en le
+# reproduisant par un test qui rejoue exactement ce scénario (démarrage,
+# empreinte source prête, Continuer, annulation depuis `BackupKindDialog`,
+# relance -- le minuteur redémarre et retrouve la carte correctement dans
+# ce test). Seuil très au-dessus de l'intervalle normal (1,5 s) pour ne
+# jamais confondre une latence normale de l'OS avec un arrêt réel du
+# minuteur -- diagnostic ajouté en attendant une confirmation sur du vrai
+# matériel, pas encore un correctif.
+_WIZARD_POLL_STALL_THRESHOLD_SECONDS = 6.0
 
 # Parcours de clonage (§5 mode assisté) : une étape, un job -- plus besoin
 # qu'un même écran recouvre deux jobs indépendants comme l'ancien parcours
@@ -209,6 +223,16 @@ class MainWindow(QMainWindow):
         self._wizard_source_device: Optional[Device] = None
         self._wizard_source_fingerprint: Optional[str] = None
         self._wizard_target_device: Optional[Device] = None
+        # Résultat de l'éjection de la carte source, chaînée dans le worker
+        # de l'étape 2 (`backup --eject-after`, `_on_wizard_source_eject_
+        # result`) -- `None` tant qu'aucun résultat n'est encore connu
+        # (avant CREATE_IMAGE, ou si l'événement n'a jamais été reçu).
+        # `_run_wizard_source_eject` s'en sert pour sauter un second worker
+        # d'éjection dédié quand `True` (évite une invite UAC
+        # supplémentaire dans le cas courant), et y retombe sur `False`/
+        # `None` (échec de l'éjection chaînée, ou signal jamais reçu).
+        self._wizard_source_ejected: Optional[bool] = None
+        self._wizard_source_eject_error_msg: Optional[str] = None
         # Choix fait à l'étape 2 (`BackupKindDialog`) -- "full" (copie
         # complète) ou "system" (système seul, sans les jeux) -- décide du
         # mode passé à `_start_worker` et du texte de fin de parcours.
@@ -221,6 +245,10 @@ class MainWindow(QMainWindow):
         # libre (`_check_free_space_or_warn`) avant de lancer la copie.
         self._wizard_estimated_backup_bytes: Optional[int] = None
         self._wizard_last_poll_diagnostic: Optional[tuple] = None
+        # Horodatage du dernier sondage automatique réellement exécuté --
+        # sert uniquement au diagnostic ci-dessus (`_on_wizard_poll`),
+        # jamais à une logique métier.
+        self._wizard_last_poll_monotonic: Optional[float] = None
         # Carte détectée à l'étape 3 en attente de confirmation explicite
         # (`SameCardUnverifiedDialog`) -- ni son empreinte ni sa taille ne
         # prouvent qu'elle diffère de la carte source (§ pré-vol n°3).
@@ -759,6 +787,18 @@ class MainWindow(QMainWindow):
                 # qui reste le vrai filet de sécurité si l'éjection ne
                 # gagne pas la course).
                 argv.append("--eject-after")
+        if self._mode in ("backup", "backup_system") and self._wizard_active:
+            # Chaîne l'éjection de la carte source dans ce même worker déjà
+            # élevé (§5 mode assisté, `_run_wizard_source_eject`) plutôt que
+            # d'en relancer un second dédié juste après -- évite une
+            # seconde invite UAC dans le cas courant (les deux réussissent
+            # ensemble). Un échec de cette éjection chaînée ne fait jamais
+            # échouer la sauvegarde elle-même (voir `emit_eject_result`,
+            # `protocol.py`) -- `_on_wizard_source_eject_result` (connecté
+            # ci-dessous) et `_run_wizard_source_eject` retombent alors sur
+            # le worker d'éjection dédié existant, sans jamais avoir à
+            # refaire toute la copie pour ça.
+            argv.append("--eject-after")
 
         # Journalise la ligne de commande complète au lancement de tout
         # worker élevé (backup/flash) -- signalé sur du vrai matériel :
@@ -776,7 +816,19 @@ class MainWindow(QMainWindow):
         self._runner.log.connect(lambda level, msg: self._log_panel.append_log(msg))
         self._runner.error.connect(self._on_worker_error)
         self._runner.finished.connect(self._on_worker_finished)
+        if self._mode in ("backup", "backup_system") and self._wizard_active:
+            self._runner.eject_result.connect(self._on_wizard_source_eject_result)
         self._runner.start()
+
+    def _on_wizard_source_eject_result(self, ok: bool, msg: str) -> None:
+        """Reçu avant `finished` (l'événement `eject_result` du worker de
+        l'étape 2 est émis juste avant `done`, `__main__.py::cmd_backup`) --
+        retenu ici pour que `_run_wizard_source_eject` sache, une fois
+        `_on_wizard_job_finished` atteint, si la carte source a déjà été
+        éjectée dans ce même worker ou si un worker d'éjection dédié reste
+        nécessaire."""
+        self._wizard_source_ejected = ok
+        self._wizard_source_eject_error_msg = None if ok else msg
 
     def _get_or_create_macos_auth_session(self) -> Optional["elevate.MacosAuthorizationSession"]:
         """Une seule `AuthorizationRef` pour toute l'application (§5 mode
@@ -1291,16 +1343,47 @@ class MainWindow(QMainWindow):
         chaîner l'éjection dans le worker qui vient d'écrire/de lire (ce
         qui économiserait cette invite dans certains cas, mais ferait
         perdre la distinction entre « l'opération a réussi » et « l'
-        éjection qui a suivi a échoué », par ex. nécessaire à l'étape 3 du
-        parcours de clonage pour bloquer la suite tant que la carte source
-        n'est pas sûre à retirer). `macOS`/Linux ne sont pas concernés par
-        cette limitation d'origine (une élévation non privilégiée y
-        fonctionnait déjà), mais passent désormais par le même chemin pour
-        rester cohérents et testables uniformément.
+        éjection qui a suivi a échoué » si un échec de cette dernière
+        faisait échouer tout le worker). `macOS`/Linux ne sont pas
+        concernés par cette limitation d'origine (une élévation non
+        privilégiée y fonctionnait déjà), mais passent désormais par le
+        même chemin pour rester cohérents et testables uniformément.
+
+        **Exception notable : l'éjection de la carte source (étape 3,
+        `_run_wizard_source_eject`) est bien chaînée dans le worker de
+        sauvegarde de l'étape 2** (`backup --eject-after`,
+        `emit_eject_result` -- distinct du canal `on_finished` ci-dessous,
+        propre à ce worker d'éjection *dédié*) -- sans le compromis
+        ci-dessus, puisque son résultat est rapporté sur un canal séparé
+        qui ne fait jamais échouer la sauvegarde elle-même. Ce worker
+        dédié (`_start_eject`) reste le chemin normal pour l'éjection de
+        la carte cible (étape 5) et pour un repli si l'éjection chaînée de
+        l'étape 3 a échoué -- voir `_run_wizard_source_eject`.
 
         `on_finished(ok, code, msg)` est appelé une fois le worker
         terminé -- jamais silencieusement : chaque appelant journalise
-        explicitement le résultat, succès comme échec (§4.4)."""
+        explicitement le résultat, succès comme échec (§4.4). Ceci inclut
+        désormais un refus d'élévation lui-même (`runner.start()`, voir
+        ci-dessous) : `on_finished` est le seul point d'arrivée, qu'un
+        appelant n'a donc plus besoin d'entourer de son propre `try/except`
+        pour ce cas précis (`_run_wizard_source_eject` en gardait un pour
+        d'autres causes, ex. `self._wizard_source_device` valant `None`).
+
+        ⚠️ Bug corrigé, confirmé sur du vrai matériel : une invite UAC
+        refusée pendant l'éjection affichait « Impossible d'éjecter la
+        carte. Ferme les fichiers ouverts dessus » -- sans rapport avec la
+        cause réelle. `runner.start()` (Windows, `ShellExecuteExW` verbe
+        `runas`) peut lever `elevate.ElevationRefusedError` de façon
+        *synchrone*, avant même que le protocole JSON Lines n'ait quoi que
+        ce soit à relayer -- resté non intercepté ici, cette exception se
+        propageait telle quelle jusqu'à l'appelant, dont le `try/except`
+        générique (`_run_wizard_source_eject`) la retombait alors
+        systématiquement sur le code `EJECT_FAILED` codé en dur, quelle
+        que soit la cause réelle. Distinguée maintenant à la source : un
+        refus d'élévation devient le code dédié `ELEVATION_REFUSED`
+        (message « L'autorisation Windows a été refusée. Réessaie et
+        accepte l'invite. »), toute autre exception au démarrage restant
+        `EJECT_FAILED` comme avant."""
         self._home.set_busy(True)
         self._assisted_landing.set_busy(True)
         eject_argv = ["eject", "--device", device.path]
@@ -1334,7 +1417,18 @@ class MainWindow(QMainWindow):
 
         runner.error.connect(_on_error)
         runner.finished.connect(_on_runner_finished)
-        runner.start()
+        try:
+            runner.start()
+        except elevate.ElevationRefusedError as exc:
+            self._home.set_busy(False)
+            self._assisted_landing.set_busy(False)
+            self._eject_runner = None
+            on_finished(False, "ELEVATION_REFUSED", str(exc))
+        except Exception as exc:
+            self._home.set_busy(False)
+            self._assisted_landing.set_busy(False)
+            self._eject_runner = None
+            on_finished(False, "EJECT_FAILED", str(exc))
 
     def _perform_eject(self) -> None:
         """Étape F : démonte toutes les partitions et éjecte, puis
@@ -1450,9 +1544,12 @@ class MainWindow(QMainWindow):
         self._wizard_source_device = None
         self._wizard_source_fingerprint = None
         self._wizard_target_device = None
+        self._wizard_source_ejected = None
+        self._wizard_source_eject_error_msg = None
         self._wizard_backup_kind = None
         self._wizard_estimated_backup_bytes = None
         self._wizard_last_poll_diagnostic = None
+        self._wizard_last_poll_monotonic = None
         self._pending_target_candidate = None
         self._same_card_unverified_dialog.close()
         self._log_panel.set_idle()
@@ -1503,7 +1600,7 @@ class MainWindow(QMainWindow):
 
         if is_detect_step:
             self._wizard_panel.set_status(tr("wizard_status_waiting"))
-            self._wizard_poll_timer.start()
+            self._start_wizard_poll_timer()
         elif job == WizardJob.CREATE_IMAGE:
             self._enter_wizard_create_image_step()
         elif job == WizardJob.RESTORE_IMAGE:
@@ -1552,7 +1649,28 @@ class MainWindow(QMainWindow):
         que de la laisser disparaître -- si la ligne `wizard_ejecting_source`
         n'apparaît toujours pas au prochain test réel, cette fonction n'est
         simplement jamais atteinte (à chercher du côté de `_on_wizard_job_
-        finished`/`_enter_wizard_job`, pas ici)."""
+        finished`/`_enter_wizard_job`, pas ici).
+
+        **Éjection déjà chaînée dans le worker de l'étape 2, cas courant.**
+        `_start_worker` ajoute `--eject-after` à la sauvegarde elle-même
+        quand le parcours guidé est actif (§5) -- `_wizard_source_ejected`
+        (rempli par `_on_wizard_source_eject_result`, reçu avant la fin de
+        ce worker) vaut alors déjà `True` la plupart du temps : sauter
+        directement au même point d'arrivée que l'ancien chemin
+        (`_on_wizard_source_eject_finished`) évite une seconde invite UAC
+        rien que pour cette éjection, en plus de celle déjà demandée pour
+        la sauvegarde. `False` (l'éjection chaînée a échoué -- rapportée
+        séparément, la sauvegarde elle-même a déjà réussi) ou `None`
+        (signal jamais reçu) retombent sur le worker d'éjection dédié
+        ci-dessous, exactement comme avant ce chaînage -- sans jamais
+        avoir à refaire toute la sauvegarde pour ça."""
+        if self._wizard_source_ejected:
+            self._on_wizard_source_eject_finished(True, None, None)
+            return
+        refreshed = self._refresh_device_before_eject_retry(self._wizard_source_device)
+        if refreshed is None:
+            return
+        self._wizard_source_device = refreshed
         self._log_panel.append_log(tr("wizard_ejecting_source"))
         try:
             title_key, instruction_key = _WIZARD_STEP_STRINGS[WizardJob.DETECT_TARGET]
@@ -1581,7 +1699,7 @@ class MainWindow(QMainWindow):
         self._log_panel.append_log(tr("wizard_source_ejected"))
         self._wizard_panel.show_step(tr(title_key), tr(instruction_key), can_continue=False, show_refresh=True)
         self._wizard_panel.set_status(tr("wizard_status_waiting"))
-        self._wizard_poll_timer.start()
+        self._start_wizard_poll_timer()
 
     def _enter_wizard_create_image_step(self) -> None:
         """Étape 2 (§5 mode assisté, parcours de clonage) : demande d'abord
@@ -1660,7 +1778,57 @@ class MainWindow(QMainWindow):
 
     # --- étapes 1/4 : détection, avec garde-fou d'empreinte à l'étape 4 -----
 
+    def _start_wizard_poll_timer(self) -> None:
+        """Point de passage unique pour (re)démarrer `_wizard_poll_timer`
+        (§5 mode assisté) -- réinitialise `_wizard_last_poll_monotonic` au
+        moment précis du redémarrage, jamais seulement à `_start_wizard`.
+
+        Bug corrigé, rapporté sur du vrai matériel : `_check_wizard_poll_
+        stall` (ci-dessous) déclenchait un faux positif systématique après
+        toute pause légitime du minuteur -- une sauvegarde de 10 min
+        (`_wizard_poll_timer.stop()` pendant l'étape CREATE_IMAGE, aucun
+        rapport avec un arrêt anormal) redémarrait le sondage à l'étape
+        DETECT_TARGET en comparant au dernier sondage d'*avant* la pause,
+        vieux de plusieurs centaines de secondes. Pire : le cycle « même
+        carte, on continue d'attendre » de DETECT_TARGET (`_on_wizard_
+        fingerprint_ready`, ci-dessous) arrête puis relance ce même
+        minuteur à *chaque* carte retrouvée identique à la source -- une
+        vérification d'empreinte (montage/démontage du BOOT) prenant
+        rarement moins de quelques secondes, l'écart mesuré entre deux
+        sondages consécutifs dépassait alors le seuil en boucle, noyant le
+        journal d'un faux positif toutes les 6 à 12 s tant que la carte
+        neuve n'était pas encore branchée -- un cas pourtant parfaitement
+        normal (§5, l'utilisateur n'a simplement pas encore échangé les
+        cartes).
+        """
+        self._wizard_last_poll_monotonic = time.monotonic()
+        self._wizard_poll_timer.start()
+
+    def _check_wizard_poll_stall(self) -> None:
+        """Diagnostic pur, sans effet sur la logique métier (voir la note
+        `_WIZARD_POLL_STALL_THRESHOLD_SECONDS` ci-dessus) : signale dans le
+        journal si le sondage automatique semble être resté silencieux
+        nettement plus longtemps que son intervalle normal (1,5 s) --
+        signe soit d'un arrêt du minuteur non détecté par la relecture de
+        code, soit d'un ralentissement de l'énumération des disques côté
+        OS après le montage/démontage du BOOT pour l'empreinte (§4.4).
+        `_wizard_last_poll_monotonic` est mis à jour à chaque appel, y
+        compris le tout premier (rien à comparer), pour que seul un écart
+        réel entre deux sondages consécutifs soit signalé -- toute pause
+        volontaire du minuteur (`_start_wizard_poll_timer`, ci-dessus)
+        réinitialise déjà cette référence à son propre redémarrage, donc
+        ne compte jamais comme un arrêt anormal ici."""
+        now = time.monotonic()
+        previous = self._wizard_last_poll_monotonic
+        self._wizard_last_poll_monotonic = now
+        if previous is None:
+            return
+        elapsed = now - previous
+        if elapsed > _WIZARD_POLL_STALL_THRESHOLD_SECONDS:
+            self._log_panel.append_log(tr("wizard_poll_stall_detected", seconds=round(elapsed)))
+
     def _on_wizard_poll(self) -> None:
+        self._check_wizard_poll_stall()
         devices, rejected_lines = self._list_devices_with_diagnostics()
         self._log_wizard_detection_diagnostic(len(devices), rejected_lines)
 
@@ -1744,7 +1912,7 @@ class MainWindow(QMainWindow):
             self._on_prepare_card_poll()
             return
         if not self._wizard_poll_timer.isActive():
-            self._wizard_poll_timer.start()
+            self._start_wizard_poll_timer()
         self._on_wizard_poll()
 
     def _on_wizard_fingerprint_ready(
@@ -1760,7 +1928,7 @@ class MainWindow(QMainWindow):
             if is_same_card(self._wizard_source_fingerprint, fingerprint):
                 self._wizard_panel.set_status(tr("wizard_status_same_card"))
                 self._wizard_panel.set_can_continue(False)
-                self._wizard_poll_timer.start()  # continue d'attendre une vraie carte différente
+                self._start_wizard_poll_timer()  # continue d'attendre une vraie carte différente
                 return
             # Bug corrigé, confirmé sur du vrai matériel : `is_same_card`
             # seule ne peut plus rien affirmer quand la source n'a pas
@@ -1854,7 +2022,41 @@ class MainWindow(QMainWindow):
 
     # --- étape 5 : éjection, via le worker élevé comme _perform_eject --------
 
+    def _refresh_device_before_eject_retry(self, device: Optional[Device]) -> Optional[Device]:
+        """Reconfirme la carte à éjecter avant chaque tentative -- bug
+        corrigé, confirmé sur du vrai matériel : une deuxième tentative
+        après une invite UAC refusée réutilisait tel quel l'ancien chemin
+        Windows (`\\\\.\\PhysicalDriveN`) de la première -- Windows a pu le
+        libérer/renuméroter entre-temps, rejeté ensuite par le worker élevé
+        lui-même comme introuvable (`DEVICE_NOT_ALLOWED`,
+        `_resolve_device_or_report`) sur un chemin déjà mort. Un seul
+        candidat détecté -> utilisé directement, y compris au tout premier
+        appel (sans effet sur le cas normal, qui retrouve simplement la
+        même carte) -- l'éjection ne modifie aucune donnée, contrairement à
+        une écriture, donc aucune vérification d'empreinte supplémentaire
+        n'est nécessaire ici (§ pré-vol, réservée aux écritures). Zéro ou
+        plusieurs candidates -> message explicite déjà journalisé plutôt
+        qu'une tentative sur un chemin peut-être mort."""
+        devices = self._list_safe_devices()
+        if len(devices) == 1:
+            return devices[0]
+        self._last_error_code = "DEVICE_NOT_ALLOWED"
+        self._last_error_msg = (
+            "Plusieurs cartes détectées -- débranche celles qui ne sont pas concernées, puis réessaie."
+            if devices
+            else "Carte introuvable -- vérifie qu'elle est toujours branchée, puis réessaie."
+        )
+        self._log_panel.finish_error(
+            friendly_error_message(self._last_error_code), details=self._last_error_msg
+        )
+        self._wizard_panel.show_error()
+        return None
+
     def _run_wizard_eject(self) -> None:
+        refreshed = self._refresh_device_before_eject_retry(self._wizard_target_device)
+        if refreshed is None:
+            return
+        self._wizard_target_device = refreshed
         self._log_panel.append_log("Éjection de la carte…")
         self._start_eject(self._wizard_target_device, self._on_wizard_eject_finished)
 

@@ -28,6 +28,7 @@ from r36s_studio.gui.screens import (
     RocknixVariantDialog,
     WindowBackdrop,
     WizardStepPanel,
+    _capacity_go,
     _format_duration,
     _format_size,
     build_console_stage,
@@ -386,7 +387,10 @@ def test_home_screen_banner_shows_device_model_and_size(qapp):
     screen.set_status({"flash": StepStatus.AVAILABLE}, device=device)
 
     assert "SanDisk Ultra" in screen._banner_device_label.text()
-    assert "32.0 Go" in screen._banner_device_label.text()
+    # Base 1024 (comme l'Explorateur Windows), pas 1000 -- bug corrigé,
+    # signalé sur du vrai matériel : « 31,9 Go » affiché par l'app contre
+    # « 29,7 Go » dans l'Explorateur pour la même carte.
+    assert "29.8 Go" in screen._banner_device_label.text()
 
 
 def test_home_screen_banner_recognizes_arkos_card(qapp):
@@ -1774,12 +1778,17 @@ def test_confirm_dialog_go_disabled_until_checkbox_checked(qapp):
 
 
 def test_confirm_dialog_shows_device_display_and_size(qapp):
+    """Base 1024 (comme l'Explorateur Windows), pas 1000 -- bug corrigé,
+    signalé sur du vrai matériel : ce même compte d'octets exact
+    (31 914 983 424, une vraie carte "32 Go") s'affichait « 31,9 Go » ici
+    contre « 29,7 Go » dans l'Explorateur, laissant croire à une perte de
+    capacité."""
     dialog = ConfirmDialog()
     dialog.set_device(_make_device(display="SanDisk Ultra", size_bytes=31_914_983_424))
 
     text = dialog._message.text()
     assert "SanDisk Ultra" in text
-    assert "31.9" in text
+    assert "29.7" in text
 
 
 def test_confirm_dialog_cancel_button_closes_dialog(qapp):
@@ -2167,3 +2176,17 @@ def test_format_size_formats_megabytes_and_gigabytes():
     assert _format_size(500) == "500 o"
     assert _format_size(12_582_912) == "12.0 Mo"
     assert _format_size(2 * 1024**3) == "2.0 Go"
+
+
+def test_capacity_go_uses_base_1024_like_format_size():
+    """Bug corrigé, signalé sur du vrai matériel : la capacité d'une carte
+    était calculée en base 1000 (`/ 1_000_000_000`) alors que `_format_
+    size` (octets copiés/archivés) utilise déjà la base 1024 -- deux
+    conventions différentes au sein de la même app, en plus du désaccord
+    avec l'Explorateur Windows (qui calcule en base 1024, lui aussi, sous
+    l'étiquette « Go »)."""
+    assert _capacity_go(2 * 1024**3) == 2.0
+    # Carte réelle "32 Go" (31 914 983 424 octets) -- 31,9 Go en base 1000
+    # (l'ancien calcul), 29,7 Go en base 1024 (Explorateur Windows, valeur
+    # confirmée sur du vrai matériel).
+    assert round(_capacity_go(31_914_983_424), 1) == 29.7

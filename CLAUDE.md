@@ -2132,7 +2132,118 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > code commun) reste ouverte sur les trois OS, faute de rapport ou de
 > test réel en dehors de Windows.
 
-⚠️ **Bug corrigé, confirmé en relisant le code après le rapport
+> ⚠️ **Trois défauts distincts rapportés sur l'éjection en mode assisté,
+> tous corrigés.**
+>
+> **1. Message d'erreur faux sur une invite UAC refusée.** `ShellExecuteExW`
+> (verbe `runas`) peut lever une exception *synchrone*, avant même que le
+> protocole JSON Lines n'ait quoi que ce soit à relayer, quand l'utilisateur
+> refuse ou ferme l'invite (`GetLastError() == ERROR_CANCELLED`, 1223) --
+> confirmé sur du vrai matériel. Cette exception, un simple `OSError`
+> générique jusqu'ici, remontait telle quelle jusqu'à l'appelant : le
+> `try/except` de `_run_wizard_source_eject` la retombait systématiquement
+> sur le code codé en dur `EJECT_FAILED`, affichant « Ferme les fichiers
+> ouverts dessus... » -- sans aucun rapport avec la cause réelle (un refus
+> d'élévation, pas un fichier verrouillé). **Corrigé** : `gui/elevate.py::
+> ElevationRefusedError` (sous-classe d'`OSError`, rien ne casse côté code
+> qui l'attrape encore génériquement) distingue ce cas précis à la source
+> (`_launch_windows`, `ERROR_CANCELLED = 1223`). `_start_eject`
+> (`main_window.py`) intercepte désormais `runner.start()` lui-même --
+> jamais fait auparavant, une omission distincte de ce qui précède -- et
+> route systématiquement vers `on_finished(False, code, msg)` plutôt que de
+> laisser l'exception se propager : `ELEVATION_REFUSED` pour ce cas précis
+> (message dédié, « L'autorisation Windows a été refusée. Réessaie et
+> accepte l'invite. »), `EJECT_FAILED` pour toute autre exception au
+> démarrage comme avant. Plus aucun appelant (`_perform_eject`, `_on_eject_
+> requested`, `_run_wizard_eject`, `_run_wizard_source_eject`) n'a besoin de
+> son propre `try/except` pour ce cas précis -- `_run_wizard_source_eject`
+> en gardait un pour d'autres causes (ex. `self._wizard_source_device`
+> valant `None`), qui reste en place mais ne voit plus jamais passer un
+> refus d'élévation par ce chemin.
+>
+> **2. Chemin périmé réutilisé à la deuxième tentative.** Rapporté : un
+> deuxième essai après un premier échec réutilisait tel quel l'ancien
+> chemin Windows (`\\.\PhysicalDriveN`) de la première tentative -- rejeté
+> ensuite par le worker élevé lui-même comme introuvable
+> (`DEVICE_NOT_ALLOWED`, `_resolve_device_or_report`) : Windows a pu
+> libérer/renuméroter ce chemin entre les deux essais (ex. après une
+> invite UAC refusée). **Corrigé** : `MainWindow._refresh_device_before_
+> eject_retry` (nouveau) redétecte la carte (`_list_safe_devices()`, déjà
+> non privilégié) avant *chaque* tentative d'éjection -- y compris la toute
+> première, sans effet sur le cas normal (retrouve simplement la même
+> carte) -- plutôt que de faire confiance à l'objet `Device` capturé une
+> fois pour toutes. Un seul candidat détecté -> utilisé directement
+> (l'éjection ne modifie aucune donnée, contrairement à une écriture :
+> aucune vérification d'empreinte supplémentaire n'est nécessaire ici,
+> § pré-vol réservée aux écritures) ; zéro ou plusieurs -> message
+> explicite (`DEVICE_NOT_ALLOWED`) plutôt qu'une tentative sur un chemin
+> peut-être mort. Appliqué aux deux ejections du parcours guidé (source,
+> étape 3 ; cible, étape 5) -- pas aux boutons d'éjection du mode expert
+> (`_perform_eject`/`_on_eject_requested`), qui partagent en théorie le
+> même risque mais n'ont pas été signalés et n'ont donc pas été touchés
+> ici, pour limiter le risque de régression à ce qui a été demandé.
+>
+> **3. Invite UAC supplémentaire rien que pour l'éjection, en plus de
+> celle de la sauvegarde.** Rapporté précisément pour l'éjection de la
+> carte *source* (étape 3, `_run_wizard_source_eject`, immédiatement après
+> la sauvegarde de l'étape 2) -- chaque étape élevée redemande l'UAC sur
+> Windows (§3, aucun équivalent de `MacosAuthorizationSession`), donc
+> l'éjection dédiée existante ajoutait une seconde invite juste après
+> celle de la sauvegarde. **Chaîner l'éjection dans le worker qui vient de
+> lire la carte avait déjà été envisagé et écarté** (voir le docstring de
+> `_start_eject` ci-dessus, encore valable pour le cas général) : le
+> risque identifié était de perdre la distinction entre « la sauvegarde a
+> réussi » et « l'éjection qui a suivi a échoué » -- si un échec
+> d'éjection chaîné faisait échouer tout le `backup`, Reprendre relancerait
+> toute la copie (potentiellement plusieurs Go, plusieurs minutes) juste
+> pour réessayer une éjection ratée. **Résolu sans ce compromis** grâce à
+> un canal séparé : `protocol.py::emit_eject_result(ok, msg)` (nouvel
+> événement `eject_result`, distinct de `done`) rapporte le résultat de
+> l'éjection chaînée sans jamais le mélanger au résultat de la sauvegarde
+> elle-même. `backup --eject-after` (nouveau drapeau sur `cmd_backup`,
+> distinct du `--eject-after` de `cmd_flash` -- best-effort, jamais
+> rapporté séparément, §4.6) éjecte la carte source juste après la copie,
+> dans ce même worker déjà élevé ; `WorkerRunner.eject_result` (nouveau
+> signal Qt) relaie l'événement à `MainWindow._on_wizard_source_eject_
+> result`, qui retient simplement le résultat (`_wizard_source_ejected`,
+> `_wizard_source_eject_error_msg`) -- reçu *avant* la fin du worker
+> (`eject_result` précède toujours `done` dans `cmd_backup`).
+> `_start_worker` ajoute ce drapeau uniquement pour `backup`/`backup_
+> system` en mode assisté (`self._wizard_active`), jamais en mode expert
+> (aucun rapport avec ce parcours). `_run_wizard_source_eject` vérifie
+> `_wizard_source_ejected` en tout premier : `True` (cas courant, les deux
+> ont réussi ensemble) saute directement au même point d'arrivée que
+> l'ancien chemin (`_on_wizard_source_eject_finished`, réutilisé tel quel)
+> -- aucune seconde invite UAC ; `False` (l'éjection chaînée a échoué,
+> rapportée séparément) ou `None` (signal jamais reçu) retombent sur le
+> worker d'éjection dédié existant, exactement comme avant ce chaînage --
+> sans jamais avoir à refaire toute la sauvegarde. `_wizard_source_ejected`/
+> `_wizard_source_eject_error_msg` sont remis à `None` par `_start_wizard`,
+> comme le reste de l'état du parcours.
+>
+> Portée volontairement limitée à l'éjection de la carte *source* (étape 3)
+> -- celle explicitement rapportée « en plus de celle de la sauvegarde ».
+> L'éjection de la carte *cible* (étape 5, `_run_wizard_eject`, après
+> RESTORE_IMAGE) reste un worker dédié, non chaînée dans le flash : le
+> même compromis (canal séparé, jamais fatal) s'y appliquerait tout aussi
+> bien, mais n'a pas été demandé ici -- piste future si un jour signalée.
+>
+> **Effet secondaire possible, non confirmé, sur le chien de garde du
+> sondage et la détection de la carte neuve.** Au moment d'écrire cette
+> note, un signalement distinct reste ouvert : le chien de garde
+> (`_check_wizard_poll_stall`, ci-dessus) continuerait de journaliser en
+> boucle, et la carte neuve resterait non détectée sans clic manuel sur
+> Rafraîchir, à l'entrée de l'étape 3 -- après le correctif du chien de
+> garde lui-même (faux positifs sur les pauses légitimes, déjà corrigés,
+> voir plus haut) et malgré lui. Le chaînage ci-dessus retire un worker
+> d'éjection dédié entier -- avec sa propre invite d'élévation, son propre
+> cycle de vie Qt -- du chemin courant entre la fin de la sauvegarde et le
+> démarrage du sondage de la carte neuve, ce qui pourrait éliminer une
+> source d'interférence non identifiée jusqu'ici. **Non confirmé** : aucune
+> hypothèse concrète ne relie ce chaînage au symptôme rapporté, et aucun
+> test ne le démontre -- à réévaluer au prochain test réel une fois ce
+> correctif en place, avant de rouvrir une nouvelle investigation dédiée
+> si le symptôme persiste malgré tout.
 > ci-dessus : le Continuer du vrai parcours guidé pouvait afficher la
 > fenêtre Confirmation avec la mauvaise carte, court-circuitant la
 > vérification d'empreinte (§5, § pré-vol n°3).** Rapporté comme : image
@@ -2828,6 +2939,64 @@ ci-dessus, un journal étant par nature un endroit où tout finit par être visi
 Interface en français, avec les chaînes isolées dans un fichier de traduction dès le
 départ (l'anglais viendra vite si tu diffuses la vidéo hors France).
 
+> ⚠️ **Bug corrigé, signalé sur du vrai matériel : l'app affichait « 31,9
+> Go » pour une carte que l'Explorateur Windows affiche « 29,7 Go » --
+> même carte, mêmes octets, deux nombres différents. Un utilisateur qui
+> compare les deux pouvait croire à une perte de capacité.**
+>
+> **Cause, plus profonde qu'un simple désaccord avec Windows** : l'app
+> calculait déjà la capacité d'une carte de deux façons différentes en
+> interne. `gui/screens.py::_format_size` (octets copiés/archivés, ex.
+> « 8,4 Go » pour une sauvegarde système) divise par 1024 à chaque palier
+> (o -> Ko -> Mo -> Go) -- base 1024, comme l'Explorateur Windows, qui
+> fait de même sous une étiquette tout aussi ambiguë. Mais les quatre
+> endroits qui affichent la capacité d'une carte *entière* (bandeau de
+> détection, liste de `DeviceDialog`, `ConfirmDialog`/`SameCardUnverified
+> Dialog`, plus `cmd_list`/`_confirm_flash` côté CLI) divisaient par
+> `1_000_000_000` -- base 1000, jamais 1024. Deux conventions
+> différentes au sein de la même app, pas seulement un désaccord avec
+> Windows.
+>
+> **Vérifié plutôt que supposé** (demande explicite) ce qu'affichent les
+> deux autres OS pour la même carte -- aucun des trois ne fait consensus :
+> - **macOS** (Finder) : base 1000 depuis Snow Leopard (10.6, 2009),
+>   étiqueté « Go » correctement -- ce que l'app calculait déjà pour la
+>   capacité d'une carte (mais pas pour `_format_size`, toujours en base
+>   1024 : la même incohérence interne existait donc aussi entre cette
+>   fonction-là et macOS, dans l'autre sens).
+> - **Linux** : mélangé selon l'outil. GNOME Fichiers (Nautilus) suit la
+>   même convention que macOS (base 1000, « Go » correctement étiqueté) ;
+>   les outils historiques en ligne de commande (`df`, `lsblk`) utilisent
+>   traditionnellement la base 1024 avec un « G » tout aussi ambigu que
+>   celui de Windows. Aucune convention unique ne fait consensus sur
+>   Linux non plus -- vérifié en connaissance des deux familles d'outils
+>   plutôt que jamais testé sur une vraie installation Linux ici (aucune
+>   disponible).
+>
+> **Corrigé** en alignant toute l'app sur une seule et même base --
+> celle déjà utilisée par `_format_size`, jamais changée : `gui/screens.py
+> ::_capacity_go` et son équivalent local `__main__.py::_capacity_go`
+> (dupliqué plutôt qu'importé de `gui/` -- trop petit pour un module
+> partagé, et le CLI ne doit pas dépendre de PySide6, §3) remplacent les
+> six calculs en base 1000 par `size_bytes / 1024**3`. Plus jamais deux
+> nombres différents pour la même carte selon l'écran consulté au sein de
+> cette app -- et l'affichage se rapproche au passage de l'Explorateur
+> Windows, la plateforme la plus vérifiée sur du vrai matériel dans ce
+> projet, au prix d'un désaccord avec le Finder macOS/Nautilus (une carte
+> annoncée « 128 Go » par son fabricant s'affichera ici autour de 119 Go,
+> comme dans l'Explorateur, plutôt que 128 Go comme dans Finder) --
+> aucune option n'évite complètement l'écart avec un OS ou un autre,
+> celle-ci l'élimine au moins en interne, et avec la plateforme la plus
+> testée ici.
+>
+> Volontairement **pas** de double affichage (« 31,9 Go / 29,7 Gio ») :
+> envisagé, écarté -- introduirait un terme jamais vu par un néophyte
+> (« Gio »/GiB) pour un problème que l'utilisateur ne remarque de toute
+> façon que s'il compare activement les deux écrans, contraire à la règle
+> §5 (aucun jargon technique dans l'interface). Un seul nombre cohérent
+> partout dans l'app est plus simple à comprendre qu'une explication de
+> la différence entre deux conventions de calcul.
+
 **Habillage visuel (phase 8) : `gui/theme.py`.** Palette « poste de commande »
 sombre et technique, inspirée des interfaces de console de jeu rétro — fond très
 sombre, surfaces légèrement plus claires, bordures cyan fines, une seule couleur
@@ -3461,6 +3630,130 @@ une fois empaqueté, via le même mécanisme que l'horodatage de construction,
 > `LogPanel.finish_error` affiche le message clair (§5, vocabulaire),
 > `WizardStepPanel.show_error()` remplace le bouton Continuer par
 > Reprendre/Mode expert — inchangé.
+
+> ⚠️ **Signalement non reproduit en isolation : le sondage automatique de
+> l'étape 1/4 semblerait parfois s'arrêter tout seul après un retour à
+> l'accueil suivi d'une relance.** Rapporté ainsi : lancement du parcours,
+> détection de la carte source réussie, arrivée au choix « avec ou sans
+> les jeux » (`BackupKindDialog`), retour à l'accueil (bouton Annuler de
+> cette fenêtre), relance (« Préparer ma carte automatiquement ») — le
+> journal affiche alors « 0 carte(s) retenue(s) » et reste sur ce statut
+> jusqu'à un clic manuel sur Rafraîchir, qui retrouve aussitôt la carte
+> (toujours branchée, jamais débranchée entre-temps). Signalé comme
+> potentiellement « même famille » que le bug d'état périmé
+> `_prepare_card_candidate` corrigé plus haut (§4.3/§5, un signal ou un
+> drapeau d'un passage précédent contaminant le suivant).
+>
+> **Relu et rejoué sans trouver de défaut dans ce chemin précis.**
+> `_start_wizard` (appelé par « Préparer ma carte automatiquement »)
+> réinitialise sans exception tout l'état du parcours --
+> `_wizard_flow.reset()`, `_wizard_source_device`/`_wizard_target_device`/
+> `_wizard_backup_kind`/`_wizard_estimated_backup_bytes`,
+> `_wizard_last_poll_diagnostic`, `_pending_target_candidate`, et l'état ad
+> hoc `_prepare_card_candidate`/`_assisted_ad_hoc_active` -- avant
+> d'appeler inconditionnellement `_enter_wizard_job(DETECT_SOURCE)`, qui
+> démarre `_wizard_poll_timer` sans condition. `_cancel_wizard` (câblé au
+> bouton Annuler de `BackupKindDialog`, `cancelled.connect(self.
+> _cancel_wizard)`) arrête proprement ce même minuteur et bascule vers
+> l'accueil assisté, sans rien laisser d'incohérent pour la relance
+> suivante. Un test dédié
+> (`tests/test_gui_main_window.py::
+> test_wizard_relaunch_after_cancelling_backup_kind_dialog_restarts_poll_and_immediately_redetects_the_device`)
+> rejoue exactement cette séquence (détection, Continuer, annulation
+> depuis `BackupKindDialog`, relance, sondage) et retrouve la carte dès le
+> premier sondage suivant la relance, sans clic sur Rafraîchir -- ce
+> chemin précis fonctionne correctement dans ce test.
+>
+> L'hypothèse initiale du `WizardFingerprintRunner` resté en vol (un
+> ancien calcul d'empreinte, lancé sur un thread séparé, qui livrerait son
+> résultat après coup et arrêterait à tort le minuteur relancé) a été
+> écartée : pour atteindre `BackupKindDialog`, l'empreinte de l'étape
+> DETECT_SOURCE doit déjà avoir abouti (Continuer n'est activé qu'une fois
+> `_on_wizard_fingerprint_ready` reçu) -- aucun calcul n'est donc encore en
+> vol au moment de l'annulation dans ce scénario précis. Un démontage
+> résiduel du BOOT par `compute_boot_fingerprint` a aussi été écarté :
+> `unmount_forced` est un no-op pour un montage Windows normal (déjà
+> documenté ailleurs dans ce fichier).
+>
+> **Note secondaire du signalement, probablement pas un bug distinct** :
+> les lignes de périphériques écartés identiques à deux horodatages
+> espacés de plusieurs minutes ne trahissent pas nécessairement un défaut
+> du dédoublonnage (`_log_wizard_detection_diagnostic`, qui compare une
+> signature `(accepted_count, rejected_lines)` au dernier sondage) --
+> `_wizard_last_poll_diagnostic` est remis à `None` par `_start_wizard` à
+> chaque relance, donc deux relances distinctes reproduisent légitimement
+> une fois chacune le même contenu, sans que le dédoublonnage ait failli
+> au sein d'une même relance.
+>
+> **Diagnostic ajouté en attendant, pas encore un correctif** (le vrai
+> mécanisme reste à confirmer sur du vrai matériel, puisqu'il ne se
+> reproduit pas ici) : `MainWindow._check_wizard_poll_stall`, appelée en
+> tout premier dans `_on_wizard_poll`, retient l'horodatage
+> (`time.monotonic`) de chaque sondage réellement exécuté
+> (`_wizard_last_poll_monotonic`, remis à `None` par `_start_wizard` comme
+> le reste de cet état) et journalise un avertissement explicite si l'écart
+> avec le sondage précédent dépasse largement l'intervalle normal de 1,5 s
+> (seuil `_WIZARD_POLL_STALL_THRESHOLD_SECONDS`, 6 s -- large marge pour ne
+> jamais confondre une latence normale de l'OS avec un arrêt réel du
+> minuteur). Si cette ligne apparaît au prochain test réel juste avant le
+> « 0 carte(s) retenue(s) » qui a motivé ce signalement, le minuteur
+> s'arrête bien réellement de sonner (à chercher alors du côté d'un
+> comportement Qt propre au vrai matériel, non reproductible hors écran) ;
+> si elle n'apparaît jamais alors que le blocage se reproduit, le minuteur
+> tourne mais `list_devices()`/`filter_devices()` retourne réellement zéro
+> carte pendant cette fenêtre -- pointant plutôt vers une latence
+> d'énumération disque côté OS après le montage/démontage du BOOT pour
+> l'empreinte (§4.4), à traiter alors par une retenue/un nouvel essai côté
+> `devices/windows.py`, pas ici.
+
+> ⚠️ **Bug corrigé dans le diagnostic lui-même, confirmé sur du vrai
+> matériel : le chien de garde ci-dessus se déclenchait en boucle et
+> noyait le journal, deux faux positifs distincts.** Journal réel après
+> une sauvegarde complète : une première ligne signalant un arrêt de
+> 615 s juste après la reprise du sondage à l'étape 3 (« légitimement en
+> pause pendant les 10 min de sauvegarde, c'est le comportement voulu »),
+> puis la même ligne répétée toutes les 6 à 12 s, indéfiniment, tant que
+> la carte neuve n'était pas encore branchée.
+>
+> **Cause** : `_check_wizard_poll_stall` comparait chaque sondage réel au
+> tout dernier, sans distinguer un arrêt anormal d'une pause *voulue* du
+> minuteur -- or `_wizard_poll_timer` s'arrête légitimement à plusieurs
+> endroits déjà documentés dans ce fichier : pendant toute l'étape
+> CREATE_IMAGE (une sauvegarde de plusieurs minutes, aucun sondage
+> n'ayant de sens pendant ce temps), et à *chaque* cycle « même carte que
+> la source, on continue d'attendre » de l'étape DETECT_TARGET
+> (`_on_wizard_fingerprint_ready`), où le minuteur est arrêté le temps de
+> calculer l'empreinte (montage/démontage du BOOT, plusieurs secondes)
+> puis relancé -- rien de tel qu'un arrêt réel du sondage, juste son
+> fonctionnement normal en boucle tant que l'utilisateur n'a pas encore
+> échangé les cartes. Comparer le premier sondage suivant chacune de ces
+> pauses à celui d'*avant* la pause produisait à chaque fois un écart
+> artificiellement énorme.
+>
+> **Corrigé** : `MainWindow._start_wizard_poll_timer` (nouveau point de
+> passage unique pour redémarrer `_wizard_poll_timer`, remplace les
+> quatre appels directs à `.start()` du fichier) réinitialise
+> `_wizard_last_poll_monotonic` au moment précis de chaque redémarrage --
+> plus seulement dans `_start_wizard` comme avant. Une pause volontaire,
+> quelle que soit sa durée, ne compte donc plus jamais comme un arrêt
+> anormal : seul un écart entre deux sondages *au sein d'une même
+> période d'activité continue* du minuteur peut désormais dépasser le
+> seuil. Deux tests dédiés (`tests/test_gui_main_window.py::
+> test_wizard_poll_stall_diagnostic_does_not_fire_after_a_legitimate_
+> pause_for_backup` et `..._does_not_fire_across_repeated_same_card_
+> fingerprint_checks`) rejouent chacun des deux scénarios rapportés et
+> confirment qu'aucune ligne n'est journalisée dans ces deux cas -- tout
+> en gardant `test_wizard_poll_logs_a_stall_when_gap_far_exceeds_the_
+> normal_interval` pour vérifier qu'un vrai arrêt (au sein d'une même
+> période d'activité) est toujours signalé.
+>
+> Le mécanisme et le seuil (6 s) eux-mêmes restent inchangés -- c'est
+> uniquement le calcul de la référence qui était en cause, pas la logique
+> de comparaison. La question d'origine (le sondage automatique reste-t-il
+> réellement bloqué après un retour à l'accueil puis une relance, cas non
+> reproduit en isolation, ci-dessus) reste donc tout aussi ouverte
+> qu'avant -- ce correctif rend seulement le diagnostic utilisable pour y
+> répondre, en éliminant le bruit qui aurait masqué un vrai signal.
 
 ---
 

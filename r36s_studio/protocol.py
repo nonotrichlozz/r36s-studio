@@ -70,3 +70,16 @@ def emit_estimate(size_bytes: int) -> None:
     list_partitions` (non élevé) n'expose pas assez d'information pour
     l'estimer sans lire la table de partitions brute."""
     emit({"type": "estimate", "size_bytes": size_bytes})
+
+
+def emit_eject_result(ok: bool, msg: str = "") -> None:
+    """Résultat d'une éjection chaînée dans un worker élevé qui vient de
+    faire autre chose (§5 mode assisté, `cmd_backup --eject-after`) --
+    distinct du `log` best-effort déjà utilisé par `cmd_flash --eject-
+    after` (§4.6) : là où le flash ne fait jamais échouer sur un échec
+    d'éjection (un bonus après une écriture déjà vérifiée), la GUI a ici
+    besoin de savoir *précisément* si l'éjection a réussi ou non, pour
+    décider d'enchaîner directement sur l'étape suivante du parcours
+    guidé ou de retomber sur un worker d'éjection dédié -- sans jamais
+    refaire toute la sauvegarde juste pour réessayer l'éjection seule."""
+    emit({"type": "eject_result", "ok": ok, "msg": msg})

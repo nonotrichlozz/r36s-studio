@@ -16,6 +16,7 @@ from r36s_studio import config as app_config
 from r36s_studio.config import AppConfig
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
+from r36s_studio.gui import elevate
 from r36s_studio.gui.main_window import MainWindow
 from r36s_studio.gui.worker_runner import WorkerRunner
 from r36s_studio.imaging.copy import ProgressEvent
@@ -2627,6 +2628,189 @@ def test_wizard_step_panel_refresh_button_triggers_immediate_poll(
     fingerprint_runner_class.assert_called_once_with(device.path, parent=window)
 
 
+# --- diagnostic d'un sondage automatique resté silencieux (§5 mode
+# assisté, `_check_wizard_poll_stall`) : bug rapporté ("la carte n'est
+# plus retenue après un retour à l'accueil puis une relance, jusqu'au clic
+# manuel sur Rafraîchir") mais non reproduit en relisant `_start_wizard`/
+# `_cancel_wizard` ni en rejouant exactement ce scénario (voir
+# test_wizard_relaunch_after_cancelling_backup_kind_dialog_restarts_poll_
+# and_immediately_redetects_the_device ci-dessous, qui passe) -- ce
+# diagnostic pur permet de confirmer sur du vrai matériel si le minuteur
+# s'arrête réellement de sonner, sans rien changer au comportement.
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_poll_logs_nothing_on_first_poll_or_normal_cadence(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    # `_start_wizard_poll_timer` (appelé par `prepare_requested`) a déjà
+    # posé un vrai horodatage -- remis à `None` pour repartir d'un « rien
+    # à comparer » propre sous l'horloge simulée ci-dessous.
+    window._wizard_last_poll_monotonic = None
+
+    with patch("r36s_studio.gui.main_window.time.monotonic", side_effect=[100.0, 101.4]):
+        window._on_wizard_poll()  # fixe le premier horodatage (100.0)
+        window._on_wizard_poll()  # 1,4 s plus tard -- cadence normale (1,5 s)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "sondage automatique" not in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_poll_logs_a_stall_when_gap_far_exceeds_the_normal_interval(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_last_poll_monotonic = None
+
+    with patch("r36s_studio.gui.main_window.time.monotonic", side_effect=[100.0, 310.0]):
+        window._on_wizard_poll()
+        window._on_wizard_poll()  # 210 s plus tard -- très au-delà du seuil (6 s)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "sondage automatique" in log_text
+    assert "210" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_poll_stall_diagnostic_does_not_fire_after_a_legitimate_pause_for_backup(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    """Faux positif rapporté sur du vrai matériel : `_wizard_poll_timer`
+    s'arrête légitimement pendant toute l'étape CREATE_IMAGE (sauvegarde
+    de plusieurs minutes) -- son redémarrage à l'étape DETECT_TARGET
+    (`_on_wizard_source_eject_finished`) ne doit jamais être comparé au
+    dernier sondage d'*avant* cette pause, sans quoi le tout premier
+    sondage suivant la reprise ressemble à un arrêt de plusieurs centaines
+    de secondes alors qu'il ne s'agit que du comportement voulu."""
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()  # DETECT_SOURCE, pose un premier horodatage
+
+    with patch("r36s_studio.gui.main_window.time.monotonic", return_value=100.0):
+        window._on_wizard_poll()  # dernier sondage avant la pause de la sauvegarde
+
+    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()), patch(
+        "r36s_studio.gui.main_window.time.monotonic", return_value=100.0 + 615.0
+    ):
+        # Simule la reprise du sondage à l'étape 3, après ~10 min de
+        # sauvegarde (`_wizard_poll_timer` resté arrêté tout ce temps) --
+        # `_start_wizard_poll_timer` doit reposer sa propre référence ici,
+        # pas hériter de celle d'avant la pause.
+        window._on_wizard_source_eject_finished(True, None, None)
+
+    with patch("r36s_studio.gui.main_window.time.monotonic", return_value=100.0 + 615.0 + 1.5):
+        window._on_wizard_poll()  # premier sondage réel après la reprise, 1,5 s plus tard
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "sondage automatique" not in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_poll_stall_diagnostic_does_not_fire_across_repeated_same_card_fingerprint_checks(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    """Second faux positif rapporté, répété toutes les 6 à 12 s en boucle :
+    tant que la carte neuve n'est pas encore branchée, chaque sondage qui
+    retrouve la même carte que la source arrête le minuteur pour lancer
+    une vérification d'empreinte (montage/démontage du BOOT, plusieurs
+    secondes), puis le redémarre une fois « même carte » confirmé
+    (`_on_wizard_fingerprint_ready`). Comparer le sondage suivant à celui
+    d'*avant* ce cycle déclenchait un faux positif à chaque itération,
+    alors que la carte n'a simplement pas encore été échangée (cas
+    normal)."""
+    same_card = _make_device(path="/dev/fake-disk-test-9")
+    mock_list.return_value = [same_card]
+    mock_filter.return_value = [same_card]
+
+    window = MainWindow()
+    _target_setup(window, same_card)
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()), patch(
+        "r36s_studio.gui.main_window.time.monotonic", return_value=100.0
+    ):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+        window._on_wizard_source_eject_finished(True, None, None)  # démarre le sondage, t=100
+
+    with patch(
+        "r36s_studio.gui.main_window.WizardFingerprintRunner", _mock_fingerprint_runner_class()
+    ), patch("r36s_studio.gui.main_window.time.monotonic", return_value=100.0):
+        window._on_wizard_poll()  # trouve la même carte -> arrête le minuteur, lance l'empreinte
+
+    with patch("r36s_studio.gui.main_window.time.monotonic", return_value=100.0 + 8.0):
+        # Empreinte recalculée (~8 s, une vérification BOOT réelle) --
+        # même carte que la source : le minuteur redémarre à la fin.
+        window._on_wizard_fingerprint_ready(WizardJob.DETECT_TARGET, same_card, "fp-source")
+
+    with patch("r36s_studio.gui.main_window.time.monotonic", return_value=100.0 + 8.0 + 1.5):
+        window._on_wizard_poll()  # tick suivant, cadence normale depuis le redémarrage
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "sondage automatique" not in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_relaunch_after_cancelling_backup_kind_dialog_restarts_poll_and_immediately_redetects_the_device(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    """Rejoue le scénario rapporté (§5 mode assisté) : détection de la
+    carte source, Continuer vers `BackupKindDialog`, annulation (retour à
+    l'accueil), relance -- le minuteur doit redémarrer et retrouver la
+    même carte dès le premier sondage, sans nécessiter de clic manuel sur
+    Rafraîchir. Passe avec le code actuel : aucun état périmé n'a été
+    trouvé dans `_start_wizard`/`_cancel_wizard` pour ce chemin précis
+    (voir la note ci-dessus)."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    assert window._wizard_poll_timer.isActive() is True
+
+    window._on_wizard_fingerprint_ready(WizardJob.DETECT_SOURCE, device, "fp-source")
+    window._on_wizard_continue()
+    assert window._wizard_flow.current_job() == WizardJob.CREATE_IMAGE
+    assert window._backup_kind_dialog.isVisible() is True
+
+    window._backup_kind_dialog.cancelled.emit()
+    assert window._root_stack.currentWidget() is window._assisted_landing
+    assert window._wizard_active is False
+    assert window._wizard_poll_timer.isActive() is False
+
+    window._assisted_landing.prepare_requested.emit()
+    assert window._wizard_poll_timer.isActive() is True
+    assert window._wizard_flow.current_job() == WizardJob.DETECT_SOURCE
+
+    fingerprint_runner_class = _mock_fingerprint_runner_class()
+    with patch("r36s_studio.gui.main_window.WizardFingerprintRunner", fingerprint_runner_class):
+        window._on_wizard_poll()
+
+    fingerprint_runner_class.assert_called_once_with(device.path, parent=window)
+
+
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
@@ -2930,6 +3114,8 @@ def test_entering_detect_target_ejects_the_source_card_first(mock_list, mock_fil
     window = MainWindow()
     source = _make_device(path="/dev/fake-disk-test-source")
     window._wizard_source_device = source
+    mock_list.return_value = [source]
+    mock_filter.return_value = [source]
     runner_class = _mock_runner_class()
 
     with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
@@ -2949,7 +3135,10 @@ def test_entering_detect_target_logs_before_starting_the_eject_worker(mock_list,
     si elle manque encore au prochain test réel, `_run_wizard_source_eject`
     elle-même n'est jamais atteinte."""
     window = MainWindow()
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+    source = _make_device(path="/dev/fake-disk-test-source")
+    window._wizard_source_device = source
+    mock_list.return_value = [source]
+    mock_filter.return_value = [source]
 
     with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
         window._enter_wizard_job(WizardJob.DETECT_TARGET)
@@ -2965,11 +3154,13 @@ def test_entering_detect_target_with_no_source_device_logs_instead_of_vanishing(
     mock_list, mock_filter, mock_load, qapp
 ):
     """Si `_wizard_source_device` est `None` au moment d'entrer dans
-    DETECT_TARGET (état incohérent), `_start_eject` lèverait auparavant une
-    `AttributeError` (`None.path`) qui remontait sans jamais toucher le
-    journal ni l'écran -- exactement le symptôme du quatrième signalement
-    (aucune trace du tout). Doit désormais atterrir dans le journal et
-    l'écran d'erreur du parcours, jamais silencieusement."""
+    DETECT_TARGET (état incohérent) -- et qu'aucune carte n'est détectée
+    non plus (`list_devices`/`filter_devices` vides, comme ici) -- la
+    redétection avant éjection (`_refresh_device_before_eject_retry`, bug
+    distinct corrigé séparément) ne trouve rien à éjecter : message
+    explicite et écran d'erreur, jamais un blocage muet ni la levée brute
+    d'origine (`AttributeError` sur `None.path`, symptôme du quatrième
+    signalement -- aucune trace du tout)."""
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
     window._main_view.show_wizard_panel()
@@ -2979,7 +3170,7 @@ def test_entering_detect_target_with_no_source_device_logs_instead_of_vanishing(
     window._enter_wizard_job(WizardJob.DETECT_TARGET)
 
     log_text = window._log_panel._log_view.toPlainText()
-    assert "Éjection de ta carte d'origine" in log_text  # entrée, malgré tout
+    assert "introuvable" in log_text  # jamais un blocage muet
     assert window._wizard_panel._resume_button.isVisible() is True  # écran d'erreur, pas un blocage muet
 
 
@@ -2988,7 +3179,10 @@ def test_entering_detect_target_with_no_source_device_logs_instead_of_vanishing(
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_detect_target_confirms_source_card_can_be_removed_after_eject(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+    source = _make_device(path="/dev/fake-disk-test-source")
+    window._wizard_source_device = source
+    mock_list.return_value = [source]
+    mock_filter.return_value = [source]
 
     with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
         window._enter_wizard_job(WizardJob.DETECT_TARGET)
@@ -3013,7 +3207,10 @@ def test_detect_target_eject_failure_shows_explicit_error_and_no_polling(mock_li
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
     window._main_view.show_wizard_panel()
     window._root_stack.setCurrentWidget(window._main_view)
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+    source = _make_device(path="/dev/fake-disk-test-source")
+    window._wizard_source_device = source
+    mock_list.return_value = [source]
+    mock_filter.return_value = [source]
     for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
 
@@ -3034,7 +3231,10 @@ def test_detect_target_eject_failure_shows_explicit_error_and_no_polling(mock_li
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_detect_target_resume_after_eject_failure_retries_the_eject(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
-    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+    source = _make_device(path="/dev/fake-disk-test-source")
+    window._wizard_source_device = source
+    mock_list.return_value = [source]
+    mock_filter.return_value = [source]
     for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
         window._wizard_flow.mark_done(job)
 
@@ -3055,6 +3255,46 @@ def test_detect_target_resume_after_eject_failure_retries_the_eject(mock_list, m
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_detect_target_eject_retry_redetects_device_and_uses_the_fresh_path(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Bug corrigé, confirmé sur du vrai matériel : une deuxième tentative
+    après un échec (ex. invite UAC refusée) réutilisait tel quel l'ancien
+    chemin Windows (`\\\\.\\PhysicalDriveN`) -- Windows a pu le libérer/
+    renuméroter entre-temps, rejeté ensuite par le worker élevé lui-même
+    comme introuvable (`DEVICE_NOT_ALLOWED`). La carte est redétectée avant
+    chaque tentative (`_refresh_device_before_eject_retry`) : un chemin qui
+    a changé entre les deux essais est donc suivi, pas figé sur le
+    premier."""
+    window = MainWindow()
+    source_v1 = _make_device(path="/dev/fake-disk-test-source-v1")
+    window._wizard_source_device = source_v1
+    mock_list.return_value = [source_v1]
+    mock_filter.return_value = [source_v1]
+    for job in (WizardJob.DETECT_SOURCE, WizardJob.CREATE_IMAGE):
+        window._wizard_flow.mark_done(job)
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", _mock_runner_class()):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+    window._on_wizard_source_eject_finished(False, "ELEVATION_REFUSED", "invite UAC refusée")
+
+    # Windows a renuméroté le disque entre les deux tentatives -- même
+    # carte physique, chemin différent.
+    source_v2 = _make_device(path="/dev/fake-disk-test-source-v2")
+    mock_list.return_value = [source_v2]
+    mock_filter.return_value = [source_v2]
+
+    runner_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._wizard_panel.resume_requested.emit()
+
+    assert runner_class.instances[0].argv == ["eject", "--device", "/dev/fake-disk-test-source-v2"]
+    assert window._wizard_source_device is source_v2
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_source_card_stays_mounted_during_create_image_step(mock_list, mock_filter, mock_load, qapp):
     """La carte source n'est éjectée qu'à l'entrée de l'étape 3 -- elle
     reste montée pendant l'étape 2 (l'image est créée depuis cette même
@@ -3069,6 +3309,127 @@ def test_source_card_stays_mounted_during_create_image_step(mock_list, mock_filt
     runner_class.assert_not_called()
 
 
+# --- éjection de la carte source chaînée dans le worker de l'étape 2 -------
+# (bug corrigé : une invite UAC dédiée rien que pour cette éjection,
+# en plus de celle déjà demandée pour la sauvegarde -- `backup --eject-
+# after` chaîne les deux dans le même worker élevé dans le cas courant).
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_backup_start_worker_chains_eject_after_and_connects_result_signal(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    window = MainWindow()
+    window._wizard_active = True
+    window._mode = "backup"
+    window._device = _make_device(path="/dev/fake-disk-test-source")
+    window._file_path = str(tmp_path / "out.img")
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--eject-after" in runner_class.instances[0].argv
+    runner_class.instances[0].eject_result.connect.assert_called_once_with(window._on_wizard_source_eject_result)
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_expert_mode_backup_never_gets_eject_after_flag(mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path):
+    window = MainWindow()
+    window._mode = "backup"
+    window._device = _make_device()
+    window._file_path = str(tmp_path / "out.img")
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--eject-after" not in runner_class.instances[0].argv
+    runner_class.instances[0].eject_result.connect.assert_not_called()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_on_wizard_source_eject_result_stores_outcome(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+
+    window._on_wizard_source_eject_result(True, "")
+    assert window._wizard_source_ejected is True
+    assert window._wizard_source_eject_error_msg is None
+
+    window._on_wizard_source_eject_result(False, "carte occupée")
+    assert window._wizard_source_ejected is False
+    assert window._wizard_source_eject_error_msg == "carte occupée"
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_run_wizard_source_eject_skips_dedicated_worker_when_already_chained(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Cas courant : `backup --eject-after` (étape 2) a déjà éjecté la
+    carte source dans son propre worker élevé -- entrer dans l'étape 3 ne
+    doit jamais relancer un second worker d'éjection dédié (ce qui
+    redemanderait une invite UAC rien que pour ça)."""
+    window = MainWindow()
+    window._wizard_source_device = _make_device(path="/dev/fake-disk-test-source")
+    window._wizard_source_ejected = True
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+
+    runner_class.assert_not_called()
+    assert window._wizard_poll_timer.isActive() is True  # bien passé à l'étape suivante
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_run_wizard_source_eject_falls_back_to_dedicated_worker_when_chained_eject_failed(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """L'éjection chaînée de l'étape 2 a échoué (rapportée séparément, la
+    sauvegarde elle-même a déjà réussi) -- retombe sur le worker d'éjection
+    dédié existant, sans jamais avoir à refaire toute la sauvegarde pour
+    ça."""
+    source = _make_device(path="/dev/fake-disk-test-source")
+    window = MainWindow()
+    window._wizard_source_device = source
+    window._wizard_source_ejected = False
+    mock_list.return_value = [source]
+    mock_filter.return_value = [source]
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._enter_wizard_job(WizardJob.DETECT_TARGET)
+
+    assert runner_class.instances[0].argv == ["eject", "--device", source.path]
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_wizard_resets_chained_eject_state(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window._wizard_source_ejected = True
+    window._wizard_source_eject_error_msg = "carte occupée"
+
+    window._start_wizard()
+
+    assert window._wizard_source_ejected is None
+    assert window._wizard_source_eject_error_msg is None
+
+
 # --- étape 5 : éjection de la carte cible, via le worker élevé -------------
 # (§4.3/§4.4 : bug corrigé, même correctif que l'étape 3 et le mode expert) -
 
@@ -3078,7 +3439,10 @@ def test_source_card_stays_mounted_during_create_image_step(mock_list, mock_filt
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_run_wizard_eject_starts_elevated_worker_with_target_device(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
-    window._wizard_target_device = _make_device(path="/dev/fake-disk-test-target")
+    target = _make_device(path="/dev/fake-disk-test-target")
+    window._wizard_target_device = target
+    mock_list.return_value = [target]
+    mock_filter.return_value = [target]
     runner_class = _mock_runner_class()
 
     with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
@@ -3570,6 +3934,87 @@ def test_start_eject_logs_the_full_command_line(mock_list, mock_filter, mock_loa
 
     log_text = window._log_panel._log_view.toPlainText()
     assert f"eject --device {device.path}" in log_text
+
+
+# --- éjection : refus d'élévation distingué d'un échec ordinaire ----------
+# Bug corrigé, confirmé sur du vrai matériel : une invite UAC refusée
+# (`elevate.ElevationRefusedError`, `runner.start()`) était auparavant non
+# interceptée -- soit elle remontait telle quelle jusqu'à un appelant dont
+# le `try/except` générique la retombait sur `EJECT_FAILED` codé en dur
+# (`_run_wizard_source_eject`), soit elle n'était interceptée nulle part du
+# tout (`_run_wizard_eject`, `_perform_eject`, `_on_eject_requested`) --
+# menant au message trompeur « ferme les fichiers ouverts... » ou à un
+# plantage silencieux selon le chemin. `_start_eject` intercepte
+# maintenant `runner.start()` lui-même et route toujours vers `on_finished`.
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_eject_maps_elevation_refused_error_to_dedicated_code(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    device = _make_device()
+    results = []
+
+    def _factory(argv, parent=None, macos_auth_session=None):
+        instance = MagicMock()
+        instance.argv = argv
+        instance.start.side_effect = elevate.ElevationRefusedError("invite UAC refusée")
+        return instance
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", side_effect=_factory):
+        window._start_eject(device, lambda ok, code, msg: results.append((ok, code, msg)))
+
+    ok, code, msg = results[-1]
+    assert ok is False
+    assert code == "ELEVATION_REFUSED"
+    assert "invite UAC refusée" in msg
+    # Ne doit jamais laisser l'interface bloquée « occupée » sans issue.
+    assert window._home._busy is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_eject_maps_other_start_failures_to_eject_failed(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    device = _make_device()
+    results = []
+
+    def _factory(argv, parent=None, macos_auth_session=None):
+        instance = MagicMock()
+        instance.argv = argv
+        instance.start.side_effect = OSError("exécutable introuvable")
+        return instance
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", side_effect=_factory):
+        window._start_eject(device, lambda ok, code, msg: results.append((ok, code, msg)))
+
+    ok, code, msg = results[-1]
+    assert ok is False
+    assert code == "EJECT_FAILED"
+    assert "exécutable introuvable" in msg
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_on_eject_requested_shows_the_elevation_refused_friendly_message(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._device = _make_device()
+
+    def _factory(argv, parent=None, macos_auth_session=None):
+        instance = MagicMock()
+        instance.argv = argv
+        instance.start.side_effect = elevate.ElevationRefusedError("invite UAC refusée")
+        return instance
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", side_effect=_factory):
+        window._on_eject_requested()
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "L'autorisation Windows a été refusée" in log_text
+    assert "Ferme les fichiers ouverts" not in log_text  # jamais le message générique pour ce cas
 
 
 # --- flash Android : avertissement + éjection automatique (§4.6) -----------

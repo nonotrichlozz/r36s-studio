@@ -272,6 +272,7 @@ def launch_elevated_worker(
     argv: List[str],
     stderr_log: Optional[Path] = None,
     macos_auth_ref: Optional[AuthorizationRef] = None,
+    parent_hwnd: Optional[int] = None,
 ) -> object:
     """Démarre le worker élevé pour `argv` et retourne un handle exposant
     au moins `.poll()` (un vrai `subprocess.Popen` sur macOS/Linux, un
@@ -291,7 +292,15 @@ def launch_elevated_worker(
     réutiliser une même autorisation entre plusieurs workers élevés sur
     macOS -- ignoré sur les autres OS (pas d'équivalent léger de ce genre
     pour `pkexec`/`sudo`/UAC dans ce squelette) et sans effet sur macOS en
-    développement (`osascript`, qui ne consomme aucune `AuthorizationRef`)."""
+    développement (`osascript`, qui ne consomme aucune `AuthorizationRef`).
+
+    `parent_hwnd` (Windows uniquement, `gui/worker_runner.py::_windows_
+    parent_hwnd`, le handle natif de `MainWindow`) est transmis à
+    `ShellExecuteExW` comme propriétaire de l'invite UAC -- pratique
+    recommandée par Microsoft pour `ShellExecuteEx`, amélioration
+    raisonnable en réponse à un signalement d'invite restée invisible
+    (voir le docstring de `_windows_parent_hwnd` pour le détail et ses
+    limites -- pas un correctif confirmé). Ignoré sur les autres OS."""
     command = _worker_command(argv)
 
     system = platform.system()
@@ -300,7 +309,7 @@ def launch_elevated_worker(
     if system == "Linux":
         return _launch_linux(command, stderr_log)
     if system == "Windows":
-        return _launch_windows(command, stderr_log)
+        return _launch_windows(command, stderr_log, parent_hwnd)
     raise NotImplementedError(f"OS non supporté pour l'élévation : {system}")
 
 
@@ -596,7 +605,9 @@ def _launch_linux(command: List[str], stderr_log: Optional[Path]) -> subprocess.
             stderr_file.close()
 
 
-def _launch_windows(command: List[str], stderr_log: Optional[Path] = None) -> WindowsElevatedProcess:
+def _launch_windows(
+    command: List[str], stderr_log: Optional[Path] = None, parent_hwnd: Optional[int] = None
+) -> WindowsElevatedProcess:
     exe, *rest = command
     params = subprocess.list2cmdline(rest)
 
@@ -605,7 +616,11 @@ def _launch_windows(command: List[str], stderr_log: Optional[Path] = None) -> Wi
     info = _SHELLEXECUTEINFOW()
     info.cbSize = ctypes.sizeof(_SHELLEXECUTEINFOW)
     info.fMask = SEE_MASK_NOCLOSEPROCESS
-    info.hwnd = None
+    # Propriétaire de l'invite UAC (`gui/worker_runner.py::_windows_parent_
+    # hwnd`) -- `None` (comportement historique) si non fourni. Voir le
+    # docstring de `launch_elevated_worker` pour le contexte et les limites
+    # de cette amélioration.
+    info.hwnd = parent_hwnd
     info.lpVerb = "runas"
     info.lpFile = exe
     info.lpParameters = params

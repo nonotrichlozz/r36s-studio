@@ -585,6 +585,53 @@ def test_windows_uses_shell_execute_ex_with_runas(mock_system, mock_windll):
 
 @patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_launch_forwards_parent_hwnd_to_shell_execute(mock_system, mock_windll):
+    """Signalé : une invite UAC pourrait rester invisible en arrière-plan.
+    `hwnd` (propriétaire de l'invite pour `ShellExecuteExW`, jamais renseigné
+    jusqu'ici) doit porter le handle transmis par l'appelant
+    (`gui/worker_runner.py::_windows_parent_hwnd`, le handle natif de
+    `MainWindow`) plutôt que rester toujours `None`."""
+    captured = {}
+    shell32 = MagicMock()
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        captured["hwnd"] = info.hwnd
+        info.hProcess = 4242
+        return 1
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    mock_windll.return_value = shell32
+
+    elevate.launch_elevated_worker(["backup", "--device", "/dev/whatever"], parent_hwnd=123456)
+
+    assert captured["hwnd"] == 123456
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_launch_without_parent_hwnd_keeps_none(mock_system, mock_windll):
+    """Comportement historique inchangé quand l'appelant ne fournit rien
+    (ex. hors GUI, ou `winId()` indisponible) -- jamais un handle inventé."""
+    captured = {}
+    shell32 = MagicMock()
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        captured["hwnd"] = info.hwnd
+        info.hProcess = 4242
+        return 1
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    mock_windll.return_value = shell32
+
+    elevate.launch_elevated_worker(["backup", "--device", "/dev/whatever"])
+
+    assert captured["hwnd"] is None
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
 def test_windows_hides_the_worker_console_window(mock_system, mock_windll):
     """`ShellExecuteW` ne fournit aucun tube stdout/stderr vers le worker
     élevé (§3) -- toute la communication passe déjà par `--progress-file`,

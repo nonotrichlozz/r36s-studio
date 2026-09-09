@@ -4242,6 +4242,67 @@ def test_non_android_flash_success_warns_generically_and_hides_eject_button(
     assert window._log_panel._eject_button.isVisible() is False
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_flash_success_shows_eject_button_when_chained_eject_actually_failed(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Bug corrigé, confirmé sur du vrai matériel : le bouton Éjecter
+    restait masqué même quand l'éjection chaînée (`flash --eject-after`)
+    avait réellement échoué (best-effort côté CLI, jamais fatal pour le
+    flash) -- l'utilisateur devait alors passer par l'étape F séparée,
+    une invite UAC dédiée en plus, minutes plus tard. `_flash_ejected`
+    (rempli par `_on_flash_eject_result`, connecté au signal `eject_result`
+    du worker) doit désormais réafficher ce bouton quand ce résultat est
+    connu et négatif."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/rocknix.img"
+    window._app_config.firmware = "rocknix"
+    window._flash_ejected = False
+
+    window._on_worker_finished(True)
+
+    assert window._log_panel._eject_button.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_worker_resets_flash_ejected_and_connects_eject_result_signal(
+    mock_list, mock_filter, mock_load, qapp
+):
+    window = MainWindow()
+    window._flash_ejected = False  # état périmé d'une opération précédente
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/rocknix.img"
+    window._app_config.firmware = "rocknix"
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert window._flash_ejected is None  # remis à neuf avant le nouveau worker
+    assert "--eject-after" in runner_class.instances[0].argv
+    runner_class.instances[0].eject_result.connect.assert_called_once_with(window._on_flash_eject_result)
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_on_flash_eject_result_stores_outcome(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+
+    window._on_flash_eject_result(True, "")
+    assert window._flash_ejected is True
+
+    window._on_flash_eject_result(False, "carte occupée")
+    assert window._flash_ejected is False
+
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])

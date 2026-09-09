@@ -148,9 +148,46 @@ class WorkerRunner(QObject):
         ]
         macos_auth_ref = self._macos_auth_session.auth_ref if self._macos_auth_session is not None else None
         self._process = elevate.launch_elevated_worker(
-            full_argv, stderr_log=self._log_path, macos_auth_ref=macos_auth_ref
+            full_argv, stderr_log=self._log_path, macos_auth_ref=macos_auth_ref, parent_hwnd=self._windows_parent_hwnd()
         )
         self._timer.start()
+
+    def _windows_parent_hwnd(self) -> Optional[int]:
+        """Handle de fenêtre natif du parent (`MainWindow`, toujours passé
+        en `parent=` à la construction, §3) -- transmis à `ShellExecuteExW`
+        (`elevate.py::_launch_windows`) comme propriétaire de l'invite UAC.
+
+        Signalé : une invite UAC pourrait rester en arrière-plan (deux
+        minutes avant l'échec observé, sans que l'utilisateur ne la voie
+        apparaître). `ShellExecuteExW` reçoit `hwnd=None` depuis toujours --
+        Microsoft documente ce paramètre comme le propriétaire de la
+        fenêtre affichée, utilisé pour son rattachement au bon endroit
+        (z-order, association dans la barre des tâches) même si l'invite de
+        consentement s'affiche elle-même sur le Bureau sécurisé (un
+        mécanisme Windows séparé, qui prend déjà la main sur tout l'écran
+        indépendamment de ce paramètre -- donc *pas* la cause la plus
+        probable d'une invite invisible ; un second écran sur lequel
+        l'invite apparaîtrait hors du champ de vision de l'utilisateur est
+        une explication au moins aussi plausible, non vérifiable sans du
+        vrai matériel multi-écran). Passer ce handle est la pratique
+        recommandée par Microsoft pour `ShellExecuteEx`, sans inconvénient
+        connu -- amélioration raisonnable en l'absence d'une cause confirmée,
+        pas un correctif garanti.
+
+        `None` hors Windows (le paramètre est ignoré par `elevate.py` sur
+        les autres OS) et si `winId()` échoue pour une raison quelconque
+        (ex. widget pas encore affiché) -- `ShellExecuteExW` accepte déjà
+        `hwnd=None` comme absence de propriétaire, comportement inchangé
+        dans ce cas."""
+        if platform.system() != "Windows":
+            return None
+        parent_widget = self.parent()
+        if parent_widget is None:
+            return None
+        try:
+            return int(parent_widget.winId())
+        except Exception:
+            return None
 
     def cancel(self) -> None:
         """Crée le fichier que le worker surveille (`--cancel-file`) pour

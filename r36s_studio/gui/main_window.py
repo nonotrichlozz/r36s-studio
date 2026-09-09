@@ -233,6 +233,16 @@ class MainWindow(QMainWindow):
         # `None` (échec de l'éjection chaînée, ou signal jamais reçu).
         self._wizard_source_ejected: Optional[bool] = None
         self._wizard_source_eject_error_msg: Optional[str] = None
+        # Résultat de l'éjection chaînée dans un flash mode expert
+        # (`flash --eject-after`, §4.6) -- même mécanisme que `_wizard_
+        # source_ejected` ci-dessus, `None` tant qu'aucun résultat n'est
+        # encore connu. `_on_worker_finished` ne masque le bouton Éjecter
+        # de fin d'opération que si ce résultat confirme un succès, jamais
+        # par défaut (bug corrigé, confirmé sur du vrai matériel : un échec
+        # silencieux de cette éjection chaînée laissait la carte non
+        # éjectée sans bouton visible pour réessayer, forçant à passer par
+        # l'étape F séparée -- une invite UAC dédiée, minutes plus tard).
+        self._flash_ejected: Optional[bool] = None
         # Choix fait à l'étape 2 (`BackupKindDialog`) -- "full" (copie
         # complète) ou "system" (système seul, sans les jeux) -- décide du
         # mode passé à `_start_worker` et du texte de fin de parcours.
@@ -719,6 +729,7 @@ class MainWindow(QMainWindow):
     # --- opération : journal de bord permanent (§5, refonte navigation) ----
 
     def _start_worker(self) -> None:
+        self._flash_ejected = None
         self._log_panel.start_operation(tr(_OPERATION_TITLE_KEYS[self._mode]))
         if self._mode in _EXTRACTION_MODES:
             # Annoncé dès le début de la copie, pas seulement à la fin
@@ -818,6 +829,14 @@ class MainWindow(QMainWindow):
         self._runner.finished.connect(self._on_worker_finished)
         if self._mode in ("backup", "backup_system") and self._wizard_active:
             self._runner.eject_result.connect(self._on_wizard_source_eject_result)
+        elif "--eject-after" in argv:
+            # Flash mode expert (`_flash_may_trigger_windows_format_
+            # prompt`, ci-dessus) -- même mécanisme, `_on_flash_eject_
+            # result` plutôt que `_on_wizard_source_eject_result` (mode
+            # assisté) : les deux stockent un résultat distinct
+            # (`_flash_ejected` vs `_wizard_source_ejected`), jamais
+            # confondus.
+            self._runner.eject_result.connect(self._on_flash_eject_result)
         self._runner.start()
 
     def _on_wizard_source_eject_result(self, ok: bool, msg: str) -> None:
@@ -829,6 +848,17 @@ class MainWindow(QMainWindow):
         nécessaire."""
         self._wizard_source_ejected = ok
         self._wizard_source_eject_error_msg = None if ok else msg
+
+    def _on_flash_eject_result(self, ok: bool, msg: str) -> None:
+        """Reçu avant `finished` (comme `_on_wizard_source_eject_result`
+        ci-dessus, mais pour `flash --eject-after` en mode expert) --
+        `_on_worker_finished` s'en sert pour décider si le bouton Éjecter
+        de fin d'opération doit rester masqué (l'éjection chaînée a
+        réellement réussi) ou réapparaître (elle a échoué -- bug corrigé,
+        confirmé sur du vrai matériel : rester masqué inconditionnellement
+        laissait la carte réellement non éjectée sans bouton visible pour
+        réessayer)."""
+        self._flash_ejected = ok
 
     def _get_or_create_macos_auth_session(self) -> Optional["elevate.MacosAuthorizationSession"]:
         """Une seule `AuthorizationRef` pour toute l'application (§5 mode
@@ -1023,12 +1053,25 @@ class MainWindow(QMainWindow):
         if ok:
             android_flash = self._is_flashing_android_firmware()
             format_prompt_flash = self._flash_may_trigger_windows_format_prompt()
-            # Déjà éjectée par le worker lui-même (`--eject-after`, ajouté
-            # dans `_start_worker` dès que `format_prompt_flash` est vrai,
-            # donc pour tout flash mode expert désormais -- plus seulement
-            # Android) -- proposer de l'éjecter à nouveau serait redondant,
-            # voire une erreur si la carte n'est déjà plus vue par l'OS.
-            allow_eject = self._mode in _ALLOW_EJECT_AFTER_MODES and not format_prompt_flash
+            # Déjà éjectée par le worker lui-même dans le cas courant
+            # (`--eject-after`, ajouté dans `_start_worker` dès que
+            # `format_prompt_flash` est vrai, donc pour tout flash mode
+            # expert désormais -- plus seulement Android) -- proposer de
+            # l'éjecter à nouveau serait redondant, voire une erreur si la
+            # carte n'est déjà plus vue par l'OS. Bug corrigé, confirmé sur
+            # du vrai matériel : masquer le bouton inconditionnellement dès
+            # que ce drapeau était posé, sans jamais vérifier si l'éjection
+            # chaînée avait réellement réussi, laissait un échec silencieux
+            # (best-effort, `emit_eject_result`) sans aucun moyen évident de
+            # réessayer -- l'utilisateur devait alors passer par l'étape F
+            # séparée, une invite UAC dédiée en plus, minutes plus tard.
+            # `self._flash_ejected is False` (résultat connu et négatif)
+            # réaffiche donc le bouton ; `True` ou `None` (succès, ou signal
+            # jamais reçu -- comportement par défaut inchangé) le laissent
+            # masqué comme avant.
+            allow_eject = self._mode in _ALLOW_EJECT_AFTER_MODES and (
+                not format_prompt_flash or self._flash_ejected is False
+            )
             archive_info = self._archive_info()
             reveal_path = self._file_path if self._mode in (_EXTRACTION_MODES | _INJECTION_MODES) else None
             if archive_info:

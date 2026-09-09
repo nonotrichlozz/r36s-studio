@@ -2244,6 +2244,68 @@ Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, 
 > test ne le démontre -- à réévaluer au prochain test réel une fois ce
 > correctif en place, avant de rouvrir une nouvelle investigation dédiée
 > si le symptôme persiste malgré tout.
+
+> ⚠️ **Même défaut rapporté après un flash en mode expert, deux minutes
+> plus tard.** `flash --eject-after` (§4.6) existe déjà et chaîne
+> l'éjection dans le worker de flash lui-même pour tout flash mode expert
+> (`_flash_may_trigger_windows_format_prompt`, quasiment toujours vrai) --
+> aucune seconde invite dans le cas courant, contrairement à la source
+> confusion initiale. Mais ce mécanisme, best-effort, ne rapportait son
+> résultat qu'au journal (`emit_log`, jamais un événement structuré) --
+> `_on_worker_finished` masquait alors le bouton Éjecter *inconditionnel-
+> lement* dès que ce drapeau était posé, en supposant la carte déjà
+> éjectée avec succès. Un échec silencieux de cette éjection chaînée
+> laissait donc la carte réellement non éjectée, sans bouton visible pour
+> réessayer -- l'utilisateur devait deviner qu'il fallait passer par
+> l'étape F séparée du mode expert, qui redemande sa propre élévation
+> (§3) : exactement l'« invite UAC dédiée, deux minutes plus tard »
+> rapportée, le délai correspondant au temps mis à remarquer que la carte
+> n'était pas éjectée puis à cliquer sur cette étape séparée.
+>
+> **Corrigé** en réutilisant le mécanisme déjà construit pour `backup
+> --eject-after` (ci-dessus) : `cmd_flash` appelle désormais aussi
+> `emit_eject_result(ok, msg)` en plus du `emit_log` existant.
+> `WorkerRunner.eject_result` (même signal, déjà partagé) est connecté à
+> un nouveau `MainWindow._on_flash_eject_result` quand `_start_worker`
+> pose `--eject-after` sur un flash (`self._flash_ejected`, remis à
+> `None` à chaque nouveau worker). `_on_worker_finished` ne masque plus le
+> bouton Éjecter inconditionnellement : `allow_eject` réapparaît dès que
+> `self._flash_ejected is False` (résultat connu et négatif) -- `True` ou
+> `None` (succès, ou signal jamais reçu) le laissent masqué comme avant.
+> Portée volontairement limitée au flash (le cas rapporté) : `reset-card`
+> éjecte aussi automatiquement mais n'a pas de bouton concurrent à
+> masquer (§4.3 bis, déjà retiré de `_ALLOW_EJECT_AFTER_MODES`), rien à
+> changer là.
+>
+> **Question posée en plus, non résolue avec certitude : l'invite UAC
+> s'affiche-t-elle au premier plan ?** Deux minutes se sont écoulées avant
+> l'échec observé -- cohérent avec une invite restée invisible pour
+> l'utilisateur jusqu'à un délai d'expiration Windows, plutôt qu'un refus
+> explicite et rapide (`ERROR_CANCELLED` immédiat). `ShellExecuteExW`
+> recevait `hwnd=None` depuis toujours (`gui/elevate.py::_launch_
+> windows`) -- Microsoft documente ce paramètre comme le propriétaire de
+> la fenêtre affichée, et le laisser vide prive Windows d'un signal
+> normal pour rattacher/mettre en avant l'invite. **Réserve importante,
+> qui limite la portée de ce correctif** : l'invite de consentement UAC
+> s'affiche elle-même sur le Bureau sécurisé, un mécanisme Windows séparé
+> qui prend la main sur tout l'écran indépendamment de `hwnd` -- ce
+> paramètre ne peut donc pas expliquer une invite cachée *derrière* une
+> autre fenêtre au sens strict. Une explication au moins aussi probable,
+> non vérifiable sans du vrai matériel multi-écran : l'invite apparaît sur
+> un second écran hors du champ de vision de l'utilisateur au moment où il
+> regarde l'application. **Corrigé quand même, en amélioration en
+> l'absence de cause confirmée plutôt qu'en correctif garanti** :
+> `WorkerRunner._windows_parent_hwnd` (nouveau) transmet le handle natif
+> de `MainWindow` (`winId()`, Windows uniquement, `None` si indisponible
+> ou hors Windows) à `launch_elevated_worker`/`_launch_windows`, qui le
+> pose sur `info.hwnd` -- pratique recommandée par Microsoft pour
+> `ShellExecuteEx`, sans inconvénient connu. **Non confirmé sur du vrai
+> matériel** : à réévaluer au prochain flash réel si l'invite reste
+> invisible malgré ce changement -- pointerait alors vers l'hypothèse
+> multi-écran plutôt que vers un défaut de paramétrage de
+> `ShellExecuteExW`.
+
+⚠️ **Bug corrigé, confirmé en relisant le code après le rapport
 > ci-dessus : le Continuer du vrai parcours guidé pouvait afficher la
 > fenêtre Confirmation avec la mauvaise carte, court-circuitant la
 > vérification d'empreinte (§5, § pré-vol n°3).** Rapporté comme : image

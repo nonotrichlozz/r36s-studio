@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+from PySide6.QtWidgets import QWidget
+
 from r36s_studio.gui.worker_runner import MACOS_TCC_BLOCKED, MACOS_TCC_PROTECTED_FOLDER, WorkerRunner
 
 
@@ -93,6 +95,82 @@ def test_start_passes_none_macos_auth_ref_without_a_session(mock_launch, mock_lo
     runner.start()
 
     assert mock_launch.call_args.kwargs["macos_auth_ref"] is None
+    runner._stop()
+
+
+# --- handle de fenêtre transmis à ShellExecuteExW (Windows) ----------------
+#
+# Signalé : une invite UAC pourrait rester en arrière-plan, invisible pour
+# l'utilisateur (deux minutes avant l'échec observé). `ShellExecuteExW`
+# recevait `hwnd=None` depuis toujours -- transmettre le handle natif du
+# parent (`MainWindow`) est la pratique recommandée par Microsoft, sans
+# garantie que ce soit la cause réelle (voir `_windows_parent_hwnd`).
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Windows")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_start_forwards_parent_window_handle_on_windows(mock_launch, mock_log_path, mock_platform, tmp_path, qapp):
+    mock_log_path.return_value = tmp_path / "elevation.log"
+    mock_launch.return_value = _fake_process([None])
+    parent = QWidget()
+    with patch.object(parent, "winId", return_value=424242):
+        runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"], parent=parent)
+        runner.start()
+
+    assert mock_launch.call_args.kwargs["parent_hwnd"] == 424242
+    runner._stop()
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Windows")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_start_parent_hwnd_is_none_without_a_parent(mock_launch, mock_log_path, mock_platform, tmp_path, qapp):
+    mock_log_path.return_value = tmp_path / "elevation.log"
+    mock_launch.return_value = _fake_process([None])
+    runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"])
+
+    runner.start()
+
+    assert mock_launch.call_args.kwargs["parent_hwnd"] is None
+    runner._stop()
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Windows")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_start_parent_hwnd_falls_back_to_none_when_winid_raises(
+    mock_launch, mock_log_path, mock_platform, tmp_path, qapp
+):
+    """Jamais un plantage si `winId()` échoue pour une raison quelconque
+    (ex. widget pas encore affiché) -- comportement historique (`hwnd=None`)
+    préservé dans ce cas."""
+    mock_log_path.return_value = tmp_path / "elevation.log"
+    mock_launch.return_value = _fake_process([None])
+    parent = QWidget()
+    with patch.object(parent, "winId", side_effect=RuntimeError("pas encore affiché")):
+        runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"], parent=parent)
+        runner.start()
+
+    assert mock_launch.call_args.kwargs["parent_hwnd"] is None
+    runner._stop()
+
+
+@patch("r36s_studio.gui.worker_runner.platform.system", return_value="Darwin")
+@patch("r36s_studio.gui.worker_runner.logs.elevation_log_path")
+@patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
+def test_start_parent_hwnd_is_none_outside_windows(mock_launch, mock_log_path, mock_platform, tmp_path, qapp):
+    """`parent_hwnd` n'a de sens que pour `ShellExecuteExW` (Windows) --
+    jamais calculé (ni transmis comme autre chose que `None`) sur macOS/
+    Linux, ignoré de toute façon côté `elevate.py`."""
+    mock_log_path.return_value = tmp_path / "elevation.log"
+    mock_launch.return_value = _fake_process([None])
+    parent = QWidget()
+    with patch.object(parent, "winId", return_value=424242):
+        runner = WorkerRunner(["backup", "--device", "/dev/fake-disk-test-3", "--output", "x.img"], parent=parent)
+        runner.start()
+
+    assert mock_launch.call_args.kwargs["parent_hwnd"] is None
     runner._stop()
 
 

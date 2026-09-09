@@ -564,13 +564,32 @@ def cmd_flash(args: argparse.Namespace) -> int:
             # neutre désormais, sans conséquence fonctionnelle (l'éjection
             # elle-même n'a jamais dépendu de ce texte) mais trompeur pour
             # qui lit le journal.
+            # Bug corrigé, confirmé sur du vrai matériel : ce résultat
+            # n'était jusqu'ici *que* journalisé (`emit_log`, best-effort)
+            # -- indiscernable côté GUI d'un succès, `_on_worker_finished`
+            # masquait donc systématiquement le bouton Éjecter dès que ce
+            # drapeau était posé (`format_prompt_flash`), en supposant la
+            # carte déjà éjectée. Un échec silencieux de cette éjection
+            # chaînée laissait alors la carte réellement non éjectée, sans
+            # aucun moyen évident de le refaire dans le prolongement du
+            # flash -- l'utilisateur devait deviner qu'il fallait passer par
+            # l'étape F séparée, qui redemande sa propre élévation (§3,
+            # aucun équivalent de `MacosAuthorizationSession` sur Windows) :
+            # exactement la « invite UAC dédiée, deux minutes plus tard »
+            # rapportée. `emit_eject_result` (même mécanisme que `backup
+            # --eject-after`, §5 mode assisté) rapporte désormais ce
+            # résultat séparément -- `_on_worker_finished` (GUI) ne masque
+            # le bouton que si ce résultat confirme un succès, jamais par
+            # défaut.
             emit_log("Éjection automatique de la carte...")
             try:
                 eject_device(device.path)
             except Exception as exc:
                 emit_log(f"Éjection automatique impossible : {exc}", level="warning")
+                emit_eject_result(False, str(exc))
             else:
                 emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
+                emit_eject_result(True)
 
         emit_done(True)
         return 0

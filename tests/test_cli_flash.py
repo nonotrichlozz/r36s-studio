@@ -339,7 +339,7 @@ def test_cmd_flash_games_partition_failure_is_best_effort_and_does_not_fail_the_
 @patch("r36s_studio.__main__.flash_device")
 @patch("r36s_studio.__main__._confirm_flash", return_value=True)
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_flash_without_flag_never_ejects(mock_list, mock_confirm, mock_flash, mock_eject, tmp_path):
+def test_cmd_flash_without_flag_never_ejects(mock_list, mock_confirm, mock_flash, mock_eject, tmp_path, capsys):
     mock_list.return_value = [_make_device()]
     mock_flash.return_value = FlashResult(
         bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
@@ -352,6 +352,8 @@ def test_cmd_flash_without_flag_never_ejects(mock_list, mock_confirm, mock_flash
 
     assert code == 0
     mock_eject.assert_not_called()
+    out = capsys.readouterr().out
+    assert '"type": "eject_result"' not in out
 
 
 @patch("r36s_studio.__main__.eject_device")
@@ -377,6 +379,12 @@ def test_cmd_flash_with_eject_after_ejects_on_success(mock_list, mock_confirm, m
     out = capsys.readouterr().out
     assert '"type": "done"' in out
     assert '"ok": true' in out
+    # Bug corrigé, confirmé sur du vrai matériel (§4.6) : sans cet
+    # événement séparé, la GUI ne pouvait pas distinguer un succès d'un
+    # échec silencieux de cette éjection chaînée -- elle masquait le
+    # bouton Éjecter de fin d'opération dans tous les cas.
+    assert '"type": "eject_result"' in out
+    assert '"ok": true' in out.split('"type": "eject_result"')[-1]
 
 
 @patch(
@@ -407,3 +415,5 @@ def test_cmd_flash_eject_after_failure_does_not_fail_the_flash(
     out = capsys.readouterr().out
     assert '"ok": true' in out
     assert "carte occupée" in out
+    assert '"type": "eject_result"' in out
+    assert '"ok": false' in out.split('"type": "eject_result"')[-1].split("\n")[0]

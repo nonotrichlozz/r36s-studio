@@ -1,14 +1,93 @@
 # R36S Studio
 
-Application de bureau (Windows, macOS, Linux) pour préparer une carte SD de
-console R36S sans ligne de commande : sauvegarder l'ancienne carte, flasher
-ArkOS/ROCKNIX/EmuELEC sur une carte neuve, réinjecter l'écran d'origine et
-copier les jeux — le tout depuis une interface graphique.
+Application de bureau gratuite (Windows, macOS, Linux) pour préparer une
+carte SD de console R36S — **sans jamais ouvrir de ligne de commande**.
+
+## À qui ça s'adresse
+
+À quelqu'un qui vient de recevoir sa console et qui n'a jamais ouvert de
+terminal de sa vie. L'application reconnaît d'elle-même ce qu'il y a sur la
+carte SD branchée et propose l'action pertinente — aucun compte à créer,
+aucune configuration préalable, aucune connexion internet requise pour les
+opérations principales.
+
+## Ce que ça fait
+
+- **Sauvegarder** l'ancienne carte SD dans un fichier, avant de risquer quoi
+  que ce soit.
+- **Flasher** une carte neuve avec un système (ArkOS, ROCKNIX, EmuELEC...).
+- **Réinjecter** l'écran et les réglages de l'ancienne carte sur la neuve.
+- **Copier** les jeux et sauvegardes de l'ancienne carte vers la neuve.
+- **Remettre une carte à zéro** si des essais de firmware l'ont laissée en
+  plusieurs partitions illisibles pour un ordinateur.
+
+Deux façons de s'en servir :
+
+- **Parcours guidé** — cinq étapes, une carte puis l'autre, aucune question
+  technique posée. C'est l'écran par défaut.
+- **Mode expert** — les six opérations disponibles séparément, pour qui
+  préfère garder la main sur chaque étape.
+
+## Captures d'écran
+
+| Parcours guidé (accueil) | Mode expert |
+|---|---|
+| ![Accueil du parcours guidé](docs/screenshots/assisted-landing.png) | ![Mode expert, six étapes](docs/screenshots/expert-home.png) |
+
+## Garanties de sécurité
+
+- Aucune carte n'est jamais présélectionnée — l'utilisateur choisit toujours
+  activement, même quand une seule carte est branchée.
+- Le disque système de l'ordinateur, et tout disque non amovible/non USB,
+  sont exclus de la liste avant même d'être proposés — un disque refusé
+  n'apparaît pas grisé, il n'apparaît pas du tout.
+- Toute écriture destructrice (flasher, remettre à zéro) exige une
+  confirmation explicite, avec une case à cocher — jamais de sélection par
+  défaut ni de double-clic accidentel.
+- La barre de progression affichée correspond toujours à une progression
+  réelle (octets copiés, étape effectivement terminée) — jamais une
+  animation qui avance seule pendant que le vrai travail se termine
+  ailleurs.
+
+## Installation
+
+Aucune ligne de commande n'est nécessaire pour *utiliser* l'application —
+seulement pour la construire soi-même depuis les sources (voir
+[Pour les développeurs](#pour-les-développeurs) plus bas, si tu préfères
+cette voie). Pour tout le monde d'autre : télécharge le binaire de ton
+système sur la page [Releases](../../releases).
+
+| Système | Archive | Premier lancement |
+|---|---|---|
+| Windows | `R36S-Studio-windows.zip` | Décompresse l'archive entière (pas seulement l'exe), puis double-clique sur `R36S Studio.exe`. **Windows SmartScreen affichera un avertissement** (« Windows a protégé votre ordinateur ») — c'est normal, le binaire n'est pas signé par un certificat payant. Clique **Informations complémentaires**, puis **Exécuter quand même**. |
+| macOS | `R36S-Studio-macos.zip` | Décompresse, puis **clic droit sur l'app → Ouvrir** (jamais un simple double-clic la première fois) — l'app n'est pas notariée par Apple, Gatekeeper la bloquerait sinon. Ensuite, l'app te guidera elle-même vers Réglages Système → Confidentialité et sécurité pour lui accorder l'**Accès complet au disque**, nécessaire pour lire/écrire une carte SD sur macOS. |
+| Linux | `R36S-Studio-linux.tar.gz` | Décompresse (`tar xzf R36S-Studio-linux.tar.gz`), puis lance `./R36S\ Studio/R36S\ Studio`. |
+
+Ces avertissements de premier lancement existent uniquement parce
+qu'aucun des trois binaires n'est signé avec un certificat payant
+(200–400 €/an, une dépense volontairement évitée pour l'instant) — ils
+s'atténuent avec le nombre de téléchargements sur Windows, et ne
+remettent rien en cause côté fonctionnement de l'application.
+
+## Ce que ce logiciel ne fournit jamais
+
+**Aucune ROM, aucun BIOS, aucune image système `.img` n'est inclus dans ce
+dépôt ni dans les binaires distribués.** L'image du système à flasher
+(ArkOS, ROCKNIX...) est soit téléchargée par l'application elle-même
+directement depuis la source officielle du projet correspondant (avec
+vérification de somme de contrôle quand le dépôt en fournit une), soit
+choisie par l'utilisateur parmi ses propres fichiers. Ce logiciel prépare
+une carte SD ; il ne fournit et ne diffuse aucun contenu protégé par le
+droit d'auteur.
+
+---
+
+## Pour les développeurs
 
 Le cahier des charges complet (contraintes de sécurité, architecture
-GUI/worker, détail des modules) vit dans [`CLAUDE.md`](CLAUDE.md).
+GUI/worker, détail de chaque module) vit dans [`CLAUDE.md`](CLAUDE.md).
 
-## Développement
+### Mise en route
 
 Prérequis : Python 3.11+.
 
@@ -27,8 +106,8 @@ python -m r36s_studio gui
 L'app est aussi utilisable en ligne de commande (utile pour le
 développement et le diagnostic — jamais exposé à l'utilisateur final,
 §1/§5 de `CLAUDE.md`) : `list`, `backup`, `flash`, `extract-boot`,
-`extract-easyroms`, `inject-boot`, `copy-games`, `identify`, `eject`.
-Détail de chaque sous-commande :
+`extract-easyroms`, `inject-boot`, `copy-games`, `identify`, `eject`,
+`reset-card`. Détail de chaque sous-commande :
 
 ```sh
 python -m r36s_studio --help
@@ -46,7 +125,7 @@ Aucun sous-processus réel n'est autorisé pendant les tests
 `CLAUDE.md`) : la suite entière tourne sans carte SD ni droits
 administrateur, sur les trois OS.
 
-## Construire un binaire localement
+### Construire un binaire localement
 
 Chaque OS a son propre script de construction ([PyInstaller](https://pyinstaller.org/)) sous
 `packaging/` :
@@ -56,6 +135,13 @@ Chaque OS a son propre script de construction ([PyInstaller](https://pyinstaller
 | macOS | `packaging/build_macos.sh` | `dist/R36S Studio.app` |
 | Windows | `packaging/build_windows.ps1` | `dist/R36S Studio/R36S Studio.exe` |
 | Linux | `packaging/build_linux.sh` | `dist/R36S Studio/R36S Studio` |
+
+Les trois constructions produisent un dossier **onedir**, jamais un
+exécutable **onefile** — délibéré, pas un oubli : PySide6 est distribué
+sous licence LGPLv3 (voir [Licences](#licences) ci-dessous), qui exige que
+la bibliothèque Qt reste un fichier séparé et remplaçable par
+l'utilisateur final plutôt que fusionnée dans un binaire opaque. Détail
+complet de cette contrainte : [`packaging/README.md`](packaging/README.md).
 
 `packaging/build_macos.sh dist` construit puis produit en plus
 `dist/R36S-Studio-macos.zip`, prêt à distribuer : l'app accompagnée de
@@ -67,17 +153,11 @@ produire l'artefact macOS de chaque Release.
 Chaque script crée son propre `.venv/` s'il n'existe pas déjà, installe les
 dépendances, puis appelle le `.spec` PyInstaller correspondant
 (`packaging/r36s_studio.spec` pour macOS, `..._windows.spec`,
-`..._linux.spec`). Détail complet de la construction macOS — la seule à
-avoir une contrainte particulière (accès disque bloqué par TCC tant que
-l'app n'a pas d'identité de bundle propre, résolu depuis la phase 7) — et
-de la procédure de vérification sur du vrai matériel : voir
+`..._linux.spec`). Détail complet de la construction, OS par OS, et de la
+procédure de vérification sur du vrai matériel : voir
 [`packaging/README.md`](packaging/README.md).
 
-Aucun des trois binaires n'est signé avec un certificat payant (§6 du
-brief) : au premier lancement, Windows SmartScreen et macOS Gatekeeper
-affichent un avertissement — pour macOS, clic droit sur l'app → Ouvrir.
-
-## Intégration continue et publication d'une Release
+### Intégration continue et publication d'une Release
 
 `.github/workflows/build.yml` définit quatre jobs GitHub Actions :
 
@@ -89,9 +169,7 @@ affichent un avertissement — pour macOS, clic droit sur l'app → Ouvrir.
   tournent sur **chaque push sur `main`** et **chaque pull request** — un
   changement qui casse la construction ou une régression sur un OS
   particulier est visible avant merge, pas seulement en local sur la seule
-  machine du contributeur (§7 du brief : la CI existe justement parce que
-  les machines de développement disponibles ne peuvent chacune compiler
-  que pour leur propre OS).
+  machine du contributeur.
 - **release** — ne se déclenche **que sur un tag** de la forme `v*` (ex.
   `v0.2.0`) et seulement si les trois constructions précédentes ont
   réussi (`needs:`). Télécharge les trois artefacts et les publie sur une
@@ -99,7 +177,7 @@ affichent un avertissement — pour macOS, clic droit sur l'app → Ouvrir.
   des notes de version générées automatiquement à partir des commits
   depuis le tag précédent.
 
-### Publier une nouvelle version
+Publier une nouvelle version :
 
 ```sh
 git tag v0.2.0

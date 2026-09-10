@@ -104,6 +104,13 @@ _WIZARD_POLL_INTERVAL_MS = 1500
 # matériel, pas encore un correctif.
 _WIZARD_POLL_STALL_THRESHOLD_SECONDS = 6.0
 
+# `MainWindow.closeEvent` (§2, bug corrigé -- worker élevé orphelin à la
+# fermeture) : délai laissé à l'annulation coopérative avant un arrêt forcé.
+# Court délibérément -- jamais un blocage perceptible de la fermeture de
+# l'app pour un worker qui ne répond pas, l'arrêt forcé (`force_kill`) reste
+# le filet de sécurité qui compte vraiment.
+_WORKER_SHUTDOWN_GRACE_SECONDS = 2.0
+
 # Parcours de clonage (§5 mode assisté) : une étape, un job -- plus besoin
 # qu'un même écran recouvre deux jobs indépendants comme l'ancien parcours
 # à 7 étapes/8 jobs (identification DTB, extraction/injection BOOT-
@@ -923,9 +930,52 @@ class MainWindow(QMainWindow):
         return elevate.run_privileged_mount(device_path, mountpoint, auth_ref=auth_ref)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
+        """Bug corrigé, constaté sur du vrai matériel : fermer la fenêtre
+        pendant qu'une opération élevée tournait encore laissait le worker
+        orphelin -- PID survivant, verrous de fichiers maintenus (le
+        binaire empaqueté lui-même, mais tout aussi bien un verrou sur la
+        carte SD en cours d'écriture, §2 : un risque réel, pas seulement
+        une gêne). `closeEvent` ne faisait jusqu'ici rien de tel que
+        vérifier `self._runner` -- qui de toute façon ne redevient jamais
+        `None` après une opération terminée (§ `_terminate_active_worker_
+        before_close`, ci-dessous), d'où `LogPanel.is_operation_active()`
+        plutôt qu'un simple `self._runner is not None`."""
+        if self._log_panel.is_operation_active() and self._runner is not None:
+            self._terminate_active_worker_before_close()
         if self._macos_auth_session is not None:
             self._macos_auth_session.close()
         super().closeEvent(event)
+
+    def _terminate_active_worker_before_close(self) -> None:
+        """Annulation coopérative d'abord (`cancel()`, via le fichier que
+        le worker surveille lui-même -- laisse une chance de refermer
+        proprement un handle d'écriture brute en cours plutôt que de le
+        couper net) ; si le worker ne s'arrête pas de lui-même dans un délai
+        court, arrêt forcé (`force_kill()`). Sur Windows, ce dernier tue
+        désormais tout l'arbre de processus -- Job Object avec `JOB_OBJECT_
+        LIMIT_KILL_ON_JOB_CLOSE`, `gui/elevate.py` -- pas seulement le
+        worker principal : sans ça, un sous-processus PowerShell qu'il
+        aurait lui-même lancé (`winprocess.py`) aurait survécu tout autant,
+        exactement le symptôme rapporté (quatre `powershell.exe` restés
+        après fermeture, en plus du worker). Délai volontairement court :
+        jamais un blocage indéfini de la fermeture de l'app pour un worker
+        qui ne répond pas."""
+        runner = self._runner
+        try:
+            runner.cancel()
+        except Exception:
+            pass
+        process = getattr(runner, "_process", None)
+        if process is not None:
+            deadline = time.monotonic() + _WORKER_SHUTDOWN_GRACE_SECONDS
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    return
+                time.sleep(0.05)
+        try:
+            runner.force_kill()
+        except Exception:
+            pass
 
     # `@Slot` explicite sur ces trois méthodes : ce sont les seules qui
     # reçoivent un signal pouvant traverser une frontière de thread réelle

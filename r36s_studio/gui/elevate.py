@@ -123,6 +123,133 @@ class _SHELLEXECUTEINFOW(ctypes.Structure):
     ]
 
 
+# --- Job Object Windows : tuer tout l'arbre de processus d'un coup --------
+#
+# Bug corrigé, constaté sur du vrai matériel : fermer la fenêtre pendant
+# qu'un worker élevé tourne encore laissait ce worker orphelin, PID
+# survivant, verrou de fichiers maintenu (`_internal/PySide6/*.dll` du
+# binaire empaqueté, mais tout aussi bien un verrou sur la carte SD elle-
+# même en cours d'écriture -- §2, un risque réel, pas seulement une gêne
+# pour reconstruire). Pire : les sous-processus PowerShell que ce worker
+# lance lui-même (`winprocess.py`, `Get-Partition`/`Format-Volume`...)
+# survivaient eux aussi -- `TerminateProcess` sur le seul processus
+# principal (`WindowsElevatedProcess.kill()`, ci-dessous) ne termine
+# jamais ses enfants, qui continuent tout seuls.
+#
+# Un « Job Object » Windows, avec l'indicateur `JOB_OBJECT_LIMIT_KILL_ON_
+# JOB_CLOSE`, résout les deux à la fois : tout processus qui y est assigné
+# (et tout enfant qu'il lance ensuite, qui hérite du même job
+# automatiquement, sauf s'il est créé avec `CREATE_BREAKAWAY_FROM_JOB` --
+# jamais le cas ici) est terminé d'un coup dès que le job est fermé ou
+# explicitement arrêté (`TerminateJobObject`). Bénéfice en plus, passif :
+# si l'app elle-même plantait sans jamais appeler `kill()`, Windows ferme
+# de toute façon le handle du job en nettoyant le processus mort -- ce qui
+# déclenche `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` tout seul, sans code
+# supplémentaire pour ce cas.
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInformation
+
+
+class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_longlong),
+        ("PerJobUserTimeLimit", ctypes.c_longlong),
+        ("LimitFlags", wintypes.DWORD),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", wintypes.DWORD),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", wintypes.DWORD),
+        ("SchedulingClass", wintypes.DWORD),
+    ]
+
+
+class _IO_COUNTERS(ctypes.Structure):
+    _fields_ = [
+        ("ReadOperationCount", ctypes.c_ulonglong),
+        ("WriteOperationCount", ctypes.c_ulonglong),
+        ("OtherOperationCount", ctypes.c_ulonglong),
+        ("ReadTransferCount", ctypes.c_ulonglong),
+        ("WriteTransferCount", ctypes.c_ulonglong),
+        ("OtherTransferCount", ctypes.c_ulonglong),
+    ]
+
+
+class _JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", _JOBOBJECT_BASIC_LIMIT_INFORMATION),
+        ("IoInfo", _IO_COUNTERS),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+def _create_kill_on_close_job(stderr_log: Optional[Path] = None) -> Optional[int]:
+    """Crée un Job Object Windows avec `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+    et y assigne rien pour l'instant -- `_launch_windows` y assigne le
+    worker élevé juste après son lancement, avant qu'il n'ait pu lancer le
+    moindre sous-processus PowerShell. Best-effort : une erreur ici
+    (rarissime -- Job Objects disponibles depuis Windows 2000) ne doit
+    jamais empêcher l'élévation elle-même de réussir -- retourne `None`,
+    `WindowsElevatedProcess.kill()` retombe alors sur `TerminateProcess`
+    du seul processus principal, comportement d'avant ce correctif."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # `restype`/`argtypes` explicites -- une HANDLE Windows tient toujours
+    # dans 32 bits en pratique (garanti par Microsoft), mais le type de
+    # retour par défaut de ctypes pour une fonction non déclarée (`c_int`)
+    # ne le garantit pas de façon fiable sur toutes les configurations :
+    # mieux vaut le dire explicitement que de risquer une troncature
+    # silencieuse, contrairement aux appels déjà en place ailleurs dans ce
+    # fichier qui ne manipulent que des champs de structure déjà typés
+    # (`wintypes.HANDLE`), jamais une valeur de retour brute comme ici.
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    # `AssignProcessToJobObject`/`TerminateJobObject` sont appelées ailleurs
+    # (`_launch_windows`, `WindowsElevatedProcess.kill()`), chacune via son
+    # propre `ctypes.WinDLL("kernel32", ...)` local -- `argtypes`/`restype`
+    # posés ici, sur cette instance-ci, ne s'appliqueraient pas là-bas
+    # (chaque instance `WinDLL` a son propre cache de fonctions). La valeur
+    # de retour de `CreateJobObjectW` ci-dessus reste correctement typée
+    # (`wintypes.HANDLE`, jamais tronquée) au moment où elle est produite --
+    # c'est elle qui compte, pas comment un futur appel la repasse en
+    # argument (une HANDLE valide tient toujours dans 32 bits, garanti par
+    # Microsoft, donc sans risque au passage par le marshalling par défaut
+    # de ctypes -- même niveau de rigueur que le reste de ce fichier pour
+    # `TerminateProcess`/`GetExitCodeProcess`, jamais typés explicitement
+    # non plus).
+    job_handle = kernel32.CreateJobObjectW(None, None)
+    if not job_handle:
+        _log_windows_diagnostic(
+            stderr_log, f"CreateJobObjectW a échoué (GetLastError={_get_last_error()})"
+        )
+        return None
+
+    info = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    ok = kernel32.SetInformationJobObject(
+        job_handle,
+        _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+        ctypes.byref(info),
+        ctypes.sizeof(info),
+    )
+    if not ok:
+        _log_windows_diagnostic(
+            stderr_log, f"SetInformationJobObject a échoué (GetLastError={_get_last_error()})"
+        )
+        kernel32.CloseHandle(job_handle)
+        return None
+    return job_handle
+
+
 def _get_last_error() -> Optional[int]:
     """`ctypes.get_last_error`/`ctypes.FormatError` n'existent que sous
     Windows -- absents du module sur macOS/Linux (même piège que
@@ -214,12 +341,25 @@ class WindowsElevatedProcess:
     hypothèse plausible pour un délai d'environ 12 s avant l'échec, à
     confirmer par ce diagnostic plutôt que supposée)."""
 
-    def __init__(self, h_process: int, stderr_log: Optional[Path] = None, pid: Optional[int] = None):
+    def __init__(
+        self,
+        h_process: int,
+        stderr_log: Optional[Path] = None,
+        pid: Optional[int] = None,
+        job_handle: Optional[int] = None,
+    ):
         self._h_process = h_process
         self._stderr_log = stderr_log
         self._pid = pid
         self._launched_at = time.monotonic()
         self._exit_logged = False
+        # Job Object (`_create_kill_on_close_job`, ci-dessus) -- `None` si sa
+        # création a échoué (rarissime, best-effort) : `kill()` retombe alors
+        # sur `TerminateProcess` du seul processus principal, comme avant ce
+        # correctif (les sous-processus PowerShell éventuels resteraient
+        # orphelins dans ce cas précis, mais l'élévation elle-même n'en est
+        # jamais empêchée).
+        self._job_handle = job_handle
 
     def poll(self) -> Optional[int]:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -258,9 +398,20 @@ class WindowsElevatedProcess:
         return self.poll()
 
     def kill(self) -> None:
+        """Bug corrigé, constaté sur du vrai matériel : `TerminateProcess`
+        seul ne tue que le processus principal -- tout sous-processus
+        PowerShell qu'il a lui-même lancé (`winprocess.py`) continue de
+        tourner, orphelin. `TerminateJobObject` (Job Object assigné à ce
+        processus dès son lancement, `_create_kill_on_close_job`) tue tout
+        l'arbre d'un coup ; retombe sur `TerminateProcess` seul si ce job
+        n'a pas pu être créé (`self._job_handle` vaut alors `None`,
+        best-effort dès la construction)."""
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         PROCESS_TERMINATE_EXIT_CODE = 1
-        kernel32.TerminateProcess(self._h_process, PROCESS_TERMINATE_EXIT_CODE)
+        if self._job_handle:
+            kernel32.TerminateJobObject(self._job_handle, PROCESS_TERMINATE_EXIT_CODE)
+        else:
+            kernel32.TerminateProcess(self._h_process, PROCESS_TERMINATE_EXIT_CODE)
 
 
 def _project_root() -> Path:
@@ -682,7 +833,22 @@ def _launch_windows(
     pid = _windows_process_id(info.hProcess)
     _log_windows_diagnostic(stderr_log, f"ShellExecuteExW a réussi : hProcess={info.hProcess}, PID={pid}")
 
-    return WindowsElevatedProcess(info.hProcess, stderr_log=stderr_log, pid=pid)
+    # Assigné tout de suite après le lancement, avant que le worker élevé
+    # n'ait eu la moindre chance de démarrer un sous-processus PowerShell
+    # (§ ci-dessus, `_create_kill_on_close_job`) -- un enfant lancé après
+    # coup hérite automatiquement du même job, donc de la même garantie de
+    # nettoyage groupé.
+    job_handle = _create_kill_on_close_job(stderr_log)
+    if job_handle is not None:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if not kernel32.AssignProcessToJobObject(job_handle, info.hProcess):
+            _log_windows_diagnostic(
+                stderr_log, f"AssignProcessToJobObject a échoué (GetLastError={_get_last_error()})"
+            )
+            kernel32.CloseHandle(job_handle)
+            job_handle = None
+
+    return WindowsElevatedProcess(info.hProcess, stderr_log=stderr_log, pid=pid, job_handle=job_handle)
 
 
 # --- montage forcé élevé (macOS, cartes GPT/EFI -- §4.4) -------------------

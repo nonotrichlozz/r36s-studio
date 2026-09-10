@@ -1030,6 +1030,107 @@ def test_close_event_without_a_macos_auth_session_does_not_raise(mock_list, mock
     window.close()  # ne doit pas lever, même sans session créée
 
 
+# --- fermeture pendant qu'un worker élevé tourne encore (§2) ---------------
+#
+# Bug corrigé, constaté sur du vrai matériel : fermer la fenêtre pendant
+# qu'une opération élevée tournait encore laissait le worker orphelin --
+# PID survivant, verrous de fichiers maintenus (y compris, dans le pire des
+# cas, sur la carte SD elle-même en cours d'écriture -- un risque réel, pas
+# seulement une gêne pour reconstruire le binaire). `self._runner` ne
+# redevient jamais `None` une fois une opération terminée (seulement
+# réaffecté au worker suivant) -- ces tests vérifient donc que `closeEvent`
+# se base bien sur `LogPanel.is_operation_active()`, pas sur `self._runner
+# is not None` seul, pour ne jamais agir sur un worker déjà terminé depuis
+# longtemps.
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_close_event_leaves_a_finished_runner_alone(mock_list, mock_filter, mock_load, qapp):
+    """`self._runner` pointe encore vers le worker de la toute dernière
+    opération, déjà terminée depuis longtemps (jamais remis à `None`) --
+    `LogPanel.is_operation_active()` vaut alors `False` (`finish_success`/
+    `finish_error` déjà passés), `closeEvent` ne doit rien lui faire."""
+    window = MainWindow()
+    runner = MagicMock()
+    window._runner = runner
+
+    window.close()
+
+    runner.cancel.assert_not_called()
+    runner.force_kill.assert_not_called()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_close_event_force_kills_worker_that_never_responds_to_cancel(mock_list, mock_filter, mock_load, qapp):
+    """Le worker ne s'arrête jamais tout seul (`process.poll()` reste
+    `None` -- toujours actif) -- après le court délai de grâce, `closeEvent`
+    doit forcer l'arrêt plutôt que de laisser un worker (et, sous Windows,
+    tout sous-processus PowerShell qu'il aurait lui-même lancé) orphelin."""
+    window = MainWindow()
+    window._log_panel.start_operation("Test")
+    runner = MagicMock()
+    process = MagicMock()
+    process.poll.return_value = None
+    runner._process = process
+    window._runner = runner
+
+    with patch("r36s_studio.gui.main_window.time.sleep"), patch(
+        "r36s_studio.gui.main_window.time.monotonic", side_effect=[0.0, 0.1, 0.2, 3.0]
+    ):
+        window.close()
+
+    runner.cancel.assert_called_once()
+    runner.force_kill.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_close_event_skips_force_kill_once_cancel_succeeds_quickly(mock_list, mock_filter, mock_load, qapp):
+    """L'annulation coopérative a le temps d'aboutir avant le délai de
+    grâce (`process.poll()` renvoie un vrai code de sortie) -- jamais
+    besoin de forcer l'arrêt dans ce cas, l'écriture en cours a pu se
+    terminer/s'annuler proprement."""
+    window = MainWindow()
+    window._log_panel.start_operation("Test")
+    runner = MagicMock()
+    process = MagicMock()
+    process.poll.return_value = 0
+    runner._process = process
+    window._runner = runner
+
+    with patch("r36s_studio.gui.main_window.time.sleep"), patch(
+        "r36s_studio.gui.main_window.time.monotonic", side_effect=[0.0, 0.1]
+    ):
+        window.close()
+
+    runner.cancel.assert_called_once()
+    runner.force_kill.assert_not_called()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_close_event_terminates_partition_job_runner_too(mock_list, mock_filter, mock_load, qapp):
+    """`self._runner` peut aussi être un `PartitionJobRunner` (étapes A/B/D/
+    E, sans élévation, §4.4) -- pas de `_process`/`force_kill` à sa
+    disposition (ni orphelin de sous-processus possible, un QThread meurt
+    avec le process principal), mais l'annulation coopérative reste
+    appelée sans lever, `force_kill` manquant simplement ignoré."""
+    window = MainWindow()
+    window._log_panel.start_operation("Test")
+    runner = MagicMock(spec=["cancel"])  # ni _process, ni force_kill
+    window._runner = runner
+
+    window.close()  # ne doit pas lever
+
+    runner.cancel.assert_called_once()
+
+
 # --- repli élevé pour le montage forcé d'une carte GPT/EFI (§4.4) ----------
 #
 # Confirmé sur du vrai matériel : le montage forcé lui-même (`mount -t

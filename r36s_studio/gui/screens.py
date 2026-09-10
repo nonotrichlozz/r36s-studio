@@ -1502,6 +1502,13 @@ class LogPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setProperty("role", "logPanel")
+        # État explicite plutôt que `_cancel_button.isVisible()` -- piège Qt
+        # déjà rencontré ailleurs dans ce fichier : `isVisible()` ne reflète
+        # `setVisible(True)` qu'une fois la fenêtre réellement affichée
+        # (chaîne de visibilité des parents comprise), pas dans un test
+        # hors écran qui ne l'affiche jamais. `is_operation_active()` doit
+        # rester fiable même dans ce cas (`MainWindow.closeEvent`, §2).
+        self._operation_active = False
         layout = QVBoxLayout(self)
 
         header_row = QHBoxLayout()
@@ -1558,6 +1565,7 @@ class LogPanel(QFrame):
         à `finish_success`/`finish_error`, masque aussi les boutons
         Éjecter/Afficher -- rien à proposer tant qu'aucune opération n'a
         encore eu lieu."""
+        self._operation_active = False
         self._header_label.setText(tr("log_header_idle"))
         self._bar.setVisible(False)
         self._speed_label.setVisible(False)
@@ -1567,6 +1575,7 @@ class LogPanel(QFrame):
         self._reveal_button.setVisible(False)
 
     def start_operation(self, title: str) -> None:
+        self._operation_active = True
         self._header_label.setText(tr("log_header_active", title=title))
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
@@ -1626,9 +1635,21 @@ class LogPanel(QFrame):
     def set_cancel_enabled(self, enabled: bool) -> None:
         self._cancel_button.setEnabled(enabled)
 
+    def is_operation_active(self) -> bool:
+        """Vrai entre `start_operation` et `finish_success`/`finish_error`
+        -- drapeau explicite plutôt que `_cancel_button.isVisible()` (qui
+        ne reflète `setVisible(True)` qu'une fois la fenêtre réellement
+        affichée, jamais le cas dans un test hors écran). Utilisé par
+        `MainWindow.closeEvent` pour savoir s'il faut arrêter un worker
+        élevé encore en cours avant de fermer (§2 -- un worker orphelin
+        peut garder un verrou sur une carte SD, un risque réel plutôt
+        qu'une simple gêne)."""
+        return self._operation_active
+
     # --- fin d'opération : résultat affiché dans le journal, pas un écran -
 
     def finish_success(self, message: str, allow_eject: bool, reveal_path: Optional[str]) -> None:
+        self._operation_active = False
         self.append_log(message)
         self._reveal_path = reveal_path
         self._reveal_button.setVisible(bool(reveal_path))
@@ -1640,6 +1661,7 @@ class LogPanel(QFrame):
         self._header_label.setText(tr("log_header_idle"))
 
     def finish_error(self, message: str, details: str = "") -> None:
+        self._operation_active = False
         self.append_log(message)
         if details and details != message:
             self.append_log(details)

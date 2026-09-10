@@ -695,6 +695,137 @@ def test_windows_launch_success_logs_pid_to_stderr_log(mock_system, mock_windll,
     assert "4242" in content
 
 
+# --- Job Object : tuer tout l'arbre de processus, pas juste le worker -----
+#
+# Bug corrigé, constaté sur du vrai matériel : fermer la fenêtre pendant
+# qu'un worker élevé tournait encore laissait ce worker orphelin, PID
+# survivant, verrou de fichiers maintenu -- et pire, les sous-processus
+# PowerShell qu'il lance lui-même (`winprocess.py`) survivaient eux aussi,
+# `TerminateProcess` seul ne terminant jamais les enfants d'un processus.
+# `_launch_windows` assigne désormais le worker à un Job Object
+# (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) dès son lancement -- ces tests
+# distinguent le mock "shell32" (ShellExecuteExW) du mock "kernel32"
+# (Job Object) via un `side_effect` sur `ctypes.WinDLL`, contrairement aux
+# tests existants ci-dessus qui n'ont besoin que d'un seul mock partagé.
+
+
+def _windll_side_effect(shell32_mock, kernel32_mock):
+    def _factory(name, use_last_error=True):
+        return shell32_mock if name == "shell32" else kernel32_mock
+
+    return _factory
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_launch_assigns_process_to_kill_on_close_job(mock_system, mock_windll):
+    shell32 = MagicMock()
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        info.hProcess = 4242
+        return 1
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    shell32.GetProcessId.return_value = 9001
+
+    kernel32 = MagicMock()
+    kernel32.CreateJobObjectW.return_value = 555
+    kernel32.SetInformationJobObject.return_value = 1
+    kernel32.AssignProcessToJobObject.return_value = 1
+
+    mock_windll.side_effect = _windll_side_effect(shell32, kernel32)
+
+    process = elevate.launch_elevated_worker(["backup", "--device", "/dev/whatever"])
+
+    kernel32.CreateJobObjectW.assert_called_once()
+    kernel32.SetInformationJobObject.assert_called_once()
+    kernel32.AssignProcessToJobObject.assert_called_once_with(555, 4242)
+    assert process._job_handle == 555
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_launch_succeeds_even_if_job_object_creation_fails(mock_system, mock_windll):
+    """Best-effort : la création du Job Object est une amélioration de
+    nettoyage, jamais une condition de l'élévation elle-même -- un échec
+    ici (rarissime) ne doit jamais empêcher le worker de démarrer."""
+    shell32 = MagicMock()
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        info.hProcess = 4242
+        return 1
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    shell32.GetProcessId.return_value = 9001
+
+    kernel32 = MagicMock()
+    kernel32.CreateJobObjectW.return_value = 0  # échec
+
+    mock_windll.side_effect = _windll_side_effect(shell32, kernel32)
+
+    process = elevate.launch_elevated_worker(["backup", "--device", "/dev/whatever"])
+
+    assert isinstance(process, elevate.WindowsElevatedProcess)
+    assert process._job_handle is None
+    kernel32.AssignProcessToJobObject.assert_not_called()
+
+
+@patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
+@patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
+def test_windows_launch_succeeds_even_if_job_object_assignment_fails(mock_system, mock_windll):
+    shell32 = MagicMock()
+
+    def _shell_execute(info_ref):
+        info = info_ref._obj if hasattr(info_ref, "_obj") else info_ref
+        info.hProcess = 4242
+        return 1
+
+    shell32.ShellExecuteExW.side_effect = _shell_execute
+    shell32.GetProcessId.return_value = 9001
+
+    kernel32 = MagicMock()
+    kernel32.CreateJobObjectW.return_value = 555
+    kernel32.SetInformationJobObject.return_value = 1
+    kernel32.AssignProcessToJobObject.return_value = 0  # échec
+
+    mock_windll.side_effect = _windll_side_effect(shell32, kernel32)
+
+    process = elevate.launch_elevated_worker(["backup", "--device", "/dev/whatever"])
+
+    assert isinstance(process, elevate.WindowsElevatedProcess)
+    assert process._job_handle is None
+    kernel32.CloseHandle.assert_called_once_with(555)
+
+
+def test_windows_elevated_process_kill_terminates_the_whole_job_when_available():
+    with patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True) as mock_windll:
+        kernel32 = MagicMock()
+        mock_windll.return_value = kernel32
+        process = elevate.WindowsElevatedProcess(h_process=4242, job_handle=555)
+
+        process.kill()
+
+        kernel32.TerminateJobObject.assert_called_once_with(555, 1)
+        kernel32.TerminateProcess.assert_not_called()
+
+
+def test_windows_elevated_process_kill_falls_back_to_terminate_process_without_job():
+    """Le job n'a pas pu être créé (`job_handle=None`, best-effort) --
+    retombe sur le comportement d'avant ce correctif plutôt que de ne rien
+    tuer du tout."""
+    with patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True) as mock_windll:
+        kernel32 = MagicMock()
+        mock_windll.return_value = kernel32
+        process = elevate.WindowsElevatedProcess(h_process=4242, job_handle=None)
+
+        process.kill()
+
+        kernel32.TerminateProcess.assert_called_once_with(4242, 1)
+        kernel32.TerminateJobObject.assert_not_called()
+
+
 @patch("r36s_studio.gui.elevate.ctypes.WinDLL", create=True)
 @patch("r36s_studio.gui.elevate.platform.system", return_value="Windows")
 def test_windows_launch_failure_logs_last_error_to_stderr_log(mock_system, mock_windll, tmp_path):

@@ -1929,6 +1929,31 @@ def test_log_panel_starts_idle(qapp):
     assert panel._reveal_button.isVisible() is False
 
 
+def test_log_panel_is_operation_active_tracks_start_and_finish(qapp):
+    """Drapeau explicite (`_operation_active`), pas `_cancel_button.
+    isVisible()` -- ce dernier ne reflète `setVisible(True)` qu'une fois la
+    fenêtre réellement affichée, jamais le cas ici (`LogPanel` seul, hors
+    écran). `MainWindow.closeEvent` (§2) en dépend pour savoir s'il faut
+    arrêter un worker élevé encore en cours avant de fermer."""
+    panel = LogPanel()
+    assert panel.is_operation_active() is False
+
+    panel.start_operation("Test")
+    assert panel.is_operation_active() is True
+
+    panel.finish_success("ok", allow_eject=False, reveal_path=None)
+    assert panel.is_operation_active() is False
+
+    panel.start_operation("Test")
+    assert panel.is_operation_active() is True
+    panel.finish_error("erreur")
+    assert panel.is_operation_active() is False
+
+    panel.start_operation("Test")
+    panel.set_idle()
+    assert panel.is_operation_active() is False
+
+
 def test_log_panel_start_operation_shows_header_progress_and_cancel(qapp):
     panel = LogPanel()
     panel.show()  # isVisible() ne reflète setVisible() qu'une fois affiché

@@ -13,10 +13,10 @@ workflow `.github/workflows/build.yml`) :
     packaging/build_windows.ps1
 
 Résultat : `dist/R36S Studio/R36S Studio.exe` (+ ses dépendances à côté,
-onedir -- PyInstaller ne permet pas un vrai onefile sans copier les DLL
-Qt à chaque lancement dans un dossier temporaire, plus lent au démarrage
-et sans bénéfice ici puisque l'artefact est de toute façon distribué en
-`.zip`, §7)."""
+onedir -- jamais onefile : PySide6 est sous LGPLv3, qui exige que les DLL
+Qt restent des fichiers séparés et remplaçables plutôt que fusionnées dans
+un binaire opaque, voir `packaging/README.md` §2 « Onedir, jamais onefile »
+pour le détail. L'artefact est de toute façon distribué en `.zip`, §7)."""
 
 import sys
 from datetime import datetime

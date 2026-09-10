@@ -114,7 +114,27 @@ faire manuellement. Le numéro de version affiché dans l'app elle-même
 `r36s_studio/__init__.py::__version__`, à mettre à jour avant de poser le
 tag pour que les deux restent cohérents.
 
-## Ce que ce dépôt ne contient jamais
+## Licences
 
-Aucun token, aucune ROM, aucun BIOS, aucune image système `.img` — voir
-§9 de `CLAUDE.md` pour le détail complet des contraintes du projet.
+Ce projet est distribué sous licence **GNU General Public License version 3
+(GPLv3)** — texte intégral dans [`LICENSE`](LICENSE). La dépendance
+principale a des implications à connaître avant toute redistribution :
+
+| Dépendance | Rôle | Licence |
+|---|---|---|
+| [PySide6](https://pypi.org/project/PySide6/) (Qt pour Python) | Interface graphique | [LGPLv3](https://www.gnu.org/licenses/lgpl-3.0.html) (alternative : licence commerciale Qt, payante — ce projet utilise la voie LGPL) |
+| [pytest](https://pypi.org/project/pytest/) (dépendance de développement uniquement, jamais distribuée avec l'app) | Suite de tests | [MIT](https://github.com/pytest-dev/pytest/blob/main/LICENSE) |
+
+**Obligation LGPLv3 de PySide6, et comment ce projet la respecte** : la LGPL
+exige que l'utilisateur final puisse remplacer la bibliothèque Qt par une
+version modifiée ou plus récente de son choix — impossible si elle est
+fusionnée dans un exécutable opaque. Les trois constructions PyInstaller
+produisent donc volontairement un dossier **onedir**, jamais un
+**onefile** (voir [Construire un binaire
+localement](#construire-un-binaire-localement) ci-dessus) : les
+DLL/dylib/so de Qt restent des fichiers séparés dans `_internal/PySide6/`,
+librement remplaçables sans recompiler l'application.
+
+`gui/assets/console.png` est une photographie prise par l'auteur du projet,
+qui en détient les droits — couverte par la licence de ce dépôt comme le
+reste du code et des ressources.

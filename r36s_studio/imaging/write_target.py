@@ -27,6 +27,7 @@ import subprocess
 from typing import Iterator, List
 
 from r36s_studio.devices import Device
+from r36s_studio.winprocess import no_console_kwargs
 
 from .source import raw_read_path
 
@@ -94,6 +95,7 @@ def _windows_all_volume_paths(device_path: str) -> List[str]:
         capture_output=True,
         text=True,
         check=False,
+        **no_console_kwargs(),
     )
     if result.returncode != 0:
         return []

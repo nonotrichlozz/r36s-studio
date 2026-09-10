@@ -32,6 +32,8 @@ import re
 import subprocess
 from typing import List
 
+from r36s_studio.winprocess import no_console_kwargs
+
 _PHYSICAL_DRIVE_RE = re.compile(r"PhysicalDrive(\d+)$", re.IGNORECASE)
 
 
@@ -75,6 +77,7 @@ def _windows_drive_letters(disk_number: int) -> List[str]:
         capture_output=True,
         text=True,
         check=True,
+        **no_console_kwargs(),
     )
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 

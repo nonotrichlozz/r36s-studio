@@ -77,6 +77,7 @@ from typing import List, Optional
 
 from r36s_studio.devices import Device
 from r36s_studio.partitions.locate import PartitionInfo, list_partitions
+from r36s_studio.winprocess import no_console_kwargs
 
 from .gpt import (
     GptHeader,
@@ -553,7 +554,10 @@ def _format_windows(device_path: str, label: str, filesystem: str) -> Optional[s
         "}\n"
     ) % (disk_number, _WINDOWS_PARTITION_RETRY_COUNT, _WINDOWS_PARTITION_RETRY_DELAY_MS, fs_name, label)
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", command], capture_output=True, text=True
+        ["powershell", "-NoProfile", "-Command", command],
+        capture_output=True,
+        text=True,
+        **no_console_kwargs(),
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()

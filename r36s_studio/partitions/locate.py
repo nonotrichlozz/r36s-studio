@@ -82,6 +82,8 @@ import time
 from dataclasses import dataclass, replace
 from typing import Callable, Optional
 
+from r36s_studio.winprocess import no_console_kwargs
+
 BOOT_LABEL = "BOOT"
 EASYROMS_LABEL = "EASYROMS"
 
@@ -567,6 +569,7 @@ def _list_windows(device_path: str) -> list[PartitionInfo]:
         capture_output=True,
         text=True,
         check=True,
+        **no_console_kwargs(),
     )
     volumes = _as_list(json.loads(result.stdout)) if result.stdout.strip() else []
     volumes.sort(key=lambda v: v.get("PartitionNumber") if v.get("PartitionNumber") is not None else 0)

@@ -22,6 +22,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+from r36s_studio.winprocess import no_console_kwargs
+
 from .base import Device, DeviceProvider
 
 
@@ -63,6 +65,7 @@ class WindowsDeviceProvider(DeviceProvider):
             capture_output=True,
             text=True,
             check=True,
+            **no_console_kwargs(),
         )
         return result.stdout
 

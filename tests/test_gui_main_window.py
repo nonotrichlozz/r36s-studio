@@ -2487,6 +2487,59 @@ def test_prepare_button_starts_wizard_on_step_one(mock_list, mock_filter, mock_d
     assert window._wizard_poll_timer.isActive() is True
 
 
+# --- cycle de vie du sondage automatique journalisé une fois chacun -------
+#
+# Bug rapporté sur le binaire empaqueté : impossible de savoir depuis le
+# journal si `_wizard_poll_timer` démarre bien et reste actif -- seul son
+# absence totale de détection automatique (jusqu'au clic manuel sur
+# Rafraîchir) était visible. `_start_wizard_poll_timer`/
+# `_stop_wizard_poll_timer` journalisent désormais chaque vraie transition
+# arrêté <-> actif, une seule fois -- jamais à chaque relance interne
+# pendant l'attente (§5 mode assisté).
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_poll_start_is_logged_once_not_on_every_internal_restart(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+
+    window._assisted_landing.prepare_requested.emit()  # démarre le sondage (étape 1)
+    window._on_wizard_refresh_requested()  # relance manuelle -- déjà actif, rien à trouver
+    window._on_wizard_poll()  # tick automatique -- toujours rien à trouver
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert log_text.count("Sondage automatique de la carte démarré") == 1
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_wizard_poll_stop_is_logged_once_when_card_found(mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    fingerprint_runner_class = _mock_fingerprint_runner_class()
+
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+
+    with patch("r36s_studio.gui.main_window.WizardFingerprintRunner", fingerprint_runner_class):
+        window._on_wizard_poll()  # trouve la carte -> arrête le minuteur pour l'empreinte
+        window._on_wizard_fingerprint_ready(WizardJob.DETECT_SOURCE, device, "fp-1")  # déjà arrêté
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert log_text.count("Sondage automatique de la carte démarré") == 1
+    assert log_text.count("Sondage automatique de la carte arrêté") == 1
+    assert window._wizard_poll_timer.isActive() is False
+
+
 def _mock_fingerprint_runner_class():
     """Même principe que `_mock_identify_runner_class`, pour
     `WizardFingerprintRunner` (§5 mode assisté, correctif : plus de
@@ -2681,6 +2734,37 @@ def test_wizard_poll_logs_a_stall_when_gap_far_exceeds_the_normal_interval(
     log_text = window._log_panel._log_view.toPlainText()
     assert "sondage automatique" in log_text
     assert "210" in log_text
+    # Corrige plutôt que seulement constater (§1) : le minuteur est relancé
+    # directement (`.start()`), sans passer par `_start_wizard_poll_timer`
+    # (qui remettrait `_wizard_poll_stall_warned` à `False` et rouvrirait la
+    # porte à répéter la même ligne si le ralentissement persiste).
+    assert window._wizard_poll_timer.isActive() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_poll_stall_message_does_not_repeat_while_the_stall_persists(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp
+):
+    """Défaut rapporté sur le binaire empaqueté : la même ligne de chien de
+    garde apparaissait à chaque tick tant que l'énumération des disques
+    restait lente, noyant le journal. Deux sondages consécutifs, tous deux
+    très au-delà du seuil (ralentissement qui persiste) -- une seule ligne
+    doit apparaître, pas deux."""
+    window = MainWindow()
+    window._assisted_landing.prepare_requested.emit()
+    window._wizard_last_poll_monotonic = None
+
+    with patch("r36s_studio.gui.main_window.time.monotonic", side_effect=[100.0, 310.0, 520.0]):
+        window._on_wizard_poll()  # t=100, rien à comparer
+        window._on_wizard_poll()  # t=310, 210 s plus tard -- stall, journalisé
+        window._on_wizard_poll()  # t=520, 210 s plus tard -- stall persistant, pas rejournalisé
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert log_text.count("sondage automatique") == 1
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")

@@ -128,11 +128,19 @@ STRINGS = {
     # que là) -- combien de périphériques retenus/écartés à un sondage du
     # mode assisté, avec la raison de chaque exclusion.
     "wizard_diagnostic_summary": "Détection : {accepted} carte(s) retenue(s), {rejected} écartée(s)",
-    # Diagnostic pur (§5 mode assisté, `_check_wizard_poll_stall`) : signale
-    # un sondage automatique resté silencieux anormalement longtemps --
-    # bug rapporté, non reproduit en isolation, voir la note dédiée.
+    # Cycle de vie du minuteur de sondage automatique (`_start_wizard_poll_
+    # timer`/`_stop_wizard_poll_timer`), journalisé une fois par transition
+    # réelle (jamais à chaque relance interne pendant l'attente, §5 mode
+    # assisté) -- rend visible si le sondage démarre bien et reste actif,
+    # plutôt que de laisser deviner son état.
+    "wizard_poll_started": "Sondage automatique de la carte démarré.",
+    "wizard_poll_stopped": "Sondage automatique de la carte arrêté.",
+    # Chien de garde (§5 mode assisté, `_check_wizard_poll_stall`) : signale
+    # un sondage automatique resté silencieux anormalement longtemps et le
+    # relance -- une seule ligne par épisode de ralentissement, jamais
+    # répétée tant qu'il persiste (`_wizard_poll_stall_warned`).
     "wizard_poll_stall_detected": (
-        "Le sondage automatique de la carte semblait interrompu depuis {seconds} s."
+        "Le sondage automatique de la carte semblait interrompu depuis {seconds} s — relancé."
     ),
     "wizard_step1_title": "1. Insère ta carte SD d'origine",
     "wizard_step1_instruction": "Branche l'ancienne carte SD de ta console sur ton ordinateur.",

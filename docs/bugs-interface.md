@@ -350,3 +350,36 @@
 
 ---
 
+
+---
+
+✅ **Question d'origine répondue, confirmée sur le binaire empaqueté** : le
+minuteur ne s'arrête pas réellement -- il tourne, mais chaque cycle est
+trop lent (§4.1, trois processus PowerShell séquentiels par sondage sous
+Windows, corrigé en une seule invocation). Le chien de garde le
+journalisait donc à répétition, à chaque tick, tant que le ralentissement
+durait -- exactement le symptôme rapporté (« constate sans corriger »).
+**Corrigé, en plus du correctif §4.1 lui-même :**
+- `_wizard_poll_stall_warned` évite de répéter la même ligne tant qu'un
+  même épisode de ralentissement persiste -- remis à `False` dès qu'un
+  sondage retrouve un rythme normal (`elapsed <= seuil`), jamais par la
+  relance elle-même (qui rouvrirait la porte à la répétition si le
+  ralentissement dure).
+- Le chien de garde relance directement le minuteur (`_wizard_poll_timer.
+  start()`) au lieu de seulement journaliser -- un redémarrage explicite
+  ne coûte rien si le minuteur tournait déjà, et corrige réellement le cas
+  où il se serait arrêté sans que rien d'autre ne le relance. Reste
+  structurellement incapable de détecter un minuteur *complètement* mort
+  (`_check_wizard_poll_stall` n'est appelée que par le `timeout` du
+  minuteur lui-même, §5 mode assisté -- un minuteur réellement arrêté ne
+  rappellerait plus jamais cette fonction) ; non traité ici, aucun cas
+  réel de ce genre n'ayant été confirmé une fois le vrai ralentissement
+  identifié.
+- `_start_wizard_poll_timer`/`_stop_wizard_poll_timer` (nouveau, remplace
+  les appels directs `.start()`/`.stop()` dispersés) journalisent chaque
+  vraie transition arrêté/actif une seule fois (`isActive()` évalué avant
+  d'agir) -- jamais à chaque relance interne pendant l'attente (ex. cycle
+  « même carte, on continue d'attendre » de DETECT_TARGET) -- pour rendre
+  le cycle de vie du sondage visible dans le journal sans avoir à
+  instrumenter le code à chaque doute (même principe que la ligne de
+  commande complète journalisée pour tout worker élevé, §4.3).

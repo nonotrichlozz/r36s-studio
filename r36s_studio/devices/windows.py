@@ -25,6 +25,14 @@ import subprocess
 from .base import Device, DeviceProvider
 
 
+_LIST_DEVICES_COMMAND = (
+    "$disks = Get-Disk; "
+    "$partitions = Get-Partition; "
+    "$drives = Get-CimInstance Win32_DiskDrive | Select-Object Index, MediaType; "
+    "@{ Disks = $disks; Partitions = $partitions; Drives = $drives } | ConvertTo-Json -Depth 3"
+)
+
+
 class WindowsDeviceProvider(DeviceProvider):
     def list_devices(self, allow_disk_image: bool = False) -> list[Device]:
         # `allow_disk_image` n'a rien à faire ici : `Get-Disk` ne distingue
@@ -33,12 +41,20 @@ class WindowsDeviceProvider(DeviceProvider):
         # Le paramètre reste accepté pour respecter l'interface commune de
         # `DeviceProvider`.
         del allow_disk_image
-        disks_raw = self._run_powershell("Get-Disk | ConvertTo-Json -Depth 3")
-        partitions_raw = self._run_powershell("Get-Partition | ConvertTo-Json -Depth 3")
-        drives_raw = self._run_powershell(
-            "Get-CimInstance Win32_DiskDrive | Select-Object Index, MediaType | ConvertTo-Json -Depth 3"
-        )
-        return self._build(disks_raw, partitions_raw, drives_raw)
+        # Une seule invocation PowerShell pour les trois requêtes (plutôt que
+        # trois `subprocess.run` séquentiels) -- chaque lancement de
+        # `powershell.exe` coûte plusieurs centaines de millisecondes à
+        # plus d'une seconde (démarrage à froid, antivirus qui scrute
+        # chaque nouveau processus, plus sensible sur un binaire empaqueté
+        # fraîchement construit) ; multiplié par trois à chaque sondage
+        # automatique du parcours de clonage (§5, toutes les 1,5 s), ça
+        # suffit à dépasser le seuil du chien de garde (`_wizard_poll_timer`,
+        # `gui/main_window.py`) à quasiment chaque cycle -- constaté en usage
+        # réel sur le binaire empaqueté (le sondage semble "ne rien
+        # détecter" alors qu'il tourne, simplement trop lentement).
+        combined_raw = self._run_powershell(_LIST_DEVICES_COMMAND)
+        combined = json.loads(combined_raw) if combined_raw.strip() else {}
+        return self._build(combined.get("Disks"), combined.get("Partitions"), combined.get("Drives"))
 
     @staticmethod
     def _run_powershell(command: str) -> str:
@@ -51,10 +67,10 @@ class WindowsDeviceProvider(DeviceProvider):
         return result.stdout
 
     @classmethod
-    def _build(cls, disks_raw: str, partitions_raw: str, drives_raw: str = "") -> list[Device]:
-        disks = cls._as_list(json.loads(disks_raw)) if disks_raw.strip() else []
-        partitions = cls._as_list(json.loads(partitions_raw)) if partitions_raw.strip() else []
-        drives = cls._as_list(json.loads(drives_raw)) if drives_raw.strip() else []
+    def _build(cls, disks_raw, partitions_raw, drives_raw=None) -> list[Device]:
+        disks = cls._as_list(disks_raw)
+        partitions = cls._as_list(partitions_raw)
+        drives = cls._as_list(drives_raw)
         media_type_by_index = {
             int(d["Index"]): d.get("MediaType") for d in drives if d.get("Index") is not None
         }

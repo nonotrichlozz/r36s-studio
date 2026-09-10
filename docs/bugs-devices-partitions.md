@@ -528,3 +528,23 @@
 
 ---
 
+
+---
+
+⚠️ **Bug corrigé, confirmé sur le binaire empaqueté : le sondage automatique
+du parcours de clonage (§5, `_wizard_poll_timer`, toutes les 1,5 s) semblait
+ne jamais détecter une carte insérée après l'ouverture de l'app, forçant un
+clic manuel sur Rafraîchir — contraire à §1.** Cause : `list_devices()`
+lançait trois processus PowerShell séquentiels (`Get-Disk`, `Get-Partition`,
+`Get-CimInstance Win32_DiskDrive`), chacun coûtant de quelques centaines de
+millisecondes à plus d'une seconde à démarrer (plus sensible sur un binaire
+empaqueté fraîchement construit, plus scruté par l'antivirus) — exécutés
+*synchrones sur le thread Qt principal* à chaque tick du minuteur. Le cumul
+dépassait régulièrement le seuil du chien de garde (`_check_wizard_poll_
+stall`, §5), qui journalisait un ralentissement à répétition sans que le
+minuteur lui-même ne soit en cause. **Corrigé** : `_LIST_DEVICES_COMMAND`
+combine les trois requêtes en une seule invocation PowerShell (un objet
+`@{ Disks = …; Partitions = …; Drives = … } | ConvertTo-Json`), une seule
+fois par sondage plutôt que trois. `_build` accepte désormais directement
+les objets déjà désérialisés (`combined.get("Disks")`, etc.) plutôt que des
+chaînes JSON brutes.

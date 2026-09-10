@@ -17,64 +17,56 @@ from unittest.mock import patch
 from r36s_studio.devices.windows import WindowsDeviceProvider
 from r36s_studio.safety import SafetyConfig, filter_devices
 
-DISKS = json.dumps(
-    [
-        {
-            "Number": 0,
-            "FriendlyName": "NVMe SSD",
-            "Size": 512_000_000_000,
-            "BusType": "NVMe",
-            "IsSystem": True,
-            "IsBoot": True,
-            "IsRemovable": None,
-        },
-        {
-            "Number": 1,
-            "FriendlyName": "Realtek PCIE CardReader",
-            "Size": 128_000_000_000,
-            "BusType": "SCSI",
-            "IsSystem": False,
-            "IsBoot": False,
-            "IsRemovable": None,
-        },
-        {
-            "Number": 2,
-            "FriendlyName": "SanDisk Ultra",
-            "Size": 32_000_000_000,
-            "BusType": "USB",
-            "IsSystem": False,
-            "IsBoot": False,
-            "IsRemovable": True,
-        },
-    ]
-)
+DISKS = [
+    {
+        "Number": 0,
+        "FriendlyName": "NVMe SSD",
+        "Size": 512_000_000_000,
+        "BusType": "NVMe",
+        "IsSystem": True,
+        "IsBoot": True,
+        "IsRemovable": None,
+    },
+    {
+        "Number": 1,
+        "FriendlyName": "Realtek PCIE CardReader",
+        "Size": 128_000_000_000,
+        "BusType": "SCSI",
+        "IsSystem": False,
+        "IsBoot": False,
+        "IsRemovable": None,
+    },
+    {
+        "Number": 2,
+        "FriendlyName": "SanDisk Ultra",
+        "Size": 32_000_000_000,
+        "BusType": "USB",
+        "IsSystem": False,
+        "IsBoot": False,
+        "IsRemovable": True,
+    },
+]
 
-PARTITIONS = json.dumps(
-    [
-        {"DiskNumber": 0, "DriveLetter": "C"},
-        {"DiskNumber": 1, "DriveLetter": "E"},
-        {"DiskNumber": 2, "DriveLetter": "F"},
-    ]
-)
+PARTITIONS = [
+    {"DiskNumber": 0, "DriveLetter": "C"},
+    {"DiskNumber": 1, "DriveLetter": "E"},
+    {"DiskNumber": 2, "DriveLetter": "F"},
+]
 
-DRIVES = json.dumps(
-    [
-        {"Index": 0, "MediaType": "Fixed hard disk media"},
-        {"Index": 1, "MediaType": "Removable Media"},
-        {"Index": 2, "MediaType": "Removable Media"},
-    ]
-)
+DRIVES = [
+    {"Index": 0, "MediaType": "Fixed hard disk media"},
+    {"Index": 1, "MediaType": "Removable Media"},
+    {"Index": 2, "MediaType": "Removable Media"},
+]
+
+# Une seule invocation PowerShell désormais (`_LIST_DEVICES_COMMAND`) --
+# renvoie les trois jeux de données combinés dans un unique objet JSON,
+# quel que soit le contenu exact de la commande.
+COMBINED = json.dumps({"Disks": DISKS, "Partitions": PARTITIONS, "Drives": DRIVES})
 
 
 def _fake_run(cmd, **kwargs):
-    command = cmd[-1]
-    if "Win32_DiskDrive" in command:
-        stdout = DRIVES
-    elif "Get-Partition" in command:
-        stdout = PARTITIONS
-    else:
-        stdout = DISKS
-    return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+    return subprocess.CompletedProcess(cmd, 0, stdout=COMBINED, stderr="")
 
 
 @patch("r36s_studio.devices.windows.subprocess.run", side_effect=_fake_run)
@@ -83,6 +75,17 @@ def test_sd_card_reader_without_is_removable_is_detected_via_media_type(mock_run
     reader = devices["Realtek PCIE CardReader"]
     assert reader.removable is True
     assert reader.bus == "SCSI"
+
+
+@patch("r36s_studio.devices.windows.subprocess.run", side_effect=_fake_run)
+def test_list_devices_makes_a_single_powershell_call(mock_run):
+    # Sondage automatique du parcours de clonage (§5, toutes les 1,5 s) --
+    # trois appels PowerShell séquentiels par cycle suffisaient à dépasser
+    # le seuil du chien de garde sur le binaire empaqueté (chaque
+    # lancement de powershell.exe coûte plusieurs centaines de ms). Une
+    # seule invocation combinée (`_LIST_DEVICES_COMMAND`) plutôt que trois.
+    WindowsDeviceProvider().list_devices()
+    assert mock_run.call_count == 1
 
 
 @patch("r36s_studio.devices.windows.subprocess.run", side_effect=_fake_run)

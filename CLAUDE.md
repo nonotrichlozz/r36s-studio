@@ -213,6 +213,14 @@ déterminer si un disque est amovible quand `Get-Disk.IsRemovable` est absent
 pas `USB`). Utilisé seulement en complément, jamais pour contredire une valeur
 explicite ; le repli `bus == "USB"` reste le dernier recours.
 
+`_LIST_DEVICES_COMMAND` combine les trois requêtes en une seule invocation
+PowerShell (`@{ Disks = …; Partitions = …; Drives = … } | ConvertTo-Json`)
+plutôt que trois processus séquentiels -- chacun coûtant de quelques
+centaines de ms à plus d'une seconde à démarrer, plus sensible sur un
+binaire empaqueté, le cumul pouvait dépasser le seuil du chien de garde de
+sondage du parcours de clonage (§5) à chaque tick, empêchant en pratique
+la détection automatique d'une carte insérée (bug corrigé, confirmé).
+
 > 📚 Historique détaillé : [docs/bugs-devices-partitions.md](docs/bugs-devices-partitions.md)
 
 ### 4.2 `safety/` — le garde-fou
@@ -1834,6 +1842,16 @@ l'écran de démarrage — `config.py` (première vraie implémentation de
 `~/.config/r36s-studio/config.json`, §6) mémorise `ui_mode`
 (`"assisted"` par défaut, `"expert"`) d'un lancement à l'autre.
 
+✅ **Vérifié, sur signalement du binaire empaqueté ouvrant en mode expert** :
+`config_dir()` résout `~/.config/r36s-studio/` (macOS/Linux) ou
+`%APPDATA%\r36s-studio\` (Windows) via `Path.home()`/`os.environ`, sans
+branche `sys.frozen` -- même fichier lu par le binaire empaqueté et par les
+sources, sur la même machine. `load_config()` retombe bien sur `AppConfig()`
+(`ui_mode="assisted"`) dès que le fichier est absent ou invalide, testé
+explicitement. Le mode expert observé provenait d'un `config.json` déjà
+présent sur la machine de test, écrit par un essai manuel antérieur du
+bouton « Mode expert » -- persistance attendue, pas un défaut du binaire.
+
 **Accueil** (`gui/screens.py::AssistedLandingScreen`) : sa propre
 `ConsoleStage` (instance séparée de celle de `MainView`, plus grande,
 centrée — les deux écrans ne sont jamais affichés en même temps, donc
@@ -2197,6 +2215,27 @@ réellement bloqué après un retour à l'accueil puis une relance, cas non
 reproduit en isolation, ci-dessus) reste donc tout aussi ouverte
 qu'avant -- ce correctif rend seulement le diagnostic utilisable pour y
 répondre, en éliminant le bruit qui aurait masqué un vrai signal.
+
+✅ **Question d'origine répondue** : le minuteur ne s'arrête pas réellement --
+il tourne, mais chaque cycle était trop lent (§4.1, corrigé). Le chien de
+garde le journalisait donc à répétition, à chaque tick, tant que le
+ralentissement durait. **Corrigé** : `_wizard_poll_stall_warned` évite de
+répéter la même ligne tant qu'un même épisode persiste (remis à `False`
+seulement quand un sondage retrouve un rythme normal, jamais par une
+relance) ; le chien de garde relance directement le minuteur (`.start()`)
+plutôt que de seulement journaliser ; `_start_wizard_poll_timer`/
+`_stop_wizard_poll_timer` (remplacent les appels directs `.start()`/
+`.stop()` dispersés) journalisent chaque vraie transition arrêté/actif une
+seule fois, jamais à chaque relance interne pendant l'attente.
+
+⚠️ **Limite structurelle non traitée** : `_check_wizard_poll_stall` n'est
+appelée que par le `timeout` du minuteur lui-même -- un minuteur réellement
+arrêté ne rappellerait plus jamais cette fonction, donc ce chien de garde ne
+peut détecter (ni corriger) qu'un ralentissement, jamais un arrêt complet.
+Aucun cas réel de ce genre n'a été confirmé une fois le vrai ralentissement
+identifié.
+
+> 📚 Historique détaillé : [docs/bugs-interface.md](docs/bugs-interface.md)
 
 ---
 

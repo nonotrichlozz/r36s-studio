@@ -275,6 +275,12 @@ class MainWindow(QMainWindow):
         # sert uniquement au diagnostic ci-dessus (`_on_wizard_poll`),
         # jamais à une logique métier.
         self._wizard_last_poll_monotonic: Optional[float] = None
+        # Empêche `_check_wizard_poll_stall` de répéter la même ligne à
+        # chaque tick tant qu'un même épisode de ralentissement persiste --
+        # remis à `False` à chaque (re)démarrage réel du minuteur
+        # (`_start_wizard_poll_timer`), donc dès qu'un sondage retrouve un
+        # rythme normal.
+        self._wizard_poll_stall_warned: bool = False
         # Carte détectée à l'étape 3 en attente de confirmation explicite
         # (`SameCardUnverifiedDialog`) -- ni son empreinte ni sa taille ne
         # prouvent qu'elle diffère de la carte source (§ pré-vol n°3).
@@ -1532,8 +1538,7 @@ class MainWindow(QMainWindow):
         étape en erreur (§5) -- n'annule/ne défait aucune opération déjà
         réussie : une archive déjà extraite reste utilisable depuis
         l'étape D du mode expert."""
-        if self._wizard_poll_timer.isActive():
-            self._wizard_poll_timer.stop()
+        self._stop_wizard_poll_timer()
         self._wizard_active = False
         self._app_config.ui_mode = "expert"
         app_config.save_config(self._app_config)
@@ -1609,6 +1614,7 @@ class MainWindow(QMainWindow):
         self._wizard_estimated_backup_bytes = None
         self._wizard_last_poll_diagnostic = None
         self._wizard_last_poll_monotonic = None
+        self._wizard_poll_stall_warned = False
         self._pending_target_candidate = None
         self._same_card_unverified_dialog.close()
         self._log_panel.set_idle()
@@ -1625,8 +1631,7 @@ class MainWindow(QMainWindow):
         pendant le sondage de « Préparer une carte ») : fonctionne
         correctement dans les deux cas, `self._runner` étant le même
         mécanisme sous-jacent quel que soit le contexte."""
-        if self._wizard_poll_timer.isActive():
-            self._wizard_poll_timer.stop()
+        self._stop_wizard_poll_timer()
         if self._prepare_card_poll_timer.isActive():
             self._prepare_card_poll_timer.stop()
         self._prepare_card_candidate = None
@@ -1845,7 +1850,7 @@ class MainWindow(QMainWindow):
         Bug corrigé, rapporté sur du vrai matériel : `_check_wizard_poll_
         stall` (ci-dessous) déclenchait un faux positif systématique après
         toute pause légitime du minuteur -- une sauvegarde de 10 min
-        (`_wizard_poll_timer.stop()` pendant l'étape CREATE_IMAGE, aucun
+        (`_stop_wizard_poll_timer` pendant l'étape CREATE_IMAGE, aucun
         rapport avec un arrêt anormal) redémarrait le sondage à l'étape
         DETECT_TARGET en comparant au dernier sondage d'*avant* la pause,
         vieux de plusieurs centaines de secondes. Pire : le cycle « même
@@ -1859,32 +1864,71 @@ class MainWindow(QMainWindow):
         neuve n'était pas encore branchée -- un cas pourtant parfaitement
         normal (§5, l'utilisateur n'a simplement pas encore échangé les
         cartes).
-        """
+
+        Journalise « Sondage automatique de la carte démarré. » une seule
+        fois par vraie transition arrêté -> actif (jamais à chaque relance
+        interne pendant l'attente, ci-dessus) -- rend visible dans le
+        journal que le minuteur démarre bien, plutôt que de laisser
+        deviner son état (bug rapporté : le sondage semblait ne jamais
+        démarrer sur le binaire empaqueté, sans aucune trace pour le
+        confirmer ou l'infirmer)."""
+        if not self._wizard_poll_timer.isActive():
+            self._log_panel.append_log(tr("wizard_poll_started"))
+        self._wizard_poll_stall_warned = False
         self._wizard_last_poll_monotonic = time.monotonic()
         self._wizard_poll_timer.start()
 
+    def _stop_wizard_poll_timer(self) -> None:
+        """Symétrique de `_start_wizard_poll_timer` -- journalise l'arrêt
+        une seule fois par vraie transition actif -> arrêté, jamais si le
+        minuteur était déjà arrêté (`isActive()` évalué *avant* `.stop()`,
+        qui est de toute façon un no-op sûr sur un minuteur déjà arrêté)."""
+        if self._wizard_poll_timer.isActive():
+            self._log_panel.append_log(tr("wizard_poll_stopped"))
+        self._wizard_poll_timer.stop()
+
     def _check_wizard_poll_stall(self) -> None:
-        """Diagnostic pur, sans effet sur la logique métier (voir la note
-        `_WIZARD_POLL_STALL_THRESHOLD_SECONDS` ci-dessus) : signale dans le
-        journal si le sondage automatique semble être resté silencieux
-        nettement plus longtemps que son intervalle normal (1,5 s) --
-        signe soit d'un arrêt du minuteur non détecté par la relecture de
-        code, soit d'un ralentissement de l'énumération des disques côté
-        OS après le montage/démontage du BOOT pour l'empreinte (§4.4).
+        """Chien de garde (voir la note `_WIZARD_POLL_STALL_THRESHOLD_
+        SECONDS` ci-dessus) : si le sondage automatique semble être resté
+        silencieux nettement plus longtemps que son intervalle normal
+        (1,5 s) -- signe soit d'un arrêt du minuteur non détecté par la
+        relecture de code, soit (confirmé en usage réel sur le binaire
+        empaqueté) d'une énumération des disques anormalement lente sur
+        cette machine (`_list_devices_with_diagnostics`, plusieurs
+        secondes par appel côté Windows avant la consolidation en un seul
+        appel PowerShell, `devices/windows.py::_LIST_DEVICES_COMMAND`) --
+        relance le minuteur plutôt que de seulement le constater : un
+        redémarrage explicite ne coûte rien si `_wizard_poll_timer`
+        tournait déjà (`QTimer.start()` réarme simplement l'échéance), et
+        corrige réellement le cas où il se serait arrêté sans que rien
+        d'autre ne le relance.
+
         `_wizard_last_poll_monotonic` est mis à jour à chaque appel, y
-        compris le tout premier (rien à comparer), pour que seul un écart
-        réel entre deux sondages consécutifs soit signalé -- toute pause
-        volontaire du minuteur (`_start_wizard_poll_timer`, ci-dessus)
-        réinitialise déjà cette référence à son propre redémarrage, donc
-        ne compte jamais comme un arrêt anormal ici."""
+        compris pendant un épisode de ralentissement -- une comparaison
+        tick à tick, jamais ancrée sur l'instant d'avant le début de
+        l'épisode (sans quoi le premier sondage qui retrouve un rythme
+        normal semblerait, à tort, tout aussi en retard que les précédents).
+        `_wizard_poll_stall_warned` évite de répéter la même ligne tant que
+        l'épisode persiste -- remis à `False` dès qu'un sondage retrouve un
+        rythme normal (branche `elapsed <= ...`). La relance ci-dessous
+        appelle directement `.start()` sur le minuteur plutôt que
+        `_start_wizard_poll_timer()` : cette dernière remettrait
+        `_wizard_poll_stall_warned` à `False` inconditionnellement, ce qui
+        rouvrirait la porte à répéter la même ligne dès le tick suivant si
+        le ralentissement persiste -- exactement le défaut rapporté."""
         now = time.monotonic()
         previous = self._wizard_last_poll_monotonic
         self._wizard_last_poll_monotonic = now
         if previous is None:
             return
         elapsed = now - previous
-        if elapsed > _WIZARD_POLL_STALL_THRESHOLD_SECONDS:
+        if elapsed <= _WIZARD_POLL_STALL_THRESHOLD_SECONDS:
+            self._wizard_poll_stall_warned = False
+            return
+        if not self._wizard_poll_stall_warned:
             self._log_panel.append_log(tr("wizard_poll_stall_detected", seconds=round(elapsed)))
+            self._wizard_poll_stall_warned = True
+        self._wizard_poll_timer.start()
 
     def _on_wizard_poll(self) -> None:
         self._check_wizard_poll_stall()
@@ -1898,7 +1942,7 @@ class MainWindow(QMainWindow):
             # carte » -- proposer un choix plutôt que de rester bloqué en
             # silence, comme le mode expert le fait déjà via cette même
             # fenêtre.
-            self._wizard_poll_timer.stop()
+            self._stop_wizard_poll_timer()
             self._wizard_panel.set_status(tr("wizard_status_multiple_candidates"))
             self._device_dialog.set_devices(devices)
             self._device_dialog.open()
@@ -1941,7 +1985,7 @@ class MainWindow(QMainWindow):
         # parallèle au tick suivant -- `_on_wizard_fingerprint_ready` le
         # relance lui-même si la carte détectée à l'étape 4 s'avère être
         # la même qu'à l'étape 1.
-        self._wizard_poll_timer.stop()
+        self._stop_wizard_poll_timer()
         self._wizard_panel.set_can_continue(False)
         job = self._wizard_flow.current_job()
         self._fingerprint_runner = WizardFingerprintRunner(candidate.path, parent=self)
@@ -1970,15 +2014,14 @@ class MainWindow(QMainWindow):
                 self._prepare_card_poll_timer.start()
             self._on_prepare_card_poll()
             return
-        if not self._wizard_poll_timer.isActive():
-            self._start_wizard_poll_timer()
+        self._start_wizard_poll_timer()
         self._on_wizard_poll()
 
     def _on_wizard_fingerprint_ready(
         self, job: WizardJob, candidate: Device, fingerprint: Optional[str]
     ) -> None:
         if job == WizardJob.DETECT_SOURCE:
-            self._wizard_poll_timer.stop()  # trouvé -> plus besoin de reinterroger
+            self._stop_wizard_poll_timer()  # trouvé -> plus besoin de reinterroger
             self._wizard_source_device = candidate
             self._wizard_source_fingerprint = fingerprint
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
@@ -2007,13 +2050,13 @@ class MainWindow(QMainWindow):
             source_device = self._wizard_source_device
             source_size = source_device.size_bytes if source_device is not None else None
             if fingerprint is None and not size_proves_different_card(source_size, candidate.size_bytes):
-                self._wizard_poll_timer.stop()
+                self._stop_wizard_poll_timer()
                 self._pending_target_candidate = candidate
                 self._wizard_panel.set_status(tr("wizard_status_confirmation_needed"))
                 self._same_card_unverified_dialog.set_device(candidate)
                 self._same_card_unverified_dialog.open()
                 return
-            self._wizard_poll_timer.stop()
+            self._stop_wizard_poll_timer()
             self._wizard_target_device = candidate
             self._wizard_panel.set_status(tr("wizard_status_device_found", display=candidate.display))
             self._wizard_panel.set_can_continue(True)

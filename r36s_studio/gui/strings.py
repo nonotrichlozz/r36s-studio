@@ -37,6 +37,11 @@ STRINGS = {
     # Symétrique de "assisted_expert_mode_button" -- bouton de retour au
     # mode assisté, en haut à droite de l'écran expert (§5 mode assisté).
     "home_assisted_mode_button": "Mode assisté",
+    # Section « Consoles diverses » (consoles_diverses/, étape 1) -- bouton
+    # discret vers un écran indépendant, isolé dans son propre package
+    # (règle d'isolation, consoles_diverses/CLAUDE.md). Symétrique sur les
+    # deux accueils (expert et assisté).
+    "home_consoles_diverses_button": "Consoles diverses",
     "home_step_a_title": "A. Copier le BOOT de la SD d'origine",
     "home_step_a_desc": "Enregistre l'écran et les réglages de ton ancienne carte sur ton ordinateur.",
     "home_step_b_title": "B. Copier l'EASYROMS de la SD d'origine",
@@ -88,6 +93,9 @@ STRINGS = {
     # Sauvegarde système sans les jeux (§4.3), aussi proposée comme option
     # du mode assisté -- discrète, sous le bouton principal.
     "assisted_backup_system_button": "Sauvegarder mon système sans les jeux",
+    # Section « Consoles diverses » (consoles_diverses/, étape 1) --
+    # symétrique de "home_consoles_diverses_button".
+    "assisted_consoles_diverses_button": "Consoles diverses",
     # Sauvegarde système lancée depuis l'accueil assisté (§4.3) : reste
     # entièrement dans l'habillage assisté (WizardStepPanel), jamais
     # l'écran expert -- correctif d'un défaut de parcours signalé (bascule

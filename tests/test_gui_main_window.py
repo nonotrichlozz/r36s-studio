@@ -2545,6 +2545,39 @@ def test_expert_mode_button_from_landing_persists_config_and_shows_home(
     assert mock_save.call_args[0][0].ui_mode == "expert"
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_consoles_diverses_button_from_assisted_landing_switches_screen(
+    mock_list, mock_filter, mock_detect, mock_load, qapp
+):
+    """Section « Consoles diverses » (consoles_diverses/, étape 1) --
+    bouton discret présent sur les deux accueils, jamais un changement de
+    `ui_mode` (ce n'est pas un mode, juste une section indépendante)."""
+    window = MainWindow()
+
+    window._assisted_landing.consoles_diverses_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._consoles_diverses_screen
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_consoles_diverses_button_from_home_switches_screen_and_back_returns(
+    mock_list, mock_filter, mock_detect, mock_load, qapp
+):
+    window = MainWindow()
+
+    window._home.consoles_diverses_requested.emit()
+    assert window._root_stack.currentWidget() is window._consoles_diverses_screen
+
+    window._consoles_diverses_screen.back_requested.emit()
+    assert window._root_stack.currentWidget() is window._main_view
+
+
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))

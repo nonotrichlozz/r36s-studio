@@ -232,6 +232,26 @@ def test_home_screen_assisted_mode_button_emits_signal(qapp):
     assert received == [True]
 
 
+def test_home_screen_consoles_diverses_button_emits_signal(qapp):
+    """Section « Consoles diverses » (consoles_diverses/, étape 1) --
+    bouton discret vers un écran indépendant."""
+    screen = HomeScreen()
+    received = []
+    screen.consoles_diverses_requested.connect(lambda: received.append(True))
+
+    screen._consoles_diverses_button.click()
+
+    assert received == [True]
+
+
+def test_home_screen_set_busy_also_disables_consoles_diverses_button(qapp):
+    screen = HomeScreen()
+
+    screen.set_busy(True)
+
+    assert screen._consoles_diverses_button.isEnabled() is False
+
+
 @patch("r36s_studio.gui.screens.platform.system", return_value="Darwin")
 def test_home_screen_shows_help_button_on_macos(mock_system, qapp):
     """Seul macOS a besoin de l'autorisation Accès complet au disque (§3) --
@@ -906,6 +926,26 @@ def test_assisted_landing_screen_set_busy_disables_backup_system_button(qapp):
 
     screen.set_busy(True)
     assert screen._backup_system_button.isEnabled() is False
+
+
+def test_assisted_landing_screen_consoles_diverses_button_emits_signal(qapp):
+    """Symétrique du bouton de HomeScreen (§ section « Consoles diverses »)."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    received = []
+    screen.consoles_diverses_requested.connect(lambda: received.append(True))
+
+    screen._consoles_diverses_button.click()
+
+    assert received == [True]
+
+
+def test_assisted_landing_screen_set_busy_disables_consoles_diverses_button(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+
+    screen.set_busy(True)
+    assert screen._consoles_diverses_button.isEnabled() is False
 
     screen.set_busy(False)
     assert screen._expert_button.isEnabled() is True

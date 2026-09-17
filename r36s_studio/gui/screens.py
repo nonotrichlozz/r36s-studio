@@ -565,6 +565,12 @@ class HomeScreen(Screen):
     refresh_requested = Signal()
     help_requested = Signal()
     assisted_mode_requested = Signal()
+    # Section « Consoles diverses » (consoles_diverses/, étape 1) --
+    # bouton discret, même rôle que assisted_mode_requested, jamais un
+    # import du package consoles_diverses ici : cet écran ne fait
+    # qu'émettre un signal, c'est main_window.py qui sait quoi en faire
+    # (règle d'isolation, consoles_diverses/CLAUDE.md).
+    consoles_diverses_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -588,6 +594,10 @@ class HomeScreen(Screen):
         title.setProperty("role", "title")
         title_row.addWidget(title)
         title_row.addStretch()
+        self._consoles_diverses_button = QPushButton(tr("home_consoles_diverses_button"))
+        self._consoles_diverses_button.setProperty("role", "flat")
+        self._consoles_diverses_button.clicked.connect(self.consoles_diverses_requested.emit)
+        title_row.addWidget(self._consoles_diverses_button)
         self._assisted_mode_button = QPushButton(tr("home_assisted_mode_button"))
         self._assisted_mode_button.setProperty("role", "flat")
         self._assisted_mode_button.clicked.connect(self.assisted_mode_requested.emit)
@@ -708,6 +718,7 @@ class HomeScreen(Screen):
         # Changer de mode en plein flash ou en pleine copie laisserait un
         # job orphelin (§5 mode assisté) -- même garde que les étapes.
         self._assisted_mode_button.setEnabled(not busy)
+        self._consoles_diverses_button.setEnabled(not busy)
 
     def _update_backup_rows_enabled(self) -> None:
         """« Par sécurité » (§4.3) exige une carte -- contrairement aux
@@ -1926,6 +1937,10 @@ class AssistedLandingScreen(Screen):
     prepare_requested = Signal()
     expert_mode_requested = Signal()
     backup_system_requested = Signal()
+    # Section « Consoles diverses » (consoles_diverses/, étape 1) --
+    # symétrique du bouton de HomeScreen, même règle d'isolation (voir
+    # HomeScreen.consoles_diverses_requested).
+    consoles_diverses_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1973,6 +1988,18 @@ class AssistedLandingScreen(Screen):
         backup_system_row.addStretch()
         root.addLayout(backup_system_row)
 
+        # Section « Consoles diverses » -- discrète (rôle "flat"), sous les
+        # deux boutons ci-dessus, même principe : ne jamais rivaliser avec
+        # le parcours guidé mis en avant.
+        self._consoles_diverses_button = QPushButton(tr("assisted_consoles_diverses_button"))
+        self._consoles_diverses_button.setProperty("role", "flat")
+        self._consoles_diverses_button.clicked.connect(self.consoles_diverses_requested.emit)
+        consoles_diverses_row = QHBoxLayout()
+        consoles_diverses_row.addStretch()
+        consoles_diverses_row.addWidget(self._consoles_diverses_button)
+        consoles_diverses_row.addStretch()
+        root.addLayout(consoles_diverses_row)
+
         root.addStretch(3)
 
     def set_busy(self, busy: bool) -> None:
@@ -1985,6 +2012,7 @@ class AssistedLandingScreen(Screen):
         annulation coopérative et l'arrêt effectif du job."""
         self._expert_button.setEnabled(not busy)
         self._backup_system_button.setEnabled(not busy)
+        self._consoles_diverses_button.setEnabled(not busy)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         super().resizeEvent(event)

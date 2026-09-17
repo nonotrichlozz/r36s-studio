@@ -42,6 +42,7 @@ from PySide6.QtCore import QTimer, Slot
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 
 from r36s_studio import config as app_config
+from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
@@ -317,11 +318,18 @@ class MainWindow(QMainWindow):
         # n'est choisi comme écran de démarrage que sur macOS sans Accès
         # complet au disque -- voir plus bas.
         self._fda_screen = FullDiskAccessScreen()
+        # Section « Consoles diverses » (consoles_diverses/, étape 1) --
+        # écran indépendant, isolé dans son propre package (règle
+        # d'isolation, consoles_diverses/CLAUDE.md) : aucun rapport avec le
+        # pipeline flash/backup/worker élevé ci-dessus, un simple appel
+        # réseau en lecture. Construit une fois, comme les autres écrans.
+        self._consoles_diverses_screen = ConsolesDiversesScreen()
 
         self._root_stack = QStackedWidget()
         self._root_stack.addWidget(self._assisted_landing)
         self._root_stack.addWidget(self._main_view)
         self._root_stack.addWidget(self._fda_screen)
+        self._root_stack.addWidget(self._consoles_diverses_screen)
         self.setCentralWidget(self._root_stack)
 
         # Fenêtres modales (§5, refonte navigation) : construites une fois,
@@ -374,6 +382,9 @@ class MainWindow(QMainWindow):
         self._home.refresh_requested.connect(self._refresh_home_state)
         self._home.help_requested.connect(self._help_dialog.open)
         self._home.assisted_mode_requested.connect(self._switch_to_assisted_mode)
+        self._home.consoles_diverses_requested.connect(self._open_consoles_diverses)
+        self._assisted_landing.consoles_diverses_requested.connect(self._open_consoles_diverses)
+        self._consoles_diverses_screen.back_requested.connect(self._show_startup_screen)
 
         self._help_dialog.open_settings_requested.connect(self._on_open_settings_requested)
         self._fda_screen.open_settings_requested.connect(self._on_open_settings_requested)
@@ -1630,6 +1641,15 @@ class MainWindow(QMainWindow):
         self._app_config.ui_mode = "assisted"
         app_config.save_config(self._app_config)
         self._root_stack.setCurrentWidget(self._assisted_landing)
+
+    def _open_consoles_diverses(self) -> None:
+        """Bouton discret « Consoles diverses », présent sur les deux
+        accueils (expert et assisté) -- bascule vers l'écran du package
+        isolé `consoles_diverses/`, sans jamais modifier `ui_mode` : ce
+        n'est pas un changement de mode, juste une section indépendante.
+        Retour à l'accueil habituel via `back_requested`
+        (`_show_startup_screen`, câblé dans `_wire_signals`)."""
+        self._root_stack.setCurrentWidget(self._consoles_diverses_screen)
 
     def _start_wizard(self) -> None:
         self._app_config.ui_mode = "assisted"

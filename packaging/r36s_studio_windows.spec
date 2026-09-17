@@ -55,25 +55,29 @@ EXTRA_DATAS = [
     if (ASSETS_DIR / name).exists()
 ]
 
-# `keyring` (consoles_diverses/settings_store.py) choisit son backend par
-# introspection au moment de l'exécution -- PyInstaller ne le détecte pas
-# automatiquement, il faut le déclarer explicitement (voir CLAUDE.md
-# racine, § durcissement consoles_diverses, point 5). `Windows` est le
-# backend natif (Credential Manager) ; `chainer`/`fail` sont les deux
-# backends génériques que `keyring` charge toujours en repli, quel que
-# soit l'OS.
-KEYRING_HIDDEN_IMPORTS = [
-    "keyring.backends.Windows",
-    "keyring.backends.chainer",
-    "keyring.backends.fail",
-]
+# `keyring` (consoles_diverses/settings_store.py) : aucun `hiddenimports`
+# manuel nécessaire ici -- PyInstaller fournit son propre hook officiel
+# (`hook-keyring.py`, `collect_submodules('keyring.backends')` +
+# `copy_metadata('keyring')`, cette dernière indispensable puisque
+# `keyring` découvre ses backends via les points d'entrée setuptools de sa
+# propre métadonnée) qui s'applique automatiquement dès que `keyring` est
+# importé quelque part dans le code. Vérifié en conditions réelles sur le
+# binaire Windows construit par ce fichier (§CLAUDE.md racine, §
+# durcissement consoles_diverses, point 5) : les neuf sous-modules de
+# `keyring.backends` et les métadonnées `keyring-*.dist-info` sont bien
+# présents dans l'archive embarquée, et un appel `keyring.set_password`/
+# `get_password`/`delete_password` réel depuis le binaire compilé
+# fonctionne correctement (Windows Credential Manager). Une première
+# version de ce fichier déclarait une liste manuelle de backends par
+# hypothèse -- retirée une fois cette vérification faite : elle n'ajoutait
+# rien face au hook déjà présent.
 
 a = Analysis(
     [ENTRY_SCRIPT],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[(str(BUILD_TIMESTAMP_FILE), ".")] + EXTRA_DATAS,
-    hiddenimports=KEYRING_HIDDEN_IMPORTS,
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

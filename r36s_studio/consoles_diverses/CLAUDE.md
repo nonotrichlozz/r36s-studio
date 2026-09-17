@@ -75,11 +75,27 @@ seul Windows (Credential Manager, backend natif toujours disponible) a pu
 (Keychain) et sur un Linux sans trousseau de bureau (repli mémoire-session
 réel) reste à confirmer au premier essai sur ces plateformes.
 
-**Packaging** : `keyring` choisit son backend par introspection au moment
-de l'exécution, ce que PyInstaller ne détecte pas seul -- les trois
-fichiers `packaging/*.spec` déclarent explicitement les modules de backend
-pertinents par OS (`hiddenimports`). Non vérifié sur un vrai binaire
-construit à ce jour.
+**Packaging, corrigé après vérification sur du vrai binaire.** L'hypothèse
+initiale (PyInstaller ne détecterait pas seul les backends `keyring`,
+nécessitant un `hiddenimports` manuel par OS dans `packaging/*.spec`) était
+fausse. Construit et inspecté directement (`packaging/r36s_studio_windows.
+spec`, `pyinstaller` réel, PYZ embarqué décompressé et listé) : PyInstaller
+fournit son propre hook officiel (`hook-keyring.py`,
+`collect_submodules('keyring.backends')` + `copy_metadata('keyring')`) qui
+s'applique automatiquement dès que `keyring` est importé -- les neuf
+sous-modules de `keyring.backends` (`Windows`, `macOS`, `SecretService`,
+`kwallet`, `libsecret`, `chainer`, `fail`, `null`, `macOS.api`) et les
+métadonnées `keyring-*.dist-info` (indispensables : `keyring` découvre ses
+backends via les points d'entrée setuptools de sa propre métadonnée) sont
+tous présents dans le binaire construit, sans aucune déclaration manuelle.
+Un appel réel `enregistrer_licence`/`lire_licence`/`effacer_licence` depuis
+le binaire compilé (Windows Credential Manager) a fonctionné correctement.
+Les trois fichiers `.spec` ont été simplifiés en conséquence (retrait des
+`hiddenimports` ajoutés par hypothèse). **macOS et Linux restent non
+vérifiés sur du vrai matériel** -- le hook lui-même n'est pas conditionné à
+l'OS, donc la même collecte s'applique en théorie aux trois plateformes,
+mais seul le binaire Windows a été réellement construit et testé à ce
+jour.
 
 ## Hors périmètre (étape 1)
 

@@ -67,24 +67,26 @@ EXTRA_DATAS = [
     if (ASSETS_DIR / name).exists()
 ]
 
-# `keyring` (consoles_diverses/settings_store.py) choisit son backend par
-# introspection au moment de l'exécution -- PyInstaller ne le détecte pas
-# automatiquement, il faut le déclarer explicitement (voir CLAUDE.md
-# racine, § durcissement consoles_diverses, point 5). `macOS` est le
-# backend natif (Trousseau) ; `chainer`/`fail` sont les deux backends
-# génériques que `keyring` charge toujours en repli, quel que soit l'OS.
-KEYRING_HIDDEN_IMPORTS = [
-    "keyring.backends.macOS",
-    "keyring.backends.chainer",
-    "keyring.backends.fail",
-]
+# `keyring` (consoles_diverses/settings_store.py) : aucun `hiddenimports`
+# manuel nécessaire ici -- PyInstaller fournit son propre hook officiel
+# (`hook-keyring.py`, `collect_submodules('keyring.backends')` +
+# `copy_metadata('keyring')`, cette dernière indispensable puisque
+# `keyring` découvre ses backends via les points d'entrée setuptools de sa
+# propre métadonnée) qui s'applique automatiquement dès que `keyring` est
+# importé quelque part dans le code -- vérifié en conditions réelles sur
+# le binaire Windows (même hook, non spécifique à un OS -- voir
+# `r36s_studio_windows.spec` pour le détail de cette vérification ;
+# non encore reconstruit sur du vrai matériel macOS à ce jour). Une
+# première version de ce fichier déclarait une liste manuelle de backends
+# par hypothèse -- retirée : elle n'ajoutait rien face au hook déjà
+# présent.
 
 a = Analysis(
     [ENTRY_SCRIPT],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[(str(BUILD_TIMESTAMP_FILE), ".")] + EXTRA_DATAS,
-    hiddenimports=KEYRING_HIDDEN_IMPORTS,
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

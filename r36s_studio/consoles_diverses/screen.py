@@ -39,7 +39,7 @@ from __future__ import annotations
 from typing import Optional
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import QUrl, Qt, Signal
+from PySide6.QtCore import QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFrame,
@@ -61,6 +61,7 @@ from .search_runner import ConsoleSearchRunner
 from .strings import friendly_error_message, tr
 
 MAX_REFERENCE_LENGTH = 64
+SLOW_SEARCH_WARNING_DELAY_MS = 15_000
 
 _CATEGORY_TITLE_KEYS = {
     "frontend": "category_frontend",
@@ -143,7 +144,7 @@ def _build_option_widget(option: OptionConsole) -> QWidget:
     if option.restriction_commerciale:
         layout.addWidget(_build_restriction_banner())
     if option.url:
-        layout.addWidget(_link_widget(option.url))
+        layout.addWidget(_link_widget(option.url), alignment=Qt.AlignLeft)
     if option.source_url:
         layout.addWidget(_plain_label(tr("option_source_url", valeur=option.source_url), role="secondary", wrap=True))
     return container
@@ -180,6 +181,10 @@ class ConsolesDiversesScreen(Screen):
         self._licence_key = ""
         self._opener = None
         self._runner: Optional[ConsoleSearchRunner] = None
+        self._slow_search_timer = QTimer(self)
+        self._slow_search_timer.setSingleShot(True)
+        self._slow_search_timer.setInterval(SLOW_SEARCH_WARNING_DELAY_MS)
+        self._slow_search_timer.timeout.connect(self._on_slow_search_warning)
 
         root = QVBoxLayout(self)
 
@@ -264,8 +269,10 @@ class ConsolesDiversesScreen(Screen):
         reference = self._reference_edit.text().strip()
         if not reference:
             return
+        self._status_label.setText(tr("searching_status"))
         self._set_controls_enabled(False)
         self._show_zone("searching")
+        self._slow_search_timer.start()
 
         runner = ConsoleSearchRunner(reference, self._server_url, self._licence_key, opener=self._opener)
         runner.finished_ok.connect(self._on_search_finished)
@@ -274,7 +281,11 @@ class ConsolesDiversesScreen(Screen):
         self._runner = runner
         runner.start()
 
+    def _on_slow_search_warning(self) -> None:
+        self._status_label.setText(tr("searching_status_lente"))
+
     def _on_search_finished(self, resultat: ResultatRecherche) -> None:
+        self._slow_search_timer.stop()
         self._set_controls_enabled(True)
         if resultat.statut == "aucune_information_trouvee":
             self._show_zone("no_info")
@@ -286,6 +297,7 @@ class ConsolesDiversesScreen(Screen):
         self._show_zone("result")
 
     def _on_search_error(self, code: str, message_serveur: str) -> None:
+        self._slow_search_timer.stop()
         self._set_controls_enabled(True)
         self._error_label.setText(friendly_error_message(code, message_serveur))
         self._show_zone("error")

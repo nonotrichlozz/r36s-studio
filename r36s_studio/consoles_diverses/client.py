@@ -40,7 +40,7 @@ from typing import Any, Callable, Optional
 
 from .models import FicheConsole, fiche_depuis_json
 
-REQUEST_TIMEOUT_SECONDS = 30
+REQUEST_TIMEOUT_SECONDS = 90
 MAX_RESPONSE_BYTES = 1024 * 1024  # 1 Mio (durcissement demandé, point 4)
 
 _STATUTS_CONNUS = {"trouve_dans_catalogue", "trouve_par_ia", "aucune_information_trouvee"}

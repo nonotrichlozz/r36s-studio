@@ -14,7 +14,11 @@ from PySide6.QtWidgets import QLabel, QPushButton
 
 from r36s_studio.consoles_diverses.client import ResultatRecherche
 from r36s_studio.consoles_diverses.models import fiche_depuis_json
-from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen, _est_url_externe_sure
+from r36s_studio.consoles_diverses.screen import (
+    SLOW_SEARCH_WARNING_DELAY_MS,
+    ConsolesDiversesScreen,
+    _est_url_externe_sure,
+)
 
 
 def _fiche(**overrides) -> dict:
@@ -273,3 +277,91 @@ def test_settings_button_emits_signal(qapp):
     screen._settings_button.click()
 
     assert received == [True]
+
+
+# --- Recherche lente (délai serveur allongé, nouvelles tentatives/modèles) --
+
+
+@patch("r36s_studio.consoles_diverses.screen.ConsoleSearchRunner")
+def test_search_starts_slow_search_timer_with_expected_delay(mock_runner_cls, qapp):
+    screen = ConsolesDiversesScreen()
+    screen._reference_edit.setText("RG35XX")
+
+    screen._search_button.click()
+
+    assert screen._slow_search_timer.isActive() is True
+    assert screen._slow_search_timer.interval() == SLOW_SEARCH_WARNING_DELAY_MS == 15_000
+    assert screen._status_label.text() == "Recherche en cours…"
+
+
+def test_slow_search_warning_updates_status_label_text(qapp):
+    screen = ConsolesDiversesScreen()
+
+    screen._on_slow_search_warning()
+
+    assert screen._status_label.text() == "La recherche prend plus de temps que prévu…"
+
+
+@patch("r36s_studio.consoles_diverses.screen.ConsoleSearchRunner")
+def test_relaunching_search_resets_status_label_after_previous_slow_warning(mock_runner_cls, qapp):
+    screen = ConsolesDiversesScreen()
+    screen._reference_edit.setText("RG35XX")
+    screen._on_slow_search_warning()
+
+    screen._search_button.click()
+
+    assert screen._status_label.text() == "Recherche en cours…"
+
+
+def test_search_finished_stops_the_slow_search_timer(qapp):
+    screen = ConsolesDiversesScreen()
+    screen._slow_search_timer.start()
+
+    screen._on_search_finished(ResultatRecherche(statut="aucune_information_trouvee", console=None))
+
+    assert screen._slow_search_timer.isActive() is False
+
+
+def test_search_error_stops_the_slow_search_timer(qapp):
+    screen = ConsolesDiversesScreen()
+    screen._slow_search_timer.start()
+
+    screen._on_search_error("serveur_injoignable", "")
+
+    assert screen._slow_search_timer.isActive() is False
+
+
+def test_ia_surchargee_error_shows_error_zone_with_friendly_message(qapp):
+    screen = ConsolesDiversesScreen()
+    screen.show()
+
+    screen._on_search_error("ia_surchargee", "")
+
+    assert screen._error_frame.isVisible() is True
+    assert "surchargé" in screen._error_label.text()
+    assert screen._retry_error_button.isVisible() is True
+
+
+# --- Alignement du lien des cartes d'option ---------------------------------
+
+
+def test_option_link_is_left_aligned_within_its_card(qapp):
+    from r36s_studio.consoles_diverses.screen import _build_option_widget
+    from r36s_studio.consoles_diverses.models import OptionConsole
+
+    option = OptionConsole(
+        nom="Option", description="desc", source_url="https://example.invalid/source", url="https://example.invalid/a"
+    )
+
+    container = _build_option_widget(option)
+
+    layout = container.layout()
+    link_widget = next(
+        item.widget()
+        for i in range(layout.count())
+        if (item := layout.itemAt(i)).widget() is not None
+        and isinstance(item.widget(), QPushButton)
+        and item.widget().text() == "https://example.invalid/a"
+    )
+    index = layout.indexOf(link_widget)
+    assert layout.itemAt(index).alignment() == Qt.AlignLeft

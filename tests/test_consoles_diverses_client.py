@@ -16,6 +16,7 @@ import pytest
 
 from r36s_studio.consoles_diverses.client import (
     MAX_RESPONSE_BYTES,
+    REQUEST_TIMEOUT_SECONDS,
     RechercheErreur,
     rechercher_console,
 )
@@ -93,6 +94,13 @@ def _fiche_minimale() -> dict:
     }
 
 
+def test_request_timeout_allows_for_server_retries_and_fallback_models():
+    # Le serveur peut désormais tenter plusieurs modèles de secours avant de
+    # répondre (jusqu'à ~60 s) -- le client doit laisser une marge confortable
+    # au-delà, pas couper juste à la limite observée côté serveur.
+    assert REQUEST_TIMEOUT_SECONDS == 90
+
+
 # --- Statuts 200 -----------------------------------------------------------
 
 
@@ -156,6 +164,7 @@ def test_rechercher_console_aucune_information_trouvee():
         (500, "configuration_manquante"),
         (502, "erreur_api_ia"),
         (502, "reponse_ia_non_json"),
+        (503, "ia_surchargee"),
     ],
 )
 def test_rechercher_console_raises_recherche_erreur_for_known_http_error_codes(status, code):

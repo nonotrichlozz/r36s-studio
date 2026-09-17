@@ -2578,6 +2578,44 @@ def test_consoles_diverses_button_from_home_switches_screen_and_back_returns(
     assert window._root_stack.currentWidget() is window._main_view
 
 
+@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="cle-existante")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(consoles_diverses_server_url="https://exemple.invalid"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_consoles_diverses_settings_requested_prefills_dialog(
+    mock_list, mock_filter, mock_detect, mock_load, mock_lire_licence, qapp
+):
+    window = MainWindow()
+
+    window._consoles_diverses_screen.settings_requested.emit()
+
+    assert window._consoles_diverses_settings_dialog.isVisible() is True
+    assert window._consoles_diverses_settings_dialog._server_url_edit.text() == "https://exemple.invalid"
+    assert window._consoles_diverses_settings_dialog._licence_edit.text() == "cle-existante"
+
+
+@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.enregistrer_licence")
+@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="nouvelle-cle")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_consoles_diverses_settings_saved_persists_url_and_licence(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_lire_licence, mock_enregistrer, qapp
+):
+    window = MainWindow()
+
+    window._consoles_diverses_settings_dialog.settings_saved.emit("https://nouveau-serveur.invalid", "nouvelle-cle")
+
+    mock_save.assert_called_once()
+    assert mock_save.call_args[0][0].consoles_diverses_server_url == "https://nouveau-serveur.invalid"
+    mock_enregistrer.assert_called_once_with("nouvelle-cle")
+    assert window._consoles_diverses_screen._server_url == "https://nouveau-serveur.invalid"
+    assert window._consoles_diverses_screen._licence_key == "nouvelle-cle"
+
+
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))

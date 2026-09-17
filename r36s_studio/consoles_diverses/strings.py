@@ -62,6 +62,13 @@ STRINGS = {
         "Aucun trousseau système disponible sur cet ordinateur : la clé sera "
         "mémorisée seulement pour cette session, à ressaisir au prochain lancement."
     ),
+    "settings_url_empty": "Indique une adresse de serveur.",
+    "settings_url_invalid_scheme": "L'adresse doit commencer par http:// ou https://.",
+    "settings_url_http_remote_refused": (
+        "Une adresse http:// n'est acceptée que pour localhost ou 127.0.0.1 -- sinon ta "
+        "clé de licence circulerait en clair sur le réseau. Utilise https:// pour un "
+        "serveur distant."
+    ),
     # Erreurs -- messages clairs pour un débutant, jamais de jargon (§5
     # vocabulaire de CLAUDE.md racine). Le message brut du serveur, quand il
     # existe, est interpolé en second plan plutôt qu'affiché seul.

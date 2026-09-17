@@ -54,11 +54,23 @@ _VALID_UI_MODES = {"assisted", "expert"}
 DEFAULT_FIRMWARE = "rocknix"
 _VALID_FIRMWARES = set(FIRMWARE_BY_ID)
 
+# Section « Consoles diverses » (consoles_diverses/, étape 1) -- adresse du
+# serveur r36s-studio-cloud interrogé par POST /recherche. Seule l'adresse
+# vit ici : jamais la clé de licence (trousseau système, `consoles_
+# diverses/settings_store.py`, §9 de CLAUDE.md racine -- aucun secret dans
+# un fichier de configuration). Pas d'ensemble de valeurs valides comme
+# `_VALID_FIRMWARES` ci-dessus : une adresse de serveur est un champ libre,
+# pas un choix parmi un catalogue fixe -- sa validité (schéma http(s),
+# localhost pour http:// nu) est vérifiée à la saisie par `consoles_
+# diverses/settings_store.py::valider_adresse_serveur`, pas ici.
+DEFAULT_CONSOLES_DIVERSES_SERVER_URL = "http://localhost:8787"
+
 
 @dataclass
 class AppConfig:
     ui_mode: str = DEFAULT_UI_MODE
     firmware: str = DEFAULT_FIRMWARE
+    consoles_diverses_server_url: str = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
 
 
 def config_dir() -> Path:
@@ -88,7 +100,14 @@ def load_config() -> AppConfig:
     firmware = raw.get("firmware")
     if firmware not in _VALID_FIRMWARES:
         firmware = DEFAULT_FIRMWARE
-    return AppConfig(ui_mode=ui_mode, firmware=firmware)
+    consoles_diverses_server_url = raw.get("consoles_diverses_server_url")
+    if not isinstance(consoles_diverses_server_url, str) or not consoles_diverses_server_url.strip():
+        consoles_diverses_server_url = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
+    return AppConfig(
+        ui_mode=ui_mode,
+        firmware=firmware,
+        consoles_diverses_server_url=consoles_diverses_server_url,
+    )
 
 
 def save_config(config: AppConfig) -> None:

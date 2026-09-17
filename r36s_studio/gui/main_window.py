@@ -42,7 +42,9 @@ from PySide6.QtCore import QTimer, Slot
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 
 from r36s_studio import config as app_config
+from r36s_studio.consoles_diverses import settings_store as consoles_diverses_settings_store
 from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
+from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettingsDialog
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
@@ -343,6 +345,7 @@ class MainWindow(QMainWindow):
         self._backup_kind_dialog = BackupKindDialog(self)
         self._same_card_unverified_dialog = SameCardUnverifiedDialog(self)
         self._reset_card_label_dialog = ResetCardLabelDialog(self)
+        self._consoles_diverses_settings_dialog = ConsolesDiversesSettingsDialog(self)
 
         self._wire_signals()
         self._refresh_home_state()
@@ -385,6 +388,8 @@ class MainWindow(QMainWindow):
         self._home.consoles_diverses_requested.connect(self._open_consoles_diverses)
         self._assisted_landing.consoles_diverses_requested.connect(self._open_consoles_diverses)
         self._consoles_diverses_screen.back_requested.connect(self._show_startup_screen)
+        self._consoles_diverses_screen.settings_requested.connect(self._on_consoles_diverses_settings_requested)
+        self._consoles_diverses_settings_dialog.settings_saved.connect(self._on_consoles_diverses_settings_saved)
 
         self._help_dialog.open_settings_requested.connect(self._on_open_settings_requested)
         self._fda_screen.open_settings_requested.connect(self._on_open_settings_requested)
@@ -1648,8 +1653,30 @@ class MainWindow(QMainWindow):
         isolé `consoles_diverses/`, sans jamais modifier `ui_mode` : ce
         n'est pas un changement de mode, juste une section indépendante.
         Retour à l'accueil habituel via `back_requested`
-        (`_show_startup_screen`, câblé dans `_wire_signals`)."""
+        (`_show_startup_screen`, câblé dans `_wire_signals`). Rafraîchit la
+        configuration réseau à chaque ouverture (adresse serveur/clé de
+        licence ont pu changer depuis la dernière visite, via la fenêtre
+        de réglages)."""
+        self._consoles_diverses_screen.set_network_config(
+            self._app_config.consoles_diverses_server_url,
+            consoles_diverses_settings_store.lire_licence() or "",
+        )
         self._root_stack.setCurrentWidget(self._consoles_diverses_screen)
+
+    def _on_consoles_diverses_settings_requested(self) -> None:
+        licence = consoles_diverses_settings_store.lire_licence() or ""
+        self._consoles_diverses_settings_dialog.set_values(
+            self._app_config.consoles_diverses_server_url, licence
+        )
+        self._consoles_diverses_settings_dialog.open()
+
+    def _on_consoles_diverses_settings_saved(self, server_url: str, licence_key: str) -> None:
+        self._app_config.consoles_diverses_server_url = server_url
+        app_config.save_config(self._app_config)
+        consoles_diverses_settings_store.enregistrer_licence(licence_key)
+        self._consoles_diverses_screen.set_network_config(
+            server_url, consoles_diverses_settings_store.lire_licence() or licence_key
+        )
 
     def _start_wizard(self) -> None:
         self._app_config.ui_mode = "assisted"

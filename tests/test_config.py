@@ -107,6 +107,32 @@ def test_load_config_falls_back_to_default_on_unknown_firmware_value(tmp_path):
     assert loaded.firmware == "rocknix"
 
 
+def test_load_config_defaults_to_localhost_server_url_when_no_file_exists(tmp_path):
+    with patch("r36s_studio.config.config_path", return_value=tmp_path / "config.json"):
+        loaded = config.load_config()
+
+    assert loaded.consoles_diverses_server_url == "http://localhost:8787"
+
+
+def test_save_then_load_roundtrips_consoles_diverses_server_url(tmp_path):
+    path = tmp_path / "config.json"
+    with patch("r36s_studio.config.config_path", return_value=path):
+        config.save_config(config.AppConfig(consoles_diverses_server_url="https://exemple.invalid"))
+        loaded = config.load_config()
+
+    assert loaded.consoles_diverses_server_url == "https://exemple.invalid"
+
+
+def test_load_config_falls_back_to_default_server_url_when_field_missing_or_blank(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"consoles_diverses_server_url": "   "}', encoding="utf-8")
+
+    with patch("r36s_studio.config.config_path", return_value=path):
+        loaded = config.load_config()
+
+    assert loaded.consoles_diverses_server_url == "http://localhost:8787"
+
+
 def test_save_config_never_stores_a_secret_looking_key(tmp_path):
     """Garde-fou léger, cohérent avec la règle §9 (« aucun secret dans le
     dépôt ») : ce module ne doit jamais introduire de champ de ce genre."""

@@ -517,11 +517,16 @@ def test_r36s_ia_fixture_shows_unverified_badge_and_grouped_empty_categories(qap
 
     assert "Non vérifié" in labels
     assert "Trouvé automatiquement, non vérifié." in labels
-    assert "Non trouvé" in labels  # fabricant absent de la fixture -> "inconnu" -> "Non trouvé"
+    # Fabricant absent de la fixture -> "inconnu" -> ligne masquée sous le nom,
+    # jamais "Non trouvé" ni le mot brut "inconnu".
+    assert "Non trouvé" not in labels
+    assert "inconnu" not in labels
     assert any("Rockchip RK3326" in t for t in labels)
     assert "Linux" in labels
     assert any("non commerciale" in t for t in labels)  # restriction_commerciale=true dans la fixture
     assert any("à vérifier" in t for t in labels)  # l'option EmulationStation a licence_a_verifier=true
+    assert "Licence non détectée" in labels  # option.licence="non_detectee" dans la fixture
+    assert "non_detectee" not in labels
     assert any(
         t == "Rien trouvé pour : Système / CFW, Firmware d'origine, Mises à jour" for t in labels
     )
@@ -543,3 +548,66 @@ def test_android_fiche_without_any_option_shows_single_message_and_android_notic
     # Aucune des deux autres conditions du bloc « À savoir » ne s'applique ici.
     assert not any("non commerciale" in t for t in labels)
     assert not any("à vérifier" in t for t in labels)
+    # Fabricant "inconnu" -> ligne masquée sous le nom (contrairement à SoC/
+    # Architecture, qui affichent "Non trouvé" -- voir les tests dédiés
+    # `test_header_hides_fabricant_line_when_unknown` ci-dessous), jamais le
+    # mot brut "inconnu" en clair.
+    assert "inconnu" not in labels
+
+
+# --- Retouches : licence "non_detectee" et fabricant absent -----------------
+
+
+def test_licence_non_detectee_shows_friendly_chip_label(qapp):
+    from r36s_studio.consoles_diverses.models import OptionConsole
+    from r36s_studio.consoles_diverses.screen import _build_option_widget
+
+    option = OptionConsole(
+        nom="Option", description="desc", source_url="https://example.invalid/source", licence="non_detectee"
+    )
+
+    container = _build_option_widget(option)
+
+    chip_texts = [label.text() for label in container.findChildren(QLabel)]
+    assert "Licence non détectée" in chip_texts
+    assert "non_detectee" not in chip_texts
+
+
+def test_licence_with_real_value_is_shown_unchanged(qapp):
+    from r36s_studio.consoles_diverses.models import OptionConsole
+    from r36s_studio.consoles_diverses.screen import _build_option_widget
+
+    option = OptionConsole(
+        nom="Option",
+        description="desc",
+        source_url="https://example.invalid/source",
+        licence="CC-BY-NC-SA-4.0",
+    )
+
+    container = _build_option_widget(option)
+
+    chip_texts = [label.text() for label in container.findChildren(QLabel)]
+    assert "CC-BY-NC-SA-4.0" in chip_texts
+
+
+def test_header_hides_fabricant_line_when_unknown(qapp):
+    screen = ConsolesDiversesScreen()
+    data = _fiche()
+    data["identite"]["fabricant"] = "inconnu"
+    fiche = fiche_depuis_json(data)
+
+    header = screen._build_header(fiche)
+
+    labels = [label.text() for label in header.findChildren(QLabel)]
+    assert "inconnu" not in labels
+    assert "Non trouvé" not in labels
+
+
+def test_header_shows_fabricant_line_when_known(qapp):
+    screen = ConsolesDiversesScreen()
+    fiche = fiche_depuis_json(_fiche())  # fabricant = "Fabricant Y"
+
+    header = screen._build_header(fiche)
+
+    labels = [label.text() for label in header.findChildren(QLabel)]
+    assert "Fabricant Y" in labels

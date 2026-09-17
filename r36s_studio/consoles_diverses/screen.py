@@ -90,6 +90,12 @@ _CATEGORY_TITLE_KEYS = {
 # "inconnu" signifie ici (§docs/consoles-diverses-design.md).
 _VALEUR_INCONNUE = "inconnu"
 
+# Sentinelle du schéma pour une option dont la licence n'a pas pu être
+# identifiée (ex. `tests/fixtures_reponse_r36s.json::options.frontend[0].
+# licence`) -- affichée en clair plutôt que le code technique brut, même
+# principe que `_VALEUR_INCONNUE` ci-dessus.
+_LICENCE_NON_DETECTEE = "non_detectee"
+
 
 def _est_url_externe_sure(url: Optional[str]) -> bool:
     """Un lien n'est jamais cliquable que s'il s'agit explicitement d'une
@@ -140,6 +146,15 @@ def _valeur_ou_non_trouve(valeur: str) -> QLabel:
     if valeur.strip().lower() == _VALEUR_INCONNUE:
         return _plain_label(tr("value_not_found"), role="secondary")
     return _plain_label(valeur)
+
+
+def _licence_affichee(licence: str) -> str:
+    """`_LICENCE_NON_DETECTEE` (sentinelle du schéma pour une option dont la
+    licence n'a pas pu être identifiée) s'affiche en clair plutôt que le
+    code technique brut sur la pastille de la carte d'option."""
+    if licence.strip().lower() == _LICENCE_NON_DETECTEE:
+        return tr("licence_non_detectee")
+    return licence
 
 
 def _link_widget(url: Optional[str], label: Optional[str] = None) -> QWidget:
@@ -205,7 +220,7 @@ def _build_option_widget(option: OptionConsole) -> QWidget:
     chips_row = QHBoxLayout()
     has_chip = False
     if option.licence:
-        chips_row.addWidget(_badge_label(option.licence, "neutral"))
+        chips_row.addWidget(_badge_label(_licence_affichee(option.licence), "neutral"))
         has_chip = True
     if option.restriction_commerciale:
         chips_row.addWidget(_badge_label(tr("restriction_commerciale_chip"), "danger"))
@@ -493,7 +508,8 @@ class ConsolesDiversesScreen(Screen):
         badge_text = tr("badge_verified") if fiche.verifiee else tr("badge_unverified")
         name_row.addWidget(_badge_label(badge_text, badge_kind))
         layout.addLayout(name_row)
-        layout.addWidget(_valeur_ou_non_trouve(fiche.fabricant))
+        if fiche.fabricant.strip().lower() != _VALEUR_INCONNUE:
+            layout.addWidget(_plain_label(fiche.fabricant))
         if not fiche.verifiee:
             layout.addWidget(_plain_label(tr("unverified_note"), role="secondary"))
         return frame

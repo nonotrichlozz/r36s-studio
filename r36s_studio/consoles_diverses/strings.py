@@ -38,6 +38,7 @@ STRINGS = {
     "restriction_commerciale_banner": "Licence non commerciale : usage commercial interdit.",
     "restriction_commerciale_chip": "Non commerciale",
     "licence_a_verifier_mention": "Licence à vérifier",
+    "licence_non_detectee": "Licence non détectée",
     "info_title": "À savoir",
     "android_notice": (
         "Console Android : la préparation se fait par ADB, pas par la carte SD "

@@ -34,3 +34,12 @@ def test_elevation_log_path_is_inside_log_dir(mock_system, tmp_path):
 
     assert path == tmp_path / ".config" / "r36s-studio" / "logs" / "elevation.log"
     assert isinstance(path, Path)
+
+
+@patch("r36s_studio.gui.logs.platform.system", return_value="Darwin")
+def test_consoles_diverses_log_path_is_inside_log_dir(mock_system, tmp_path):
+    with patch("r36s_studio.gui.logs.Path.home", return_value=tmp_path):
+        path = logs.consoles_diverses_log_path()
+
+    assert path == tmp_path / ".config" / "r36s-studio" / "logs" / "consoles_diverses.log"
+    assert isinstance(path, Path)

@@ -1,0 +1,65 @@
+﻿{
+    "statut":  "trouve_par_ia",
+    "console":  {
+                    "id":  "r36s",
+                    "identite":  {
+                                     "nom":  "R36S",
+                                     "fabricant":  "inconnu",
+                                     "alias":  [
+                                                   "RetroBox Console",
+                                                   "Game Station",
+                                                   "Game Console R36S"
+                                               ]
+                                 },
+                    "materiel":  {
+                                     "soc":  "Rockchip RK3326 Quad-core ARM Cortex-A35 CPU with GPU",
+                                     "architecture":  "ARM64"
+                                 },
+                    "os":  {
+                               "type":  "Linux"
+                           },
+                    "options":  {
+                                    "frontend":  [
+                                                     {
+                                                         "nom":  "EmulationStation",
+                                                         "description":  "It is possible to setup EmulationStation to support our native games.",
+                                                         "licence":  "non_detectee",
+                                                         "source_url":  "https://github.com/dov/r36s-programming",
+                                                         "licence_a_verifier":  true
+                                                     }
+                                                 ],
+                                    "systeme_cfw":  [
+
+                                                    ],
+                                    "firmware_origine":  [
+
+                                                         ],
+                                    "mises_a_jour":  [
+
+                                                     ]
+                                },
+                    "liens_officiels":  [
+
+                                        ],
+                    "licences":  [
+                                     "CC-BY-NC-4.0"
+                                 ],
+                    "sources":  [
+                                    {
+                                        "url":  "https://github.com/dov/r36s-programming",
+                                        "type":  "github"
+                                    }
+                                ],
+                    "licences_a_verifier":  true,
+                    "restriction_commerciale":  true,
+                    "recherche_web":  false,
+                    "sources_collectees":  true,
+                    "statut":  "non_verifie",
+                    "modele_ia":  "gemini-3.5-flash-lite"
+                },
+    "pr_creee":  false,
+    "connecteurs":  {
+                        "handhelds_wiki":  "desactive",
+                        "github":  "ok"
+                    }
+}

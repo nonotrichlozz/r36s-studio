@@ -6,9 +6,15 @@ la conception de cette fonctionnalité)."""
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from r36s_studio.consoles_diverses.models import fiche_depuis_json
+
+FIXTURE_REPONSE_R36S = Path(__file__).parent / "fixtures_reponse_r36s.json"
 
 
 def _fiche_sf3000hd() -> dict:
@@ -177,7 +183,7 @@ def test_fiche_depuis_json_ignores_malformed_option_entries():
 
 @pytest.mark.parametrize(
     "champ_manquant",
-    ["id", "statut", "signalements"],
+    ["id", "statut"],
 )
 def test_fiche_depuis_json_raises_when_top_level_field_missing(champ_manquant):
     data = _fiche_sf3000hd()
@@ -187,27 +193,9 @@ def test_fiche_depuis_json_raises_when_top_level_field_missing(champ_manquant):
         fiche_depuis_json(data)
 
 
-@pytest.mark.parametrize("champ_manquant", ["nom", "fabricant"])
-def test_fiche_depuis_json_raises_when_identite_field_missing(champ_manquant):
+def test_fiche_depuis_json_raises_when_identite_nom_missing():
     data = _fiche_sf3000hd()
-    del data["identite"][champ_manquant]
-
-    with pytest.raises(ValueError):
-        fiche_depuis_json(data)
-
-
-@pytest.mark.parametrize("champ_manquant", ["soc", "architecture"])
-def test_fiche_depuis_json_raises_when_materiel_field_missing(champ_manquant):
-    data = _fiche_sf3000hd()
-    del data["materiel"][champ_manquant]
-
-    with pytest.raises(ValueError):
-        fiche_depuis_json(data)
-
-
-def test_fiche_depuis_json_raises_when_os_type_missing():
-    data = _fiche_sf3000hd()
-    del data["os"]["type"]
+    del data["identite"]["nom"]
 
     with pytest.raises(ValueError):
         fiche_depuis_json(data)
@@ -216,3 +204,125 @@ def test_fiche_depuis_json_raises_when_os_type_missing():
 def test_fiche_depuis_json_raises_when_not_a_dict():
     with pytest.raises(ValueError):
         fiche_depuis_json("pas un objet")  # type: ignore[arg-type]
+
+
+# --- Tolérance aux fiches IA (seuls id/identite.nom/statut restent -------
+# --- obligatoires ; le reste du schéma connu retombe sur une valeur -------
+# --- par défaut, tout champ inconnu est ignoré) ---------------------------
+
+
+def test_fiche_depuis_json_defaults_signalements_when_missing():
+    data = _fiche_sf3000hd()
+    del data["signalements"]
+
+    fiche = fiche_depuis_json(data)
+
+    assert fiche.signalements == 0
+
+
+def test_fiche_depuis_json_defaults_signalements_when_wrong_type():
+    data = _fiche_sf3000hd()
+    data["signalements"] = "pas un nombre"
+
+    fiche = fiche_depuis_json(data)
+
+    assert fiche.signalements == 0
+
+
+def test_fiche_depuis_json_defaults_fabricant_when_identite_missing_it():
+    data = _fiche_sf3000hd()
+    del data["identite"]["fabricant"]
+
+    fiche = fiche_depuis_json(data)
+
+    assert fiche.fabricant == "inconnu"
+
+
+def test_fiche_depuis_json_defaults_soc_and_architecture_when_materiel_missing():
+    data = _fiche_sf3000hd()
+    del data["materiel"]
+
+    fiche = fiche_depuis_json(data)
+
+    assert fiche.soc == "inconnu"
+    assert fiche.architecture == "inconnu"
+
+
+def test_fiche_depuis_json_defaults_os_type_when_os_missing():
+    data = _fiche_sf3000hd()
+    del data["os"]
+
+    fiche = fiche_depuis_json(data)
+
+    assert fiche.os_type == "inconnu"
+
+
+def test_fiche_depuis_json_ignores_unknown_fields():
+    data = _fiche_sf3000hd()
+    data["modele_ia"] = "gemini-3.5-flash-lite"
+    data["connecteurs"] = {"github": "ok"}
+    data["sources_collectees"] = True
+    data["recherche_web"] = False
+    data["licences_a_verifier"] = True
+    data["detection_sd"] = {"quelque_chose": "d_inattendu"}
+
+    fiche = fiche_depuis_json(data)  # ne lève pas
+
+    assert fiche.id == "sf3000hd"
+
+
+# --- Journalisation d'une fiche rejetée (jamais à l'écran) -----------------
+
+
+def test_fiche_depuis_json_logs_the_offending_field_name_when_rejected(tmp_path):
+    log_path = tmp_path / "consoles_diverses.log"
+    data = _fiche_sf3000hd()
+    del data["statut"]
+
+    with patch(
+        "r36s_studio.consoles_diverses.models.gui_logs.consoles_diverses_log_path",
+        return_value=log_path,
+    ):
+        with pytest.raises(ValueError):
+            fiche_depuis_json(data)
+
+    contenu = log_path.read_text(encoding="utf-8")
+    assert "statut" in contenu
+
+
+def test_fiche_depuis_json_logging_failure_does_not_prevent_the_rejection(tmp_path):
+    data = _fiche_sf3000hd()
+    del data["id"]
+
+    with patch(
+        "r36s_studio.consoles_diverses.models.gui_logs.consoles_diverses_log_path",
+        side_effect=OSError("disque plein"),
+    ):
+        with pytest.raises(ValueError):
+            fiche_depuis_json(data)
+
+
+# --- Régression : vraie réponse serveur pour la R36S (fiche IA, non --------
+# --- vérifiée) qui échouait auparavant avec "réponse inattendue" -----------
+# --- (reponse_invalide) faute de `signalements`. ---------------------------
+
+
+def test_fiche_depuis_json_parses_the_real_r36s_ia_response_fixture():
+    payload = json.loads(FIXTURE_REPONSE_R36S.read_text(encoding="utf-8-sig"))
+
+    fiche = fiche_depuis_json(payload["console"])
+
+    assert fiche.id == "r36s"
+    assert fiche.nom == "R36S"
+    assert fiche.fabricant == "inconnu"
+    assert fiche.soc.startswith("Rockchip RK3326")
+    assert fiche.os_type == "Linux"
+    assert fiche.statut == "non_verifie"
+    assert fiche.verifiee is False
+    assert fiche.signalements == 0  # absent de la fixture, valeur par défaut
+    assert fiche.date_verification is None  # absent de la fixture
+    assert len(fiche.options.frontend) == 1
+    assert fiche.options.frontend[0].nom == "EmulationStation"
+    assert fiche.options.frontend[0].licence_a_verifier is True
+    assert fiche.licences == ["CC-BY-NC-4.0"]
+    assert fiche.sources[0].url == "https://github.com/dov/r36s-programming"

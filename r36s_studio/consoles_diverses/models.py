@@ -18,20 +18,36 @@
 `r36s-studio-catalogue/schema/console.schema.json` (lu en lecture seule,
 jamais modifié depuis ce dépôt). Parsing défensif plutôt qu'une dépendance
 de validation externe (aucune n'est déjà présente dans `requirements.txt`,
-on n'en ajoute pas pour un schéma de cette taille) : seuls les champs dont
-l'absence empêcherait tout affichage sensé (identité, matériel, statut)
-font lever `ValueError` -- capturée par `client.py` et traduite en
-`RechercheErreur("reponse_invalide")`. Les champs optionnels du schéma
-(`incompatibles`, `licences`, `sources`, `liens_officiels`,
-`date_verification`, et les booléens "absents-si-faux" de chaque option)
-retombent silencieusement sur une valeur vide/`False`, jamais sur une
-exception -- une fiche par ailleurs exploitable ne doit pas être rejetée
-pour un champ annexe manquant ou malformé côté serveur."""
+on n'en ajoute pas pour un schéma de cette taille) : seuls `id`,
+`identite.nom` et `statut` sont indispensables à tout affichage sensé (un
+titre, une clé, un badge vérifié/non vérifié) -- leur absence fait lever
+`ValueError` (le nom du champ en cause est d'abord consigné dans le journal
+de l'app, jamais affiché à l'écran, §CLAUDE.md du package -- voir
+`_journaliser_fiche_rejetee` ci-dessous), capturée par `client.py` et
+traduite en `RechercheErreur("reponse_invalide")`.
+
+**Une fiche générée par IA (`statut: "non_verifie"`) peut légitimement
+omettre ou ajouter des champs** par rapport à une fiche vérifiée à la main
+-- champ par champ :
+- Tout le reste du schéma connu (`fabricant`, `materiel.soc`/
+  `materiel.architecture`, `os.type`, `signalements`, `incompatibles`,
+  `licences`, `sources`, `liens_officiels`, `date_verification`, et les
+  booléens "absents-si-faux" de chaque option) retombe silencieusement sur
+  une valeur par défaut (`"inconnu"`/`0`/vide/`False`) quand il est absent
+  ou malformé, jamais sur une exception -- une fiche par ailleurs
+  exploitable ne doit pas être rejetée pour un champ annexe.
+- Tout champ que ce module ne connaît pas du tout (`modele_ia`,
+  `sources_collectees`, `recherche_web`, `licences_a_verifier` au niveau
+  fiche...) est simplement ignoré -- ce parsing ne lit que les clés dont il
+  a besoin, il ne valide jamais qu'aucune autre clé n'existe."""
 
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NoReturn, Optional
+
+from r36s_studio.gui import logs as gui_logs
 
 
 @dataclass
@@ -176,48 +192,93 @@ def _sources_depuis_json(data: Any) -> List[Source]:
     return result
 
 
+def _str_ou_defaut(value: Any, defaut: str) -> str:
+    if isinstance(value, str) and value:
+        return value
+    return defaut
+
+
+def _signalements_ou_zero(value: Any) -> int:
+    """`signalements` est optionnel depuis qu'une fiche IA peut l'omettre --
+    une valeur absente ou du mauvais type retombe sur 0 plutôt que de
+    rejeter toute la fiche pour ce seul champ annexe."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _journaliser_fiche_rejetee(champ: str) -> None:
+    """Consigne le champ en cause dans le journal de l'app (`gui/logs.py::
+    consoles_diverses_log_path`) -- jamais à l'écran, l'utilisateur ne voit
+    que le message générique `error_reponse_invalide` (§CLAUDE.md du
+    package). Best-effort : un journal inaccessible (droits, disque plein)
+    ne doit jamais empêcher le rejet lui-même de remonter normalement."""
+    try:
+        chemin = gui_logs.consoles_diverses_log_path()
+        horodatage = datetime.datetime.now().isoformat(timespec="seconds")
+        with open(chemin, "a", encoding="utf-8") as fichier:
+            fichier.write(f"{horodatage} fiche rejetée : champ '{champ}' manquant ou invalide.\n")
+    except OSError:
+        pass
+
+
+def _rejeter(champ: str, message: str) -> NoReturn:
+    _journaliser_fiche_rejetee(champ)
+    raise ValueError(message)
+
+
 def fiche_depuis_json(data: Dict[str, Any]) -> FicheConsole:
     """Construit une `FicheConsole` depuis le JSON `console` renvoyé par le
-    serveur. Lève `ValueError` (message explicite, jamais silencieux) si un
-    champ dont l'absence empêcherait tout affichage sensé manque -- capturé
-    par `client.py::rechercher_console` et traduit en
-    `RechercheErreur("reponse_invalide")`."""
+    serveur. Seuls `id`, `identite.nom` et `statut` sont indispensables --
+    leur absence lève `ValueError` (message explicite, jamais silencieux ;
+    le nom du champ est d'abord consigné dans le journal de l'app, jamais
+    affiché à l'écran) capturée par `client.py::rechercher_console` et
+    traduite en `RechercheErreur("reponse_invalide")`. Tout le reste du
+    schéma connu retombe sur une valeur par défaut quand il est absent ou
+    malformé (une fiche générée par IA peut légitimement l'omettre), et
+    tout champ inconnu est simplement ignoré -- voir le docstring du
+    module."""
     if not isinstance(data, dict):
-        raise ValueError("La fiche reçue n'est pas un objet JSON.")
+        _rejeter("data", "La fiche reçue n'est pas un objet JSON.")
+
+    if not isinstance(data.get("id"), str) or not data["id"]:
+        _rejeter("id", "Champ obligatoire 'id' manquant.")
 
     identite = data.get("identite")
     if not isinstance(identite, dict):
-        raise ValueError("Champ 'identite' manquant ou invalide.")
+        identite = {}
+    nom = identite.get("nom")
+    if not isinstance(nom, str) or not nom:
+        _rejeter("identite.nom", "Champ obligatoire 'identite.nom' manquant.")
+
+    if not isinstance(data.get("statut"), str) or not data["statut"]:
+        _rejeter("statut", "Champ obligatoire 'statut' manquant.")
+
     materiel = data.get("materiel")
     if not isinstance(materiel, dict):
-        raise ValueError("Champ 'materiel' manquant ou invalide.")
+        materiel = {}
     os_info = data.get("os")
     if not isinstance(os_info, dict):
-        raise ValueError("Champ 'os' manquant ou invalide.")
-
-    for champ in ("id", "statut", "signalements"):
-        if champ not in data:
-            raise ValueError(f"Champ obligatoire '{champ}' manquant.")
-    for champ in ("nom", "fabricant"):
-        if champ not in identite:
-            raise ValueError(f"Champ obligatoire 'identite.{champ}' manquant.")
-    for champ in ("soc", "architecture"):
-        if champ not in materiel:
-            raise ValueError(f"Champ obligatoire 'materiel.{champ}' manquant.")
-    if "type" not in os_info:
-        raise ValueError("Champ obligatoire 'os.type' manquant.")
+        os_info = {}
 
     return FicheConsole(
         id=str(data["id"]),
-        nom=str(identite["nom"]),
-        fabricant=str(identite["fabricant"]),
+        nom=nom,
+        fabricant=_str_ou_defaut(identite.get("fabricant"), "inconnu"),
         alias=_as_str_list(identite.get("alias")),
-        soc=str(materiel["soc"]),
-        architecture=str(materiel["architecture"]),
-        os_type=str(os_info["type"]),
+        soc=_str_ou_defaut(materiel.get("soc"), "inconnu"),
+        architecture=_str_ou_defaut(materiel.get("architecture"), "inconnu"),
+        os_type=_str_ou_defaut(os_info.get("type"), "inconnu"),
         options=_options_depuis_json(data.get("options")),
         statut=str(data["statut"]),
-        signalements=int(data["signalements"]),
+        signalements=_signalements_ou_zero(data.get("signalements")),
         incompatibles=_incompatibles_depuis_json(data.get("incompatibles")),
         liens_officiels=_as_str_list(data.get("liens_officiels")),
         licences=_as_str_list(data.get("licences")),

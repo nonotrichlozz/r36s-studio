@@ -45,3 +45,14 @@ def elevation_log_path() -> Path:
     """Écrasé à chaque lancement élevé — reflète toujours la dernière
     tentative, pas un historique."""
     return log_dir() / "elevation.log"
+
+
+def consoles_diverses_log_path() -> Path:
+    """Journal des fiches rejetées par `consoles_diverses/models.py::
+    fiche_depuis_json` -- le champ en cause n'est jamais affiché à l'écran
+    (le message utilisateur reste générique, `strings.py::error_reponse_
+    invalide`), ce fichier est le seul endroit où le détail technique
+    atterrit. Ajouté en continu (contrairement à `elevation_log_path`,
+    écrasé à chaque lancement) -- une ligne par fiche rejetée, pas un seul
+    incident à la fois."""
+    return log_dir() / "consoles_diverses.log"

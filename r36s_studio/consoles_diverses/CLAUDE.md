@@ -1,0 +1,99 @@
+# Consoles diverses — étape 1 : mode recherche
+
+> Sous-brief du package `r36s_studio/consoles_diverses/`. Complète (ne
+> remplace pas) `CLAUDE.md` à la racine du dépôt.
+
+## Règle d'isolation
+
+Ce package est volontairement indépendant du reste de R36S Studio :
+
+- Il n'appelle jamais le worker élevé, `imaging/`, `partitions/`, `devices/`
+  ni `safety/` -- un simple appel HTTP en lecture, rien à voir avec
+  l'écriture disque brute (§3 de CLAUDE.md racine).
+- Toutes ses chaînes vivent dans `consoles_diverses/strings.py`, jamais dans
+  `gui/strings.py`.
+- Le code R36S existant n'est modifié qu'au strict minimum pour le point
+  d'entrée dans la navigation : un signal et un bouton sur `HomeScreen`/
+  `AssistedLandingScreen` (`gui/screens.py`), leur câblage dans
+  `gui/main_window.py`, et un champ dans `AppConfig` (`config.py`). Rien
+  d'autre.
+
+## Contrat serveur
+
+Le serveur (`r36s-studio-cloud`, projet séparé, documentation lue en
+lecture seule -- jamais `.dev.vars`) expose `POST /recherche` :
+
+```
+POST /recherche
+Content-Type: application/json
+X-Licence-Key: (toujours envoyé, même vide)
+
+{"reference": "..."}
+```
+
+Réponses : `200 {"statut": "trouve_dans_catalogue"|"trouve_par_ia"|
+"aucune_information_trouvee", ...}`, ou une erreur (`400 reference_
+invalide`, `403 licence_requise`/`licence_invalide`, `500 configuration_
+manquante`, `503 recherche_ia_indisponible`, `502 erreur_api_ia`/
+`reponse_ia_non_json`). Côté client (`client.py`) s'ajoutent
+`serveur_injoignable`, `delai_depasse` et `reponse_invalide` (réponse
+absente/malformée/trop grande). Une fiche `console` suit
+`r36s-studio-catalogue/schema/console.schema.json` (`models.py` en fait un
+parsing défensif : seuls les champs d'identité indispensables font échouer
+le parsing).
+
+## Durcissement (une fiche est une donnée externe non fiable)
+
+Le serveur peut renvoyer une fiche générée par IA (`statut: "non_
+verifie"`), jamais vérifiée par un humain. Quatre mesures :
+
+1. **Texte brut, jamais interprété** (`screen.py::_plain_label`) --
+   `QLabel.setTextFormat(Qt.PlainText)` sur tout texte venu du serveur.
+2. **Liens restreints à http(s)** (`screen.py::_est_url_externe_sure`) --
+   `file:`/`javascript:`/un chemin local/un schéma absent restent du texte
+   simple, jamais un lien ouvert automatiquement.
+3. **Adresse du serveur restreinte** (`settings_store.py::
+   valider_adresse_serveur`) -- `https://` toujours accepté, `http://`
+   seulement pour `localhost`/`127.0.0.1` (sinon la clé de licence
+   circulerait en clair).
+4. **Réponse plafonnée à 1 Mio** (`client.py::MAX_RESPONSE_BYTES`) avant
+   tout `json.loads`.
+
+## Clé de licence : trousseau système, avec repli
+
+`settings_store.py` stocke la clé via `keyring`, jamais en clair dans
+`AppConfig`/`config.json`. Si aucun backend `keyring` n'est disponible
+(`trousseau_disponible()` renvoie `False` -- typiquement Linux sans
+`SecretService`/`kwallet` actif), la clé reste **uniquement en mémoire
+pour la session**, jamais écrite sur disque en clair à la place --
+`settings_dialog.py` affiche alors un message explicite plutôt qu'un
+échec silencieux.
+
+⚠️ **Non vérifié sur du vrai matériel au moment d'écrire cette note** :
+seul Windows (Credential Manager, backend natif toujours disponible) a pu
+être testé lors de l'implémentation initiale. Le comportement sur macOS
+(Keychain) et sur un Linux sans trousseau de bureau (repli mémoire-session
+réel) reste à confirmer au premier essai sur ces plateformes.
+
+**Packaging** : `keyring` choisit son backend par introspection au moment
+de l'exécution, ce que PyInstaller ne détecte pas seul -- les trois
+fichiers `packaging/*.spec` déclarent explicitement les modules de backend
+pertinents par OS (`hiddenimports`). Non vérifié sur un vrai binaire
+construit à ce jour.
+
+## Hors périmètre (étape 1)
+
+Analyse de carte SD (`detection_sd` du schéma non affiché), installation ou
+téléchargement d'un firmware/frontend depuis cette section (liens externes
+ouverts au navigateur uniquement, jamais de téléchargement automatique),
+contribution/soumission au catalogue, cache local des fiches consultées,
+sous-commande CLI de diagnostic. `pr_creee`/`connecteurs` (diagnostic
+serveur) ne sont jamais affichés à l'utilisateur.
+
+## Tests
+
+Toute communication réseau passe par un paramètre `opener` injectable
+(`client.py::Opener`, même principe que `identify/rocknix.py`) -- aucun
+test de ce package ne fait un appel réseau réel. `keyring` est monkeypatché
+dans `tests/test_consoles_diverses_settings.py`, jamais un vrai trousseau
+système lu ou écrit pendant la suite.

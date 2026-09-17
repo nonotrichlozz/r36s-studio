@@ -2,10 +2,18 @@
 conditionnels, restriction http(s)/PlainText (durcissement demandé), et
 comportement du bouton Réessayer. `ConsoleSearchRunner` est mocké au
 niveau module pour ne jamais démarrer un vrai thread Qt pendant les tests
-(même principe que `tests/test_gui_partition_runner.py`)."""
+(même principe que `tests/test_gui_partition_runner.py`).
+
+La section « Captures de régression » (bas de fichier) couvre la nouvelle
+présentation de la fiche (`docs/consoles-diverses-design.md`) sur trois cas
+réels : SF3000HD (vérifiée, restriction commerciale, incompatibles), R36S
+(fixture IA, `tests/fixtures_reponse_r36s.json`), et une fiche Android sans
+aucune option."""
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -20,6 +28,8 @@ from r36s_studio.consoles_diverses.screen import (
     _est_url_externe_sure,
 )
 
+FIXTURE_REPONSE_R36S = Path(__file__).parent / "fixtures_reponse_r36s.json"
+
 
 def _fiche(**overrides) -> dict:
     data = {
@@ -33,6 +43,70 @@ def _fiche(**overrides) -> dict:
     }
     data.update(overrides)
     return data
+
+
+def _fiche_sf3000hd() -> dict:
+    return {
+        "id": "sf3000hd",
+        "identite": {"nom": "SF3000HD", "fabricant": "Data Frog", "alias": []},
+        "materiel": {"soc": "HiChip C3100", "architecture": "MIPS"},
+        "os": {"type": "proprietaire (H.OS / iCube / cubegm)"},
+        "options": {
+            "frontend": [
+                {
+                    "nom": "TreeFrog UI",
+                    "description": "Interface/frontend personnalisé pour SF3000HD et consoles apparentées.",
+                    "url": "https://github.com/tzubertowski/TreeFrogUI",
+                    "licence": "CC-BY-NC-SA-4.0",
+                    "restriction_commerciale": True,
+                    "source_url": "https://github.com/tzubertowski/TreeFrogUI",
+                }
+            ],
+            "systeme_cfw": [],
+            "firmware_origine": [
+                {
+                    "nom": "Sauvegarde du firmware d'origine",
+                    "description": "Procédure de sauvegarde variable selon le modèle exact de console.",
+                    "url": "https://github.com/tzubertowski/TreeFrogUI/blob/main/install.md",
+                    "source_url": "https://github.com/tzubertowski/TreeFrogUI/blob/main/install.md",
+                }
+            ],
+            "mises_a_jour": [
+                {
+                    "nom": "update.zip officiel TreeFrog UI",
+                    "description": "Copier update.zip à la racine de la carte SD pour mettre à jour TreeFrog UI.",
+                    "source_url": "https://github.com/tzubertowski/TreeFrogUI",
+                    "licence": "CC-BY-NC-SA-4.0",
+                    "restriction_commerciale": True,
+                }
+            ],
+        },
+        "incompatibles": [
+            {"nom": "ArkOS", "raison": "ARM uniquement, flasher une image ARM corrompt la carte"},
+            {"nom": "EmuELEC", "raison": "ARM uniquement, flasher une image ARM corrompt la carte"},
+        ],
+        "liens_officiels": [],
+        "licences": ["CC-BY-NC-SA-4.0"],
+        "restriction_commerciale": True,
+        "sources": [
+            {"url": "https://github.com/tzubertowski/TreeFrogUI", "type": "github"},
+        ],
+        "statut": "verifie",
+        "date_verification": "2026-09-17",
+        "signalements": 0,
+    }
+
+
+def _fiche_android_vide() -> dict:
+    return {
+        "id": "android-clone",
+        "identite": {"nom": "Console Android générique", "fabricant": "inconnu", "alias": []},
+        "materiel": {"soc": "inconnu", "architecture": "inconnu"},
+        "os": {"type": "Android (LineageOS)"},
+        "options": {"frontend": [], "systeme_cfw": [], "firmware_origine": [], "mises_a_jour": []},
+        "statut": "non_verifie",
+        "signalements": 0,
+    }
 
 
 # --- _est_url_externe_sure ---------------------------------------------------
@@ -78,7 +152,7 @@ def test_verified_fiche_shows_verified_badge_no_unverified_or_restriction_banner
     assert screen._error_frame.isVisible() is False
 
 
-def test_unverified_ia_fiche_with_restriction_commerciale_shows_both_banners(qapp):
+def test_unverified_ia_fiche_with_restriction_commerciale_shows_both_signals(qapp):
     screen = ConsolesDiversesScreen()
     data = _fiche(statut="non_verifie", restriction_commerciale=True)
     data["options"]["frontend"] = [
@@ -98,7 +172,7 @@ def test_unverified_ia_fiche_with_restriction_commerciale_shows_both_banners(qap
     content = screen._result_frame.widget()
     labels_text = [label.text() for label in content.findChildren(QLabel)]
     assert any("non commerciale" in text for text in labels_text)
-    assert any("non vérifiées" in text for text in labels_text)
+    assert any("non vérifié" in text for text in labels_text)
     assert any("à vérifier" in text for text in labels_text)
 
 
@@ -202,6 +276,21 @@ def test_fiche_source_with_unsafe_scheme_shown_as_plain_text(qapp):
     label_texts = [label.text() for label in content.findChildren(QLabel)]
     assert "file:///etc/passwd" not in button_texts
     assert "file:///etc/passwd" in label_texts
+
+
+# --- Aucun bouton d'installation/téléchargement automatique -----------------
+
+
+def test_no_install_or_download_button_appears_in_a_rendered_fiche(qapp):
+    screen = ConsolesDiversesScreen()
+    fiche = fiche_depuis_json(_fiche_sf3000hd())
+
+    screen._on_search_finished(ResultatRecherche(statut="trouve_dans_catalogue", console=fiche))
+
+    content = screen._result_frame.widget()
+    button_texts = [button.text().lower() for button in content.findChildren(QPushButton)]
+    interdits = ("install", "télécharg", "download")
+    assert not any(mot in texte for texte in button_texts for mot in interdits)
 
 
 # --- Recherche / Réessayer ---------------------------------------------------
@@ -346,8 +435,8 @@ def test_ia_surchargee_error_shows_error_zone_with_friendly_message(qapp):
 
 
 def test_option_link_is_left_aligned_within_its_card(qapp):
-    from r36s_studio.consoles_diverses.screen import _build_option_widget
     from r36s_studio.consoles_diverses.models import OptionConsole
+    from r36s_studio.consoles_diverses.screen import _build_option_widget
 
     option = OptionConsole(
         nom="Option", description="desc", source_url="https://example.invalid/source", url="https://example.invalid/a"
@@ -361,7 +450,96 @@ def test_option_link_is_left_aligned_within_its_card(qapp):
         for i in range(layout.count())
         if (item := layout.itemAt(i)).widget() is not None
         and isinstance(item.widget(), QPushButton)
-        and item.widget().text() == "https://example.invalid/a"
+        and item.widget().text() == "Ouvrir la page"
     )
+    assert link_widget.toolTip() == "https://example.invalid/a"
     index = layout.indexOf(link_widget)
     assert layout.itemAt(index).alignment() == Qt.AlignLeft
+
+
+# --- Captures de régression (docs/consoles-diverses-design.md) --------------
+
+
+def _texts(container, widget_cls) -> list:
+    return [widget.text() for widget in container.findChildren(widget_cls)]
+
+
+def test_sf3000hd_fiche_shows_verified_badge_restriction_and_incompatibles(qapp):
+    screen = ConsolesDiversesScreen()
+    fiche = fiche_depuis_json(_fiche_sf3000hd())
+
+    screen._on_search_finished(ResultatRecherche(statut="trouve_dans_catalogue", console=fiche))
+
+    content = screen._result_frame.widget()
+    labels = _texts(content, QLabel)
+
+    assert "Vérifié" in labels
+    assert "Data Frog" in labels  # fabricant connu, jamais "Non trouvé"
+    assert any("non commerciale" in t for t in labels)
+    assert any(t.startswith("Ne pas installer : ") and "ArkOS" in t and "EmuELEC" in t for t in labels)
+    assert "HiChip C3100" in labels
+    assert "MIPS" in labels
+    assert "proprietaire (H.OS / iCube / cubegm)" in labels
+    # Une seule catégorie vide (systeme_cfw) -- frontend/firmware_origine/
+    # mises_a_jour ont chacune une option, donc pas regroupées.
+    assert any(t == "Rien trouvé pour : Système / CFW" for t in labels)
+    assert "TreeFrog UI" in labels
+
+
+def test_sf3000hd_sources_section_starts_collapsed_and_toggle_reveals_it(qapp):
+    screen = ConsolesDiversesScreen()
+    fiche = fiche_depuis_json(_fiche_sf3000hd())
+
+    screen._on_search_finished(ResultatRecherche(statut="trouve_dans_catalogue", console=fiche))
+
+    content = screen._result_frame.widget()
+    toggle = next(b for b in content.findChildren(QPushButton) if "Sources" in b.text())
+    assert toggle.text() == "▸ Sources (1)"
+    assert toggle.isChecked() is False
+
+    toggle.click()
+
+    assert toggle.isChecked() is True
+    assert toggle.text() == "▾ Sources (1)"
+    liens = [b.text() for b in content.findChildren(QPushButton) if b.text().startswith("https://")]
+    assert "https://github.com/tzubertowski/TreeFrogUI" in liens
+
+
+def test_r36s_ia_fixture_shows_unverified_badge_and_grouped_empty_categories(qapp):
+    screen = ConsolesDiversesScreen()
+    payload = json.loads(FIXTURE_REPONSE_R36S.read_text(encoding="utf-8-sig"))
+    fiche = fiche_depuis_json(payload["console"])
+
+    screen._on_search_finished(ResultatRecherche(statut="trouve_par_ia", console=fiche, pr_creee=False))
+
+    content = screen._result_frame.widget()
+    labels = _texts(content, QLabel)
+
+    assert "Non vérifié" in labels
+    assert "Trouvé automatiquement, non vérifié." in labels
+    assert "Non trouvé" in labels  # fabricant absent de la fixture -> "inconnu" -> "Non trouvé"
+    assert any("Rockchip RK3326" in t for t in labels)
+    assert "Linux" in labels
+    assert any("non commerciale" in t for t in labels)  # restriction_commerciale=true dans la fixture
+    assert any("à vérifier" in t for t in labels)  # l'option EmulationStation a licence_a_verifier=true
+    assert any(
+        t == "Rien trouvé pour : Système / CFW, Firmware d'origine, Mises à jour" for t in labels
+    )
+    assert "EmulationStation" in labels
+
+
+def test_android_fiche_without_any_option_shows_single_message_and_android_notice(qapp):
+    screen = ConsolesDiversesScreen()
+    fiche = fiche_depuis_json(_fiche_android_vide())
+
+    screen._on_search_finished(ResultatRecherche(statut="trouve_par_ia", console=fiche, pr_creee=False))
+
+    content = screen._result_frame.widget()
+    labels = _texts(content, QLabel)
+
+    assert "Peu d'informations trouvées pour cette console." in labels
+    assert not any(t.startswith("Rien trouvé pour : ") for t in labels)
+    assert any("ADB" in t for t in labels)
+    # Aucune des deux autres conditions du bloc « À savoir » ne s'applique ici.
+    assert not any("non commerciale" in t for t in labels)
+    assert not any("à vérifier" in t for t in labels)

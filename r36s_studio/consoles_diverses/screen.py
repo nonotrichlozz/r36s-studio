@@ -28,21 +28,34 @@ d'isolation : c'est le contenu qui est isolé, pas l'habillage Qt).
 **Une fiche vient d'un serveur externe et peut être générée par IA -- elle
 est traitée comme une donnée non fiable, jamais comme du contenu de
 confiance** (durcissement demandé) :
-- Tout texte serveur passe par `_plain_label`, qui verrouille
-  `setTextFormat(Qt.PlainText)` -- aucun HTML n'est jamais interprété.
-- Un lien n'est cliquable que si `_est_url_externe_sure` le confirme --
-  strictement `http://`/`https://`, jamais `file:`/`javascript:`/un chemin
-  local/un schéma absent, qui restent du texte simple non cliquable."""
+- Tout texte serveur passe par `_plain_label`/`_badge_label`, qui
+  verrouillent `setTextFormat(Qt.PlainText)` -- aucun HTML n'est jamais
+  interprété.
+- Un lien -- y compris le bouton « Ouvrir la page » d'une carte d'option --
+  n'est cliquable que si `_est_url_externe_sure` le confirme -- strictement
+  `http://`/`https://`, jamais `file:`/`javascript:`/un chemin local/un
+  schéma absent, qui restent du texte simple non cliquable. Aucun bouton
+  d'installation ou de téléchargement automatique : uniquement des liens
+  ouverts dans le navigateur (§CLAUDE.md du package, hors périmètre).
+
+Présentation (`docs/consoles-diverses-design.md`) : une fiche lisible en 5
+secondes -- en-tête (nom + statut vérifié/non vérifié), bloc « À savoir »
+conditionnel (licence non commerciale, licence à vérifier, incompatibles,
+console Android), carte Matériel, options groupées par catégorie (les
+catégories vides sont résumées en une seule ligne plutôt que répétées),
+section Sources repliée par défaut. Contenu centré sur une colonne de
+largeur de lecture max (`_MAX_CONTENT_WIDTH`)."""
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -56,12 +69,13 @@ from PySide6.QtWidgets import (
 from r36s_studio.gui.screens import Screen
 
 from .client import ResultatRecherche
-from .models import FicheConsole, OptionConsole
+from .models import FicheConsole, Incompatible, OptionConsole
 from .search_runner import ConsoleSearchRunner
 from .strings import friendly_error_message, tr
 
 MAX_REFERENCE_LENGTH = 64
 SLOW_SEARCH_WARNING_DELAY_MS = 15_000
+_MAX_CONTENT_WIDTH = 900
 
 _CATEGORY_TITLE_KEYS = {
     "frontend": "category_frontend",
@@ -70,13 +84,21 @@ _CATEGORY_TITLE_KEYS = {
     "mises_a_jour": "category_mises_a_jour",
 }
 
+# Sentinelle renvoyée par `models.py::fiche_depuis_json` pour tout champ
+# matériel/identité optionnel absent ou malformé -- affichée « Non trouvé »
+# plutôt que le mot brut, un débutant n'a aucune raison de savoir ce que
+# "inconnu" signifie ici (§docs/consoles-diverses-design.md).
+_VALEUR_INCONNUE = "inconnu"
+
 
 def _est_url_externe_sure(url: Optional[str]) -> bool:
     """Un lien n'est jamais cliquable que s'il s'agit explicitement d'une
     URL `http://`/`https://` -- une fiche peut être générée par IA, donc
     traitée comme une donnée non fiable. `file:`, `javascript:`, un chemin
     local ou un schéma absent restent du texte simple, jamais un lien ouvert
-    automatiquement."""
+    automatiquement. S'applique à tout lien de la fiche, y compris le
+    bouton « Ouvrir la page » d'une carte d'option -- même garantie, pas
+    d'exception pour ce libellé plus convivial."""
     if not url:
         return False
     try:
@@ -99,17 +121,44 @@ def _plain_label(text: str, role: Optional[str] = None, wrap: bool = False) -> Q
     return label
 
 
-def _link_widget(url: Optional[str]) -> QWidget:
+def _badge_label(text: str, badge_kind: str) -> QLabel:
+    """Pastille capsule (`role="badge"`/`badgeKind`, `gui/theme.py`) --
+    même verrouillage `PlainText` que `_plain_label` (point 1), factorisé
+    ici puisque plusieurs pastilles distinctes (statut vérifié, licence,
+    restriction commerciale) partagent exactement ce contrat."""
+    label = QLabel(text)
+    label.setTextFormat(Qt.PlainText)
+    label.setProperty("role", "badge")
+    label.setProperty("badgeKind", badge_kind)
+    return label
+
+
+def _valeur_ou_non_trouve(valeur: str) -> QLabel:
+    """`_VALEUR_INCONNUE` (le repli par défaut de `models.py` pour un champ
+    matériel/identité absent ou malformé) s'affiche en gris « Non trouvé »
+    plutôt que le mot technique brut."""
+    if valeur.strip().lower() == _VALEUR_INCONNUE:
+        return _plain_label(tr("value_not_found"), role="secondary")
+    return _plain_label(valeur)
+
+
+def _link_widget(url: Optional[str], label: Optional[str] = None) -> QWidget:
     """Un petit bouton cliquable (jamais un `QLabel` en `RichText` --
     point 1) si `url` est une adresse http(s) sûre (point 2), un simple
     texte non cliquable sinon -- jamais caché pour autant, l'utilisateur
-    voit toujours l'adresse brute."""
+    voit toujours l'adresse brute. `label`, quand fourni (bouton « Ouvrir la
+    page » d'une carte d'option), remplace l'URL comme texte affiché --
+    l'URL elle-même reste consultable en infobulle -- mais ne change en
+    rien la règle de sécurité : une URL non sûre reste le texte brut de
+    l'URL, jamais le libellé convivial, jamais un bouton."""
     if not url:
         return _plain_label("", role="secondary")
     if _est_url_externe_sure(url):
-        button = QPushButton(url)
+        button = QPushButton(label or url)
         button.setProperty("role", "flat")
         button.setCursor(Qt.PointingHandCursor)
+        if label:
+            button.setToolTip(url)
         button.clicked.connect(lambda checked=False, u=url: QDesktopServices.openUrl(QUrl(u)))
         return button
     return _plain_label(url, role="secondary", wrap=True)
@@ -123,12 +172,27 @@ def _build_restriction_banner() -> QWidget:
     return frame
 
 
-def _build_info_banner(text: str) -> QWidget:
+def _build_warning_banner(text: str) -> QWidget:
+    """Symétrique de `_build_restriction_banner`, teinte orange (`role=
+    "warning"`, `gui/theme.py`) -- signal de prudence plutôt que de danger
+    (ex. licence à vérifier)."""
     frame = QFrame()
-    frame.setProperty("role", "banner")
+    frame.setProperty("role", "warning")
     layout = QVBoxLayout(frame)
-    layout.addWidget(_plain_label(text, role="secondary", wrap=True))
+    layout.addWidget(_plain_label(text, role="dangerTitle", wrap=True))
     return frame
+
+
+def _build_card(*, title: Optional[str] = None) -> tuple[QWidget, QVBoxLayout]:
+    """Cadre `role="row"` générique (surface, bordure, coins arrondis) --
+    l'unité visuelle répétée pour l'en-tête, le bloc « À savoir » et la
+    carte Matériel (§docs/consoles-diverses-design.md)."""
+    frame = QFrame()
+    frame.setProperty("role", "row")
+    layout = QVBoxLayout(frame)
+    if title:
+        layout.addWidget(_plain_label(title, role="title"))
+    return frame, layout
 
 
 def _build_option_widget(option: OptionConsole) -> QWidget:
@@ -137,17 +201,120 @@ def _build_option_widget(option: OptionConsole) -> QWidget:
     layout = QVBoxLayout(container)
     layout.addWidget(_plain_label(option.nom, role="rowTitle"))
     layout.addWidget(_plain_label(option.description, role="rowDesc", wrap=True))
+
+    chips_row = QHBoxLayout()
+    has_chip = False
     if option.licence:
-        layout.addWidget(_plain_label(tr("option_licence", valeur=option.licence), role="secondary"))
-    if option.licence_a_verifier:
-        layout.addWidget(_plain_label(tr("licence_a_verifier_mention"), role="secondary"))
+        chips_row.addWidget(_badge_label(option.licence, "neutral"))
+        has_chip = True
     if option.restriction_commerciale:
-        layout.addWidget(_build_restriction_banner())
+        chips_row.addWidget(_badge_label(tr("restriction_commerciale_chip"), "danger"))
+        has_chip = True
+    if has_chip:
+        chips_row.addStretch()
+        layout.addLayout(chips_row)
+
     if option.url:
-        layout.addWidget(_link_widget(option.url), alignment=Qt.AlignLeft)
-    if option.source_url:
-        layout.addWidget(_plain_label(tr("option_source_url", valeur=option.source_url), role="secondary", wrap=True))
+        layout.addWidget(_link_widget(option.url, label=tr("open_page_button")), alignment=Qt.AlignLeft)
+
     return container
+
+
+def _build_hardware_card(fiche: FicheConsole) -> QWidget:
+    frame, layout = _build_card(title=tr("hardware_title"))
+    grid = QGridLayout()
+    grid.setColumnStretch(1, 1)
+    champs = [
+        (tr("hardware_label_soc"), fiche.soc),
+        (tr("hardware_label_architecture"), fiche.architecture),
+        (tr("hardware_label_os_type"), fiche.os_type),
+    ]
+    for row, (label_text, valeur) in enumerate(champs):
+        grid.addWidget(_plain_label(label_text, role="secondary"), row, 0)
+        grid.addWidget(_valeur_ou_non_trouve(valeur), row, 1)
+    layout.addLayout(grid)
+    return frame
+
+
+def _licence_a_verifier_quelque_part(fiche: FicheConsole) -> bool:
+    """Agrégat purement présentationnel (calculé ici, pas dans
+    `models.py` -- aucun changement de parsing demandé) : vrai si au moins
+    une option de la fiche porte `licence_a_verifier`, pour une seule ligne
+    de synthèse dans le bloc « À savoir » plutôt qu'une mention répétée sur
+    chaque carte d'option."""
+    return any(
+        option.licence_a_verifier
+        for _, options in fiche.options.toutes_les_categories()
+        for option in options
+    )
+
+
+def _build_incompatibles_widget(incompatibles: List[Incompatible]) -> QWidget:
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    liste = ", ".join(incompatible.nom for incompatible in incompatibles)
+    layout.addWidget(_plain_label(tr("incompatibles_title", liste=liste), wrap=True))
+    for incompatible in incompatibles:
+        layout.addWidget(_plain_label(incompatible.raison, role="secondary", wrap=True))
+    return container
+
+
+def _build_info_block(fiche: FicheConsole) -> Optional[QWidget]:
+    """Bloc « À savoir » -- absent entièrement si aucune des quatre
+    conditions ne s'applique (§docs/consoles-diverses-design.md, point 2).
+    Licence non commerciale et licence à vérifier sont des signaux courts,
+    colorés (rouge/orange) ; incompatibles et mention Android restent en
+    texte simple, la spec ne leur donnant pas de couleur."""
+    est_android = "android" in fiche.os_type.lower()
+    licence_a_verifier = _licence_a_verifier_quelque_part(fiche)
+    a_quelque_chose = (
+        fiche.a_une_restriction_commerciale or licence_a_verifier or bool(fiche.incompatibles) or est_android
+    )
+    if not a_quelque_chose:
+        return None
+
+    frame, layout = _build_card(title=tr("info_title"))
+    if fiche.a_une_restriction_commerciale:
+        layout.addWidget(_build_restriction_banner())
+    if licence_a_verifier:
+        layout.addWidget(_build_warning_banner(tr("licence_a_verifier_mention")))
+    if fiche.incompatibles:
+        layout.addWidget(_build_incompatibles_widget(fiche.incompatibles))
+    if est_android:
+        layout.addWidget(_plain_label(tr("android_notice"), role="secondary", wrap=True))
+    return frame
+
+
+def _build_options_section(fiche: FicheConsole) -> List[QWidget]:
+    """Une carte par option présente, plus -- pour les catégories qui n'en
+    ont aucune -- une seule ligne grise groupée plutôt qu'un titre de
+    catégorie répété pour ne rien dire (point 4). Si la fiche n'a
+    strictement aucune option nulle part, un message unique remplace tout
+    (point 6) -- pas de liste de catégories vides à côté d'un message déjà
+    équivalent."""
+    widgets: List[QWidget] = []
+    categories = fiche.options.toutes_les_categories()
+    total_options = sum(len(options) for _, options in categories)
+
+    if total_options == 0:
+        widgets.append(_plain_label(tr("no_options_at_all_message"), role="secondary"))
+        return widgets
+
+    categories_vides: List[str] = []
+    for key, options in categories:
+        if not options:
+            categories_vides.append(tr(_CATEGORY_TITLE_KEYS[key]))
+            continue
+        widgets.append(_plain_label(tr(_CATEGORY_TITLE_KEYS[key]), role="title"))
+        for option in options:
+            widgets.append(_build_option_widget(option))
+
+    if categories_vides:
+        widgets.append(
+            _plain_label(tr("categories_without_options", liste=", ".join(categories_vides)), role="secondary")
+        )
+    return widgets
 
 
 def _clear_layout(layout: QLayout) -> None:
@@ -219,9 +386,22 @@ class ConsolesDiversesScreen(Screen):
 
         self._result_frame = QScrollArea()
         self._result_frame.setWidgetResizable(True)
+
+        # Colonne centrée, largeur de lecture max (§docs/consoles-diverses-
+        # design.md) -- un widget extérieur avec deux ressorts horizontaux
+        # encadrant une colonne dont la largeur est plafonnée, plutôt que le
+        # contenu du `QScrollArea` directement : `findChildren` (tests
+        # existants) traverse cette imbrication sans rien y changer.
+        result_outer = QWidget()
+        result_outer_layout = QHBoxLayout(result_outer)
+        result_outer_layout.setContentsMargins(0, 0, 0, 0)
+        result_outer_layout.addStretch()
         result_content = QWidget()
+        result_content.setMaximumWidth(_MAX_CONTENT_WIDTH)
         self._result_content_layout = QVBoxLayout(result_content)
-        self._result_frame.setWidget(result_content)
+        result_outer_layout.addWidget(result_content, 1)
+        result_outer_layout.addStretch()
+        self._result_frame.setWidget(result_outer)
         root.addWidget(self._result_frame, 1)
 
         self._no_info_frame = QWidget()
@@ -304,47 +484,65 @@ class ConsolesDiversesScreen(Screen):
 
     # --- Affichage de la fiche ----------------------------------------------
 
+    def _build_header(self, fiche: FicheConsole) -> QWidget:
+        frame, layout = _build_card()
+        name_row = QHBoxLayout()
+        name_row.addWidget(_plain_label(fiche.nom, role="title"))
+        name_row.addStretch()
+        badge_kind = "available" if fiche.verifiee else "platform_limited"
+        badge_text = tr("badge_verified") if fiche.verifiee else tr("badge_unverified")
+        name_row.addWidget(_badge_label(badge_text, badge_kind))
+        layout.addLayout(name_row)
+        layout.addWidget(_valeur_ou_non_trouve(fiche.fabricant))
+        if not fiche.verifiee:
+            layout.addWidget(_plain_label(tr("unverified_note"), role="secondary"))
+        return frame
+
+    def _build_sources_section(self, sources) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        toggle = QPushButton(f"▸ {tr('sources_title', total=len(sources))}")
+        toggle.setProperty("role", "flat")
+        toggle.setCheckable(True)
+        toggle.setChecked(False)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        for source in sources:
+            content_layout.addWidget(_link_widget(source.url), alignment=Qt.AlignLeft)
+        content.setVisible(False)
+
+        def _on_toggled(checked: bool) -> None:
+            content.setVisible(checked)
+            fleche = "▾" if checked else "▸"
+            toggle.setText(f"{fleche} {tr('sources_title', total=len(sources))}")
+
+        toggle.toggled.connect(_on_toggled)
+
+        layout.addWidget(toggle, alignment=Qt.AlignLeft)
+        layout.addWidget(content)
+        return container
+
     def _afficher_fiche(self, fiche: FicheConsole) -> None:
         _clear_layout(self._result_content_layout)
         layout = self._result_content_layout
 
-        layout.addWidget(_plain_label(fiche.nom, role="title"))
+        layout.addWidget(self._build_header(fiche))
 
-        badge = QLabel(tr("badge_verified") if fiche.verifiee else tr("badge_unverified"))
-        badge.setTextFormat(Qt.PlainText)
-        badge.setProperty("role", "badge")
-        badge.setProperty("badgeKind", "available" if fiche.verifiee else "platform_limited")
-        layout.addWidget(badge)
+        info_block = _build_info_block(fiche)
+        if info_block is not None:
+            layout.addWidget(info_block)
 
-        if not fiche.verifiee:
-            layout.addWidget(_build_info_banner(tr("unverified_banner")))
+        layout.addWidget(_build_hardware_card(fiche))
 
-        if fiche.a_une_restriction_commerciale:
-            layout.addWidget(_build_restriction_banner())
-
-        layout.addWidget(_plain_label(tr("identity_fabricant", valeur=fiche.fabricant)))
-        layout.addWidget(_plain_label(tr("identity_soc", valeur=fiche.soc)))
-        layout.addWidget(_plain_label(tr("identity_architecture", valeur=fiche.architecture)))
-        layout.addWidget(_plain_label(tr("identity_os_type", valeur=fiche.os_type)))
-
-        for key, options in fiche.options.toutes_les_categories():
-            layout.addWidget(_plain_label(tr(_CATEGORY_TITLE_KEYS[key]), role="title"))
-            if not options:
-                layout.addWidget(_plain_label(tr("category_empty"), role="secondary"))
-            for option in options:
-                layout.addWidget(_build_option_widget(option))
-
-        if fiche.incompatibles:
-            layout.addWidget(_plain_label(tr("incompatibles_title"), role="title"))
-            for incompatible in fiche.incompatibles:
-                layout.addWidget(
-                    _plain_label(f"{incompatible.nom} — {incompatible.raison}", role="dangerMessage", wrap=True)
-                )
+        for widget in _build_options_section(fiche):
+            layout.addWidget(widget)
 
         if fiche.sources:
-            layout.addWidget(_plain_label(tr("sources_title"), role="title"))
-            for source in fiche.sources:
-                layout.addWidget(_link_widget(source.url))
+            layout.addWidget(self._build_sources_section(fiche.sources))
 
 
 __all__ = ["ConsolesDiversesScreen"]

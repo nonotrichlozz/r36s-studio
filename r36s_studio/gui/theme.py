@@ -69,6 +69,14 @@ STATUS_SYSTEM_INCOMPATIBLE_FG = "#B98CF0"  # violet
 
 DANGER_BG = "#2A1214"  # écran de confirmation (§5 point 4)
 DANGER_BORDER = "#5A2328"
+DANGER_FG = "#F87171"  # texte/pastille rouge sur fond sombre (chip "non commerciale")
+
+# Encadré orange (fiche "Consoles diverses", bloc "À savoir") -- réutilise la
+# même teinte que le badge d'étape "PLATFORM_LIMITED" ci-dessus, pas une
+# nouvelle couleur pour le même signal de prudence (une seule couleur
+# d'accent, §5).
+WARNING_BG = STATUS_PLATFORM_LIMITED_BG
+WARNING_BORDER = STATUS_PLATFORM_LIMITED_FG
 
 LOG_BG = "#07101A"  # journal de bord (écran Exécution)
 LOG_TEXT = "#8CF5B0"  # vert clair
@@ -227,6 +235,11 @@ QLabel[badgeKind="system_incompatible"] {{ background-color: {STATUS_SYSTEM_INCO
 QLabel[badgeKind="maintained"] {{ background-color: {STATUS_AVAILABLE_BG}; color: {STATUS_AVAILABLE_FG}; }}
 QLabel[badgeKind="archived"] {{ background-color: {STATUS_DONE_BG}; color: {STATUS_DONE_FG}; }}
 QLabel[badgeKind="experimental"] {{ background-color: {STATUS_PLATFORM_LIMITED_BG}; color: {STATUS_PLATFORM_LIMITED_FG}; }}
+/* Pastilles de carte d'option (fiche "Consoles diverses") : licence (ton
+   neutre, même surface que le survol d'une ligne) et restriction "non
+   commerciale" (rouge, même paire que `role="danger"` ci-dessous). */
+QLabel[badgeKind="neutral"] {{ background-color: {SURFACE_RAISED}; color: {TEXT_SECONDARY}; }}
+QLabel[badgeKind="danger"] {{ background-color: {DANGER_BG}; color: {DANGER_FG}; }}
 
 QProgressBar {{
     background-color: {SURFACE};
@@ -299,6 +312,14 @@ QPlainTextEdit[role="log"] {{
 QFrame[role="danger"], QWidget[role="danger"] {{
     background-color: {DANGER_BG};
     border: 1px solid {DANGER_BORDER};
+}}
+
+/* Encadré orange -- même rôle que `role="danger"` mais pour un signal de
+   prudence plutôt que de danger (fiche "Consoles diverses", bloc « À
+   savoir », §docs/consoles-diverses-design.md). */
+QFrame[role="warning"], QWidget[role="warning"] {{
+    background-color: {WARNING_BG};
+    border: 1px solid {WARNING_BORDER};
 }}
 
 QLabel[role="dangerTitle"] {{

@@ -43,12 +43,30 @@ EXTRA_DATAS = [
     if (ASSETS_DIR / name).exists()
 ]
 
+# `keyring` (consoles_diverses/settings_store.py) choisit son backend par
+# introspection au moment de l'exécution -- PyInstaller ne le détecte pas
+# automatiquement, il faut le déclarer explicitement (voir CLAUDE.md
+# racine, § durcissement consoles_diverses, point 5). Linux n'a pas de
+# backend natif unique : `SecretService`/`libsecret` (GNOME) et `kwallet`
+# (KDE) sont les deux backends de bureau possibles, `chainer`/`fail` les
+# deux repli génériques -- sans trousseau de bureau actif (headless,
+# certains environnements minimalistes), `keyring` retombe sur `fail`, ce
+# que `settings_store.trousseau_disponible()` détecte alors comme
+# indisponible (repli mémoire-session, jamais d'écriture en clair).
+KEYRING_HIDDEN_IMPORTS = [
+    "keyring.backends.SecretService",
+    "keyring.backends.libsecret",
+    "keyring.backends.kwallet",
+    "keyring.backends.chainer",
+    "keyring.backends.fail",
+]
+
 a = Analysis(
     [ENTRY_SCRIPT],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[(str(BUILD_TIMESTAMP_FILE), ".")] + EXTRA_DATAS,
-    hiddenimports=[],
+    hiddenimports=KEYRING_HIDDEN_IMPORTS,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

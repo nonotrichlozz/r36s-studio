@@ -67,12 +67,24 @@ EXTRA_DATAS = [
     if (ASSETS_DIR / name).exists()
 ]
 
+# `keyring` (consoles_diverses/settings_store.py) choisit son backend par
+# introspection au moment de l'exécution -- PyInstaller ne le détecte pas
+# automatiquement, il faut le déclarer explicitement (voir CLAUDE.md
+# racine, § durcissement consoles_diverses, point 5). `macOS` est le
+# backend natif (Trousseau) ; `chainer`/`fail` sont les deux backends
+# génériques que `keyring` charge toujours en repli, quel que soit l'OS.
+KEYRING_HIDDEN_IMPORTS = [
+    "keyring.backends.macOS",
+    "keyring.backends.chainer",
+    "keyring.backends.fail",
+]
+
 a = Analysis(
     [ENTRY_SCRIPT],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[(str(BUILD_TIMESTAMP_FILE), ".")] + EXTRA_DATAS,
-    hiddenimports=[],
+    hiddenimports=KEYRING_HIDDEN_IMPORTS,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

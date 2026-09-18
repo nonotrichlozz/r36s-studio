@@ -177,6 +177,29 @@ QPushButton[role="cta"]:pressed {{
     background-color: {BORDER_CYAN};
 }}
 
+/* Lien externe (fiche "Consoles diverses", carte d'option et section
+   Sources) : un vrai bouton visible -- bordure, fond légèrement
+   contrasté, coins arrondis -- jamais confondu avec du texte simple
+   comme le `role="flat"` utilisé ailleurs (signalé : « Ouvrir la page »
+   ressemblait à du texte). Trois teintes croissantes au repos/survol/
+   pression, même principe que le `QPushButton` générique ci-dessus. */
+QPushButton[role="link"] {{
+    background-color: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 5px 12px;
+    color: {ACCENT_CYAN};
+    text-align: left;
+}}
+QPushButton[role="link"]:hover {{
+    background-color: {SURFACE_RAISED};
+    border-color: {BORDER_CYAN};
+}}
+QPushButton[role="link"]:pressed {{
+    background-color: {BORDER};
+    border-color: {BORDER_CYAN};
+}}
+
 /* Cadre du bandeau carte (accueil) et des lignes d'étape -- même surface,
    coins arrondis, bordure neutre au repos, cyan pour le bandeau (toujours
    actif) et au survol d'une ligne cliquable. */

@@ -52,7 +52,7 @@ from typing import List, Optional
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QTimer, QUrl, Qt, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -157,23 +157,65 @@ def _licence_affichee(licence: str) -> str:
     return licence
 
 
+# Nom d'icône tenté auprès du thème d'icônes du système (`QIcon.
+# fromTheme`) -- best-effort, comme les illustrations optionnelles de
+# `gui/asset_paths.py` : aucun thème d'icônes freedesktop n'existe sous
+# Windows par défaut (plateforme la plus testée dans ce projet), donc ce
+# nom ne résout quasiment jamais en pratique ici -- `_GLYPH_EXTERNAL_LINK`
+# est le repli explicitement demandé, pas un cas d'exception rare.
+_ICON_NAME_EXTERNAL_LINK = "external-link"
+_GLYPH_EXTERNAL_LINK = "↗"
+
+
+def _est_url_github(url: str) -> bool:
+    """Détecte un lien GitHub par simple recherche de sous-chaîne (retouche
+    visuelle demandée : « Ouvrir sur GitHub » quand l'URL contient
+    `github.com`) -- ne change jamais rien à la sécurité du lien
+    (`_est_url_externe_sure`, seule autorité sur ce qui est cliquable),
+    uniquement le libellé affiché."""
+    return "github.com" in url.lower()
+
+
+def _default_link_label(url: str) -> str:
+    """Libellé par défaut d'un bouton de lien externe -- plus parlant que
+    l'URL brute (retouche visuelle demandée), commun à la carte d'option
+    et à la section Sources (même traitement, point 5)."""
+    return tr("open_github_button") if _est_url_github(url) else tr("open_page_button")
+
+
+def _apply_external_link_appearance(button: QPushButton, label: str) -> None:
+    """Icône de lien externe devant le texte quand le thème du système en
+    fournit une (`QIcon.fromTheme`, jamais garanti) ; à défaut, le
+    caractère ↗ en préfixe du texte -- repli explicitement demandé plutôt
+    qu'un bouton sans aucun indice qu'il ouvre une page à l'extérieur de
+    l'application."""
+    icon = QIcon.fromTheme(_ICON_NAME_EXTERNAL_LINK)
+    if icon.isNull():
+        button.setText(f"{_GLYPH_EXTERNAL_LINK} {label}")
+    else:
+        button.setIcon(icon)
+        button.setText(label)
+
+
 def _link_widget(url: Optional[str], label: Optional[str] = None) -> QWidget:
-    """Un petit bouton cliquable (jamais un `QLabel` en `RichText` --
-    point 1) si `url` est une adresse http(s) sûre (point 2), un simple
-    texte non cliquable sinon -- jamais caché pour autant, l'utilisateur
-    voit toujours l'adresse brute. `label`, quand fourni (bouton « Ouvrir la
-    page » d'une carte d'option), remplace l'URL comme texte affiché --
-    l'URL elle-même reste consultable en infobulle -- mais ne change en
-    rien la règle de sécurité : une URL non sûre reste le texte brut de
-    l'URL, jamais le libellé convivial, jamais un bouton."""
+    """Un vrai bouton cliquable, jamais un `role="flat"` qui se confond
+    avec du texte simple (signalé : « Ouvrir la page » ressemblait à du
+    texte) -- si `url` est une adresse http(s) sûre (point 2 du
+    durcissement) ; un simple texte non cliquable sinon, jamais caché pour
+    autant, l'utilisateur voit toujours l'adresse brute. Le texte affiché
+    n'est jamais l'URL elle-même : `label`, quand fourni, ou sinon un
+    libellé calculé (`_default_link_label`, « Ouvrir sur GitHub »/« Ouvrir
+    la page ») -- l'URL complète reste toujours consultable en infobulle.
+    Ne change en rien la règle de sécurité : une URL non sûre reste le
+    texte brut de l'URL, jamais un libellé convivial, jamais un bouton."""
     if not url:
         return _plain_label("", role="secondary")
     if _est_url_externe_sure(url):
-        button = QPushButton(label or url)
-        button.setProperty("role", "flat")
+        button = QPushButton()
+        button.setProperty("role", "link")
         button.setCursor(Qt.PointingHandCursor)
-        if label:
-            button.setToolTip(url)
+        button.setToolTip(url)
+        _apply_external_link_appearance(button, label or _default_link_label(url))
         button.clicked.connect(lambda checked=False, u=url: QDesktopServices.openUrl(QUrl(u)))
         return button
     return _plain_label(url, role="secondary", wrap=True)
@@ -230,7 +272,9 @@ def _build_option_widget(option: OptionConsole) -> QWidget:
         layout.addLayout(chips_row)
 
     if option.url:
-        layout.addWidget(_link_widget(option.url, label=tr("open_page_button")), alignment=Qt.AlignLeft)
+        # Pas de libellé fixe ici : `_link_widget` calcule « Ouvrir sur
+        # GitHub »/« Ouvrir la page » selon l'URL (retouche visuelle).
+        layout.addWidget(_link_widget(option.url), alignment=Qt.AlignLeft)
 
     return container
 

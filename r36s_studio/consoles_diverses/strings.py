@@ -57,6 +57,10 @@ STRINGS = {
     "no_options_at_all_message": "Peu d'informations trouvées pour cette console.",
     "incompatibles_title": "Ne pas installer : {liste}",
     "open_page_button": "Ouvrir la page",
+    # Libellé plus parlant quand le lien pointe vers GitHub (§ retouche
+    # visuelle des liens) -- même bouton, même règle de sécurité
+    # (`_est_url_externe_sure`), seul le texte change.
+    "open_github_button": "Ouvrir sur GitHub",
     "sources_title": "Sources ({total})",
     "no_info_title": "Aucune information trouvée",
     "no_info_message": "Le serveur n'a trouvé aucune information sur cette console.",

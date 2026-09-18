@@ -261,7 +261,59 @@ def test_option_with_safe_https_url_is_clickable():
     widget = _link_widget("https://example.invalid/a")
 
     assert isinstance(widget, QPushButton)
-    assert widget.text() == "https://example.invalid/a"
+    # Un vrai bouton de lien (retouche visuelle), jamais l'URL brute comme
+    # texte -- celle-ci reste consultable en infobulle (point 4).
+    assert widget.property("role") == "link"
+    assert widget.text() == "↗ Ouvrir la page"
+    assert widget.toolTip() == "https://example.invalid/a"
+    assert widget.cursor().shape() == Qt.PointingHandCursor
+
+
+def test_link_widget_uses_github_label_for_a_github_url():
+    """Retouche visuelle demandée : libellé plus parlant quand l'URL
+    contient github.com."""
+    from r36s_studio.consoles_diverses.screen import _link_widget
+
+    widget = _link_widget("https://github.com/tzubertowski/TreeFrogUI")
+
+    assert widget.text() == "↗ Ouvrir sur GitHub"
+    assert widget.toolTip() == "https://github.com/tzubertowski/TreeFrogUI"
+
+
+def test_link_widget_uses_generic_label_for_a_non_github_url():
+    from r36s_studio.consoles_diverses.screen import _link_widget
+
+    widget = _link_widget("https://example.invalid/a")
+
+    assert widget.text() == "↗ Ouvrir la page"
+
+
+def test_link_widget_uses_theme_icon_instead_of_glyph_when_available():
+    """Le caractère ↗ est un repli explicite -- quand le thème du système
+    fournit une icône de lien externe, elle est utilisée à la place
+    (`QIcon.setIcon`), pas les deux en même temps."""
+    from PySide6.QtGui import QIcon, QPixmap
+
+    from r36s_studio.consoles_diverses.screen import _link_widget
+
+    fake_icon = QIcon(QPixmap(1, 1))
+    with patch("r36s_studio.consoles_diverses.screen.QIcon.fromTheme", return_value=fake_icon):
+        widget = _link_widget("https://example.invalid/a")
+
+    assert widget.text() == "Ouvrir la page"
+    assert "↗" not in widget.text()
+    assert widget.icon().isNull() is False
+
+
+def test_link_widget_explicit_label_still_gets_the_glyph_and_tooltip():
+    """Un `label` explicite (compatibilité) suit la même règle d'apparence
+    que le libellé calculé -- seul le texte affiché change."""
+    from r36s_studio.consoles_diverses.screen import _link_widget
+
+    widget = _link_widget("https://example.invalid/a", label="Mon libellé")
+
+    assert widget.text() == "↗ Mon libellé"
+    assert widget.toolTip() == "https://example.invalid/a"
 
 
 def test_fiche_source_with_unsafe_scheme_shown_as_plain_text(qapp):
@@ -450,11 +502,33 @@ def test_option_link_is_left_aligned_within_its_card(qapp):
         for i in range(layout.count())
         if (item := layout.itemAt(i)).widget() is not None
         and isinstance(item.widget(), QPushButton)
-        and item.widget().text() == "Ouvrir la page"
+        and item.widget().property("role") == "link"
     )
+    assert link_widget.text() == "↗ Ouvrir la page"
     assert link_widget.toolTip() == "https://example.invalid/a"
     index = layout.indexOf(link_widget)
     assert layout.itemAt(index).alignment() == Qt.AlignLeft
+
+
+def test_sources_links_are_left_aligned_buttons_not_raw_urls(qapp):
+    """Même traitement que la carte d'option (point 5, retouche
+    visuelle) : un vrai bouton aligné à gauche, jamais l'URL brute comme
+    texte affiché."""
+    from r36s_studio.consoles_diverses.models import Source
+    from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen as _Screen
+
+    screen = _Screen()
+    sources = [Source(url="https://example.invalid/doc", type="web")]
+
+    container = screen._build_sources_section(sources)
+
+    content = next(w for w in container.findChildren(QPushButton) if w.property("role") == "link")
+    assert content.text() != "https://example.invalid/doc"
+    assert content.text() == "↗ Ouvrir la page"
+    assert content.toolTip() == "https://example.invalid/doc"
+    content_layout = content.parentWidget().layout()
+    index = content_layout.indexOf(content)
+    assert content_layout.itemAt(index).alignment() == Qt.AlignLeft
 
 
 # --- Captures de régression (docs/consoles-diverses-design.md) --------------
@@ -501,8 +575,17 @@ def test_sf3000hd_sources_section_starts_collapsed_and_toggle_reveals_it(qapp):
 
     assert toggle.isChecked() is True
     assert toggle.text() == "▾ Sources (1)"
-    liens = [b.text() for b in content.findChildren(QPushButton) if b.text().startswith("https://")]
-    assert "https://github.com/tzubertowski/TreeFrogUI" in liens
+    # Bouton de lien, pas l'URL brute (retouche visuelle, même traitement
+    # que la carte d'option) -- github.com donne le libellé dédié, l'URL
+    # complète reste consultable en infobulle. Cherché uniquement dans la
+    # section Sources (le conteneur du bouton Sources lui-même) : les
+    # cartes d'option de cette même fiche ont elles aussi des boutons
+    # `role="link"`, sans rapport avec ce test.
+    sources_container = toggle.parentWidget()
+    liens = [b for b in sources_container.findChildren(QPushButton) if b.property("role") == "link"]
+    assert len(liens) == 1
+    assert liens[0].text() == "↗ Ouvrir sur GitHub"
+    assert liens[0].toolTip() == "https://github.com/tzubertowski/TreeFrogUI"
 
 
 def test_r36s_ia_fixture_shows_unverified_badge_and_grouped_empty_categories(qapp):

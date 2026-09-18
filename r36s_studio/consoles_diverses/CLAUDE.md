@@ -3,6 +3,11 @@
 > Sous-brief du package `r36s_studio/consoles_diverses/`. Complète (ne
 > remplace pas) `CLAUDE.md` à la racine du dépôt.
 
+**Statut : étape 1 terminée** (recherche + affichage de la fiche,
+réglages). Voir `docs/consoles-diverses-recherche.md` pour le brief
+d'origine et les prochaines étapes (analyse de carte SD, installation,
+contributions, dédoublonnage des jeux).
+
 ## Règle d'isolation
 
 Ce package est volontairement indépendant du reste de R36S Studio :
@@ -41,6 +46,36 @@ absente/malformée/trop grande). Une fiche `console` suit
 `r36s-studio-catalogue/schema/console.schema.json` (`models.py` en fait un
 parsing défensif : seuls les champs d'identité indispensables font échouer
 le parsing).
+
+✅ **Serveur de production en ligne, confirmé en conditions réelles** :
+`https://r36s-studio-cloud.r36studio.workers.dev` (HTTPS, derrière
+Cloudflare -- distinct du serveur local de développement,
+`http://localhost:8787`, qui n'a pas Cloudflare devant lui).
+
+⚠️ **Bug corrigé, confirmé sur du vrai serveur en ligne** : une recherche
+qui fonctionnait contre le serveur local échouait contre le serveur de
+production avec `reponse_invalide` (« Le serveur a renvoyé une réponse
+inattendue »). Cause : `urllib.request` n'envoie aucun en-tête `User-
+Agent` explicite par défaut, retombant sur `"Python-urllib/{version}"` --
+une signature que Cloudflare bloque par défaut (403, `error code: 1010`)
+avant même que la requête n'atteigne le Worker. Confirmé en isolant la
+piste (curl avec différents en-têtes `User-Agent`, requête sinon
+identique) : ni la compression (aucun `Content-Encoding` sur la réponse),
+ni l'URL, ni le corps, ni l'encodage n'étaient en cause --
+`python-requests/...` n'est pas bloqué, ce n'est donc pas une règle
+générique anti-script. `client.py` envoie désormais un en-tête `User-
+Agent` explicite (`USER_AGENT`, `"R36S-Studio/{version}"`) sur chaque
+requête -- même principe déjà suivi côté serveur pour ses propres
+requêtes sortantes vers GitHub/Handhelds Wiki
+(`r36s-studio-cloud/lib/sources/userAgent.ts`, lu en lecture seule).
+
+Un échec HTTP dont le corps n'est pas la forme `{"erreur": ...}` attendue
+(ex. le blocage Cloudflare ci-dessus) est désormais consigné dans le même
+journal que les fiches rejetées (`client.py::_journaliser_erreur_http_
+inattendue`, `gui/logs.py::consoles_diverses_log_path`) -- statut HTTP et
+extrait du corps, tronqué. Un code `{"erreur": ...}` bien formé du
+serveur (licence invalide, référence invalide...) n'est lui jamais
+journalisé, ce n'est pas un incident.
 
 ## Durcissement (une fiche est une donnée externe non fiable)
 
@@ -103,8 +138,10 @@ Analyse de carte SD (`detection_sd` du schéma non affiché), installation ou
 téléchargement d'un firmware/frontend depuis cette section (liens externes
 ouverts au navigateur uniquement, jamais de téléchargement automatique),
 contribution/soumission au catalogue, cache local des fiches consultées,
-sous-commande CLI de diagnostic. `pr_creee`/`connecteurs` (diagnostic
-serveur) ne sont jamais affichés à l'utilisateur.
+sous-commande CLI de diagnostic, dédoublonnage des jeux (détecter qu'un
+jeu déjà présent sur la carte correspond à un jeu qu'on s'apprête à
+recopier). `pr_creee`/`connecteurs` (diagnostic serveur) ne sont jamais
+affichés à l'utilisateur.
 
 ## Tests
 

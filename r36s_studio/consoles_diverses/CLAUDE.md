@@ -161,6 +161,58 @@ backend `keyring` lui-même (cause n°2 ci-dessus) ; un `sha256_envoyee`
 qui ne correspond à aucun des deux au moment d'une recherche pointerait
 plutôt vers un autre appelant non couvert par ce correctif.
 
+⚠️ **Suite du même signalement, une fois les causes n°1/n°2 exclues par
+comparaison des hashs** (clé identique à l'enregistrement, à la relecture
+et à l'envoi -- et fonctionnelle via `Invoke-RestMethod` contre la même
+URL de production) : la GUI seule reçoit encore `licence_invalide`, donc
+le problème est dans la requête que `client.py` construit, pas dans la
+clé. **Trois points vérifiés directement, aucun n'est en cause** (capturé
+sur un vrai socket local -- voir le commentaire de `rechercher_console`
+pour le détail) :
+- **URL finale** (`server_url.rstrip("/") + "/recherche"`) : jamais de
+  barre oblique double ni de segment manquant.
+- **En-tête `X-Licence-Key`** : stocké en interne sous une casse mutilée
+  par `Request.add_header` (`.capitalize()` -> `X-licence-key`), mais
+  `AbstractHTTPHandler.do_open` retitre tous les en-têtes (`.title()`)
+  juste avant l'envoi -- casse restaurée sur le fil. Sans incidence de
+  toute façon : les noms d'en-tête HTTP sont insensibles à la casse par
+  spécification, et Cloudflare Workers les normalise en minuscules à la
+  réception quelle que soit la casse envoyée.
+- **Encodage du corps** : `json.dumps(..., ensure_ascii=True)` (défaut)
+  échappe tout caractère non-ASCII avant l'encodage UTF-8 -- le corps
+  posté est toujours de l'ASCII pur, jamais un problème de charset
+  malgré l'absence de paramètre `charset` explicite sur `Content-Type`.
+
+**Piste restée ouverte, désormais instrumentée** : une redirection HTTP
+suivie silencieusement par `urllib` convertirait la requête POST en GET
+et supprimerait son corps (`Content-Type`/`Content-Length`), mais PAS les
+en-têtes personnalisés comme `X-Licence-Key` (vérifié dans le code source
+d'`HTTPRedirectHandler.redirect_request`, lu en lecture seule) -- une
+piste plausible seulement si l'URL configurée diffère, même légèrement,
+de celle validée manuellement. `client.py::_journaliser_diagnostic_
+licence` journalise désormais `statut_http` (le code HTTP numérique,
+distinct du code d'erreur `{"erreur": ...}` déjà consigné),
+`url_demandee` (celle construite par ce module) et `url_atteinte`
+(`HTTPError.url`, celle où l'erreur a réellement été levée -- diffère de
+`url_demandee` si une redirection a été suivie) ; `redirection_suivie`
+compare les deux.
+
+**Découverte en cours de route, à exploiter au prochain essai réel** :
+`r36s-studio-cloud/worker/src/routes/recherche.ts::logLicenceDiagnostic`
+(lu en lecture seule, jamais modifié depuis ce dépôt) existe déjà côté
+serveur pour cette même enquête -- visible via `wrangler tail`, il
+journalise, côté Worker, la liste des en-têtes réellement *reçus*, la
+présence/longueur/hash de `X-Licence-Key` tel que le serveur le voit, le
+hash de la clé attendue (`LICENCE_TEST_KEY`), et l'URL/`User-Agent` de la
+requête reçue. Comparer ce journal serveur (au prochain essai depuis la
+GUI, `wrangler tail` ouvert en parallèle) au journal client ci-dessus
+pour la même requête tranche définitivement entre un problème d'émission
+(ce module) et un problème de réception/configuration côté Worker (ex. :
+l'URL configurée dans la GUI pointe vers un environnement Cloudflare
+différent de celui interrogé manuellement, avec un `LICENCE_TEST_KEY`
+différent -- expliquerait une clé prouvée identique tout du long côté
+client, mais refusée uniquement depuis la GUI).
+
 ⚠️ **Non vérifié sur du vrai matériel au moment d'écrire cette note** :
 seul Windows (Credential Manager, backend natif toujours disponible) a pu
 être testé lors de l'implémentation initiale. Le comportement sur macOS

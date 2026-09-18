@@ -170,27 +170,59 @@ def _hash_prefix(valeur: str) -> str:
     return hashlib.sha256(valeur.encode("utf-8")).hexdigest()[:8]
 
 
-def _journaliser_diagnostic_licence(licence_key: str, code: str) -> None:
-    """Diagnostic demandé pour l'enquête « clé valide via `Invoke-
-    RestMethod`, refusée par la GUI » -- jamais la clé elle-même dans le
-    journal, seulement sa longueur, si elle contient un espace/retour à la
-    ligne parasite, le hash (8 premiers caractères du SHA-256) de la
-    valeur réellement envoyée dans cette requête -- à comparer au
-    `sha256_demandee`/`sha256_trousseau_relue` journalisés par
-    `settings_store.py::_journaliser_diagnostic_enregistrement` au moment
-    de l'enregistrement -- et le code renvoyé par le serveur. Même journal
-    best-effort que `_journaliser_erreur_http_inattendue` (un journal
-    inaccessible ne doit jamais empêcher l'erreur de remonter
+def _journaliser_diagnostic_licence(
+    licence_key: str,
+    code: str,
+    *,
+    statut_http: int,
+    url_demandee: str,
+    url_atteinte: str,
+) -> None:
+    """Diagnostic demandé pour l'enquête « clé confirmée identique à
+    l'enregistrement/la relecture/l'envoi (SHA-256), et fonctionnelle via
+    `Invoke-RestMethod`, mais refusée par la GUI » -- jamais la clé
+    elle-même dans le journal. En plus de la longueur/l'espace parasite/le
+    hash déjà en place : l'URL réellement construite pour cette requête
+    (`url_demandee`) et celle où l'erreur a finalement été levée
+    (`url_atteinte`, `HTTPError.url` -- reflète l'URL *après* une
+    éventuelle redirection HTTP suivie silencieusement par `urllib`,
+    contrairement à `url_demandee`) et le statut HTTP numérique reçu
+    (distinct du code d'erreur `{"erreur": ...}` du corps JSON, déjà
+    journalisé). `redirection_suivie` compare les deux URLs -- si elles
+    diffèrent, `urllib` a suivi une redirection avant d'atteindre cette
+    réponse, ce qui convertit une requête POST en GET et supprime son
+    corps (`Content-Type`/`Content-Length`, mais PAS les en-têtes
+    personnalisés comme `X-Licence-Key` -- vérifié directement dans le
+    code source d'`urllib.request.HTTPRedirectHandler.redirect_request`,
+    lu en lecture seule) -- une piste plausible si l'URL configurée
+    diffère, même légèrement, de celle validée manuellement.
+
+    À corréler avec le diagnostic *serveur* déjà en place pour cette même
+    enquête, `r36s-studio-cloud/worker/src/routes/recherche.ts::
+    logLicenceDiagnostic` (lu en lecture seule, jamais modifié depuis ce
+    dépôt) -- visible via `wrangler tail`, il journalise côté Worker la
+    liste des en-têtes réellement reçus, la présence/longueur/hash de
+    `X-Licence-Key` tel que *le serveur* le voit, le hash de la clé
+    attendue, et l'URL/`User-Agent` de la requête reçue. Comparer les deux
+    journaux (client ici, serveur via `wrangler tail`) pour la même
+    requête tranche entre un problème d'émission (ce module) et un
+    problème de réception/configuration côté Worker.
+
+    Même journal best-effort que `_journaliser_erreur_http_inattendue`
+    (un journal inaccessible ne doit jamais empêcher l'erreur de remonter
     normalement)."""
     try:
         chemin = gui_logs.consoles_diverses_log_path()
         horodatage = datetime.datetime.now().isoformat(timespec="seconds")
         contient_espace = licence_key != licence_key.strip()
+        redirection_suivie = url_demandee != url_atteinte
         with open(chemin, "a", encoding="utf-8") as fichier:
             fichier.write(
                 f"{horodatage} diagnostic licence : longueur={len(licence_key)}, "
                 f"espace_parasite={contient_espace}, sha256_envoyee={_hash_prefix(licence_key)}, "
-                f"code={code!r}\n"
+                f"code_serveur={code!r}, statut_http={statut_http}, "
+                f"url_demandee={url_demandee!r}, url_atteinte={url_atteinte!r}, "
+                f"redirection_suivie={redirection_suivie}\n"
             )
     except OSError:
         pass
@@ -225,7 +257,35 @@ def rechercher_console(
     décide lui-même s'il en a besoin pour ce statut précis). Lève
     `RechercheErreur` pour tout cas d'échec listé dans
     `r36s-studio-cloud/README.md`, plus les cas propres au client (serveur
-    injoignable, délai dépassé, réponse invalide/trop grande)."""
+    injoignable, délai dépassé, réponse invalide/trop grande).
+
+    **Vérifié directement (enquête « clé identique de bout en bout, mais
+    refusée par la GUI »), les trois points suivants sont corrects et ne
+    sont pas la cause -- capturé sur un vrai socket local, `git blame`
+    de cette note en garde la preuve pour ne pas les réinvestiguer :**
+    - **URL finale.** `server_url.rstrip("/") + "/recherche"` ne produit
+      jamais de barre oblique double ni de segment manquant, que
+      `server_url` se termine par `/` ou non.
+    - **En-tête `X-Licence-Key`.** `Request.add_header` le stocke en
+      interne sous une casse mutilée (`.capitalize()`, ex.
+      `X-licence-key`), mais `AbstractHTTPHandler.do_open` retitre TOUS
+      les en-têtes (`.title()`) juste avant l'envoi -- le nom réellement
+      posé sur le fil est bien `X-Licence-Key`, casse restaurée. Sans
+      incidence de toute façon : les noms d'en-tête HTTP sont
+      insensibles à la casse par spécification, et l'API `Headers` de
+      Cloudflare Workers les normalise en minuscules à la réception,
+      quelle que soit la casse envoyée.
+    - **Encodage du corps.** `json.dumps(..., ensure_ascii=True)` (défaut)
+      échappe tout caractère non-ASCII en `\\uXXXX` avant l'`.encode
+      ("utf-8")` -- le corps posté est donc toujours de l'ASCII pur,
+      jamais un problème de charset malgré l'absence de paramètre
+      `charset` explicite sur `Content-Type` (JSON est UTF-8 par défaut
+      sans ce paramètre, RFC 8259).
+
+    Une redirection HTTP suivie silencieusement par `urllib` reste elle
+    une piste ouverte -- voir `_journaliser_diagnostic_licence` ci-dessus,
+    qui la détecte désormais (`redirection_suivie`, comparaison entre
+    l'URL demandée et celle où l'erreur a été levée)."""
     url = server_url.rstrip("/") + "/recherche"
     body = json.dumps({"reference": reference}).encode("utf-8")
     request = urllib.request.Request(
@@ -249,7 +309,13 @@ def rechercher_console(
             raise
         erreur = _erreur_depuis_corps_http(exc.code, raw_error)
         if erreur.code in _CODES_LICENCE:
-            _journaliser_diagnostic_licence(licence_key, erreur.code)
+            _journaliser_diagnostic_licence(
+                licence_key,
+                erreur.code,
+                statut_http=exc.code,
+                url_demandee=url,
+                url_atteinte=getattr(exc, "url", None) or url,
+            )
         raise erreur from exc
     except urllib.error.URLError as exc:
         if _est_timeout(exc.reason):

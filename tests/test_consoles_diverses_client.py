@@ -76,6 +76,19 @@ def _opener_raising_http_error_with_non_json_body(status: int, body: bytes):
     return _opener
 
 
+def _opener_raising_http_error_after_redirect(status: int, payload: dict, url_atteinte: str):
+    """Simule une redirection HTTP suivie par `urllib` avant d'obtenir cette
+    erreur -- `HTTPError.url` reflète alors l'URL *après* redirection,
+    différente de celle demandée par `rechercher_console` (même mécanisme
+    que `HTTPRedirectHandler.redirect_request`, lu en lecture seule)."""
+    body = json.dumps(payload).encode("utf-8")
+
+    def _opener(request: urllib.request.Request):
+        raise urllib.error.HTTPError(url_atteinte, status, "erreur", None, io.BytesIO(body))
+
+    return _opener
+
+
 def _opener_raising(exc: Exception):
     def _opener(request: urllib.request.Request):
         raise exc
@@ -277,6 +290,48 @@ def test_rechercher_console_logs_licence_diagnostic_without_stray_whitespace(tmp
     contenu = log_path.read_text(encoding="utf-8")
     assert "espace_parasite=False" in contenu
     assert f"sha256_envoyee={client_module._hash_prefix('cle-secrete')}" in contenu
+
+
+def test_rechercher_console_logs_url_and_http_status_without_redirect(tmp_path):
+    """Demandé (point 1/4 de l'enquête) : l'URL réellement construite et le
+    statut HTTP numérique reçu, en plus du code d'erreur JSON déjà
+    consigné -- sans redirection, les deux URLs journalisées sont
+    identiques."""
+    from r36s_studio.consoles_diverses import client as client_module
+
+    log_path = tmp_path / "consoles_diverses.log"
+    opener = _opener_raising_http_error(403, {"erreur": "licence_invalide"})
+
+    with patch.object(client_module.gui_logs, "consoles_diverses_log_path", return_value=log_path):
+        with pytest.raises(RechercheErreur):
+            rechercher_console("ref", "https://exemple.invalid", "cle-secrete", opener=opener)
+
+    contenu = log_path.read_text(encoding="utf-8")
+    assert "statut_http=403" in contenu
+    assert "url_demandee='https://exemple.invalid/recherche'" in contenu
+    assert "url_atteinte='https://exemple.invalid/recherche'" in contenu
+    assert "redirection_suivie=False" in contenu
+
+
+def test_rechercher_console_logs_a_followed_redirect(tmp_path):
+    """Demandé (point 2 de l'enquête) : détecte et journalise une
+    redirection HTTP suivie silencieusement par `urllib` avant d'obtenir
+    la réponse d'erreur -- `HTTPError.url` diffère alors de l'URL
+    initialement construite."""
+    from r36s_studio.consoles_diverses import client as client_module
+
+    log_path = tmp_path / "consoles_diverses.log"
+    url_atteinte = "https://exemple.invalid/recherche/"
+    opener = _opener_raising_http_error_after_redirect(403, {"erreur": "licence_invalide"}, url_atteinte)
+
+    with patch.object(client_module.gui_logs, "consoles_diverses_log_path", return_value=log_path):
+        with pytest.raises(RechercheErreur):
+            rechercher_console("ref", "https://exemple.invalid", "cle-secrete", opener=opener)
+
+    contenu = log_path.read_text(encoding="utf-8")
+    assert "url_demandee='https://exemple.invalid/recherche'" in contenu
+    assert f"url_atteinte={url_atteinte!r}" in contenu
+    assert "redirection_suivie=True" in contenu
 
 
 def test_licence_diagnostic_hash_prefix_distinguishes_different_keys():

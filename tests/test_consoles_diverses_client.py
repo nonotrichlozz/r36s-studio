@@ -11,6 +11,7 @@ import json
 import socket
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 
 import pytest
 
@@ -206,6 +207,41 @@ def test_rechercher_console_http_error_without_erreur_field_is_reponse_invalide(
     assert exc_info.value.code == "reponse_invalide"
 
 
+def test_rechercher_console_logs_an_unexpected_http_error_with_status_and_body(tmp_path):
+    """Cas réel qui a motivé cet ajout : Cloudflare bloquait la requête
+    HTTPS distante (403, `error code: 1010`, corps texte brut) avant même
+    qu'elle n'atteigne le Worker -- confondu un temps avec un bug serveur
+    faute de ce détail exploitable côté client. Même journal que les
+    fiches rejetées (`gui/logs.py::consoles_diverses_log_path`)."""
+    from r36s_studio.consoles_diverses import client as client_module
+
+    log_path = tmp_path / "consoles_diverses.log"
+    opener = _opener_raising_http_error_with_non_json_body(403, b"error code: 1010")
+
+    with patch.object(client_module.gui_logs, "consoles_diverses_log_path", return_value=log_path):
+        with pytest.raises(RechercheErreur):
+            rechercher_console("ref", "https://r36s-studio-cloud.example.workers.dev", "cle", opener=opener)
+
+    contenu = log_path.read_text(encoding="utf-8")
+    assert "403" in contenu
+    assert "error code: 1010" in contenu
+
+
+def test_rechercher_console_does_not_log_a_well_formed_server_error(tmp_path):
+    """Un code `{"erreur": ...}` bien formé (licence invalide, référence
+    invalide...) n'est jamais un incident -- rien à consigner."""
+    from r36s_studio.consoles_diverses import client as client_module
+
+    log_path = tmp_path / "consoles_diverses.log"
+    opener = _opener_raising_http_error(403, {"erreur": "licence_invalide"})
+
+    with patch.object(client_module.gui_logs, "consoles_diverses_log_path", return_value=log_path):
+        with pytest.raises(RechercheErreur):
+            rechercher_console("ref", "http://localhost:8787", "cle", opener=opener)
+
+    assert not log_path.exists()
+
+
 # --- Serveur injoignable / délai dépassé -----------------------------------
 
 
@@ -303,3 +339,25 @@ def test_rechercher_console_sends_licence_key_header_and_json_body():
     assert captured["url"] == "http://localhost:8787/recherche"
     assert captured["body"] == {"reference": "Ma référence"}
     assert captured["headers"]["X-licence-key"] == "ma-cle"
+
+
+def test_rechercher_console_sends_an_explicit_user_agent_header():
+    """Bug corrigé, confirmé en isolant la différence entre le serveur
+    local (fonctionnait) et le serveur distant HTTPS derrière Cloudflare
+    (« réponse inattendue ») : sans en-tête `User-Agent` explicite,
+    `urllib.request` retombe sur `"Python-urllib/{version}"`, une
+    signature bloquée par défaut par Cloudflare (403, `error code:
+    1010`) avant même que la requête n'atteigne le Worker -- jamais un
+    problème avec le serveur local, qui n'a pas Cloudflare devant lui."""
+    from r36s_studio.consoles_diverses.client import USER_AGENT
+
+    captured = {}
+
+    def _opener(request: urllib.request.Request):
+        captured["headers"] = dict(request.header_items())
+        return _FakeResponse(json.dumps({"statut": "aucune_information_trouvee"}).encode("utf-8"))
+
+    rechercher_console("Ma référence", "https://r36s-studio-cloud.example.workers.dev", "", opener=_opener)
+
+    assert captured["headers"]["User-agent"] == USER_AGENT
+    assert "python-urllib" not in captured["headers"]["User-agent"].lower()

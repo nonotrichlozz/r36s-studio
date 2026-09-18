@@ -107,6 +107,35 @@ def test_load_config_falls_back_to_default_on_unknown_firmware_value(tmp_path):
     assert loaded.firmware == "rocknix"
 
 
+def test_load_config_defaults_to_exfat_reset_card_filesystem_when_no_file_exists(tmp_path):
+    with patch("r36s_studio.config.config_path", return_value=tmp_path / "config.json"):
+        loaded = config.load_config()
+
+    assert loaded.reset_card_filesystem == "exfat"
+
+
+def test_save_then_load_roundtrips_fat32_reset_card_filesystem(tmp_path):
+    """Cas réel : une console (SF3000HD) qui ne lit que le FAT32, rendue
+    inutilisable par le formatage exFAT par défaut de « Remettre la carte
+    à zéro » (§4.3 bis)."""
+    path = tmp_path / "config.json"
+    with patch("r36s_studio.config.config_path", return_value=path):
+        config.save_config(config.AppConfig(reset_card_filesystem="fat32"))
+        loaded = config.load_config()
+
+    assert loaded.reset_card_filesystem == "fat32"
+
+
+def test_load_config_falls_back_to_default_on_unknown_reset_card_filesystem_value(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"reset_card_filesystem": "ntfs"}', encoding="utf-8")
+
+    with patch("r36s_studio.config.config_path", return_value=path):
+        loaded = config.load_config()
+
+    assert loaded.reset_card_filesystem == "exfat"
+
+
 def test_load_config_defaults_to_localhost_server_url_when_no_file_exists(tmp_path):
     with patch("r36s_studio.config.config_path", return_value=tmp_path / "config.json"):
         loaded = config.load_config()

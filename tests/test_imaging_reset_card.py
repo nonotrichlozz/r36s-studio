@@ -15,13 +15,18 @@ from unittest.mock import patch
 import pytest
 
 from r36s_studio.devices import Device
+from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.games_partition import ALIGNMENT_SECTORS, MBR_NTFS_EXFAT_PARTITION_TYPE
 from r36s_studio.imaging.mbr import parse_mbr
 from r36s_studio.imaging.reset_card import (
+    MBR_FAT32_LBA_PARTITION_TYPE,
     CardTooSmallForReset,
+    ResetCardPlan,
     build_full_disk_mbr_sector,
+    check_fat32_feasible,
     create_single_partition,
     erase_partition_table,
+    format_reset_partition,
     plan_full_disk_partition,
 )
 
@@ -64,6 +69,31 @@ def test_plan_full_disk_partition_starts_aligned_and_covers_almost_the_whole_dis
 def test_plan_full_disk_partition_raises_on_a_too_small_disk():
     with pytest.raises(CardTooSmallForReset):
         plan_full_disk_partition(total_sectors=ALIGNMENT_SECTORS)
+
+
+# --- vérification préalable FAT32 (avant toute écriture) ---------------------
+
+
+def test_check_fat32_feasible_does_not_raise_on_a_realistic_sd_card_size():
+    """Cas réel qui motive le choix FAT32 : une carte de 128 Go -- doit
+    passer sans lever, quelle que soit la taille, puisque le formateur à
+    la main (`imaging/fat32.py`) n'a pas la limite de 32 Go de l'outil
+    Windows standard."""
+    device = _make_device("/dev/fake-disk-test-1", 128 * 1024 * 1024 * 1024)
+
+    check_fat32_feasible(device)  # ne lève pas
+
+
+def test_check_fat32_feasible_raises_before_any_write_when_volume_is_too_small():
+    """Demande explicite : « si le FAT32 s'avère impossible sur une taille
+    donnée, le dire clairement avant de lancer l'opération, jamais après »
+    -- cette fonction ne touche jamais le périphérique (pas de
+    `prepared_write_target`), donc aucune écriture n'a pu avoir lieu avant
+    qu'elle ne lève."""
+    device = _make_device("/dev/fake-disk-test-1", 20 * 1024 * 1024)  # bien en dessous du minimum FAT32
+
+    with pytest.raises(Fat32VolumeTooSmall):
+        check_fat32_feasible(device)
 
 
 # --- construction du secteur MBR neuf ----------------------------------------
@@ -196,3 +226,107 @@ def test_create_single_partition_never_waits_outside_windows(mock_prep, mock_pla
     create_single_partition(device)
 
     mock_sleep.assert_not_called()
+
+
+def test_create_single_partition_uses_the_fat32_partition_type_when_requested(tmp_path):
+    total_sectors = 200_000
+    path = _make_fake_device_file(tmp_path, "fake_card.img", total_sectors)
+    device = _make_device(path, total_sectors * SECTOR_SIZE)
+
+    with patch("r36s_studio.imaging.reset_card.prepared_write_target", side_effect=_no_prep), patch(
+        "r36s_studio.imaging.reset_card.platform.system", return_value="Linux"
+    ):
+        create_single_partition(device, filesystem="fat32")
+
+    with open(path, "rb") as f:
+        reparsed = parse_mbr(f.read(SECTOR_SIZE))
+    assert reparsed[0].partition_type == MBR_FAT32_LBA_PARTITION_TYPE
+
+
+# --- étape 3/4 : formatage ------------------------------------------------------
+
+
+def _make_plan() -> ResetCardPlan:
+    return ResetCardPlan(start_lba=ALIGNMENT_SECTORS, end_lba=200_000 - 1 - ALIGNMENT_SECTORS)
+
+
+@patch("r36s_studio.imaging.reset_card.format_games_partition")
+@patch("r36s_studio.imaging.reset_card.platform.system", return_value="Darwin")
+def test_format_reset_partition_delegates_to_native_formatter_outside_windows(mock_system, mock_format):
+    device = _make_device("/dev/fake-disk-test-1", 200_000 * SECTOR_SIZE)
+    plan = _make_plan()
+    mock_format.return_value = None
+
+    format_reset_partition(device, plan, "SDCARD", "fat32")
+
+    mock_format.assert_called_once_with(device, "SDCARD", "fat32", known_partition_paths=set())
+
+
+@patch("r36s_studio.imaging.reset_card.format_games_partition")
+@patch("r36s_studio.imaging.reset_card.platform.system", return_value="Windows")
+def test_format_reset_partition_uses_native_formatter_for_exfat_on_windows(mock_system, mock_format):
+    """Seul le cas Windows+FAT32 contourne `Format-Volume` (§ docstring de
+    module) -- exFAT n'a pas cette limite de 32 Go, rien à contourner."""
+    device = _make_device("\\\\.\\PhysicalDrive9903", 200_000 * SECTOR_SIZE)
+    plan = _make_plan()
+    mock_format.return_value = "K"
+
+    letter = format_reset_partition(device, plan, "SDCARD", "exfat")
+
+    assert letter == "K"
+    mock_format.assert_called_once_with(device, "SDCARD", "exfat", known_partition_paths=set())
+
+
+@patch("r36s_studio.imaging.reset_card._windows_assign_drive_letter_after_raw_format")
+@patch("r36s_studio.imaging.reset_card.format_fat32")
+@patch("r36s_studio.imaging.reset_card.prepared_write_target", side_effect=_no_prep)
+@patch("r36s_studio.imaging.reset_card.platform.system", return_value="Windows")
+def test_format_reset_partition_writes_fat32_by_hand_on_windows(
+    mock_system, mock_prep, mock_format_fat32, mock_assign_letter, tmp_path
+):
+    """Bug corrigé, signalé par un utilisateur (carte SF3000HD, 128 Go) :
+    `Format-Volume` refuse le FAT32 au-delà de 32 Go -- contourné en
+    écrivant nous-mêmes la structure (`imaging/fat32.py`), jamais via
+    PowerShell pour ce cas précis (aucun appel à `Format-Volume`)."""
+    path = _make_fake_device_file(tmp_path, "fake_card.img", 200_000)
+    device = _make_device(path, 200_000 * SECTOR_SIZE)
+    plan = _make_plan()
+    mock_assign_letter.return_value = "K"
+
+    letter = format_reset_partition(device, plan, "SDCARD", "fat32")
+
+    assert letter == "K"
+    mock_format_fat32.assert_called_once_with(path, plan.start_lba * SECTOR_SIZE, plan.size_bytes, "SDCARD")
+    mock_assign_letter.assert_called_once_with(device.path)
+
+
+# --- attribution de la lettre de lecteur (Windows, après formatage FAT32) ------
+
+
+@patch("r36s_studio.imaging.reset_card.subprocess.run")
+def test_windows_assign_drive_letter_never_calls_format_volume(mock_run):
+    from r36s_studio.imaging.reset_card import _windows_assign_drive_letter_after_raw_format
+
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "DRIVE_LETTER=K\n"
+
+    letter = _windows_assign_drive_letter_after_raw_format("\\\\.\\PhysicalDrive9903")
+
+    assert letter == "K"
+    command = mock_run.call_args[0][0][-1]
+    assert "Format-Volume" not in command
+    assert "Add-PartitionAccessPath" in command
+    assert "AssignDriveLetter" in command
+    assert "9903" in command
+
+
+@patch("r36s_studio.imaging.reset_card.subprocess.run")
+def test_windows_assign_drive_letter_raises_when_powershell_fails(mock_run):
+    from r36s_studio.imaging.reset_card import _windows_assign_drive_letter_after_raw_format
+
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stderr = "Aucune partition trouvee."
+    mock_run.return_value.stdout = ""
+
+    with pytest.raises(OSError):
+        _windows_assign_drive_letter_after_raw_format("\\\\.\\PhysicalDrive9903")

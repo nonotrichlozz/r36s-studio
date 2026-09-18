@@ -174,6 +174,22 @@ STRINGS = {
         "tu peux garder celui-ci."
     ),
     "reset_card_label_continue": "Continuer",
+    # Choix du système de fichiers (§4.3 bis) -- ajouté suite à un
+    # signalement : une console (SF3000HD) ne lit que le FAT32, rendue
+    # inutilisable par le formatage exFAT jusque-là systématique. exFAT
+    # reste le choix par défaut (le plus courant).
+    "reset_card_filesystem_title": "Comment formater la carte ?",
+    "reset_card_filesystem_exfat": "exFAT — recommandé",
+    "reset_card_filesystem_exfat_desc": "Accepte les gros fichiers. Fonctionne avec la plupart des consoles récentes.",
+    "reset_card_filesystem_fat32": "FAT32",
+    "reset_card_filesystem_fat32_desc": "Pour les consoles anciennes qui ne lisent pas l'exFAT.",
+    "reset_card_filesystem_fat32_note": "En FAT32, un seul fichier ne peut pas dépasser 4 Go.",
+    # Vérification préalable, jamais après coup (§4.3 bis) -- en pratique
+    # ne se déclenche jamais sur une vraie carte SD (le seuil se situe
+    # autour de quelques dizaines de Mio), garde-fou par principe.
+    "reset_card_fat32_impossible_warning": (
+        "Le FAT32 n'est pas possible sur une carte aussi petite. Choisis exFAT à la place."
+    ),
     "wizard_image_created_log": "Image créée : {path}",
     "wizard_step3_title": "3. Insère ta carte neuve",
     "wizard_step3_instruction": "Branche maintenant la carte neuve à préparer.",

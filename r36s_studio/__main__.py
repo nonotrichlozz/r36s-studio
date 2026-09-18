@@ -22,12 +22,14 @@
 - `python -m r36s_studio flash --image X --device Y` (phase 3) — écrit une
   image (`.img`, `.img.gz`, `.img.xz`) sur une carte SD, avec confirmation
   explicite (règle §2 n°6) et vérification SHA-256.
-- `python -m r36s_studio reset-card --device X [--label ÉTIQUETTE]` (§4.3
-  bis, mode expert uniquement, sous « Par sécurité ») — « Remettre la
-  carte à zéro » : efface toute la table de partitions et recrée une seule
-  partition exFAT occupant toute la carte, pour une carte laissée en
-  plusieurs partitions illisibles après des essais de firmware. Même
-  confirmation explicite obligatoire que `flash` (règle §2 n°6).
+- `python -m r36s_studio reset-card --device X [--label ÉTIQUETTE]
+  [--filesystem exfat|fat32]` (§4.3 bis, mode expert uniquement, sous
+  « Par sécurité ») — « Remettre la carte à zéro » : efface toute la
+  table de partitions et recrée une seule partition (exFAT par défaut,
+  FAT32 sur demande -- pour les consoles anciennes qui ne lisent pas
+  l'exFAT) occupant toute la carte, pour une carte laissée en plusieurs
+  partitions illisibles après des essais de firmware. Même confirmation
+  explicite obligatoire que `flash` (règle §2 n°6).
 - `python -m r36s_studio gui` (phase 4) — assistant graphique PySide6,
   branché sur `backup`/`flash` via un worker élevé (§3).
 - `python -m r36s_studio inject-boot --device X --boot-source Y` et
@@ -96,6 +98,7 @@ from r36s_studio.imaging import (
     UnsupportedImageFormatError,
     backup_device,
     backup_system_only,
+    check_fat32_feasible,
     create_and_format_games_partition_if_worthwhile,
     create_single_partition,
     erase_partition_table,
@@ -103,8 +106,9 @@ from r36s_studio.imaging import (
     estimate_system_backup_size_unprivileged,
     estimate_total_bytes,
     flash_device,
-    format_games_partition,
+    format_reset_partition,
 )
+from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.winlock import VolumeInUseError
 from r36s_studio.partitions import (
     BOOT_LABEL,
@@ -622,14 +626,19 @@ def cmd_reset_card(args: argparse.Namespace) -> int:
     firmware, une carte peut rester en trois à cinq partitions illisibles
     pour un PC (constaté en usage réel) -- Windows ne sait pas la remettre
     simplement en état de carte de stockage normale. Efface toute la table
-    de partitions et recrée une seule partition exFAT occupant toute la
-    carte, en quatre étapes réelles (`imaging/reset_card.py`, qui réutilise
-    le verrouillage/démontage de `imaging/winlock.py`, et le formatage
-    natif déjà en place pour la partition de jeux, `imaging/games_
-    partition.py::format_games_partition`). Écrit sur le périphérique
-    brut, exactement comme `flash` : même confirmation explicite
-    obligatoire (règle §2 n°6) -- réutilise `_confirm_flash`, son texte
-    générique s'applique tel quel ici.
+    de partitions et recrée une seule partition (`--filesystem`, exFAT par
+    défaut ou FAT32) occupant toute la carte, en quatre étapes réelles
+    (`imaging/reset_card.py`, qui réutilise le verrouillage/démontage de
+    `imaging/winlock.py`, et le formatage natif déjà en place pour la
+    partition de jeux, `imaging/games_partition.py::format_games_
+    partition` -- sauf pour le cas Windows+FAT32, § `imaging/reset_card.py
+    ::format_reset_partition`, contourné par un formateur FAT32 écrit à la
+    main : `Format-Volume`/`format.exe`/`diskpart` refusent tous le FAT32
+    au-delà de 32 Go, ce qui le rend impossible en pratique sur une carte
+    SD R36S typique avec l'outil natif). Écrit sur le périphérique brut,
+    exactement comme `flash` : même confirmation explicite obligatoire
+    (règle §2 n°6) -- réutilise `_confirm_flash`, son texte générique
+    s'applique tel quel ici.
 
     Bug corrigé, confirmé sur du vrai matériel : le formatage échouait
     *silencieusement* (aucune partition exFAT créée, carte restée brute)
@@ -654,11 +663,28 @@ def cmd_reset_card(args: argparse.Namespace) -> int:
         if device is None:
             return 1
 
+        label = args.label or DEFAULT_RESET_LABEL
+        filesystem = args.filesystem
+        fs_label = "exFAT" if filesystem == "exfat" else "FAT32"
+
+        # Demande explicite : « si le FAT32 s'avère impossible sur une
+        # taille donnée, le dire clairement avant de lancer l'opération,
+        # jamais après » -- avant même la confirmation, pour ne pas
+        # demander à l'utilisateur de confirmer une opération dont on sait
+        # déjà qu'elle ne peut pas aboutir. L'effacement de la table
+        # (étape 1/4, juste en dessous) est irréversible ; découvrir
+        # l'impossibilité seulement à l'étape de formatage (3/4) serait
+        # déjà trop tard.
+        if filesystem == "fat32":
+            try:
+                check_fat32_feasible(device)
+            except (CardTooSmallForReset, Fat32VolumeTooSmall) as exc:
+                emit_error("RESET_CARD_FAILED", f"FAT32 impossible sur cette carte : {exc}")
+                return 1
+
         if not args.worker and not _confirm_flash(device):
             emit_error("CONFIRMATION_REFUSED", "Remise à zéro annulée : confirmation non reçue.")
             return 1
-
-        label = args.label or DEFAULT_RESET_LABEL
 
         emit_step_progress(0, _RESET_CARD_STEP_COUNT, "Effacement de la table de partitions…")
         emit_log(f"Effacement de la table de partitions de {device.display} ({device.path})...")
@@ -672,21 +698,21 @@ def cmd_reset_card(args: argparse.Namespace) -> int:
 
         emit_step_progress(1, _RESET_CARD_STEP_COUNT, "Création de la partition…")
         try:
-            plan = create_single_partition(device)
+            plan = create_single_partition(device, filesystem)
         except (CardTooSmallForReset, OSError, subprocess.CalledProcessError, ValueError) as exc:
             emit_error("RESET_CARD_FAILED", f"Création de la partition : {exc}")
             emit_done(False)
             return 1
         emit_log(f"Nouvelle partition créée ({plan.size_bytes} octets).")
 
-        emit_step_progress(2, _RESET_CARD_STEP_COUNT, "Formatage exFAT…")
+        emit_step_progress(2, _RESET_CARD_STEP_COUNT, f"Formatage {fs_label}…")
         try:
-            drive_letter = format_games_partition(device, label, "exfat", known_partition_paths=set())
-        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
-            emit_error("RESET_CARD_FAILED", f"Formatage exFAT : {exc}")
+            drive_letter = format_reset_partition(device, plan, label, filesystem)
+        except (Fat32VolumeTooSmall, OSError, subprocess.CalledProcessError, ValueError) as exc:
+            emit_error("RESET_CARD_FAILED", f"Formatage {fs_label} : {exc}")
             emit_done(False)
             return 1
-        emit_log(f"Partition formatée en exFAT, étiquette « {label} » posée.")
+        emit_log(f"Partition formatée en {fs_label}, étiquette « {label} » posée.")
         if drive_letter:
             # Bug corrigé, confirmé sur du vrai matériel : `Get-Volume`
             # montrait déjà un volume exFAT correctement formaté, mais
@@ -1087,6 +1113,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--label",
         default=DEFAULT_RESET_LABEL,
         help=f"Étiquette du volume créé (défaut : {DEFAULT_RESET_LABEL})",
+    )
+    reset_card_parser.add_argument(
+        "--filesystem",
+        choices=["exfat", "fat32"],
+        default="exfat",
+        help=(
+            "Système de fichiers du volume créé (défaut : exfat) -- fat32 pour les "
+            "consoles anciennes qui ne lisent pas l'exFAT (ex. SF3000HD)"
+        ),
     )
     reset_card_parser.add_argument(
         "--max-size",

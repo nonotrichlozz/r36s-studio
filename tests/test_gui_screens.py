@@ -1916,16 +1916,16 @@ def test_reset_card_label_dialog_set_default_label_prefills_the_field(qapp):
     assert dialog._label_edit.text() == "SDCARD"
 
 
-def test_reset_card_label_dialog_continue_emits_the_trimmed_label_and_closes(qapp):
+def test_reset_card_label_dialog_continue_emits_the_trimmed_label_and_exfat_by_default(qapp):
     dialog = ResetCardLabelDialog()
     dialog.show()
     dialog._label_edit.setText("  MACARTE  ")
     received = []
-    dialog.label_chosen.connect(received.append)
+    dialog.label_chosen.connect(lambda label, filesystem: received.append((label, filesystem)))
 
     dialog._continue_button.click()
 
-    assert received == ["MACARTE"]
+    assert received == [("MACARTE", "exfat")]
     assert dialog.isVisible() is False
 
 
@@ -1936,7 +1936,7 @@ def test_reset_card_label_dialog_never_emits_an_empty_label(qapp):
     dialog.show()
     dialog._label_edit.setText("   ")
     received = []
-    dialog.label_chosen.connect(received.append)
+    dialog.label_chosen.connect(lambda label, filesystem: received.append((label, filesystem)))
 
     dialog._continue_button.click()
 
@@ -1949,11 +1949,53 @@ def test_reset_card_label_dialog_return_pressed_also_continues(qapp):
     dialog.show()
     dialog._label_edit.setText("MACARTE")
     received = []
-    dialog.label_chosen.connect(received.append)
+    dialog.label_chosen.connect(lambda label, filesystem: received.append((label, filesystem)))
 
     dialog._label_edit.returnPressed.emit()
 
-    assert received == ["MACARTE"]
+    assert received == [("MACARTE", "exfat")]
+
+
+def test_reset_card_label_dialog_emits_fat32_when_selected(qapp):
+    """Cas réel qui motive ce choix : une console (SF3000HD) qui ne lit
+    que le FAT32, rendue inutilisable par le formatage exFAT jusque-là
+    systématique (§4.3 bis)."""
+    dialog = ResetCardLabelDialog()
+    dialog.show()
+    dialog._label_edit.setText("MACARTE")
+    dialog._fat32_radio.setChecked(True)
+    received = []
+    dialog.label_chosen.connect(lambda label, filesystem: received.append((label, filesystem)))
+
+    dialog._continue_button.click()
+
+    assert received == [("MACARTE", "fat32")]
+
+
+def test_reset_card_label_dialog_set_default_filesystem_selects_the_matching_radio(qapp):
+    dialog = ResetCardLabelDialog()
+
+    dialog.set_default_filesystem("fat32")
+    assert dialog._fat32_radio.isChecked() is True
+
+    dialog.set_default_filesystem("exfat")
+    assert dialog._exfat_radio.isChecked() is True
+
+
+def test_reset_card_label_dialog_fat32_note_only_visible_when_fat32_selected(qapp):
+    """Rappel de la limite de taille de fichier (4 Go) du FAT32 -- n'a de
+    sens que si ce choix est sélectionné, jamais affiché par défaut avec
+    exFAT."""
+    dialog = ResetCardLabelDialog()
+    dialog.show()
+
+    assert dialog._fat32_file_size_note.isVisible() is False
+
+    dialog._fat32_radio.setChecked(True)
+    assert dialog._fat32_file_size_note.isVisible() is True
+
+    dialog._exfat_radio.setChecked(True)
+    assert dialog._fat32_file_size_note.isVisible() is False
 
 
 # --- LogPanel (§5, refonte navigation -- remplace Exécution + Résultat) ----

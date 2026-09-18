@@ -1426,6 +1426,8 @@ def test_reset_card_start_worker_builds_the_expected_argv(mock_list, mock_filter
         window._device.path,
         "--label",
         "MACARTE",
+        "--filesystem",
+        "exfat",
     ]
 
 
@@ -1446,6 +1448,63 @@ def test_reset_card_never_gets_eject_after_flag(mock_list, mock_filter, mock_loa
         window._start_worker()
 
     assert "--eject-after" not in runner_class.instances[0].argv
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_reset_card_fat32_choice_is_passed_to_the_worker_and_persisted(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    """Cas réel qui motive ce choix : une console (SF3000HD) qui ne lit
+    que le FAT32, rendue inutilisable par le formatage exFAT jusque-là
+    systématique (§4.3 bis)."""
+    window = MainWindow()
+    window._device = _make_device()
+    window._mode = "reset_card"
+
+    window._on_reset_card_label_chosen("MACARTE", "fat32")
+
+    assert window._reset_card_filesystem == "fat32"
+    assert window._app_config.reset_card_filesystem == "fat32"
+    mock_save.assert_called_once_with(window._app_config)
+
+    runner_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert runner_class.instances[0].argv == [
+        "reset-card",
+        "--device",
+        window._device.path,
+        "--label",
+        "MACARTE",
+        "--filesystem",
+        "fat32",
+    ]
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_reset_card_fat32_infeasible_warns_and_never_opens_confirm_dialog(
+    mock_list, mock_filter, mock_load, mock_save, mock_warning, qapp
+):
+    """Demande explicite : « si le FAT32 s'avère impossible sur une taille
+    donnée, le dire clairement avant de lancer l'opération, jamais après »
+    -- ici, avant même la fenêtre Confirmation (§4.3 bis)."""
+    window = MainWindow()
+    window._device = _make_device(size_bytes=20 * 1024 * 1024)  # bien en dessous du minimum FAT32
+    window._mode = "reset_card"
+
+    window._on_reset_card_label_chosen("MACARTE", "fat32")
+
+    assert window._confirm_dialog.isVisible() is False
+    mock_warning.assert_called_once()
+    mock_save.assert_not_called()  # rien à mémoriser, le choix n'a pas abouti
 
 
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])

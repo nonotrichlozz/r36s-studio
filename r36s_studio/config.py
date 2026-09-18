@@ -54,6 +54,16 @@ _VALID_UI_MODES = {"assisted", "expert"}
 DEFAULT_FIRMWARE = "rocknix"
 _VALID_FIRMWARES = set(FIRMWARE_BY_ID)
 
+# Système de fichiers choisi pour « Remettre la carte à zéro » (§4.3 bis,
+# mode expert uniquement). Mémorisé comme `firmware`/`ui_mode` -- signalé
+# par un utilisateur : une console (SF3000HD) qui ne lit que le FAT32,
+# rendue inutilisable par le formatage exFAT par défaut. exFAT reste le
+# défaut ici (le cas le plus courant, §4.3 bis -- l'EASYROMS de la carte
+# source d'une R36S d'origine est déjà en exFAT sur le matériel de test) ;
+# FAT32 reste un choix explicite, jamais présumé.
+DEFAULT_RESET_CARD_FILESYSTEM = "exfat"
+_VALID_RESET_CARD_FILESYSTEMS = {"exfat", "fat32"}
+
 # Section « Consoles diverses » (consoles_diverses/, étape 1) -- adresse du
 # serveur r36s-studio-cloud interrogé par POST /recherche. Seule l'adresse
 # vit ici : jamais la clé de licence (trousseau système, `consoles_
@@ -70,6 +80,7 @@ DEFAULT_CONSOLES_DIVERSES_SERVER_URL = "http://localhost:8787"
 class AppConfig:
     ui_mode: str = DEFAULT_UI_MODE
     firmware: str = DEFAULT_FIRMWARE
+    reset_card_filesystem: str = DEFAULT_RESET_CARD_FILESYSTEM
     consoles_diverses_server_url: str = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
 
 
@@ -100,12 +111,16 @@ def load_config() -> AppConfig:
     firmware = raw.get("firmware")
     if firmware not in _VALID_FIRMWARES:
         firmware = DEFAULT_FIRMWARE
+    reset_card_filesystem = raw.get("reset_card_filesystem")
+    if reset_card_filesystem not in _VALID_RESET_CARD_FILESYSTEMS:
+        reset_card_filesystem = DEFAULT_RESET_CARD_FILESYSTEM
     consoles_diverses_server_url = raw.get("consoles_diverses_server_url")
     if not isinstance(consoles_diverses_server_url, str) or not consoles_diverses_server_url.strip():
         consoles_diverses_server_url = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
     return AppConfig(
         ui_mode=ui_mode,
         firmware=firmware,
+        reset_card_filesystem=reset_card_filesystem,
         consoles_diverses_server_url=consoles_diverses_server_url,
     )
 

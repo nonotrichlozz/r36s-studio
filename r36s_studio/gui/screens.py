@@ -1422,13 +1422,22 @@ class BackupKindDialog(Dialog):
 
 class ResetCardLabelDialog(Dialog):
     """« Remettre la carte à zéro » (§4.3 bis, mode expert uniquement) --
-    choisit l'étiquette du volume avant la fenêtre Confirmation
-    obligatoire (§2 n°6, ouverte ensuite par l'appelant). `set_default_
-    label` pré-remplit une valeur simple à chaque ouverture -- jamais
-    imposée, toujours remplaçable, même principe que les chemins par
-    défaut proposés ailleurs dans ce projet (§4.4)."""
+    choisit l'étiquette du volume et son système de fichiers avant la
+    fenêtre Confirmation obligatoire (§2 n°6, ouverte ensuite par
+    l'appelant). `set_default_label`/`set_default_filesystem` pré-
+    remplissent des valeurs simples à chaque ouverture -- jamais imposées,
+    toujours remplaçables, même principe que les chemins par défaut
+    proposés ailleurs dans ce projet (§4.4).
 
-    label_chosen = Signal(str)
+    Choix du système de fichiers ajouté suite à un signalement : une
+    console (SF3000HD) ne lit que le FAT32, rendue inutilisable par le
+    formatage exFAT jusque-là systématique. exFAT reste le choix par
+    défaut (le plus courant) ; FAT32 est décrit en une phrase plutôt
+    qu'en jargon technique sec (§5 vocabulaire), avec un rappel de sa
+    limite de taille de fichier (4 Go) -- une surprise plausible pour un
+    néophyte qui y copierait un gros fichier plus tard."""
+
+    label_chosen = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1447,6 +1456,41 @@ class ResetCardLabelDialog(Dialog):
         self._label_edit = QLineEdit()
         self._label_edit.returnPressed.connect(self._on_continue)
         layout.addWidget(self._label_edit)
+
+        filesystem_title = QLabel(tr("reset_card_filesystem_title"))
+        filesystem_title.setProperty("role", "secondary")
+        layout.addWidget(filesystem_title)
+
+        self._filesystem_group = QButtonGroup(self)
+
+        self._exfat_radio = QRadioButton(tr("reset_card_filesystem_exfat"))
+        self._exfat_radio.setChecked(True)
+        exfat_desc = QLabel(tr("reset_card_filesystem_exfat_desc"))
+        exfat_desc.setWordWrap(True)
+        exfat_desc.setProperty("role", "secondary")
+        self._filesystem_group.addButton(self._exfat_radio)
+        layout.addWidget(self._exfat_radio)
+        layout.addWidget(exfat_desc)
+
+        self._fat32_radio = QRadioButton(tr("reset_card_filesystem_fat32"))
+        fat32_desc = QLabel(tr("reset_card_filesystem_fat32_desc"))
+        fat32_desc.setWordWrap(True)
+        fat32_desc.setProperty("role", "secondary")
+        self._filesystem_group.addButton(self._fat32_radio)
+        layout.addWidget(self._fat32_radio)
+        layout.addWidget(fat32_desc)
+
+        # Rappel de la limite de taille de fichier du FAT32 (4 Go) --
+        # visible seulement quand ce choix est sélectionné, plutôt qu'en
+        # permanence (n'a aucun sens tant qu'exFAT, sans cette limite,
+        # reste choisi).
+        self._fat32_file_size_note = QLabel(tr("reset_card_filesystem_fat32_note"))
+        self._fat32_file_size_note.setWordWrap(True)
+        self._fat32_file_size_note.setProperty("role", "secondary")
+        self._fat32_file_size_note.setVisible(False)
+        layout.addWidget(self._fat32_file_size_note)
+        self._fat32_radio.toggled.connect(self._fat32_file_size_note.setVisible)
+
         layout.addStretch()
 
         buttons = QHBoxLayout()
@@ -1461,17 +1505,24 @@ class ResetCardLabelDialog(Dialog):
         buttons.addWidget(self._continue_button)
         layout.addLayout(buttons)
 
-        self.resize(420, 220)
+        self.resize(460, 420)
 
     def set_default_label(self, label: str) -> None:
         self._label_edit.setText(label)
+
+    def set_default_filesystem(self, filesystem: str) -> None:
+        if filesystem == "fat32":
+            self._fat32_radio.setChecked(True)
+        else:
+            self._exfat_radio.setChecked(True)
 
     def _on_continue(self) -> None:
         label = self._label_edit.text().strip()
         if not label:
             return
+        filesystem = "fat32" if self._fat32_radio.isChecked() else "exfat"
         self.close()
-        self.label_chosen.emit(label)
+        self.label_chosen.emit(label, filesystem)
 
 
 _OPERATION_TITLE_KEYS = {

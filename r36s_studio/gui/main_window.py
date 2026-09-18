@@ -50,11 +50,14 @@ from r36s_studio.devices import Device, list_devices
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.imaging import (
     DEFAULT_RESET_LABEL,
+    CardTooSmallForReset,
     SevenZipArchiveError,
     UnsupportedImageFormatError,
+    check_fat32_feasible,
     check_image_format,
     estimate_total_bytes,
 )
+from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, set_privileged_mount_hook
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
@@ -234,6 +237,10 @@ class MainWindow(QMainWindow):
         # convention que `_device`/`_file_path` ci-dessus plutôt qu'une
         # classe d'état séparée.
         self._app_config = app_config.load_config()
+        # Système de fichiers pour « Remettre la carte à zéro » (§4.3 bis,
+        # mode expert uniquement) -- mémorisé comme `firmware`/`ui_mode`,
+        # choisi via `ResetCardLabelDialog`.
+        self._reset_card_filesystem: str = self._app_config.reset_card_filesystem
         self._wizard_active = False
         self._wizard_flow = WizardFlow()
         self._wizard_poll_timer = QTimer(self)
@@ -529,6 +536,7 @@ class MainWindow(QMainWindow):
             # (`ResetCardLabelDialog`), puis la fenêtre Confirmation
             # obligatoire (§2 n°6), jamais l'inverse.
             self._reset_card_label_dialog.set_default_label(self._reset_card_label)
+            self._reset_card_label_dialog.set_default_filesystem(self._reset_card_filesystem)
             self._reset_card_label_dialog.open()
             return
 
@@ -757,13 +765,35 @@ class MainWindow(QMainWindow):
         self._confirm_dialog.set_device(self._device)
         self._confirm_dialog.open()
 
-    def _on_reset_card_label_chosen(self, label: str) -> None:
-        """Réponse de `ResetCardLabelDialog` (§4.3 bis) -- mémorisée pour
-        `_start_worker` (`--label`) et pour repré-remplir la fenêtre la
-        prochaine fois, avant la fenêtre Confirmation obligatoire (§2
-        n°6, jamais sautée -- cette opération efface toute la carte, tout
-        aussi destructrice qu'un flash)."""
+    def _on_reset_card_label_chosen(self, label: str, filesystem: str) -> None:
+        """Réponse de `ResetCardLabelDialog` (§4.3 bis) -- mémorisées pour
+        `_start_worker` (`--label`/`--filesystem`) et pour repré-remplir
+        la fenêtre la prochaine fois, avant la fenêtre Confirmation
+        obligatoire (§2 n°6, jamais sautée -- cette opération efface toute
+        la carte, tout aussi destructrice qu'un flash). Le système de
+        fichiers est mémorisé d'un lancement à l'autre comme `firmware`/
+        `ui_mode` (`config.py`).
+
+        Demande explicite : « si le FAT32 s'avère impossible sur une
+        taille donnée, le dire clairement avant de lancer l'opération,
+        jamais après » -- `check_fat32_feasible` (aucune élévation, pure
+        lecture de `device.size_bytes` déjà connu) est vérifiée ici, avant
+        même la fenêtre Confirmation, symétrique du même contrôle côté
+        CLI (`__main__.py::cmd_reset_card`, autorité réelle -- celle-ci
+        n'est qu'un filet côté GUI pour éviter une confirmation inutile).
+        En pratique ne se déclenche jamais sur une vraie carte SD (§
+        `imaging/reset_card.py::check_fat32_feasible`)."""
+        if filesystem == "fat32":
+            try:
+                check_fat32_feasible(self._device)
+            except (CardTooSmallForReset, Fat32VolumeTooSmall):
+                QMessageBox.warning(self, tr("app_title"), tr("reset_card_fat32_impossible_warning"))
+                return
+
         self._reset_card_label = label
+        self._reset_card_filesystem = filesystem
+        self._app_config.reset_card_filesystem = filesystem
+        app_config.save_config(self._app_config)
         self._confirm_dialog.set_device(self._device)
         self._confirm_dialog.open()
 
@@ -814,7 +844,15 @@ class MainWindow(QMainWindow):
         elif self._mode == "backup_system":
             argv = ["backup", "--device", self._device.path, "--output", self._file_path, "--system-only"]
         elif self._mode == "reset_card":
-            argv = ["reset-card", "--device", self._device.path, "--label", self._reset_card_label]
+            argv = [
+                "reset-card",
+                "--device",
+                self._device.path,
+                "--label",
+                self._reset_card_label,
+                "--filesystem",
+                self._reset_card_filesystem,
+            ]
         else:
             argv = ["flash", "--image", self._file_path, "--device", self._device.path]
             # Plus de drapeau `--create-games-partition` à construire ici

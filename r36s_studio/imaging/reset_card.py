@@ -18,7 +18,9 @@
 peut rester en trois à cinq partitions illisibles pour un PC -- Windows ne
 sait pas la remettre simplement en état de carte de stockage normale
 (constaté en usage réel). Efface toute la table de partitions existante
-(MBR ou GPT) et recrée une seule partition exFAT occupant toute la carte.
+(MBR ou GPT) et recrée une seule partition (exFAT par défaut, ou FAT32 sur
+demande explicite -- § `format_reset_partition`, `imaging/fat32.py`, pour
+les consoles anciennes qui ne lisent pas l'exFAT) occupant toute la carte.
 
 Réutilise les briques déjà en place plutôt que d'en écrire de nouvelles :
 `imaging/write_target.py::prepared_write_target` (verrouillage/démontage
@@ -52,14 +54,42 @@ from __future__ import annotations
 
 import os
 import platform
+import re
+import subprocess
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 from r36s_studio.devices import Device
+from r36s_studio.winprocess import no_console_kwargs
 
-from .games_partition import ALIGNMENT_SECTORS, MBR_NTFS_EXFAT_PARTITION_TYPE
+from .fat32 import Fat32VolumeTooSmall, format_fat32, plan_fat32_layout
+from .games_partition import (
+    ALIGNMENT_SECTORS,
+    MBR_NTFS_EXFAT_PARTITION_TYPE,
+    format_games_partition,
+)
 from .mbr import PARTITION_ENTRY_SIZE, PARTITION_TABLE_OFFSET, SECTOR_SIZE
 from .write_target import prepared_write_target
+
+# Type de partition MBR FAT32 LBA -- distinct de `MBR_NTFS_EXFAT_PARTITION_
+# TYPE` (0x07, partagé NTFS/exFAT). Purement indicatif une fois la
+# partition formatée nativement/à la main (§ `imaging/fat32.py`) -- aucun
+# outil de ce projet ne s'en sert pour décider quoi que ce soit, mais un
+# octet de type cohérent avec le système de fichiers réellement présent
+# évite qu'un outil tiers (gestionnaire de disques, `fdisk -l`...) affiche
+# une incohérence.
+MBR_FAT32_LBA_PARTITION_TYPE = 0x0C
+
+# Bug corrigé, signalé par un utilisateur (carte SF3000HD, 128 Go, qui ne
+# lit que le FAT32) : `Format-Volume`/`format.exe` (et `diskpart`, qui
+# passe par la même API `fmifs.dll`) refusent de formater en FAT32 tout
+# volume dépassant 32 Go -- limite artificielle du formateur Windows
+# standard, pas du pilote qui *lit* du FAT32 (`fastfat.sys`, voir
+# `imaging/fat32.py`). Sur une carte SD R36S typique (64-256 Go), ça rend
+# le choix FAT32 impossible en pratique avec l'outil natif -- contourné en
+# écrivant nous-mêmes la structure FAT32 (`format_fat32`), jamais en
+# refusant silencieusement l'option à l'utilisateur.
 
 # Étiquette simple par défaut (§ demande explicite : « permettre de choisir
 # l'étiquette du volume, avec une valeur par défaut simple ») -- ni le nom
@@ -118,16 +148,47 @@ def plan_full_disk_partition(total_sectors: int) -> ResetCardPlan:
     return ResetCardPlan(start_lba=start_lba, end_lba=end_lba)
 
 
-def build_full_disk_mbr_sector(plan: ResetCardPlan) -> bytes:
+def check_fat32_feasible(device: Device) -> None:
+    """Vérifie, sans rien écrire, que le FAT32 tient sur cette carte --
+    appelée avant toute écriture (`__main__.py::cmd_reset_card`, `gui/
+    main_window.py`), jamais seulement à l'étape de formatage. Demande
+    explicite : « si le FAT32 s'avère impossible sur une taille donnée, le
+    dire clairement avant de lancer l'opération, jamais après » --
+    l'effacement de la table (étape 1/4) est irréversible, donc découvrir
+    l'impossibilité seulement à l'étape de formatage (3/4) serait déjà
+    trop tard, la carte ayant entre-temps perdu son ancienne table sans
+    qu'aucune nouvelle ne l'ait encore remplacée utilement.
+
+    En pratique, ne devrait jamais se déclencher sur une vraie carte SD
+    (le seuil FAT32, `Fat32VolumeTooSmall`, se situe autour de quelques
+    dizaines de Mio) -- garde-fou par principe, pas un cas attendu. Ne
+    concerne jamais la limite Windows de 32 Go pour `Format-Volume`/
+    `format.exe`/`diskpart` : celle-ci est contournée par un formateur
+    FAT32 écrit à la main (`imaging/fat32.py::format_fat32`), qui n'a pas
+    cette limite, quelle que soit la taille de la carte. Lève `CardTooSmallForReset`
+    (carte trop petite pour la remise à zéro elle-même, sans rapport avec
+    le système de fichiers choisi) ou `Fat32VolumeTooSmall` -- jamais
+    silencieux."""
+    total_sectors = device.size_bytes // SECTOR_SIZE
+    plan = plan_full_disk_partition(total_sectors)
+    partition_sectors = plan.end_lba - plan.start_lba + 1
+    plan_fat32_layout(partition_sectors, plan.size_bytes)
+
+
+def build_full_disk_mbr_sector(plan: ResetCardPlan, filesystem: str = "exfat") -> bytes:
     """Construit un secteur MBR neuf (tous les autres octets à zéro,
     aucun code de démarrage) avec une seule entrée de partition -- à la
     différence de `rewrite_mbr_with_games_partition` (`games_partition.py`)
     qui préserve les entrées déjà présentes, ici on repart d'un secteur
     entièrement vide : toute la table précédente est censée disparaître,
-    pas seulement gagner une entrée de plus."""
+    pas seulement gagner une entrée de plus.
+
+    `filesystem` ne choisit que l'octet de type de partition -- purement
+    indicatif (§ `MBR_FAT32_LBA_PARTITION_TYPE`), le formatage réel a lieu
+    séparément (`format_reset_partition`)."""
     sector = bytearray(SECTOR_SIZE)
     entry = bytearray(PARTITION_ENTRY_SIZE)
-    entry[4] = MBR_NTFS_EXFAT_PARTITION_TYPE
+    entry[4] = MBR_FAT32_LBA_PARTITION_TYPE if filesystem == "fat32" else MBR_NTFS_EXFAT_PARTITION_TYPE
     entry[8:12] = plan.start_lba.to_bytes(4, "little")
     sector_count = plan.end_lba - plan.start_lba + 1
     entry[12:16] = sector_count.to_bytes(4, "little")
@@ -153,7 +214,7 @@ def erase_partition_table(device: Device) -> None:
             os.fsync(f.fileno())
 
 
-def create_single_partition(device: Device) -> ResetCardPlan:
+def create_single_partition(device: Device, filesystem: str = "exfat") -> ResetCardPlan:
     """Étape 2/4 : écrit un MBR neuf (`build_full_disk_mbr_sector`) avec
     une unique partition alignée occupant tout l'espace restant.
 
@@ -172,7 +233,7 @@ def create_single_partition(device: Device) -> ResetCardPlan:
     plan = plan_full_disk_partition(total_sectors)
     with prepared_write_target(device) as raw_path:
         with open(raw_path, "r+b") as f:
-            f.write(build_full_disk_mbr_sector(plan))
+            f.write(build_full_disk_mbr_sector(plan, filesystem))
             f.flush()
             os.fsync(f.fileno())
     if platform.system() == "Windows":
@@ -180,12 +241,89 @@ def create_single_partition(device: Device) -> ResetCardPlan:
     return plan
 
 
+def _windows_assign_drive_letter_after_raw_format(device_path: str) -> Optional[str]:
+    """Après une écriture FAT32 « à la main » (`imaging/fat32.py::
+    format_fat32`, jamais `Format-Volume` -- § docstring de module),
+    Windows doit encore reprendre en compte le volume et lui attribuer une
+    lettre pour qu'il apparaisse dans l'Explorateur -- même réessai/délai
+    que `games_partition.py::_format_windows`, mais sans jamais appeler
+    `Format-Volume` (déjà fait nous-mêmes, l'étiquette étant déjà posée par
+    `format_fat32`). Lève `OSError` si la partition reste introuvable après
+    les réessais -- jamais un succès silencieux (§4.4), même principe que
+    `_format_windows`."""
+    from .games_partition import _WINDOWS_PARTITION_RETRY_COUNT, _WINDOWS_PARTITION_RETRY_DELAY_MS
+
+    match = re.search(r"PhysicalDrive(\d+)", device_path)
+    if not match:
+        raise ValueError(f"chemin de périphérique Windows invalide : {device_path}")
+    disk_number = match.group(1)
+    command = (
+        "$diskNumber = %s\n"
+        "$partition = $null\n"
+        "for ($i = 0; $i -lt %d; $i++) {\n"
+        "    $partition = Get-Partition -DiskNumber $diskNumber -ErrorAction SilentlyContinue |"
+        " Sort-Object PartitionNumber | Select-Object -Last 1\n"
+        "    if ($partition) { break }\n"
+        "    Start-Sleep -Milliseconds %d\n"
+        "}\n"
+        "if (-not $partition) {\n"
+        "    Write-Error \"Aucune partition trouvee sur le disque $diskNumber apres plusieurs tentatives.\"\n"
+        "    exit 1\n"
+        "}\n"
+        "$partition | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction SilentlyContinue\n"
+        "$updated = Get-Partition -DiskNumber $diskNumber -PartitionNumber $partition.PartitionNumber"
+        " -ErrorAction SilentlyContinue\n"
+        "if ($updated -and $updated.DriveLetter) {\n"
+        "    Write-Output \"DRIVE_LETTER=$($updated.DriveLetter)\"\n"
+        "}\n"
+    ) % (disk_number, _WINDOWS_PARTITION_RETRY_COUNT, _WINDOWS_PARTITION_RETRY_DELAY_MS)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        capture_output=True,
+        text=True,
+        **no_console_kwargs(),
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        message = f"Attribution de la lettre de lecteur : échec (code {result.returncode})"
+        raise OSError(message + (f" : {detail}" if detail else ""))
+    match_letter = re.search(r"^DRIVE_LETTER=(\S)$", result.stdout or "", re.MULTILINE)
+    return match_letter.group(1) if match_letter else None
+
+
+def format_reset_partition(device: Device, plan: ResetCardPlan, label: str, filesystem: str = "exfat") -> Optional[str]:
+    """Étape 3/4 : formate nativement la partition créée par `create_
+    single_partition`, sauf sur Windows avec `filesystem == "fat32"` --
+    `Format-Volume`/`format.exe`/`diskpart` refusent tous de formater en
+    FAT32 au-delà de 32 Go (limite du formateur standard, pas du pilote de
+    lecture, § docstring de module), ce qui rend ce choix impossible en
+    pratique sur une carte SD R36S typique. Contourné en écrivant
+    nous-mêmes une structure FAT32 conforme à la spécification directement
+    sur le disque physique (`imaging/fat32.py`), puis en demandant
+    seulement à Windows de reconnaître le nouveau volume et de lui
+    attribuer une lettre (`_windows_assign_drive_letter_after_raw_format`).
+
+    macOS (`diskutil eraseVolume "MS-DOS FAT32"`) et Linux (`mkfs.vfat -F
+    32`) n'ont pas cette limite (rapporté comme tel, § `imaging/fat32.py` --
+    non vérifié indépendamment ici) : ces deux OS, et Windows en exFAT,
+    continuent de passer par `games_partition.format_games_partition`,
+    inchangé."""
+    if platform.system() == "Windows" and filesystem == "fat32":
+        with prepared_write_target(device) as raw_path:
+            format_fat32(raw_path, plan.start_lba * SECTOR_SIZE, plan.size_bytes, label)
+        return _windows_assign_drive_letter_after_raw_format(device.path)
+    return format_games_partition(device, label, filesystem, known_partition_paths=set())
+
+
 __all__ = [
     "DEFAULT_RESET_LABEL",
+    "MBR_FAT32_LBA_PARTITION_TYPE",
     "CardTooSmallForReset",
     "ResetCardPlan",
     "plan_full_disk_partition",
+    "check_fat32_feasible",
     "build_full_disk_mbr_sector",
     "erase_partition_table",
     "create_single_partition",
+    "format_reset_partition",
 ]

@@ -48,8 +48,10 @@ from .mbr import MbrPartition, is_gpt_protective, last_used_byte, parse_mbr
 from .reset_card import (
     DEFAULT_RESET_LABEL,
     CardTooSmallForReset,
+    check_fat32_feasible,
     create_single_partition,
     erase_partition_table,
+    format_reset_partition,
 )
 from .source import prepared_source, raw_read_path
 from .system_backup import (
@@ -98,6 +100,8 @@ __all__ = [
     "format_games_partition",
     "DEFAULT_RESET_LABEL",
     "CardTooSmallForReset",
+    "check_fat32_feasible",
     "erase_partition_table",
     "create_single_partition",
+    "format_reset_partition",
 ]

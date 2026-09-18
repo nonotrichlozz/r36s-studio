@@ -3,7 +3,7 @@ en quatre étapes réelles (effacement, création, formatage, éjection),
 chacune journalisée et suivie d'une progression réelle (`emit_step_
 progress`, jamais un minuteur, §2 n°5). Confirmation explicite obligatoire
 (règle §2 n°6, réutilise `_confirm_flash`). `list_devices`/`erase_
-partition_table`/`create_single_partition`/`format_games_partition`/
+partition_table`/`create_single_partition`/`format_reset_partition`/
 `eject_device` sont mockés -- aucun disque réel n'est touché."""
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from r36s_studio import __main__ as cli
 from r36s_studio.devices import Device
+from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.reset_card import CardTooSmallForReset, DEFAULT_RESET_LABEL, ResetCardPlan
 
 
@@ -37,8 +38,10 @@ def _patch_happy_path(plan_size_bytes=32_000_000_000):
     return patch.multiple(
         "r36s_studio.__main__",
         erase_partition_table=lambda device: None,
-        create_single_partition=lambda device: ResetCardPlan(start_lba=2048, end_lba=2048 + plan_size_bytes // 512),
-        format_games_partition=lambda device, label, filesystem, known_partition_paths: None,
+        create_single_partition=lambda device, filesystem: ResetCardPlan(
+            start_lba=2048, end_lba=2048 + plan_size_bytes // 512
+        ),
+        format_reset_partition=lambda device, plan, label, filesystem: None,
         eject_device=lambda path: None,
     )
 
@@ -99,6 +102,40 @@ def test_cmd_reset_card_success_runs_all_four_steps_with_default_label(mock_list
 
 @patch("r36s_studio.__main__._confirm_flash", return_value=True)
 @patch("r36s_studio.__main__.list_devices")
+def test_cmd_reset_card_passes_the_chosen_filesystem_to_create_and_format_steps(mock_list, mock_confirm, capsys):
+    """Cas réel qui motive `--filesystem` : une console (SF3000HD) qui ne
+    lit que le FAT32, rendue inutilisable par le formatage exFAT par
+    défaut de « Remettre la carte à zéro »."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    received = {}
+
+    def fake_create_single_partition(device, filesystem):
+        received["create_fs"] = filesystem
+        return ResetCardPlan(start_lba=2048, end_lba=4096)
+
+    def fake_format_reset_partition(device, plan, label, filesystem):
+        received["format_fs"] = filesystem
+
+    with patch.multiple(
+        "r36s_studio.__main__",
+        erase_partition_table=lambda device: None,
+        create_single_partition=fake_create_single_partition,
+        format_reset_partition=fake_format_reset_partition,
+        eject_device=lambda path: None,
+    ):
+        args = _parse(["reset-card", "--device", "/dev/fake-disk-test-3", "--filesystem", "fat32"])
+        code = args.func(args)
+
+    assert code == 0
+    assert received == {"create_fs": "fat32", "format_fs": "fat32"}
+    out = capsys.readouterr().out
+    assert "Formatage FAT32" in out
+    assert "Formatage exFAT" not in out
+
+
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
 def test_cmd_reset_card_passes_custom_label_to_format_step(mock_list, mock_confirm, capsys):
     device = _make_device()
     mock_list.return_value = [device]
@@ -107,10 +144,8 @@ def test_cmd_reset_card_passes_custom_label_to_format_step(mock_list, mock_confi
     with patch.multiple(
         "r36s_studio.__main__",
         erase_partition_table=lambda device: None,
-        create_single_partition=lambda device: ResetCardPlan(start_lba=2048, end_lba=4096),
-        format_games_partition=lambda device, label, filesystem, known_partition_paths: received_labels.append(
-            label
-        ),
+        create_single_partition=lambda device, filesystem: ResetCardPlan(start_lba=2048, end_lba=4096),
+        format_reset_partition=lambda device, plan, label, filesystem: received_labels.append(label),
         eject_device=lambda path: None,
     ):
         args = _parse(["reset-card", "--device", "/dev/fake-disk-test-3", "--label", "MACARTE"])
@@ -121,7 +156,7 @@ def test_cmd_reset_card_passes_custom_label_to_format_step(mock_list, mock_confi
 
 
 @patch("r36s_studio.__main__.eject_device")
-@patch("r36s_studio.__main__.format_games_partition", return_value="K")
+@patch("r36s_studio.__main__.format_reset_partition", return_value="K")
 @patch("r36s_studio.__main__.create_single_partition", return_value=ResetCardPlan(start_lba=2048, end_lba=4096))
 @patch("r36s_studio.__main__.erase_partition_table")
 @patch("r36s_studio.__main__._confirm_flash", return_value=True)
@@ -144,7 +179,7 @@ def test_cmd_reset_card_logs_the_assigned_drive_letter(
 
 
 @patch("r36s_studio.__main__.eject_device")
-@patch("r36s_studio.__main__.format_games_partition", return_value=None)
+@patch("r36s_studio.__main__.format_reset_partition", return_value=None)
 @patch("r36s_studio.__main__.create_single_partition", return_value=ResetCardPlan(start_lba=2048, end_lba=4096))
 @patch("r36s_studio.__main__.erase_partition_table")
 @patch("r36s_studio.__main__._confirm_flash", return_value=True)
@@ -201,7 +236,45 @@ def test_cmd_reset_card_too_small_emits_dedicated_code(mock_list, mock_confirm, 
     assert "Création de la partition" in out
 
 
-@patch("r36s_studio.__main__.format_games_partition", side_effect=OSError("mkfs.exfat introuvable"))
+@patch("r36s_studio.__main__.check_fat32_feasible", side_effect=Fat32VolumeTooSmall("volume trop petit"))
+@patch("r36s_studio.__main__.erase_partition_table")
+@patch("r36s_studio.__main__._confirm_flash")
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_reset_card_fat32_infeasible_is_reported_before_confirmation_and_before_any_write(
+    mock_list, mock_confirm, mock_erase, mock_check, capsys
+):
+    """Demande explicite : « si le FAT32 s'avère impossible sur une taille
+    donnée, le dire clairement avant de lancer l'opération, jamais après »
+    -- ni la confirmation ni l'effacement (irréversible) ne doivent avoir
+    lieu quand ce cas se présente."""
+    mock_list.return_value = [_make_device()]
+
+    args = _parse(["reset-card", "--device", "/dev/fake-disk-test-3", "--filesystem", "fat32"])
+    code = args.func(args)
+
+    assert code == 1
+    mock_confirm.assert_not_called()
+    mock_erase.assert_not_called()
+    out = capsys.readouterr().out
+    assert '"code": "RESET_CARD_FAILED"' in out
+    assert "FAT32 impossible" in out
+
+
+@patch("r36s_studio.__main__.check_fat32_feasible")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_reset_card_checks_fat32_feasibility_only_when_fat32_is_chosen(mock_list, mock_confirm, mock_check, capsys):
+    mock_list.return_value = [_make_device()]
+
+    with _patch_happy_path():
+        args = _parse(["reset-card", "--device", "/dev/fake-disk-test-3"])  # exfat, par défaut
+        code = args.func(args)
+
+    assert code == 0
+    mock_check.assert_not_called()
+
+
+@patch("r36s_studio.__main__.format_reset_partition", side_effect=OSError("mkfs.exfat introuvable"))
 @patch("r36s_studio.__main__.create_single_partition", return_value=ResetCardPlan(start_lba=2048, end_lba=4096))
 @patch("r36s_studio.__main__.erase_partition_table")
 @patch("r36s_studio.__main__._confirm_flash", return_value=True)
@@ -221,7 +294,7 @@ def test_cmd_reset_card_format_failure_emits_dedicated_code(
 
 
 @patch("r36s_studio.__main__.eject_device", side_effect=OSError("carte occupee"))
-@patch("r36s_studio.__main__.format_games_partition")
+@patch("r36s_studio.__main__.format_reset_partition")
 @patch("r36s_studio.__main__.create_single_partition", return_value=ResetCardPlan(start_lba=2048, end_lba=4096))
 @patch("r36s_studio.__main__.erase_partition_table")
 @patch("r36s_studio.__main__._confirm_flash", return_value=True)

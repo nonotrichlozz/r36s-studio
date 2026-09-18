@@ -74,8 +74,10 @@ Un échec HTTP dont le corps n'est pas la forme `{"erreur": ...}` attendue
 journal que les fiches rejetées (`client.py::_journaliser_erreur_http_
 inattendue`, `gui/logs.py::consoles_diverses_log_path`) -- statut HTTP et
 extrait du corps, tronqué. Un code `{"erreur": ...}` bien formé du
-serveur (licence invalide, référence invalide...) n'est lui jamais
-journalisé, ce n'est pas un incident.
+serveur (référence invalide...) n'est lui jamais journalisé, ce n'est pas
+un incident -- exception : `licence_invalide`/`licence_requise`
+consignent un diagnostic dédié (`client.py::_journaliser_diagnostic_
+licence`), voir ci-dessous.
 
 ## Durcissement (une fiche est une donnée externe non fiable)
 
@@ -103,6 +105,25 @@ verifie"`), jamais vérifiée par un humain. Quatre mesures :
 pour la session**, jamais écrite sur disque en clair à la place --
 `settings_dialog.py` affiche alors un message explicite plutôt qu'un
 échec silencieux.
+
+⚠️ **Bug corrigé, signalé par un utilisateur** : une clé confirmée valide
+(`Invoke-RestMethod` contre le serveur de production renvoie `trouve_
+dans_catalogue`) était refusée par la GUI (« La clé de licence renseignée
+n'est pas reconnue par le serveur »). Cause : `settings_dialog.py::
+_on_save` retirait déjà les espaces de l'adresse du serveur (`.strip()`)
+mais jamais ceux de la clé de licence -- un copier-coller laisse souvent
+un espace ou un retour à la ligne parasite en tête/fin, jamais visible
+dans un champ masqué (`QLineEdit.Password`). `settings_store.py::
+enregistrer_licence` applique désormais `.strip()` avant tout stockage
+(trousseau ou repli mémoire-session) -- un seul point de passage entre la
+fenêtre de réglages et le stockage, couvre tout appelant. En complément,
+`client.py::_journaliser_diagnostic_licence` consigne désormais, pour
+`licence_invalide`/`licence_requise` uniquement, la longueur de la clé
+envoyée et si elle contenait un espace parasite -- jamais la clé
+elle-même -- dans le même journal que les fiches rejetées
+(`gui/logs.py::consoles_diverses_log_path`), pour distinguer ce cas d'une
+vraie clé invalide sans avoir à réinstrumenter le client à chaque doute
+futur.
 
 ⚠️ **Non vérifié sur du vrai matériel au moment d'écrire cette note** :
 seul Windows (Credential Manager, backend natif toujours disponible) a pu

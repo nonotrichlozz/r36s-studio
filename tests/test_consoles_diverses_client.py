@@ -228,8 +228,42 @@ def test_rechercher_console_logs_an_unexpected_http_error_with_status_and_body(t
 
 
 def test_rechercher_console_does_not_log_a_well_formed_server_error(tmp_path):
-    """Un code `{"erreur": ...}` bien formé (licence invalide, référence
-    invalide...) n'est jamais un incident -- rien à consigner."""
+    """Un code `{"erreur": ...}` bien formé qui n'est pas lié à la licence
+    (référence invalide...) n'est jamais un incident -- rien à consigner."""
+    from r36s_studio.consoles_diverses import client as client_module
+
+    log_path = tmp_path / "consoles_diverses.log"
+    opener = _opener_raising_http_error(400, {"erreur": "reference_invalide"})
+
+    with patch.object(client_module.gui_logs, "consoles_diverses_log_path", return_value=log_path):
+        with pytest.raises(RechercheErreur):
+            rechercher_console("ref", "http://localhost:8787", "cle", opener=opener)
+
+    assert not log_path.exists()
+
+
+@pytest.mark.parametrize("code", ["licence_invalide", "licence_requise"])
+def test_rechercher_console_logs_licence_diagnostic_without_the_key_itself(tmp_path, code):
+    """Diagnostic demandé (clé confirmée valide via `Invoke-RestMethod`,
+    refusée par la GUI) : longueur, présence d'un espace parasite et code
+    serveur consignés -- jamais la clé elle-même."""
+    from r36s_studio.consoles_diverses import client as client_module
+
+    log_path = tmp_path / "consoles_diverses.log"
+    opener = _opener_raising_http_error(403, {"erreur": code})
+
+    with patch.object(client_module.gui_logs, "consoles_diverses_log_path", return_value=log_path):
+        with pytest.raises(RechercheErreur):
+            rechercher_console("ref", "http://localhost:8787", " cle-secrete \n", opener=opener)
+
+    contenu = log_path.read_text(encoding="utf-8")
+    assert "cle-secrete" not in contenu
+    assert f"longueur={len(' cle-secrete \n')}" in contenu
+    assert "espace_parasite=True" in contenu
+    assert code in contenu
+
+
+def test_rechercher_console_logs_licence_diagnostic_without_stray_whitespace(tmp_path):
     from r36s_studio.consoles_diverses import client as client_module
 
     log_path = tmp_path / "consoles_diverses.log"
@@ -237,9 +271,10 @@ def test_rechercher_console_does_not_log_a_well_formed_server_error(tmp_path):
 
     with patch.object(client_module.gui_logs, "consoles_diverses_log_path", return_value=log_path):
         with pytest.raises(RechercheErreur):
-            rechercher_console("ref", "http://localhost:8787", "cle", opener=opener)
+            rechercher_console("ref", "http://localhost:8787", "cle-secrete", opener=opener)
 
-    assert not log_path.exists()
+    contenu = log_path.read_text(encoding="utf-8")
+    assert "espace_parasite=False" in contenu
 
 
 # --- Serveur injoignable / délai dépassé -----------------------------------

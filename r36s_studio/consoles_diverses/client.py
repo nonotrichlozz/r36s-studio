@@ -156,6 +156,31 @@ def _journaliser_erreur_http_inattendue(status: int, raw: bytes) -> None:
         pass
 
 
+_CODES_LICENCE = {"licence_requise", "licence_invalide"}
+
+
+def _journaliser_diagnostic_licence(licence_key: str, code: str) -> None:
+    """Diagnostic demandé pour l'enquête « clé valide via `Invoke-
+    RestMethod`, refusée par la GUI » -- jamais la clé elle-même dans le
+    journal, seulement sa longueur, si elle contient un espace/retour à la
+    ligne parasite (voir le correctif de `settings_store.py::
+    enregistrer_licence`), et le code renvoyé par le serveur. Même journal
+    best-effort que `_journaliser_erreur_http_inattendue` (un journal
+    inaccessible ne doit jamais empêcher l'erreur de remonter
+    normalement)."""
+    try:
+        chemin = gui_logs.consoles_diverses_log_path()
+        horodatage = datetime.datetime.now().isoformat(timespec="seconds")
+        contient_espace = licence_key != licence_key.strip()
+        with open(chemin, "a", encoding="utf-8") as fichier:
+            fichier.write(
+                f"{horodatage} diagnostic licence : longueur={len(licence_key)}, "
+                f"espace_parasite={contient_espace}, code={code!r}\n"
+            )
+    except OSError:
+        pass
+
+
 def _erreur_depuis_corps_http(status: int, raw: bytes) -> RechercheErreur:
     try:
         payload = json.loads(raw)
@@ -207,7 +232,10 @@ def rechercher_console(
             raw_error = _read_limited(exc)
         except RechercheErreur:
             raise
-        raise _erreur_depuis_corps_http(exc.code, raw_error) from exc
+        erreur = _erreur_depuis_corps_http(exc.code, raw_error)
+        if erreur.code in _CODES_LICENCE:
+            _journaliser_diagnostic_licence(licence_key, erreur.code)
+        raise erreur from exc
     except urllib.error.URLError as exc:
         if _est_timeout(exc.reason):
             raise RechercheErreur("delai_depasse") from exc

@@ -48,6 +48,38 @@ def test_enregistrer_puis_lire_licence_via_trousseau_quand_disponible(mock_keyri
 
 
 @patch("r36s_studio.consoles_diverses.settings_store.keyring")
+def test_enregistrer_licence_strips_stray_whitespace_via_trousseau(mock_keyring):
+    """Bug corrigé : une clé valide (confirmée contre le serveur de
+    production) était refusée par la GUI -- un espace/retour à la ligne
+    parasite laissé par un copier-coller n'était jamais retiré avant
+    l'enregistrement."""
+    stockage = {}
+
+    def _set_password(service, account, value):
+        stockage[(service, account)] = value
+
+    def _get_password(service, account):
+        return stockage.get((service, account))
+
+    mock_keyring.set_password.side_effect = _set_password
+    mock_keyring.get_password.side_effect = _get_password
+
+    settings_store.enregistrer_licence(" ma-cle \n")
+
+    mock_keyring.set_password.assert_called_once_with(settings_store.SERVICE_NAME, "licence", "ma-cle")
+    assert settings_store.lire_licence() == "ma-cle"
+
+
+@patch("r36s_studio.consoles_diverses.settings_store.keyring")
+def test_enregistrer_licence_strips_stray_whitespace_via_memory_fallback(mock_keyring):
+    mock_keyring.get_password.side_effect = RuntimeError("aucun backend keyring")
+
+    settings_store.enregistrer_licence(" ma-cle \n")
+
+    assert settings_store.lire_licence() == "ma-cle"
+
+
+@patch("r36s_studio.consoles_diverses.settings_store.keyring")
 def test_effacer_licence_supprime_du_trousseau(mock_keyring):
     mock_keyring.get_password.return_value = None
 

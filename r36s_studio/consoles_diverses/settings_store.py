@@ -84,8 +84,20 @@ def enregistrer_licence(cle: str) -> None:
     (jamais en clair sur disque, point 5 du durcissement). Un échec
     d'écriture *malgré* un trousseau détecté comme disponible (rare --
     permission refusée après coup, par exemple) retombe aussi sur la
-    mémoire-session plutôt que de lever."""
+    mémoire-session plutôt que de lever.
+
+    Bug corrigé, confirmé en conditions réelles : une clé valide (confirmée
+    via `Invoke-RestMethod` contre le serveur de production) était refusée
+    par la GUI avec `licence_invalide`. Cause : un copier-coller depuis la
+    plupart des sources (page web, gestionnaire de mots de passe) laisse
+    souvent un espace ou un retour à la ligne parasite en tête/fin, jamais
+    retiré avant l'enregistrement -- contrairement à l'adresse du serveur
+    (`_on_save` de `settings_dialog.py`, déjà `.strip()`ée). Ce module est
+    le seul point de passage entre la fenêtre de réglages et le stockage
+    (trousseau ou mémoire-session) : un `.strip()` ici couvre tout appelant
+    présent ou futur, pas seulement `settings_dialog.py`."""
     global _licence_memoire_session
+    cle = cle.strip()
     if trousseau_disponible():
         try:
             keyring.set_password(SERVICE_NAME, _LICENCE_ACCOUNT, cle)

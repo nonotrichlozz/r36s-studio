@@ -106,24 +106,60 @@ pour la session**, jamais écrite sur disque en clair à la place --
 `settings_dialog.py` affiche alors un message explicite plutôt qu'un
 échec silencieux.
 
-⚠️ **Bug corrigé, signalé par un utilisateur** : une clé confirmée valide
-(`Invoke-RestMethod` contre le serveur de production renvoie `trouve_
-dans_catalogue`) était refusée par la GUI (« La clé de licence renseignée
-n'est pas reconnue par le serveur »). Cause : `settings_dialog.py::
-_on_save` retirait déjà les espaces de l'adresse du serveur (`.strip()`)
-mais jamais ceux de la clé de licence -- un copier-coller laisse souvent
-un espace ou un retour à la ligne parasite en tête/fin, jamais visible
-dans un champ masqué (`QLineEdit.Password`). `settings_store.py::
-enregistrer_licence` applique désormais `.strip()` avant tout stockage
-(trousseau ou repli mémoire-session) -- un seul point de passage entre la
-fenêtre de réglages et le stockage, couvre tout appelant. En complément,
-`client.py::_journaliser_diagnostic_licence` consigne désormais, pour
-`licence_invalide`/`licence_requise` uniquement, la longueur de la clé
-envoyée et si elle contenait un espace parasite -- jamais la clé
-elle-même -- dans le même journal que les fiches rejetées
-(`gui/logs.py::consoles_diverses_log_path`), pour distinguer ce cas d'une
-vraie clé invalide sans avoir à réinstrumenter le client à chaque doute
-futur.
+⚠️ **Bug corrigé (cause n°1), signalé par un utilisateur** : une clé
+confirmée valide (`Invoke-RestMethod` contre le serveur de production
+renvoie `trouve_dans_catalogue`) était refusée par la GUI (« La clé de
+licence renseignée n'est pas reconnue par le serveur »). Cause :
+`settings_dialog.py::_on_save` retirait déjà les espaces de l'adresse du
+serveur (`.strip()`) mais jamais ceux de la clé de licence -- un
+copier-coller laisse souvent un espace ou un retour à la ligne parasite
+en tête/fin, jamais visible dans un champ masqué (`QLineEdit.Password`).
+`settings_store.py::enregistrer_licence` applique `.strip()` avant tout
+stockage (trousseau ou repli mémoire-session).
+
+⚠️ **Bug corrigé (cause n°2, plus grave), même signalement, resurgi après
+le correctif ci-dessus** : la clé restait refusée après plusieurs
+ressaisies *et un redémarrage complet de l'app* -- le journal de
+diagnostic montrait la même longueur, sans espace parasite, à chaque
+tentative, preuve qu'une valeur figée était envoyée indépendamment de ce
+qui était retapé. Cause réelle, trouvée en relisant `keyring.backends.
+Windows.WinVaultKeyring.set_password` (lu en lecture seule, dépendance
+tierce) : ce backend relit l'ancienne valeur et la réécrit sous une cible
+composée (`{compte}@{service}`, simulation multi-utilisateur que
+`WinVaultKeyring` documente lui-même) *avant* d'écrire la nouvelle --
+et peut lever une exception à cette étape intermédiaire, avant que la
+nouvelle valeur n'ait jamais été écrite. L'ancien `enregistrer_licence`
+retombait alors correctement sur la mémoire-session en cas d'échec, mais
+`lire_licence()` préférait quand même une relecture trousseau non vide --
+qui rendait donc systématiquement l'ancienne valeur, jamais celle qu'on
+venait de demander, quel que soit le nombre de tentatives.
+
+**Corrigé** : `_licence_memoire_session` porte désormais la valeur
+explicitement demandée à chaque appel d'`enregistrer_licence`, que
+l'écriture trousseau réussisse ou non -- et `lire_licence()` la préfère
+toujours à une relecture trousseau pour le reste de la session. Une
+relecture trousseau n'est tentée qu'en l'absence de toute registration
+cette session (premier appel après lancement, ou après
+`effacer_licence`) -- ce qui préserve la persistance normale entre deux
+lancements quand l'écriture réussit réellement.
+
+**Diagnostics ajoutés pour confirmer/creuser sans jamais journaliser la
+clé en clair** (deux points de passage distincts, à comparer entre eux) :
+- `settings_store.py::_journaliser_diagnostic_enregistrement`, à chaque
+  `enregistrer_licence` : hash (8 premiers caractères du SHA-256) de la
+  clé demandée, hash de ce que le trousseau rend en relecture *directe*
+  (`keyring.get_password`, pas via le raccourci mémoire ci-dessus --
+  volontairement, pour tester l'aller-retour réel du trousseau), et la
+  source finalement utilisée (`trousseau`/`memoire`).
+- `client.py::_journaliser_diagnostic_licence`, à chaque
+  `licence_invalide`/`licence_requise` : longueur de la clé envoyée,
+  présence d'un espace parasite, son hash, et le code serveur.
+
+Un écart entre `sha256_demandee` et `sha256_trousseau_relue` au moment de
+l'enregistrement confirme un problème d'aller-retour au niveau du
+backend `keyring` lui-même (cause n°2 ci-dessus) ; un `sha256_envoyee`
+qui ne correspond à aucun des deux au moment d'une recherche pointerait
+plutôt vers un autre appelant non couvert par ce correctif.
 
 ⚠️ **Non vérifié sur du vrai matériel au moment d'écrire cette note** :
 seul Windows (Credential Manager, backend natif toujours disponible) a pu

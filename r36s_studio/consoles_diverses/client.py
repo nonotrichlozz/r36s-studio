@@ -51,6 +51,7 @@ invalide...) n'est lui jamais un incident, donc jamais journalisé ici."""
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import socket
 import urllib.error
@@ -159,12 +160,25 @@ def _journaliser_erreur_http_inattendue(status: int, raw: bytes) -> None:
 _CODES_LICENCE = {"licence_requise", "licence_invalide"}
 
 
+def _hash_prefix(valeur: str) -> str:
+    """8 premiers caractères hexadécimaux du SHA-256 -- jamais la clé
+    elle-même, juste assez pour comparer deux valeurs entre elles dans le
+    journal (diagnostic demandé). Même fonction que `settings_store.py::
+    _hash_prefix` -- non partagée entre les deux modules pour ne pas créer
+    de dépendance croisée entre `client.py` et `settings_store.py`, tous
+    deux déjà indépendants l'un de l'autre."""
+    return hashlib.sha256(valeur.encode("utf-8")).hexdigest()[:8]
+
+
 def _journaliser_diagnostic_licence(licence_key: str, code: str) -> None:
     """Diagnostic demandé pour l'enquête « clé valide via `Invoke-
     RestMethod`, refusée par la GUI » -- jamais la clé elle-même dans le
     journal, seulement sa longueur, si elle contient un espace/retour à la
-    ligne parasite (voir le correctif de `settings_store.py::
-    enregistrer_licence`), et le code renvoyé par le serveur. Même journal
+    ligne parasite, le hash (8 premiers caractères du SHA-256) de la
+    valeur réellement envoyée dans cette requête -- à comparer au
+    `sha256_demandee`/`sha256_trousseau_relue` journalisés par
+    `settings_store.py::_journaliser_diagnostic_enregistrement` au moment
+    de l'enregistrement -- et le code renvoyé par le serveur. Même journal
     best-effort que `_journaliser_erreur_http_inattendue` (un journal
     inaccessible ne doit jamais empêcher l'erreur de remonter
     normalement)."""
@@ -175,7 +189,8 @@ def _journaliser_diagnostic_licence(licence_key: str, code: str) -> None:
         with open(chemin, "a", encoding="utf-8") as fichier:
             fichier.write(
                 f"{horodatage} diagnostic licence : longueur={len(licence_key)}, "
-                f"espace_parasite={contient_espace}, code={code!r}\n"
+                f"espace_parasite={contient_espace}, sha256_envoyee={_hash_prefix(licence_key)}, "
+                f"code={code!r}\n"
             )
     except OSError:
         pass

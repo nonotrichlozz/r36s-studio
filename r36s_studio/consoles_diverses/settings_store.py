@@ -32,10 +32,14 @@ matériel -- voir `consoles_diverses/CLAUDE.md`."""
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 from typing import Optional
 from urllib.parse import urlsplit
 
 import keyring
+
+from r36s_studio.gui import logs as gui_logs
 
 from .strings import tr
 
@@ -44,6 +48,42 @@ _LICENCE_ACCOUNT = "licence"
 
 _trousseau_disponible_cache: Optional[bool] = None
 _licence_memoire_session: Optional[str] = None
+
+
+def _hash_prefix(valeur: str) -> str:
+    """8 premiers caractères hexadécimaux du SHA-256 -- jamais la clé
+    elle-même, juste assez pour comparer deux valeurs entre elles dans le
+    journal (diagnostic demandé)."""
+    return hashlib.sha256(valeur.encode("utf-8")).hexdigest()[:8]
+
+
+def _journaliser_diagnostic_enregistrement(cle: str, source: str) -> None:
+    """Diagnostic demandé (clé confirmée valide via `Invoke-RestMethod`,
+    mais la GUI en envoie apparemment une autre) : consigne le hash de la
+    clé qu'on vient de demander d'enregistrer, le hash de ce que le
+    trousseau système rend *immédiatement* en relecture directe (sans
+    passer par le raccourci mémoire-session ci-dessous -- volontairement,
+    pour tester l'aller-retour réel du trousseau lui-même), et la source
+    finalement utilisée (`trousseau` ou `memoire`). Jamais la clé en clair.
+    Même journal best-effort que les autres diagnostics de ce package
+    (`gui/logs.py::consoles_diverses_log_path`)."""
+    try:
+        chemin = gui_logs.consoles_diverses_log_path()
+        horodatage = datetime.datetime.now().isoformat(timespec="seconds")
+        relue_trousseau: Optional[str] = None
+        if trousseau_disponible():
+            try:
+                relue_trousseau = keyring.get_password(SERVICE_NAME, _LICENCE_ACCOUNT)
+            except Exception:
+                relue_trousseau = None
+        hash_relue = _hash_prefix(relue_trousseau) if relue_trousseau is not None else "absente"
+        with open(chemin, "a", encoding="utf-8") as fichier:
+            fichier.write(
+                f"{horodatage} diagnostic enregistrement licence : source={source}, "
+                f"sha256_demandee={_hash_prefix(cle)}, sha256_trousseau_relue={hash_relue}\n"
+            )
+    except OSError:
+        pass
 
 
 def _sonder_trousseau() -> bool:
@@ -88,34 +128,59 @@ def enregistrer_licence(cle: str) -> None:
 
     Bug corrigé, confirmé en conditions réelles : une clé valide (confirmée
     via `Invoke-RestMethod` contre le serveur de production) était refusée
-    par la GUI avec `licence_invalide`. Cause : un copier-coller depuis la
-    plupart des sources (page web, gestionnaire de mots de passe) laisse
-    souvent un espace ou un retour à la ligne parasite en tête/fin, jamais
-    retiré avant l'enregistrement -- contrairement à l'adresse du serveur
-    (`_on_save` de `settings_dialog.py`, déjà `.strip()`ée). Ce module est
-    le seul point de passage entre la fenêtre de réglages et le stockage
-    (trousseau ou mémoire-session) : un `.strip()` ici couvre tout appelant
-    présent ou futur, pas seulement `settings_dialog.py`."""
+    par la GUI avec `licence_invalide`. Cause n°1 (déjà corrigée) : un
+    copier-coller laisse souvent un espace ou un retour à la ligne
+    parasite en tête/fin, jamais retiré avant l'enregistrement --
+    contrairement à l'adresse du serveur (`_on_save` de
+    `settings_dialog.py`, déjà `.strip()`ée).
+
+    Cause n°2, plus grave, trouvée en réexaminant la priorité trousseau/
+    mémoire demandée par un signalement où la même valeur (longueur
+    stable) était renvoyée après plusieurs ressaisies et un redémarrage :
+    `keyring.set_password` peut lever *après* avoir déjà commencé à
+    modifier le trousseau -- `WinVaultKeyring.set_password`, entre autres,
+    relit et réécrit l'ancienne valeur sous une cible composée avant
+    d'écrire la nouvelle (simulation multi-utilisateur, voir le
+    commentaire du module `keyring.backends.Windows`) et peut lever à
+    cette étape intermédiaire, *avant* que la nouvelle valeur n'ait jamais
+    été écrite. L'ancien code retombait alors sur la mémoire-session
+    (`_licence_memoire_session = cle`), mais `lire_licence()` continuait
+    de préférer une lecture trousseau non vide -- qui rendait toujours
+    l'ancienne valeur jamais remplacée, indéfiniment, quel que soit le
+    nombre de ressaisies. `_licence_memoire_session` porte donc désormais
+    la valeur qui vient d'être explicitement demandée dans tous les cas
+    (trousseau ou repli) -- `lire_licence()` la préfère toujours à une
+    relecture trousseau pour le reste de la session, ci-dessous."""
     global _licence_memoire_session
     cle = cle.strip()
+    _licence_memoire_session = cle
+    source = "memoire"
     if trousseau_disponible():
         try:
             keyring.set_password(SERVICE_NAME, _LICENCE_ACCOUNT, cle)
-            return
+            source = "trousseau"
         except Exception:
             pass
-    _licence_memoire_session = cle
+    _journaliser_diagnostic_enregistrement(cle, source)
 
 
 def lire_licence() -> Optional[str]:
+    """Préfère la valeur explicitement enregistrée durant cette session
+    (`_licence_memoire_session`, mise à jour par tout appel à
+    `enregistrer_licence` -- trousseau ou repli, voir son commentaire) à
+    une relecture du trousseau système, qui peut ne jamais avoir reçu la
+    dernière valeur si l'écriture a levé en cours de route (bug corrigé
+    ci-dessus). Sans registration cette session (premier appel après
+    lancement, ou après `effacer_licence`), retombe sur le trousseau puis
+    sur `None`."""
+    if _licence_memoire_session is not None:
+        return _licence_memoire_session
     if trousseau_disponible():
         try:
-            valeur = keyring.get_password(SERVICE_NAME, _LICENCE_ACCOUNT)
+            return keyring.get_password(SERVICE_NAME, _LICENCE_ACCOUNT)
         except Exception:
-            valeur = None
-        if valeur is not None:
-            return valeur
-    return _licence_memoire_session
+            return None
+    return None
 
 
 def effacer_licence() -> None:

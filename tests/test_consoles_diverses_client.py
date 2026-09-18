@@ -260,6 +260,7 @@ def test_rechercher_console_logs_licence_diagnostic_without_the_key_itself(tmp_p
     assert "cle-secrete" not in contenu
     assert f"longueur={len(' cle-secrete \n')}" in contenu
     assert "espace_parasite=True" in contenu
+    assert f"sha256_envoyee={client_module._hash_prefix(' cle-secrete \n')}" in contenu
     assert code in contenu
 
 
@@ -275,6 +276,18 @@ def test_rechercher_console_logs_licence_diagnostic_without_stray_whitespace(tmp
 
     contenu = log_path.read_text(encoding="utf-8")
     assert "espace_parasite=False" in contenu
+    assert f"sha256_envoyee={client_module._hash_prefix('cle-secrete')}" in contenu
+
+
+def test_licence_diagnostic_hash_prefix_distinguishes_different_keys():
+    """Sanity check du mécanisme de comparaison demandé : deux clés
+    différentes ne doivent jamais produire le même préfixe -- sinon le
+    diagnostic ne permettrait pas de conclure quoi que ce soit en
+    comparant les journaux d'enregistrement et d'envoi."""
+    from r36s_studio.consoles_diverses import client as client_module
+
+    assert client_module._hash_prefix("cle-envoyee") != client_module._hash_prefix("cle-enregistree")
+    assert client_module._hash_prefix("cle-envoyee") == client_module._hash_prefix("cle-envoyee")
 
 
 # --- Serveur injoignable / délai dépassé -----------------------------------

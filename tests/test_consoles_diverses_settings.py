@@ -80,6 +80,85 @@ def test_enregistrer_licence_strips_stray_whitespace_via_memory_fallback(mock_ke
 
 
 @patch("r36s_studio.consoles_diverses.settings_store.keyring")
+def test_lire_licence_never_returns_a_stale_trousseau_value_after_a_failed_rewrite(mock_keyring):
+    """Bug corrigé, signalé : une clé valide restait refusée après
+    plusieurs ressaisies (longueur identique à chaque tentative dans le
+    journal). Cause : certains backends `keyring` (`WinVaultKeyring`,
+    entre autres -- voir le commentaire d'`enregistrer_licence`) peuvent
+    lever *après* avoir déjà commencé à modifier le trousseau, avant
+    d'avoir écrit la nouvelle valeur -- l'ancienne valeur reste alors en
+    place. L'ancien code retombait sur la mémoire-session en cas
+    d'échec, mais `lire_licence()` préférait quand même une relecture
+    trousseau non vide -- rendant systématiquement l'ancienne valeur,
+    jamais celle qu'on venait de demander."""
+    stockage = {(settings_store.SERVICE_NAME, "licence"): "ancienne-cle"}
+
+    def _get_password(service, account):
+        return stockage.get((service, account))
+
+    mock_keyring.get_password.side_effect = _get_password
+    mock_keyring.set_password.side_effect = RuntimeError("échec partiel côté backend")
+
+    settings_store.enregistrer_licence("nouvelle-cle")
+
+    assert settings_store.lire_licence() == "nouvelle-cle"
+
+
+@patch("r36s_studio.consoles_diverses.settings_store.keyring")
+def test_enregistrer_licence_logs_a_diagnostic_without_the_key_itself(mock_keyring, tmp_path):
+    """Diagnostic demandé : hash de la clé demandée, hash de ce que le
+    trousseau rend en relecture directe, et la source utilisée -- jamais
+    la clé en clair."""
+    stockage = {}
+
+    def _set_password(service, account, value):
+        stockage[(service, account)] = value
+
+    def _get_password(service, account):
+        return stockage.get((service, account))
+
+    mock_keyring.set_password.side_effect = _set_password
+    mock_keyring.get_password.side_effect = _get_password
+
+    log_path = tmp_path / "consoles_diverses.log"
+    with patch.object(settings_store.gui_logs, "consoles_diverses_log_path", return_value=log_path):
+        settings_store.enregistrer_licence("ma-cle-secrete")
+
+    contenu = log_path.read_text(encoding="utf-8")
+    assert "ma-cle-secrete" not in contenu
+    assert "source=trousseau" in contenu
+    hash_attendu = settings_store._hash_prefix("ma-cle-secrete")
+    assert f"sha256_demandee={hash_attendu}" in contenu
+    assert f"sha256_trousseau_relue={hash_attendu}" in contenu
+
+
+@patch("r36s_studio.consoles_diverses.settings_store.keyring")
+def test_enregistrer_licence_diagnostic_reports_memoire_source_and_stale_trousseau_hash(mock_keyring, tmp_path):
+    """Même scénario que le bug corrigé ci-dessus, vu depuis le journal :
+    la source retombe sur `memoire`, et le hash relu au trousseau reste
+    celui de l'ancienne valeur -- exactement ce qui permet de confirmer le
+    diagnostic depuis les logs, sans jamais y faire figurer une clé."""
+    stockage = {(settings_store.SERVICE_NAME, "licence"): "ancienne-cle"}
+
+    def _get_password(service, account):
+        return stockage.get((service, account))
+
+    mock_keyring.get_password.side_effect = _get_password
+    mock_keyring.set_password.side_effect = RuntimeError("échec partiel côté backend")
+
+    log_path = tmp_path / "consoles_diverses.log"
+    with patch.object(settings_store.gui_logs, "consoles_diverses_log_path", return_value=log_path):
+        settings_store.enregistrer_licence("nouvelle-cle")
+
+    contenu = log_path.read_text(encoding="utf-8")
+    assert "nouvelle-cle" not in contenu
+    assert "ancienne-cle" not in contenu
+    assert "source=memoire" in contenu
+    assert f"sha256_demandee={settings_store._hash_prefix('nouvelle-cle')}" in contenu
+    assert f"sha256_trousseau_relue={settings_store._hash_prefix('ancienne-cle')}" in contenu
+
+
+@patch("r36s_studio.consoles_diverses.settings_store.keyring")
 def test_effacer_licence_supprime_du_trousseau(mock_keyring):
     mock_keyring.get_password.return_value = None
 

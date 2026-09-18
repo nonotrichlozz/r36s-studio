@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from r36s_studio.gui import logs
 
 
@@ -36,6 +38,7 @@ def test_elevation_log_path_is_inside_log_dir(mock_system, tmp_path):
     assert isinstance(path, Path)
 
 
+@pytest.mark.real_consoles_diverses_log_path
 @patch("r36s_studio.gui.logs.platform.system", return_value="Darwin")
 def test_consoles_diverses_log_path_is_inside_log_dir(mock_system, tmp_path):
     with patch("r36s_studio.gui.logs.Path.home", return_value=tmp_path):

@@ -120,6 +120,52 @@ def _default_full_disk_access_granted(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _consoles_diverses_log_isolated(request, tmp_path, monkeypatch):
+    """Bug corrigé, confirmé sur du vrai matériel : chaque lancement local
+    de la suite écrivait pour de vrai dans le journal applicatif réel
+    (`%APPDATA%\\r36s-studio\\logs\\consoles_diverses.log` sous Windows,
+    `gui/logs.py::consoles_diverses_log_path`) -- plusieurs tests
+    construisent volontairement une fiche malformée pour vérifier que
+    `consoles_diverses/models.py::fiche_depuis_json` la rejette
+    (`test_fiche_depuis_json_raises_when_top_level_field_missing` et
+    consorts, `tests/test_consoles_diverses_client.py::test_rechercher_
+    console_console_field_missing_required_field_is_reponse_invalide`),
+    sans jamais mocker ce chemin -- seuls les deux tests spécifiquement
+    dédiés à la journalisation elle-même le faisaient. Un signalement
+    utilisateur (« bug confirmé par les logs ») s'est avéré être
+    exactement ces cinq lignes de test, toujours dans le même ordre,
+    jamais un vrai échec serveur/réseau -- la vraie recherche fonctionnait
+    normalement (confirmé indépendamment via `Invoke-RestMethod`).
+
+    Redirige `consoles_diverses/models.py::gui_logs.consoles_diverses_
+    log_path` vers un fichier temporaire pour tous les tests, plutôt que
+    de patcher chaque site d'appel un par un -- un futur test qui
+    oublierait de le faire ne pourra plus jamais polluer le vrai journal
+    de la machine de développement. Les deux tests qui vérifient le
+    *contenu* du journal (`tests/test_consoles_diverses_models.py`) le
+    repatchent explicitement dans leur propre `with` -- ce repatch
+    l'emporte normalement pour la durée de leur bloc, puis restaure cette
+    valeur par défaut en se refermant, comme pour `_forbid_real_
+    subprocess` ci-dessus. `tests/test_gui_logs.py` teste `consoles_
+    diverses_log_path` elle-même (sa résolution de chemin réelle) --
+    marquée `@pytest.mark.real_consoles_diverses_log_path` pour laisser
+    passer son implémentation non redirigée, même principe que
+    `real_fda_probe`/`real_subprocess` ci-dessus."""
+    if request.node.get_closest_marker("real_consoles_diverses_log_path"):
+        yield
+        return
+
+    from r36s_studio.consoles_diverses import models as consoles_diverses_models
+
+    monkeypatch.setattr(
+        consoles_diverses_models.gui_logs,
+        "consoles_diverses_log_path",
+        lambda: tmp_path / "consoles_diverses.log",
+    )
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_privileged_mount_hook():
     """`partitions/locate.py::_privileged_mount_hook` est un point
     d'extension au niveau module que `MainWindow.__init__` installe sur

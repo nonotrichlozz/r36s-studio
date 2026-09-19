@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import platform
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPixmap, QPolygon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGraphicsOpacityEffect,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -50,13 +52,23 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from r36s_studio.detect import StepStatus
+from r36s_studio.detect import (
+    COPY_GAMES,
+    EJECT,
+    FLASH,
+    IDENTIFY,
+    StepStatus,
+)
 from r36s_studio.devices import Device
+from r36s_studio.doublons.scan import ExactDuplicateGroup, ExclusionWarning, ScanResult, Unit, VersionGroup
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID, FIRMWARE_CATALOG
 from r36s_studio.partitions.archives import parse_archive_timestamp
 
@@ -172,25 +184,397 @@ class _ConsoleIcon(QWidget):
     """Icône du bandeau de détection (§5) : dessinée avec `QPainter`
     plutôt qu'une image ou une police d'icônes -- un simple boîtier
     arrondi avec deux petits boutons, dans la couleur d'accent, cohérent
-    avec le reste de l'habillage sans dépendance externe."""
+    avec le reste de l'habillage sans dépendance externe. `size` (défaut
+    28, celui du bandeau de `HomeScreen`) -- constantes de dessin
+    calibrées pour 28 et remises à l'échelle proportionnellement (même
+    principe que `_icon_scale` pour les tuiles, plus bas dans ce fichier)
+    pour rester nette à une taille bien plus grande (110 dans le panneau
+    « Carte détectée » de l'accueil assisté, §5)."""
 
-    def __init__(self, parent=None):
+    _REFERENCE_SIZE = 28.0
+
+    def __init__(self, size: int = 28, parent=None):
         super().__init__(parent)
-        self.setFixedSize(28, 28)
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
+        s = self.width() / self._REFERENCE_SIZE
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(theme.ACCENT_CYAN))
+        pen.setWidthF(max(1.5, 2 * s))
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        body = self.rect().adjusted(round(2 * s), round(5 * s), -round(2 * s), -round(5 * s))
+        painter.drawRoundedRect(body, round(4 * s), round(4 * s))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(theme.ACCENT_CYAN))
+        for dx in (8, 13):
+            painter.drawEllipse(body.right() - round(dx * s), body.center().y() - round(2 * s), round(3 * s), round(3 * s))
+
+
+# --- Icônes de tuile (accueil assisté, §5 refonte menu de tuiles) ---------
+#
+# Même principe que `_ConsoleIcon` ci-dessus : formes géométriques simples
+# dessinées au `QPainter`, jamais une image ni une police d'icônes. Chaque
+# fonction reçoit la couleur à utiliser (jamais un hex en dur ici -- la
+# couleur vient de `Tile`, choisie parmi les constantes de `theme.py` selon
+# le rôle de la tuile) plutôt que de la fixer elle-même.
+#
+# Constantes calibrées à l'origine pour une icône de 28×28 (taille du
+# bandeau de détection, `_ConsoleIcon`) -- `_icon_scale` les remet à
+# l'échelle proportionnellement à la taille réelle demandée (56 en tuile
+# normale, 76 sur la tuile 1, §5 refonte visuelle) plutôt que de fixer des
+# décalages en pixels absolus, qui rendraient l'icône minuscule dans une
+# tuile agrandie.
+_ICON_REFERENCE_SIZE = 28.0
+
+
+def _icon_scale(rect: QRect) -> float:
+    return min(rect.width(), rect.height()) / _ICON_REFERENCE_SIZE
+
+
+def _icon_pen(color: QColor, rect: QRect, width: float = 2.0) -> QPen:
+    pen = QPen(color)
+    pen.setWidthF(max(1.5, width * _icon_scale(rect)))
+    return pen
+
+
+def _tile_icon_prepare(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    body = rect.adjusted(round(4 * s), round(2 * s), -round(4 * s), -round(2 * s))
+    painter.drawRoundedRect(body, round(3 * s), round(3 * s))
+    cx = body.center().x()
+    painter.drawLine(cx, body.bottom() - round(3 * s), cx, body.top() + round(3 * s))
+    painter.drawLine(cx, body.top() + round(3 * s), cx - round(4 * s), body.top() + round(8 * s))
+    painter.drawLine(cx, body.top() + round(3 * s), cx + round(4 * s), body.top() + round(8 * s))
+
+
+def _tile_icon_identify(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    glass = rect.adjusted(round(2 * s), round(2 * s), -round(9 * s), -round(9 * s))
+    painter.drawEllipse(glass)
+    painter.drawLine(glass.bottomRight(), rect.bottomRight() - QPoint(round(1 * s), round(1 * s)))
+
+
+def _tile_icon_backup(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    cx = rect.center().x()
+    painter.drawLine(cx, rect.top() + round(3 * s), cx, rect.bottom() - round(8 * s))
+    painter.drawLine(cx, rect.bottom() - round(8 * s), cx - round(4 * s), rect.bottom() - round(13 * s))
+    painter.drawLine(cx, rect.bottom() - round(8 * s), cx + round(4 * s), rect.bottom() - round(13 * s))
+    painter.drawLine(rect.left() + round(3 * s), rect.bottom() - round(3 * s), rect.right() - round(3 * s), rect.bottom() - round(3 * s))
+
+
+def _tile_icon_flash(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(color)
+    cx, cy = rect.center().x(), rect.center().y()
+    points = [
+        QPoint(cx + round(3 * s), rect.top() + round(2 * s)),
+        QPoint(rect.left() + round(6 * s), cy + round(1 * s)),
+        QPoint(cx, cy + round(1 * s)),
+        QPoint(cx - round(3 * s), rect.bottom() - round(2 * s)),
+        QPoint(rect.right() - round(6 * s), cy - round(1 * s)),
+        QPoint(cx, cy - round(1 * s)),
+    ]
+    painter.drawPolygon(QPolygon(points))
+
+
+def _tile_icon_copy_games(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    body = rect.adjusted(round(4 * s), round(4 * s), -round(4 * s), -round(4 * s))
+    painter.drawRoundedRect(body, round(3 * s), round(3 * s))
+    y = body.top() + round(6 * s)
+    for _ in range(3):
+        painter.drawLine(body.left() + round(3 * s), y, body.right() - round(3 * s), y)
+        y += round(4 * s)
+
+
+def _tile_icon_duplicates(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    back = rect.adjusted(round(2 * s), round(2 * s), -round(9 * s), -round(9 * s))
+    front = rect.adjusted(round(9 * s), round(9 * s), -round(2 * s), -round(2 * s))
+    painter.drawRoundedRect(back, round(2 * s), round(2 * s))
+    painter.drawRoundedRect(front, round(2 * s), round(2 * s))
+
+
+def _tile_icon_inject_boot(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    screen = rect.adjusted(round(2 * s), round(2 * s), -round(2 * s), -round(9 * s))
+    painter.drawRoundedRect(screen, round(2 * s), round(2 * s))
+    painter.drawLine(
+        rect.center().x() - round(4 * s), rect.bottom() - round(3 * s), rect.center().x() + round(4 * s), rect.bottom() - round(3 * s)
+    )
+
+
+def _tile_icon_eject(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(color)
+    triangle = QPolygon(
+        [
+            QPoint(rect.center().x(), rect.top() + round(2 * s)),
+            QPoint(rect.left() + round(4 * s), rect.center().y() + round(2 * s)),
+            QPoint(rect.right() - round(4 * s), rect.center().y() + round(2 * s)),
+        ]
+    )
+    painter.drawPolygon(triangle)
+    painter.drawRect(
+        QRect(rect.left() + round(4 * s), rect.bottom() - round(6 * s), rect.width() - round(8 * s), round(4 * s))
+    )
+
+
+def _tile_icon_reset_card(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    arc_rect = rect.adjusted(round(3 * s), round(3 * s), -round(3 * s), -round(3 * s))
+    painter.drawArc(arc_rect, 40 * 16, 260 * 16)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(color)
+    tip = QPoint(arc_rect.right() - round(2 * s), arc_rect.top() + round(4 * s))
+    painter.drawPolygon(
+        QPolygon([tip, tip + QPoint(-round(6 * s), -round(2 * s)), tip + QPoint(-round(2 * s), round(5 * s))])
+    )
+
+
+def _tile_icon_help(painter: QPainter, rect: QRect, color: QColor) -> None:
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    circle = rect.adjusted(round(2 * s), round(2 * s), -round(2 * s), -round(2 * s))
+    painter.drawEllipse(circle)
+    # `QFont(theme.FONT_FAMILY)` interpréterait la chaîne de repli CSS
+    # ("-apple-system, 'Segoe UI', ...") comme un unique nom de police --
+    # Qt ne le trouve alors jamais et substitue un glyphe de remplacement
+    # (rectangle vide) au lieu du "?" -- constaté en rendant l'icône hors
+    # écran avant ce correctif. `QFont()` (police système par défaut, même
+    # principe que `ConsoleTerminalOverlay._terminal_font`, qui utilise
+    # `setFamilies` plutôt que le constructeur pour la même raison) laisse
+    # Qt choisir une police réellement installée.
+    font = QFont()
+    font.setBold(True)
+    font.setPixelSize(max(round(circle.height() - 10 * s), 8))
+    painter.setFont(font)
+    painter.setPen(color)
+    painter.drawText(circle, Qt.AlignCenter, "?")
+
+
+_TILE_ICON_PAINTERS = {
+    "prepare": _tile_icon_prepare,
+    "identify": _tile_icon_identify,
+    "backup": _tile_icon_backup,
+    "flash": _tile_icon_flash,
+    "copy_games": _tile_icon_copy_games,
+    "duplicates": _tile_icon_duplicates,
+    "inject_boot": _tile_icon_inject_boot,
+    "eject": _tile_icon_eject,
+    "reset_card": _tile_icon_reset_card,
+    "help": _tile_icon_help,
+}
+
+
+class _TileIcon(QWidget):
+    """Icône d'une tuile de l'accueil assisté (§5, refonte menu de tuiles)
+    -- même moule que `_ConsoleIcon` (`QPainter` seul, jamais une image),
+    mais paramétrée par glyphe (`_TILE_ICON_PAINTERS`), couleur (jamais un
+    hex en dur ici, choisie par `Tile` selon son rôle -- cyan normalement,
+    `BG_DARK` sur la tuile 1 mise en avant, `DANGER_FG` sur la tuile
+    destructive) et taille (44 en tuile normale, §5 deuxième correctif de
+    taille -- tuiles réduites à 160x160 pour tenir sur un écran réel
+    1366x768/728 ; 60 sur la tuile 1 mise en avant -- même rapport
+    160/200 qu'avant ce correctif, §5 -- « c'est l'icône qui doit porter
+    la tuile »)."""
+
+    DEFAULT_SIZE = 44
+
+    def __init__(self, glyph: str, color: str, size: int = DEFAULT_SIZE, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._glyph = glyph
+        self._color = QColor(color)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        pen = QPen(QColor(theme.ACCENT_CYAN))
-        pen.setWidth(2)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        body = self.rect().adjusted(2, 5, -2, -5)
-        painter.drawRoundedRect(body, 4, 4)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(theme.ACCENT_CYAN))
-        for dx in (8, 13):
-            painter.drawEllipse(body.right() - dx, body.center().y() - 2, 3, 3)
+        drawer = _TILE_ICON_PAINTERS.get(self._glyph)
+        if drawer is not None:
+            drawer(painter, self.rect(), self._color)
+
+
+# Taille de police réelle de chaque rôle de libellé de tuile (theme.py,
+# QSS) -- dupliquée ici volontairement : `_tile_label_reserved_height` a
+# besoin de la connaître *avant* que le style QSS ne soit appliqué au
+# widget (au moment de la construction de `Tile`, avant tout affichage),
+# et Qt Style Sheets ne s'interroge pas depuis Python -- une seule autre
+# façon de le faire serait de construire un `QLabel`, l'ajouter à une
+# hiérarchie stylée, forcer un `ensurePolished()`, puis lire sa police,
+# nettement plus lourd pour gagner la même information.
+_TILE_LABEL_FONT_PIXEL_SIZE = {
+    "tileLabel": 14,
+    "tileLabelLarge": 16,
+}
+
+
+def _tile_label_reserved_height(label_role: str, lines: int) -> int:
+    """Hauteur à réserver pour `lines` lignes du rôle de libellé donné
+    (§5, deuxième correctif de taille) -- jamais déduite du texte
+    réellement affiché (variable d'une tuile à l'autre), pour que toutes
+    les tuiles d'un même rôle aient exactement la même hauteur de zone
+    libellé, et que la plus longue ne soit jamais coupée."""
+    font = QFont()
+    font.setPixelSize(_TILE_LABEL_FONT_PIXEL_SIZE[label_role])
+    return QFontMetrics(font).lineSpacing() * lines
+
+
+class Tile(ClickableFrame):
+    """Tuile de l'accueil assisté (§5, refonte menu de tuiles) -- hérite
+    de `ClickableFrame` pour son mécanisme clic/désactivation (opacité
+    0,45 sur `setEnabled(False)`, déjà correct tel quel), carrée à taille
+    FIXE (`setFixedSize`, jamais `setMinimumSize` -- ne doit jamais
+    s'étirer dans la grille, l'effet « menu d'applications » en dépend) :
+    badge de statut en haut-droite (hauteur toujours réservée, voir
+    `set_badge`), icône centrée dans la moitié haute, libellé en
+    bas-gauche. `role` distingue les trois variantes
+    (`"tile"`/`"tileEmphasized"`/`"tileDestructive"`, voir `theme.py`) --
+    remplace le `"row"` posé par `ClickableFrame.__init__`.
+
+    Tuile 1 (« Préparer ma carte ») est la seule à porter une
+    description sous son libellé (`description`, icône/libellé plus
+    grands aussi -- voir `AssistedLandingScreen`, qui passe des valeurs
+    différentes pour cette seule tuile).
+
+    Taille réduite à 160 (§5, deuxième correctif de taille) : à 200,
+    l'arithmétique verticale ne rentrait plus sur un écran réel de
+    1366x768/728 (zone client ~720-728, en-tête ~86-100 + trois rangées
+    de 200 + deux gouttières de 12 = 724, ça ne rentre jamais, quel que
+    soit le réglage des marges autour). 160x160 (332x160 pour la tuile 1)
+    -- 100 + 480 + 24 = 604, de la marge reste. `SPACING` inchangé (12,
+    seule la taille des tuiles elles-mêmes change)."""
+
+    SIZE = 160
+    SPACING = 12
+
+    def __init__(
+        self,
+        glyph: str,
+        label_text: str,
+        role: str = "tile",
+        icon_color: Optional[str] = None,
+        icon_size: int = _TileIcon.DEFAULT_SIZE,
+        label_role: str = "tileLabel",
+        label_lines: int = 3,
+        description: Optional[str] = None,
+        width: Optional[int] = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setProperty("role", role)
+        self.setFixedSize(width or self.SIZE, self.SIZE)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+
+        header = QHBoxLayout()
+        header.addStretch()
+        # Toujours visible (jamais `setVisible(False)`, y compris quand
+        # vide) : la hauteur du badge reste réservée quel que soit son
+        # contenu, pour que les tuiles ne bougent jamais selon leur statut
+        # (§5, correctif visuel -- voir `set_badge`).
+        self._badge = QLabel("")
+        self._badge.setProperty("role", "badge")
+        header.addWidget(self._badge)
+        layout.addLayout(header)
+
+        # Icône centrée dans la moitié haute de la tuile -- c'est elle qui
+        # doit porter la tuile, pas le libellé (§5, correctif visuel).
+        # Positionnée par les seuls espaces élastiques de `layout``
+        # ci-dessous (`addStretch`, jamais un `QWidget` intermédiaire) :
+        # un `QWidget` nu sans rôle QSS hérite quand même du fond sombre
+        # global (`QMainWindow, QWidget {{ background-color: ... }}`,
+        # theme.py) dès qu'un style d'application est actif -- correctif
+        # d'un bug constaté (un rectangle sombre plein entourait chaque
+        # icône, opaque au point de rendre celle de la tuile 1 invisible,
+        # dessinée en `BG_DARK` sur ce même `BG_DARK`). Une disposition
+        # par layouts seuls (`QHBoxLayout`/`addStretch`) ne peint jamais
+        # rien par elle-même -- l'icône se dessine directement sur le
+        # fond de la tuile.
+        icon_row = QHBoxLayout()
+        icon_row.addStretch()
+        icon_row.addWidget(_TileIcon(glyph, icon_color or theme.ACCENT_CYAN, size=icon_size))
+        icon_row.addStretch()
+        layout.addStretch(1)
+        layout.addLayout(icon_row)
+        layout.addStretch(2)
+
+        label_row = QHBoxLayout()
+        self._label = QLabel(label_text)
+        self._label.setProperty("role", label_role)
+        self._label.setWordWrap(True)
+        self._label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        # Hauteur réservée pour `label_lines` lignes (3 par défaut -- §5,
+        # deuxième correctif de taille), jamais une hauteur déduite du
+        # texte réellement passé : sans ça, une tuile au libellé court
+        # (« Aide ») et une au libellé long (« Remettre la carte à
+        # zéro ») n'auraient pas la même hauteur de zone libellé, et rien
+        # ne garantirait que le texte le plus long ne dépasse pas de la
+        # tuile. Calculée depuis la taille de police réelle du rôle
+        # (`_TILE_LABEL_FONT_PIXEL_SIZE`), pas depuis la police par défaut
+        # de l'application (qui ne reflète pas la taille QSS avant que le
+        # style ne soit appliqué).
+        self._label.setFixedHeight(_tile_label_reserved_height(label_role, label_lines))
+        label_row.addWidget(self._label)
+        label_row.addStretch()
+        layout.addLayout(label_row)
+
+        if description:
+            desc_row = QHBoxLayout()
+            desc_label = QLabel(description)
+            # Rôle dédié (jamais "rowDesc", en `TEXT_SECONDARY` -- illisible
+            # sur le fond cyan plein de cette seule tuile, correctif
+            # demandé) : `BG_DARK`, comme `tileLabelLarge` ci-dessus.
+            desc_label.setProperty("role", "tileDescLarge")
+            desc_label.setWordWrap(True)
+            desc_row.addWidget(desc_label)
+            layout.addLayout(desc_row)
+
+    def set_badge(self, status: Optional[StepStatus]) -> None:
+        """Même mécanique que `HomeScreen.set_status` (§5) : `setProperty`
+        puis `theme.repolish` -- Qt ne réévalue un sélecteur
+        `[badgeKind="..."]` qu'au moment où le style est recalculé, pas à
+        chaque changement de propriété seul.
+
+        `None` (tuile sans statut, ex. tuile 1/3/9/10) et `NOT_RELEVANT`
+        se traitent tous deux comme « rien à afficher » -- **jamais
+        `setVisible(False)`** : un badge vide, sans `badgeKind`
+        correspondant, n'a ni fond ni bordure (`QLabel[role="badge"]` ne
+        colore que sur un `badgeKind` reconnu, `theme.py`) mais réserve
+        toujours sa hauteur (`min-height`, même règle QSS) -- correctif
+        demandé : « Non pertinente pour cette carte » dominait
+        visuellement la grille sur quatre tuiles, et les tuiles auraient
+        sinon changé de hauteur selon leur statut."""
+        if status is None or status == StepStatus.NOT_RELEVANT:
+            self._badge.setText("")
+            self._badge.setProperty("badgeKind", None)
+            theme.repolish(self._badge)
+            return
+        self._badge.setText(tr(_STATUS_TEXT_KEYS[status]))
+        self._badge.setProperty("badgeKind", _BADGE_KIND_BY_STATUS[status])
+        theme.repolish(self._badge)
 
 
 class ConsoleArt(QWidget):
@@ -1977,98 +2361,1040 @@ class FullDiskAccessScreen(Screen):
             self._backdrop.setGeometry(self.rect())
 
 
+# Grille de tuiles de l'accueil assisté (§5, refonte menu de tuiles) :
+# (glyphe, clé du libellé, rôle QSS, nom du signal émis au clic, clé de
+# statut `detect.StepStatus` ou `None` si la tuile n'affiche jamais de
+# badge, largeur en colonnes). Ordre = ordre d'apparition dans la grille
+# (4 colonnes), après la tuile 1 (double largeur, construite à part plus
+# bas -- seule à porter icône/libellé agrandis et une description).
+# 2 (double) + 2 = rangée 0 pleine ; 4 = rangée 1 pleine ; 2 = rangée 2,
+# 9 tuiles au total (« Rechercher ma console » et « Consoles diverses »
+# fusionnées en une seule tuile « Identifier ma console » -- l'écran de
+# résultat de l'identification propose l'accès au catalogue en dessous,
+# `IdentifyResultDialog.catalog_requested`).
+#
+# « Remettre l'écran d'origine » (inject_boot) retirée de cette grille
+# (§5, correctif visuel) : déjà couverte par le mode expert (ligne D) et
+# par le parcours guidé lui-même (qui restaure l'écran d'origine avec le
+# reste de l'image), elle n'apportait rien de plus ici. `inject_boot`
+# reste pleinement fonctionnelle ailleurs -- seule cette tuile disparaît,
+# avec son signal (`inject_boot_requested`) et l'entrée correspondante
+# des tables ad-hoc de `main_window.py`.
+_ASSISTED_TILE_SPECS = [
+    ("identify", "assisted_tile_identify", "tile", "identify_requested", IDENTIFY, 1),
+    ("backup", "assisted_tile_backup", "tile", "backup_requested", None, 1),
+    ("flash", "assisted_tile_flash", "tile", "flash_requested", FLASH, 1),
+    ("copy_games", "assisted_tile_copy_games", "tile", "copy_games_requested", COPY_GAMES, 1),
+    # Aucune clé de statut (§ outil « Doublons de jeux », remplace la
+    # tuile carte-SD-uniquement) : cette tuile ouvre désormais un outil
+    # autonome (n'importe quel dossier -- PC, carte SD ou disque externe,
+    # docs/doublons.md), plus de rapport avec la carte détectée.
+    ("duplicates", "assisted_tile_find_duplicates", "tile", "find_duplicates_requested", None, 1),
+    ("eject", "assisted_tile_eject", "tile", "eject_requested", EJECT, 1),
+    ("reset_card", "assisted_tile_reset_card", "tileDestructive", "reset_card_requested", None, 1),
+    ("help", "assisted_tile_help", "tile", "help_requested", None, 1),
+]
+
+_ASSISTED_TILE_GRID_COLUMNS = 4
+
+_ICON_COLOR_BY_ROLE = {
+    "tileEmphasized": "BG_DARK",
+    "tileDestructive": "DANGER_FG",
+}
+
+# Icône du panneau « Carte détectée » (§5, refonte menu de tuiles,
+# correctif visuel) -- nettement plus grande que celle du bandeau
+# horizontal de HomeScreen (28, inchangée là-bas).
+_ASSISTED_PANEL_ICON_SIZE = 110
+
+# 1 rangée double-largeur (tuile 1) + 2 simples, puis 4, puis 3 -- 3
+# rangées complètes, toujours (§5, correctif visuel : dérivé une fois pour
+# toutes plutôt qu'un calcul dynamique à partir d'un widget dans un
+# `QScrollArea`, dont le `sizeHint` ne reflète pas fidèlement un contenu
+# défilable). Sert à donner au panneau « Carte détectée » exactement la
+# même hauteur que la grille (`Tile.SIZE * lignes + Tile.SPACING *
+# (lignes - 1)`) et à garantir que la fenêtre s'ouvre assez grande pour
+# afficher les trois rangées sans défiler (`main_window.py`).
+_ASSISTED_GRID_ROWS = 3
+_ASSISTED_GRID_TOTAL_HEIGHT = _ASSISTED_GRID_ROWS * Tile.SIZE + (_ASSISTED_GRID_ROWS - 1) * Tile.SPACING
+_ASSISTED_GRID_TOTAL_WIDTH = _ASSISTED_TILE_GRID_COLUMNS * Tile.SIZE + (_ASSISTED_TILE_GRID_COLUMNS - 1) * Tile.SPACING
+# Gouttière entre la grille et le panneau de droite -- distincte de
+# `Tile.SPACING` (12, entre les tuiles elles-mêmes), plus large pour
+# séparer clairement les deux zones (§5, correctif visuel).
+_ASSISTED_CONTENT_SPACING = 40
+# Largeur fixe du panneau « Carte détectée » (§5, correctif visuel, point
+# 2) -- constante nommée plutôt qu'un nombre répété dans `main_window.py`
+# (calcul de la taille minimale de fenêtre) et ici (construction du
+# panneau) : une seule source de vérité.
+_ASSISTED_PANEL_WIDTH = 308
+# Largeur totale du bloc centré (§5, correctif de centrage) : grille +
+# gouttière + panneau, jamais recalculée séparément. L'en-tête et
+# l'étiquette de section sont chacun placés dans un conteneur de cette
+# même largeur, lui-même centré de la même façon (`addStretch` de même
+# facteur avant/après) que la grille+panneau -- sans ça, ces deux lignes
+# resteraient calées sur les bords de la fenêtre pendant que le bloc
+# grille+panneau se centre en dessous, un décalage visuel entre le titre
+# et les tuiles qu'il surplombe.
+_ASSISTED_CENTERED_BLOCK_WIDTH = _ASSISTED_GRID_TOTAL_WIDTH + _ASSISTED_CONTENT_SPACING + _ASSISTED_PANEL_WIDTH
+
+
+def _centered_row(widget: QWidget) -> QHBoxLayout:
+    """Enveloppe `widget` (largeur fixe) dans une ligne horizontale qui le
+    centre -- `addStretch` de même facteur (1) de part et d'autre, pour
+    que le vide restant de la fenêtre se répartisse également des deux
+    côtés plutôt que de se concentrer à droite (§5, correctif de
+    centrage). Réutilisée pour l'en-tête, l'étiquette de section, et
+    directement en ligne pour la grille+panneau (`content_row`, qui a
+    déjà sa propre largeur fixe cumulée par construction)."""
+    row = QHBoxLayout()
+    row.addStretch(1)
+    row.addWidget(widget)
+    row.addStretch(1)
+    return row
+
+
 class AssistedLandingScreen(Screen):
     """Écran d'accueil du mode assisté (§5 mode assisté) -- par défaut au
-    lancement (`ui_mode` en configuration, §6). Sa propre `ConsoleStage`
-    (instance séparée de celle de `MainView`, plus grande, mêmes effets
-    lumineux) plutôt qu'une réutilisation : les deux écrans ne sont jamais
-    affichés en même temps (`MainWindow` bascule entre eux), donc pas de
-    conflit de parent, et chacun reste autonome/testable isolément."""
+    lancement (`ui_mode` en configuration, §6). Grille de tuiles façon
+    menu d'applications (refonte menu de tuiles, remplace la console en
+    grand + 3 boutons) : chaque tuile expose une action déjà disponible en
+    mode expert (ou nouvelle -- identification, doublons), avec le même
+    système de badges de statut (`detect.StepStatus`) que `HomeScreen`.
+    La console n'est plus affichée en grand ici -- `ConsoleStage`/
+    `ConsoleArt` restent utilisés ailleurs (`MainView`), pas sur cet écran
+    -- seule une `_ConsoleIcon` agrandie figure dans le panneau « Carte
+    détectée » à droite de la grille, même icône que le bandeau de
+    `HomeScreen`.
+
+    Grille à taille fixe, alignée en haut à gauche (`Qt.AlignTop |
+    Qt.AlignLeft`, jamais de facteur d'étirement) -- correctif visuel :
+    les tuiles s'étiraient auparavant en rectangles pour remplir l'espace
+    disponible, l'effet « menu d'applications » en dépend. La fenêtre
+    peut respirer autour (`addStretch()` après la grille/le panneau, à
+    droite et en bas).
+
+    **Fond uni, jamais `WindowBackdrop`** (§5, correctif visuel) --
+    contrairement à `MainView`/l'ancien accueil assisté (console en
+    grand), cet écran n'affiche plus le motif décoratif « circuit imprimé »
+    : `WindowBackdrop`/`build_window_backdrop` restent pleinement en
+    place et utilisés ailleurs, simplement jamais instanciés ici."""
 
     prepare_requested = Signal()
+    identify_requested = Signal()
+    backup_requested = Signal()
+    flash_requested = Signal()
+    copy_games_requested = Signal()
+    find_duplicates_requested = Signal()
+    eject_requested = Signal()
+    reset_card_requested = Signal()
+    help_requested = Signal()
     expert_mode_requested = Signal()
-    backup_system_requested = Signal()
-    # Section « Consoles diverses » (consoles_diverses/, étape 1) --
-    # symétrique du bouton de HomeScreen, même règle d'isolation (voir
-    # HomeScreen.consoles_diverses_requested).
-    consoles_diverses_requested = Signal()
+    refresh_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self._backdrop = build_window_backdrop(self)
-        if self._backdrop is not None:
-            self._backdrop.lower()
-
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 16, 24, 24)
+        # Marges resserrées (§5, correctif visuel, deuxième correctif de
+        # taille) : la grille elle-même est fixe (624 -- trois rangées de
+        # 200 + deux gouttières de 12, jamais autre chose) ; c'est donc
+        # uniquement l'habillage autour d'elle (marges, en-tête, étiquette
+        # de section) qui doit rester le plus compact possible pour que la
+        # fenêtre entière tienne sur un écran 1366x768 réel (barre de
+        # titre/tâches comprises) -- un `setMinimumHeight` généreux ne
+        # suffit pas si le contenu réel dépasse déjà l'écran (bug constaté :
+        # la fenêtre s'ouvrait plus haute que l'écran, coupant la dernière
+        # rangée), le vrai correctif est ici, pas seulement dans
+        # `main_window.py`.
+        root.setContentsMargins(24, 10, 24, 10)
 
-        top_row = QHBoxLayout()
-        top_row.addStretch()
+        # En-tête (§5, refonte menu de tuiles -- manquait entièrement) :
+        # nom de l'application en lettres espacées, couleur d'accent, un
+        # sous-titre d'orientation en dessous ; bouton Mode expert aligné
+        # sur la ligne du titre, à droite. Construit dans un conteneur de
+        # largeur fixe (`_ASSISTED_CENTERED_BLOCK_WIDTH`, §5, correctif de
+        # centrage) plutôt que directement sur `root` -- sans ce
+        # conteneur, cette ligne s'étirerait sur toute la largeur de la
+        # fenêtre (bords collés aux marges) pendant que la grille en
+        # dessous se centre indépendamment, décalant visuellement le
+        # titre par rapport aux tuiles qu'il surplombe.
+        header_container = QWidget()
+        header_container.setFixedWidth(_ASSISTED_CENTERED_BLOCK_WIDTH)
+        header_row = QHBoxLayout(header_container)
+        header_row.setContentsMargins(0, 0, 0, 0)
+        brand_col = QVBoxLayout()
+        brand_col.setSpacing(2)
+        brand_title = QLabel(tr("app_title").upper())
+        brand_title.setProperty("role", "brandTitle")
+        # Qt Style Sheets ne supporte pas `letter-spacing` (contrairement
+        # à CSS) -- posé sur la police directement, seule façon d'obtenir
+        # l'espacement demandé.
+        brand_font = brand_title.font()
+        brand_font.setLetterSpacing(QFont.AbsoluteSpacing, 2)
+        brand_title.setFont(brand_font)
+        brand_col.addWidget(brand_title)
+        brand_subtitle = QLabel(tr("assisted_brand_subtitle"))
+        brand_subtitle.setProperty("role", "secondary")
+        brand_col.addWidget(brand_subtitle)
+        header_row.addLayout(brand_col)
+        header_row.addStretch()
         self._expert_button = QPushButton(tr("assisted_expert_mode_button"))
         self._expert_button.setProperty("role", "flat")
         self._expert_button.clicked.connect(self.expert_mode_requested.emit)
-        top_row.addWidget(self._expert_button)
-        root.addLayout(top_row)
+        header_row.addWidget(self._expert_button, 0, Qt.AlignTop)
+        root.addLayout(_centered_row(header_container))
 
-        root.addStretch(2)
+        root.addSpacing(8)
 
-        self.console_stage = build_console_stage(self)
-        if self.console_stage is not None:
-            root.addWidget(self.console_stage, 5)
+        # Étiquette de section, en lettres espacées (maquette de référence,
+        # docs/screenshots/maquette-accueil.png) -- manquait entièrement.
+        # Même conteneur de largeur fixe centré que l'en-tête ci-dessus
+        # (§5, correctif de centrage) -- son bord gauche doit tomber au
+        # même endroit que celui de la grille juste en dessous, dont elle
+        # introduit visuellement la section.
+        section_container = QWidget()
+        section_container.setFixedWidth(_ASSISTED_CENTERED_BLOCK_WIDTH)
+        section_row = QHBoxLayout(section_container)
+        section_row.setContentsMargins(0, 0, 0, 0)
+        section_label = QLabel(tr("assisted_section_label"))
+        section_label.setProperty("role", "sectionLabel")
+        section_font = section_label.font()
+        section_font.setLetterSpacing(QFont.AbsoluteSpacing, 1)
+        section_label.setFont(section_font)
+        section_row.addWidget(section_label)
+        section_row.addStretch()
+        root.addLayout(_centered_row(section_container))
+        root.addSpacing(8)
 
-        self._prepare_button = QPushButton(tr("assisted_prepare_button"))
-        self._prepare_button.setProperty("role", "cta")
-        self._prepare_button.clicked.connect(self.prepare_requested.emit)
-        button_row = QHBoxLayout()
-        button_row.addStretch()
-        button_row.addWidget(self._prepare_button)
-        button_row.addStretch()
-        root.addLayout(button_row)
+        content_row = QHBoxLayout()
+        content_row.setSpacing(_ASSISTED_CONTENT_SPACING)
 
-        # Sauvegarde système sans les jeux (§4.3), aussi proposée comme
-        # option du mode assisté -- discrète (rôle "flat", comme le bouton
-        # Mode expert), en dessous du bouton principal, pour ne jamais
-        # rivaliser avec le parcours guidé qui reste l'action mise en avant.
-        self._backup_system_button = QPushButton(tr("assisted_backup_system_button"))
-        self._backup_system_button.setProperty("role", "flat")
-        self._backup_system_button.clicked.connect(self.backup_system_requested.emit)
-        backup_system_row = QHBoxLayout()
-        backup_system_row.addStretch()
-        backup_system_row.addWidget(self._backup_system_button)
-        backup_system_row.addStretch()
-        root.addLayout(backup_system_row)
+        grid_widget = QWidget()
+        grid_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        grid = QGridLayout(grid_widget)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(Tile.SPACING)
+        # Aucune ligne ni colonne extensible (§5, deuxième correctif de
+        # taille) -- déjà le comportement par défaut de `QGridLayout`
+        # (facteur 0 tant que rien ne l'augmente), posé explicitement ici
+        # pour qu'aucun ajout futur de widget dans cette grille ne puisse
+        # silencieusement en étirer une ligne ou une colonne.
+        for row in range(_ASSISTED_GRID_ROWS):
+            grid.setRowStretch(row, 0)
+        for column in range(_ASSISTED_TILE_GRID_COLUMNS):
+            grid.setColumnStretch(column, 0)
+        self._tiles_by_status_key: Dict[str, Tile] = {}
+        self._all_tiles: List[Tile] = []
 
-        # Section « Consoles diverses » -- discrète (rôle "flat"), sous les
-        # deux boutons ci-dessus, même principe : ne jamais rivaliser avec
-        # le parcours guidé mis en avant.
-        self._consoles_diverses_button = QPushButton(tr("assisted_consoles_diverses_button"))
-        self._consoles_diverses_button.setProperty("role", "flat")
-        self._consoles_diverses_button.clicked.connect(self.consoles_diverses_requested.emit)
-        consoles_diverses_row = QHBoxLayout()
-        consoles_diverses_row.addStretch()
-        consoles_diverses_row.addWidget(self._consoles_diverses_button)
-        consoles_diverses_row.addStretch()
-        root.addLayout(consoles_diverses_row)
+        # Tuile 1, seule à porter icône/libellé agrandis et une
+        # description (§5, correctif visuel) -- construite à part plutôt
+        # que par une entrée de plus dans `_ASSISTED_TILE_SPECS`, dont les
+        # champs ne varient sinon jamais d'une tuile à l'autre.
+        tile1 = Tile(
+            "prepare",
+            tr("assisted_tile_prepare"),
+            role="tileEmphasized",
+            icon_color=theme.BG_DARK,
+            icon_size=60,
+            label_role="tileLabelLarge",
+            # Une seule ligne réservée, pas les 3 par défaut (§5, deuxième
+            # correctif de taille) : contrairement aux 8 autres tuiles,
+            # celle-ci a un texte de titre fixe et toujours court
+            # ("Préparer ma carte") -- réserver 3 lignes ici gaspillerait
+            # de la place au détriment de la description en dessous, sans
+            # jamais servir (rien ne rallonge ce texte précis).
+            label_lines=1,
+            description=tr("assisted_tile_prepare_desc"),
+            width=Tile.SIZE * 2 + Tile.SPACING,
+        )
+        tile1.clicked.connect(self.prepare_requested.emit)
+        grid.addWidget(tile1, 0, 0, 1, 2)
+        self._all_tiles.append(tile1)
 
-        root.addStretch(3)
+        row_index = 0
+        col_index = 2
+        for glyph, label_key, role, signal_name, status_key, span in _ASSISTED_TILE_SPECS:
+            icon_color = getattr(theme, _ICON_COLOR_BY_ROLE.get(role, "ACCENT_CYAN"))
+            tile = Tile(glyph, tr(label_key), role=role, icon_color=icon_color)
+            tile.clicked.connect(getattr(self, signal_name).emit)
+            grid.addWidget(tile, row_index, col_index, 1, span)
+            if status_key is not None:
+                self._tiles_by_status_key[status_key] = tile
+            self._all_tiles.append(tile)
+            col_index += span
+            if col_index >= _ASSISTED_TILE_GRID_COLUMNS:
+                col_index = 0
+                row_index += 1
+
+        # Zone de la grille dans un `QScrollArea` (§5, correctif visuel) :
+        # la dernière rangée sortait de la fenêtre quand celle-ci n'était
+        # pas assez haute. `MainWindow` fixe une taille initiale assez
+        # grande pour afficher les trois rangées sans défiler
+        # (`main_window.py`, dérivée de `_ASSISTED_GRID_TOTAL_HEIGHT`/
+        # `_ASSISTED_GRID_TOTAL_WIDTH`) -- ce `QScrollArea` reste un filet
+        # de sécurité pour le cas où l'utilisateur redimensionne plus
+        # petit, pas le chemin normal. `setWidgetResizable(False)` (le
+        # défaut) : `grid_widget` garde sa taille naturelle fixe, jamais
+        # étiré par la zone de défilement.
+        #
+        # Bug corrigé (correctif visuel, deuxième passe) : `QScrollArea`
+        # a par défaut une `sizePolicy` `Expanding`/`Expanding` -- même
+        # avec `grid_widget` fixe à l'intérieur et un facteur d'étirement
+        # nul dans `content_row.addWidget`, ce `QScrollArea` pouvait donc
+        # quand même se voir attribuer une partie de l'espace horizontal
+        # (et vertical) disponible en trop dans `content_row`, ouvrant un
+        # vide entre la grille visible et le panneau -- fixée explicitement
+        # à `Fixed`/`Fixed` (sur sa propre taille naturelle, égale à celle
+        # de `grid_widget`) pour ne plus jamais concourir pour l'espace en
+        # trop : seul le `addStretch()` final de `content_row` doit
+        # l'absorber (§5, correctif visuel, point 2).
+        grid_scroll = QScrollArea()
+        grid_scroll.setFrameShape(QFrame.NoFrame)
+        grid_scroll.setWidget(grid_widget)
+        grid_scroll.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        grid_scroll.setFixedSize(_ASSISTED_GRID_TOTAL_WIDTH, _ASSISTED_GRID_TOTAL_HEIGHT)
+        # `addStretch(1)` AVANT la grille (§5, correctif de centrage) --
+        # avec celui de même facteur après le panneau plus bas, le vide
+        # restant de la fenêtre se répartit également des deux côtés du
+        # bloc grille+panneau plutôt que de se concentrer entièrement à
+        # droite. Grille et panneau gardent leur largeur fixe -- rien
+        # dans ce bloc ne s'étire jamais, seuls les deux vides de part et
+        # d'autre grandissent ou rétrécissent.
+        content_row.addStretch(1)
+        content_row.addWidget(grid_scroll, 0, Qt.AlignTop)
+        self._grid_scroll = grid_scroll  # exposé pour les tests (taille fixe, jamais étirée)
+
+        # Panneau « Carte détectée » (§5, refonte menu de tuiles) : même
+        # icône/textes que le bandeau de `HomeScreen` (agrandie ici), en
+        # panneau vertical plutôt qu'en ligne horizontale -- code dédié
+        # plutôt qu'une fonction partagée avec `HomeScreen._banner`
+        # (orientations trop différentes pour un partage simple sans
+        # complexifier les deux). Largeur fixée à 308 (§5, correctif
+        # visuel, point 2) ; hauteur fixée à celle de la grille entière
+        # (§5, correctif visuel, point 5 : « du haut de la première rangée
+        # au bas de la dernière ») -- calculée une fois pour toutes
+        # (`_ASSISTED_GRID_TOTAL_HEIGHT`) plutôt que déduite d'un widget
+        # dans un `QScrollArea`, dont le `sizeHint` ne reflète pas
+        # fidèlement un contenu défilable.
+        panel = QFrame()
+        panel.setProperty("role", "banner")
+        panel.setFixedWidth(_ASSISTED_PANEL_WIDTH)
+        panel.setFixedHeight(_ASSISTED_GRID_TOTAL_HEIGHT)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(14, 14, 14, 14)
+        panel_layout.setSpacing(10)
+        # `addStretch(1)` avant le premier élément (§5, correctif de
+        # centrage, point 3) -- avec celui de même facteur après le
+        # bouton Rafraîchir plus bas, tout le contenu (icône, modèle,
+        # état, bouton) se centre verticalement dans le panneau plutôt
+        # que de rester tassé en haut avec le vide entier en dessous.
+        panel_layout.addStretch(1)
+        panel_layout.addWidget(_ConsoleIcon(size=_ASSISTED_PANEL_ICON_SIZE), 0, Qt.AlignHCenter)
+        self._panel_device_label = QLabel()
+        self._panel_device_label.setProperty("role", "rowTitle")
+        self._panel_device_label.setWordWrap(True)
+        self._panel_device_label.setAlignment(Qt.AlignCenter)
+        panel_layout.addWidget(self._panel_device_label)
+        # État sous forme de pastille (`role="badge"`), pas du texte nu
+        # (§5, correctif visuel) -- même mécanique que `Tile.set_badge`.
+        self._panel_state_badge = QLabel("")
+        self._panel_state_badge.setProperty("role", "badge")
+        self._panel_state_badge.setAlignment(Qt.AlignCenter)
+        panel_layout.addWidget(self._panel_state_badge, 0, Qt.AlignHCenter)
+        self._refresh_button = QPushButton(tr("home_refresh"))
+        self._refresh_button.clicked.connect(self.refresh_requested.emit)
+        panel_layout.addWidget(self._refresh_button)
+        panel_layout.addStretch(1)
+        content_row.addWidget(panel, 0, Qt.AlignTop)
+        self._panel = panel  # exposé pour les tests (largeur/hauteur fixes)
+
+        # `addStretch(1)` après le panneau, même facteur que celui avant
+        # la grille plus haut (§5, correctif de centrage) -- le vide
+        # restant se répartit également des deux côtés plutôt que de se
+        # concentrer entièrement ici.
+        content_row.addStretch(1)
+        root.addLayout(content_row)
+        root.addStretch()  # respire en bas
 
     def set_busy(self, busy: bool) -> None:
-        """Changer de mode en plein flash ou en pleine copie laisserait un
-        job orphelin (§5 mode assisté) -- même garde que
-        `HomeScreen.set_busy`, sur le bouton symétrique. Landing n'est en
-        pratique jamais visible pendant une opération en cours (l'écran
-        bascule vers `MainView` dès qu'une opération démarre), mais reste
-        gardé défensivement -- notamment la brève fenêtre entre une
-        annulation coopérative et l'arrêt effectif du job."""
+        """Désactive les 9 tuiles et le bouton Mode expert pendant
+        qu'une opération est en cours (§5, refonte menu de tuiles) --
+        même garde que `HomeScreen.set_busy` : changer de mode ou lancer
+        une deuxième action en plein flash/copie laisserait un job
+        orphelin. Signature/sémantique inchangées par rapport à l'écran
+        précédent -- tous les appels existants `self._assisted_landing.
+        set_busy(...)` dans `main_window.py` continuent de fonctionner
+        sans modification."""
+        for tile in self._all_tiles:
+            tile.setEnabled(not busy)
         self._expert_button.setEnabled(not busy)
-        self._backup_system_button.setEnabled(not busy)
-        self._consoles_diverses_button.setEnabled(not busy)
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (nom imposé par Qt)
-        super().resizeEvent(event)
-        if self._backdrop is not None:
-            self._backdrop.setGeometry(self.rect())
+    def set_status(
+        self, status: Dict[str, StepStatus], device: Optional[Device] = None, has_device: Optional[bool] = None
+    ) -> None:
+        """Miroir de `HomeScreen.set_status` (§5) : pousse le badge sur
+        chaque tuile qui en affiche un (`identify`/`flash`/`copy_games`/
+        `eject` -- les cinq autres tuiles, dont « Chercher les doublons »
+        depuis qu'elle ouvre un outil autonome sans rapport avec la carte
+        détectée, n'ont structurellement pas d'entrée dans
+        `_tiles_by_status_key`, jamais de badge) et met à jour le panneau
+        de détection. `has_device`
+        accepté pour la même signature que `HomeScreen.set_status`
+        (l'appelant, `_refresh_home_state`, pousse le même résultat aux
+        deux écrans) mais sans effet ici -- contrairement aux lignes
+        « Par sécurité » du mode expert, aucune tuile n'est désactivée par
+        l'absence de carte : les neuf restent cliquables par principe
+        (§4.5), `_start_flow` guide déjà sans carte branchée."""
+        for key, tile in self._tiles_by_status_key.items():
+            tile.set_badge(status.get(key))
+        self._update_panel(status, device)
+
+    def _update_panel(self, status: Dict[str, StepStatus], device: Optional[Device]) -> None:
+        if device is None:
+            self._panel_device_label.setText(tr("home_banner_state_none"))
+            self._panel_state_badge.setText("")
+            self._panel_state_badge.setProperty("badgeKind", None)
+            theme.repolish(self._panel_state_badge)
+            return
+        size_go = _capacity_go(device.size_bytes)
+        self._panel_device_label.setText(tr("home_banner_line_device", display=device.display, size_go=size_go))
+        is_arkos = status.get("flash") == StepStatus.DONE
+        state_key = "home_banner_state_arkos" if is_arkos else "home_banner_state_unprepared"
+        self._panel_state_badge.setText(tr(state_key))
+        self._panel_state_badge.setProperty("badgeKind", "done" if is_arkos else "neutral")
+        theme.repolish(self._panel_state_badge)
+
+
+class AboutDialog(Dialog):
+    """« À propos », tuile Aide de l'accueil assisté sur Windows/Linux
+    (§5, refonte menu de tuiles) -- macOS ouvre `HelpDialog` (Accès
+    complet au disque) à la place, contenu sans rapport avec ces deux OS.
+    Minimaliste : numéro de version (`build_info.version_label()`, déjà
+    prêt à l'emploi mais jamais affiché dans une fenêtre jusqu'ici) + un
+    court paragraphe d'orientation statique, un seul bouton Fermer --
+    même structure que `HelpDialog` sans son bouton « Ouvrir les
+    réglages », qui n'a pas d'équivalent ici."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("about_title"))
+        layout = QVBoxLayout(self)
+
+        title = QLabel(tr("about_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+
+        self._version_label = QLabel(build_info.version_label())
+        self._version_label.setProperty("role", "secondary")
+        layout.addWidget(self._version_label)
+
+        body = QLabel(tr("about_orientation"))
+        body.setWordWrap(True)
+        layout.addWidget(body)
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        close_button = QPushButton(tr("about_close"))
+        close_button.setProperty("role", "primary")
+        close_button.clicked.connect(self.close)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+
+        self.resize(420, 280)
+
+
+_IDENTIFY_FAILURE_MESSAGE_KEYS = {
+    IdentifyFailureReason.MOUNT_FAILED: "identify_failed_mount_failed",
+    IdentifyFailureReason.NO_DTB_FOUND: "identify_failed_no_dtb_found",
+    IdentifyFailureReason.ALL_DTB_INVALID: "identify_failed_all_dtb_invalid",
+}
+
+
+class IdentifyResultDialog(Dialog):
+    """Résultat de la tuile « Identifier ma console » (§5, refonte menu de
+    tuiles -- fusion de « Rechercher ma console » et « Consoles diverses »
+    en une seule tuile) : affiche l'identifiant brut du `.dtb`
+    (`result.info.board_compatible`, jamais un nom convivial inventé --
+    convention déjà suivie ailleurs dans ce projet, §4.6) et un
+    avertissement si la carte est un clone (`result.is_clone`), ou le
+    message correspondant à `result.failure_reason` en cas d'échec (3 cas,
+    `identify/__init__.py::IdentifyFailureReason`) ; propose en dessous
+    l'accès au catalogue (`catalog_requested`, `main_window.py` route vers
+    `ConsolesDiversesScreen`, déjà existant) -- toujours affiché, succès ou
+    échec de l'identification : le catalogue reste utile même sans
+    identification DTB réussie (recherche manuelle par nom, par exemple)."""
+
+    catalog_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("identify_result_title"))
+        layout = QVBoxLayout(self)
+
+        title = QLabel(tr("identify_result_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+
+        self._message = QLabel()
+        self._message.setWordWrap(True)
+        layout.addWidget(self._message)
+
+        # Même pattern que `consoles_diverses/screen.py::
+        # _build_warning_banner` -- encadré orange (`role="warning"`),
+        # signal de prudence plutôt que de danger.
+        self._clone_warning_frame = QFrame()
+        self._clone_warning_frame.setProperty("role", "warning")
+        clone_warning_layout = QVBoxLayout(self._clone_warning_frame)
+        clone_warning_label = QLabel(tr("identify_result_clone_warning"))
+        clone_warning_label.setWordWrap(True)
+        clone_warning_label.setProperty("role", "dangerTitle")
+        clone_warning_layout.addWidget(clone_warning_label)
+        self._clone_warning_frame.setVisible(False)
+        layout.addWidget(self._clone_warning_frame)
+
+        layout.addStretch()
+
+        catalog_button = QPushButton(tr("identify_result_catalog_button"))
+        catalog_button.setProperty("role", "link")
+        catalog_button.clicked.connect(self._on_catalog_clicked)
+        layout.addWidget(catalog_button)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        close_button = QPushButton(tr("about_close"))
+        close_button.setProperty("role", "primary")
+        close_button.clicked.connect(self.close)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+
+        self.resize(440, 320)
+
+    def set_result(self, result: IdentifyResult) -> None:
+        if result.ok:
+            self._message.setText(tr("identify_result_board", board=result.info.board_compatible))
+        else:
+            key = _IDENTIFY_FAILURE_MESSAGE_KEYS.get(result.failure_reason, "identify_failed_mount_failed")
+            self._message.setText(tr(key))
+        self._clone_warning_frame.setVisible(result.is_clone)
+
+    def _on_catalog_clicked(self) -> None:
+        self.close()
+        self.catalog_requested.emit()
+
+
+# --- Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien flux
+# carte-SD-uniquement de la tuile) -- écrans autonomes, aucun rapport avec
+# `Device`/`partitions/` : le dossier analysé est déjà accessible tel
+# quel (PC, carte SD montée, disque externe), jamais un accès brut. ------
+
+
+class DoublonsFolderScreen(Screen):
+    """Choix du dossier à analyser -- outil autonome (docs/doublons.md) :
+    n'importe quel dossier, pas seulement EASYROMS. Raccourcis cliquables
+    vers les cartes/disques amovibles détectés (même confort que l'ancien
+    flux carte SD, demandé explicitement) en plus du sélecteur de dossier
+    classique -- jamais l'un à la place de l'autre. Options (dossiers
+    ignorés, mode simulation) juste en dessous, appliquées au clic sur un
+    raccourci ou après « Parcourir… »."""
+
+    back_requested = Signal()
+    folder_chosen = Signal(str)
+    refresh_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 16, 24, 24)
+
+        header = QHBoxLayout()
+        back_button = QPushButton(tr("doublons_back_button"))
+        back_button.setProperty("role", "flat")
+        back_button.clicked.connect(self.back_requested.emit)
+        header.addWidget(back_button)
+        title = QLabel(tr("doublons_folder_title"))
+        title.setProperty("role", "title")
+        header.addWidget(title)
+        header.addStretch()
+        refresh_button = QPushButton(tr("home_refresh"))
+        refresh_button.clicked.connect(self.refresh_requested.emit)
+        header.addWidget(refresh_button)
+        root.addLayout(header)
+
+        hint = QLabel(tr("doublons_folder_hint"))
+        hint.setWordWrap(True)
+        hint.setProperty("role", "secondary")
+        root.addWidget(hint)
+
+        # Raccourcis -- un clic navigue directement (pas de bouton
+        # Continuer séparé : ce sont des raccourcis, pas une sélection à
+        # confirmer, contrairement à `DeviceDialog`).
+        self._shortcuts_list = QListWidget()
+        self._shortcuts_list.itemClicked.connect(self._on_shortcut_clicked)
+        root.addWidget(self._shortcuts_list)
+        self._shortcuts_empty_label = QLabel(tr("doublons_folder_no_shortcuts"))
+        self._shortcuts_empty_label.setProperty("role", "secondary")
+        root.addWidget(self._shortcuts_empty_label)
+
+        browse_button = QPushButton(tr("doublons_browse_button"))
+        browse_button.setProperty("role", "primary")
+        browse_button.clicked.connect(self._on_browse_clicked)
+        root.addWidget(browse_button)
+
+        options_title = QLabel(tr("doublons_options_title"))
+        options_title.setProperty("role", "sectionLabel")
+        root.addWidget(options_title)
+
+        # Coché par défaut au premier lancement (`AppConfig.
+        # doublons_simulation_mode`, § garde-fou 1) -- l'utilisateur
+        # décoche sciemment pour agir pour de vrai.
+        self._simulation_checkbox = QCheckBox(tr("doublons_simulation_checkbox"))
+        root.addWidget(self._simulation_checkbox)
+
+        ignored_title = QLabel(tr("doublons_ignored_folders_title"))
+        ignored_title.setProperty("role", "secondary")
+        root.addWidget(ignored_title)
+        self._ignored_folders_layout = QVBoxLayout()
+        root.addLayout(self._ignored_folders_layout)
+        self._ignored_checkboxes: Dict[str, QCheckBox] = {}
+
+        root.addStretch()
+
+    def set_simulation_mode(self, enabled: bool) -> None:
+        self._simulation_checkbox.setChecked(enabled)
+
+    def simulation_mode(self) -> bool:
+        return self._simulation_checkbox.isChecked()
+
+    def set_ignored_folders(self, names: List[str]) -> None:
+        """Reconstruit entièrement la liste -- toutes cochées par défaut
+        (dossiers ignorés *par défaut*, §brief), modifiable ensuite."""
+        while self._ignored_folders_layout.count():
+            item = self._ignored_folders_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._ignored_checkboxes = {}
+        for name in names:
+            checkbox = QCheckBox(name)
+            checkbox.setChecked(True)
+            self._ignored_folders_layout.addWidget(checkbox)
+            self._ignored_checkboxes[name] = checkbox
+
+    def ignored_folders(self) -> List[str]:
+        return [name for name, checkbox in self._ignored_checkboxes.items() if checkbox.isChecked()]
+
+    def set_shortcuts(self, shortcuts: List[Tuple[str, str]]) -> None:
+        """`shortcuts` : liste de `(libellé, chemin)` -- cartes/disques
+        amovibles détectés, EASYROMS en priorité quand elle est
+        identifiable (§ demandé explicitement)."""
+        self._shortcuts_list.clear()
+        for label, path in shortcuts:
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, path)
+            self._shortcuts_list.addItem(item)
+        self._shortcuts_empty_label.setVisible(not shortcuts)
+        self._shortcuts_list.setVisible(bool(shortcuts))
+
+    def _on_shortcut_clicked(self, item: QListWidgetItem) -> None:
+        self.folder_chosen.emit(item.data(Qt.UserRole))
+
+    def _on_browse_clicked(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, tr("doublons_browse_button"))
+        if path:
+            self.folder_chosen.emit(path)
+
+
+class DoublonsScanProgressScreen(Screen):
+    """Analyse en cours (§ interface, « barre de progression annulable,
+    l'interface ne gèle jamais ») -- `QProgressBar` indéterminée : le
+    nombre total de fichiers n'est jamais connu à l'avance (ce serait
+    l'analyse elle-même, en double)."""
+
+    cancel_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 16, 24, 24)
+        root.addStretch()
+
+        title = QLabel(tr("doublons_scan_progress_title"))
+        title.setProperty("role", "title")
+        title.setAlignment(Qt.AlignCenter)
+        root.addWidget(title)
+
+        self._count_label = QLabel("")
+        self._count_label.setAlignment(Qt.AlignCenter)
+        self._count_label.setProperty("role", "secondary")
+        root.addWidget(self._count_label)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 0)
+        root.addWidget(self._progress_bar)
+
+        cancel_button = QPushButton(tr("doublons_scan_cancel_button"))
+        cancel_button.clicked.connect(self.cancel_requested.emit)
+        root.addWidget(cancel_button, 0, Qt.AlignCenter)
+
+        root.addStretch()
+
+    def set_files_scanned(self, count: int) -> None:
+        self._count_label.setText(tr("doublons_scan_progress_count", count=count))
+
+
+class DoublonsRiskConfirmDialog(Dialog):
+    """Confirmation dédiée avant de lancer une analyse à risque (§ garde-
+    fous ajoutés après validation du plan : racine de disque, dossier
+    utilisateur entier, ou plus de 200 000 fichiers rencontrés en cours
+    d'analyse) -- un seul message à la fois, posé par l'appelant selon le
+    cas précis rencontré. Jamais `role="danger"` : rien n'est encore
+    modifié à ce stade, juste une analyse potentiellement longue/hors
+    de propos."""
+
+    confirmed = Signal()
+    # Émis en plus d'une simple fermeture (§ le cas des 200 000 fichiers,
+    # `DoublonsScanRunner` reste bloqué en attente d'une réponse -- Annuler
+    # doit le débloquer explicitement, pas seulement fermer la fenêtre).
+    # Les deux autres cas (racine de disque, dossier utilisateur entier)
+    # n'ont besoin de rien de plus qu'une fermeture -- `cancelled` reste
+    # sans effet s'il n'est jamais connecté pour eux.
+    cancelled = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("doublons_risk_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+        self._message = QLabel()
+        self._message.setWordWrap(True)
+        layout.addWidget(self._message)
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        cancel_button = QPushButton(tr("doublons_risk_cancel"))
+        cancel_button.clicked.connect(self._on_cancel)
+        confirm_button = QPushButton(tr("doublons_risk_continue"))
+        confirm_button.setProperty("role", "primary")
+        confirm_button.clicked.connect(self._on_confirm)
+        buttons.addWidget(cancel_button)
+        buttons.addStretch()
+        buttons.addWidget(confirm_button)
+        layout.addLayout(buttons)
+
+        self.resize(440, 260)
+
+    def _on_cancel(self) -> None:
+        self.close()
+        self.cancelled.emit()
+
+    def set_message(self, message: str) -> None:
+        self._message.setText(message)
+
+    def _on_confirm(self) -> None:
+        self.close()
+        self.confirmed.emit()
+
+
+class DoublonsResultsScreen(Screen):
+    """Résultats de l'analyse (docs/doublons.md §Interface point 3) --
+    deux sections distinctes : copies identiques (palier 1, « certain »,
+    précochées -- seule exception à la règle générale de ce projet
+    « jamais de présélection », explicitement demandée par le brief) et
+    versions différentes (palier 2, jamais précochées, version suggérée
+    mise en évidence par une étoile). Groupes exclus (fichier lié
+    introuvable) affichés séparément, jamais silencieusement absents."""
+
+    back_requested = Signal()
+    move_requested = Signal(list)  # List[Unit] à écarter (jamais le fichier gardé)
+    export_requested = Signal()
+    undo_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 16, 24, 24)
+
+        header = QHBoxLayout()
+        back_button = QPushButton(tr("doublons_back_button"))
+        back_button.setProperty("role", "flat")
+        back_button.clicked.connect(self.back_requested.emit)
+        header.addWidget(back_button)
+        title = QLabel(tr("doublons_results_title"))
+        title.setProperty("role", "title")
+        header.addWidget(title)
+        header.addStretch()
+        self._undo_button = QPushButton(tr("doublons_undo_button"))
+        self._undo_button.setEnabled(False)
+        self._undo_button.clicked.connect(self.undo_requested.emit)
+        header.addWidget(self._undo_button)
+        export_button = QPushButton(tr("doublons_export_button"))
+        export_button.clicked.connect(self.export_requested.emit)
+        header.addWidget(export_button)
+        root.addLayout(header)
+
+        # Bandeau permanent tant que le mode simulation est actif (§
+        # garde-fou 1) -- jamais un simple détail dans le journal, ce
+        # doit être visible en permanence sur cet écran.
+        self._simulation_banner = QLabel(tr("doublons_simulation_banner"))
+        self._simulation_banner.setProperty("role", "warning")
+        self._simulation_banner.setVisible(False)
+        root.addWidget(self._simulation_banner)
+
+        self._summary_label = QLabel()
+        self._summary_label.setWordWrap(True)
+        self._summary_label.setProperty("role", "secondary")
+        root.addWidget(self._summary_label)
+
+        self._empty_label = QLabel(tr("doublons_empty"))
+        self._empty_label.setProperty("role", "secondary")
+        self._empty_label.setVisible(False)
+        root.addWidget(self._empty_label)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self._list_container = QWidget()
+        self._list_layout = QVBoxLayout(self._list_container)
+        self._list_layout.setSpacing(12)
+        self._list_layout.addStretch()
+        scroll.setWidget(self._list_container)
+        root.addWidget(scroll, 1)
+
+    def set_simulation_mode(self, enabled: bool) -> None:
+        self._simulation_banner.setVisible(enabled)
+
+    def set_undo_available(self, available: bool) -> None:
+        self._undo_button.setEnabled(available)
+
+    def set_results(self, scan_result: ScanResult, macos_move_blocked: bool = False) -> None:
+        """Reconstruit entièrement la liste -- appelé après chaque scan,
+        y compris un nouveau scan relancé après un déplacement réussi
+        (reflète toujours l'état réel du dossier, jamais une mise à jour
+        partielle de l'affichage précédent)."""
+        while self._list_layout.count() > 1:
+            item = self._list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        has_groups = bool(scan_result.exact_duplicate_groups or scan_result.version_groups)
+        self._empty_label.setVisible(not has_groups)
+        self._summary_label.setText(
+            tr(
+                "doublons_summary",
+                files=scan_result.files_scanned,
+                exact=len(scan_result.exact_duplicate_groups),
+                versions=len(scan_result.version_groups),
+            )
+        )
+
+        insert_at = 0
+        if scan_result.excluded:
+            self._list_layout.insertWidget(insert_at, self._build_excluded_section(scan_result.excluded))
+            insert_at += 1
+        for group in scan_result.exact_duplicate_groups:
+            self._list_layout.insertWidget(insert_at, self._build_exact_group_row(group, macos_move_blocked))
+            insert_at += 1
+        for group in scan_result.version_groups:
+            self._list_layout.insertWidget(insert_at, self._build_version_group_row(group, macos_move_blocked))
+            insert_at += 1
+
+    def _build_exact_group_row(self, group: ExactDuplicateGroup, macos_move_blocked: bool) -> QWidget:
+        frame = QFrame()
+        frame.setProperty("role", "row")
+        layout = QVBoxLayout(frame)
+
+        header = QHBoxLayout()
+        title = QLabel(tr("doublons_group_exact_title"))
+        title.setProperty("role", "rowTitle")
+        header.addWidget(title)
+        header.addStretch()
+        badge = QLabel(tr("status_done"))
+        badge.setProperty("role", "badge")
+        badge.setProperty("badgeKind", "done")
+        header.addWidget(badge)
+        layout.addLayout(header)
+
+        checkboxes: Dict[QCheckBox, Unit] = {}
+        for index, unit in enumerate(group.units):
+            row = QHBoxLayout()
+            checkbox = QCheckBox(tr("doublons_move_this_one"))
+            # « Certain », donc précoché par défaut -- sauf le premier,
+            # gardé (§ garde-fou 1, seule exception documentée à la règle
+            # générale de ce projet contre toute présélection).
+            checkbox.setChecked(index != 0)
+            checkboxes[checkbox] = unit
+            row.addWidget(checkbox)
+            label = QLabel(f"{unit.representative} — {_format_size(unit.total_size_bytes)}")
+            label.setProperty("role", "secondary")
+            label.setWordWrap(True)
+            row.addWidget(label, 1)
+            layout.addLayout(row)
+
+        move_button = QPushButton(tr("doublons_move_selected_button"))
+        move_button.setProperty("role", "primary")
+        move_button.setEnabled(not macos_move_blocked)
+        move_button.clicked.connect(lambda: self._emit_move_requested(checkboxes))
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        button_row.addWidget(move_button)
+        layout.addLayout(button_row)
+        return frame
+
+    def _build_version_group_row(self, group: VersionGroup, macos_move_blocked: bool) -> QWidget:
+        frame = QFrame()
+        frame.setProperty("role", "row")
+        layout = QVBoxLayout(frame)
+
+        header = QHBoxLayout()
+        label_text = f"{group.system_folder} — {group.normalized_title}" if group.system_folder else group.normalized_title
+        title = QLabel(label_text)
+        title.setProperty("role", "rowTitle")
+        header.addWidget(title)
+        header.addStretch()
+        if macos_move_blocked:
+            badge = QLabel(tr("status_platform_limited"))
+            badge.setProperty("role", "badge")
+            badge.setProperty("badgeKind", "platform_limited")
+            header.addWidget(badge)
+        layout.addLayout(header)
+
+        checkboxes: Dict[QCheckBox, Unit] = {}
+        move_button = QPushButton(tr("doublons_move_selected_button"))
+        move_button.setProperty("role", "primary")
+        move_button.setEnabled(False)
+
+        def _on_toggled() -> None:
+            any_checked = any(box.isChecked() for box in checkboxes)
+            move_button.setEnabled(any_checked and not macos_move_blocked)
+
+        for unit in group.units:
+            row = QHBoxLayout()
+            # Jamais précoché (palier 2, règle générale du projet --
+            # contrairement au palier 1 ci-dessus).
+            checkbox = QCheckBox(tr("doublons_move_this_one"))
+            checkbox.toggled.connect(_on_toggled)
+            checkboxes[checkbox] = unit
+            row.addWidget(checkbox)
+            suggested_marker = " ★" if unit is group.suggested_keep else ""
+            path_label = QLabel(f"{unit.representative} — {_format_size(unit.total_size_bytes)}{suggested_marker}")
+            path_label.setProperty("role", "secondary")
+            path_label.setWordWrap(True)
+            row.addWidget(path_label, 1)
+            layout.addLayout(row)
+
+        move_button.clicked.connect(lambda: self._emit_move_requested(checkboxes))
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        button_row.addWidget(move_button)
+        layout.addLayout(button_row)
+        return frame
+
+    def _emit_move_requested(self, checkboxes: Dict[QCheckBox, Unit]) -> None:
+        selected = [unit for checkbox, unit in checkboxes.items() if checkbox.isChecked()]
+        if selected:
+            self.move_requested.emit(selected)
+
+    def _build_excluded_section(self, excluded: List[ExclusionWarning]) -> QWidget:
+        frame = QFrame()
+        frame.setProperty("role", "danger")
+        layout = QVBoxLayout(frame)
+        title = QLabel(tr("doublons_excluded_title"))
+        title.setProperty("role", "dangerTitle")
+        layout.addWidget(title)
+        for warning in excluded:
+            text = tr("doublons_excluded_entry", manifest=warning.manifest.name, missing=", ".join(warning.missing))
+            label = QLabel(text)
+            label.setProperty("role", "dangerMessage")
+            label.setWordWrap(True)
+            layout.addWidget(label)
+        return frame
+
+
+class ConfirmMoveDoublonsDialog(Dialog):
+    """Confirmation avant d'écarter des doublons (§ interface point 4) --
+    **pas** `role="danger"` : rien n'est perdu (déplacement vers
+    `_doublons/`, jamais une suppression), un simple bouton de
+    confirmation suffit plutôt que la friction d'une case à cocher
+    réservée aux actions réellement irréversibles. Texte adapté si le
+    mode simulation est actif (« Simuler le déplacement de... »)."""
+
+    confirmed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("doublons_confirm_title"))
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("doublons_confirm_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+        self._message = QLabel()
+        self._message.setWordWrap(True)
+        layout.addWidget(self._message)
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        cancel_button = QPushButton(tr("doublons_confirm_cancel"))
+        cancel_button.clicked.connect(self.close)
+        self._confirm_button = QPushButton(tr("doublons_confirm_button"))
+        self._confirm_button.setProperty("role", "primary")
+        self._confirm_button.clicked.connect(self._on_confirm)
+        buttons.addWidget(cancel_button)
+        buttons.addStretch()
+        buttons.addWidget(self._confirm_button)
+        layout.addLayout(buttons)
+
+        self.resize(440, 320)
+
+    def set_units(self, units: List[Unit], dry_run: bool) -> None:
+        total_files = sum(len(unit.members) for unit in units)
+        total_bytes = sum(unit.total_size_bytes for unit in units)
+        message_key = "doublons_confirm_message_simulation" if dry_run else "doublons_confirm_message"
+        button_key = "doublons_confirm_button_simulation" if dry_run else "doublons_confirm_button"
+        self._message.setText(tr(message_key, count=total_files, size=_format_size(total_bytes)))
+        self._confirm_button.setText(tr(button_key))
+
+    def _on_confirm(self) -> None:
+        self.close()
+        self.confirmed.emit()
+
+
+class ConfirmUndoDoublonsDialog(Dialog):
+    """Confirmation avant « Tout annuler » (§ interface) -- même famille
+    que `ConfirmMoveDoublonsDialog` : restaurer des fichiers n'est pas
+    non plus une action destructrice, jamais `role="danger"`."""
+
+    confirmed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("doublons_undo_confirm_title"))
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("doublons_undo_confirm_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+        message = QLabel(tr("doublons_undo_confirm_message"))
+        message.setWordWrap(True)
+        layout.addWidget(message)
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        cancel_button = QPushButton(tr("doublons_confirm_cancel"))
+        cancel_button.clicked.connect(self.close)
+        confirm_button = QPushButton(tr("doublons_undo_confirm_button"))
+        confirm_button.setProperty("role", "primary")
+        confirm_button.clicked.connect(self._on_confirm)
+        buttons.addWidget(cancel_button)
+        buttons.addStretch()
+        buttons.addWidget(confirm_button)
+        layout.addLayout(buttons)
+
+        self.resize(440, 260)
+
+    def _on_confirm(self) -> None:
+        self.close()
+        self.confirmed.emit()
 
 
 class WizardStepPanel(Screen):

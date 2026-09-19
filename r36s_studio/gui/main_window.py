@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QTimer, Slot
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QStackedWidget
 
 from r36s_studio import config as app_config
 from r36s_studio.consoles_diverses import settings_store as consoles_diverses_settings_store
@@ -47,6 +47,11 @@ from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
 from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettingsDialog
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
+from r36s_studio.doublons.move import has_pending_journal_entries
+from r36s_studio.doublons.report import build_report
+from r36s_studio.doublons.safety import is_filesystem_root, is_whole_user_folder
+from r36s_studio.doublons.scan import Unit
+from r36s_studio.identify import IdentifyResult
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.imaging import (
     DEFAULT_RESET_LABEL,
@@ -58,12 +63,14 @@ from r36s_studio.imaging import (
     estimate_total_bytes,
 )
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
-from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, set_privileged_mount_hook
+from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, list_partitions, set_privileged_mount_hook
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
 
 from . import elevate
+from .doublons_runner import DoublonsMoveRunner, DoublonsScanRunner, DoublonsUndoRunner
 from .partition_runner import (
+    IdentifyRunner,
     PartitionJobRunner,
     RocknixDownloadRunner,
     RocknixListRunner,
@@ -73,20 +80,32 @@ from .partition_runner import (
 )
 from .reveal import reveal
 from .screens import (
+    AboutDialog,
     AssistedLandingScreen,
     BackupKindDialog,
     ConfirmDialog,
+    ConfirmMoveDoublonsDialog,
+    ConfirmUndoDoublonsDialog,
     DeviceDialog,
+    DoublonsFolderScreen,
+    DoublonsResultsScreen,
+    DoublonsRiskConfirmDialog,
+    DoublonsScanProgressScreen,
     FileDialog,
     FullDiskAccessScreen,
     HelpDialog,
     HomeScreen,
+    IdentifyResultDialog,
     LogPanel,
     MainView,
     ResetCardLabelDialog,
     RocknixVariantDialog,
     SameCardUnverifiedDialog,
     WizardStepPanel,
+    _ASSISTED_CONTENT_SPACING,
+    _ASSISTED_GRID_TOTAL_HEIGHT,
+    _ASSISTED_GRID_TOTAL_WIDTH,
+    _ASSISTED_PANEL_WIDTH,
     _OPERATION_TITLE_KEYS,
     _format_size,
     build_console_stage,
@@ -159,12 +178,76 @@ _ARCHIVE_LABEL_BY_MODE = {
     "copy_games": EASYROMS_LABEL,
 }
 
+# Mécanisme ad-hoc de l'accueil assisté (§5, refonte menu de tuiles) --
+# `_start_assisted_ad_hoc_job` (titre/instruction affichés le temps de
+# l'opération) et `_on_assisted_ad_hoc_worker_finished` (titre/instruction
+# affichés une fois terminée, plus `show_prepare_card` : propose « Préparer
+# une carte avec cette sauvegarde » uniquement après une vraie sauvegarde).
+# Généralise l'ancien câblage en dur (`backup_system` et un `else` pensé
+# pour `flash`) à tout job_key déclenchable depuis une tuile.
+_ASSISTED_AD_HOC_RUNNING_STRINGS = {
+    "backup": ("assisted_backup_running_title", "assisted_backup_running_instruction"),
+    "backup_system": ("assisted_backup_system_running_title", "assisted_backup_system_running_instruction"),
+    "flash": ("assisted_flash_running_title", "assisted_flash_running_instruction"),
+    "copy_games": ("assisted_copy_games_running_title", "assisted_copy_games_running_instruction"),
+    "reset_card": ("assisted_reset_card_running_title", "assisted_reset_card_running_instruction"),
+    "eject": ("assisted_eject_running_title", "assisted_eject_running_instruction"),
+}
+_ASSISTED_AD_HOC_DONE_STRINGS = {
+    "backup": ("assisted_backup_done_title", "assisted_backup_done_instruction", True),
+    "backup_system": ("assisted_backup_system_done_title", "assisted_backup_system_done_instruction", True),
+    "flash": ("assisted_prepare_card_done_title", "assisted_prepare_card_done_instruction", False),
+    "copy_games": ("assisted_copy_games_done_title", "assisted_copy_games_done_instruction", False),
+    "reset_card": ("assisted_reset_card_done_title", "assisted_reset_card_done_instruction", False),
+    "eject": ("assisted_eject_done_title", "assisted_eject_done_instruction", False),
+}
+
+
+# Accueil assisté (§5, refonte menu de tuiles, correctif visuel) : la
+# fenêtre doit toujours pouvoir afficher les trois rangées de la grille
+# sans défiler (le `QScrollArea` de `AssistedLandingScreen` reste un
+# filet de sécurité, pas le chemin normal), y compris sur un écran réel
+# de 1366x768 -- barre de titre/tâches comprises, donc sans marge de
+# confort inutile. `_ASSISTED_GRID_TOTAL_*`/`_ASSISTED_CONTENT_SPACING`/
+# `_ASSISTED_PANEL_WIDTH` sont calculées une fois dans `screens.py`
+# (taille/nombre de tuiles, gouttière, largeur du panneau), jamais
+# dupliquées ici. Le supplément (96) correspond exactement à l'habillage
+# resserré au-dessus de la grille dans `AssistedLandingScreen.__init__`
+# (marges 10 haut/bas, en-tête, étiquette de section, gouttières) --
+# mesuré directement sur l'écran construit, pas une estimation à la
+# louche : un ancien supplément de 160 (jamais revérifié contre le
+# contenu réel) ouvrait la fenêtre plus haute que nécessaire, plus haute
+# même que l'écran de test 1366x768 une fois la barre de titre ajoutée --
+# cause du bug signalé (dernière rangée coupée).
+#
+# Deuxième correctif (arithmétique, pas de réglage de marges) : même
+# resserré, l'habillage ci-dessus plus trois rangées de tuiles à 200
+# (`Tile.SIZE`, screens.py) ne tenait structurellement pas sur un écran
+# réel 1366x728/768 -- 96 + 3*200 + 2*12 = 720, déjà supérieur à la zone
+# client observée (~720-728). `Tile.SIZE` réduit à 160 (624 -> 504 pour
+# `_ASSISTED_GRID_TOTAL_HEIGHT`, recalculé automatiquement ci-dessous) :
+# 96 + 504 = 600, marge confortable cette fois. Le supplément de 96
+# lui-même n'a pas changé -- lui n'a jamais été le problème, seule la
+# taille des tuiles l'était.
+_ASSISTED_MIN_WIDTH = _ASSISTED_GRID_TOTAL_WIDTH + _ASSISTED_CONTENT_SPACING + _ASSISTED_PANEL_WIDTH + 60
+_ASSISTED_MIN_HEIGHT = _ASSISTED_GRID_TOTAL_HEIGHT + 96
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(tr("app_title"))
-        self.resize(1120, 760)  # deux colonnes (§5, refonte navigation) : plus large qu'un seul écran
+        # Le mode expert (deux colonnes, §5 refonte navigation) tient dans
+        # 1120x690 (mesuré : `HomeScreen.minimumSizeHint().height()` vaut
+        # 677) -- la taille minimale est désormais celle qui convient aux
+        # deux modes, la plus grande des deux l'emportant ; plus le
+        # plancher artificiel de 760 d'avant ce correctif, qui dépassait
+        # déjà à lui seul un écran 1366x768 une fois la barre de titre
+        # ajoutée, indépendamment du bug ci-dessus côté accueil assisté.
+        min_width = max(1120, _ASSISTED_MIN_WIDTH)
+        min_height = max(690, _ASSISTED_MIN_HEIGHT)
+        self.setMinimumSize(min_width, min_height)
+        self.resize(min_width, min_height)
 
         self._mode: Optional[str] = None
         self._device: Optional[Device] = None
@@ -333,12 +416,22 @@ class MainWindow(QMainWindow):
         # pipeline flash/backup/worker élevé ci-dessus, un simple appel
         # réseau en lecture. Construit une fois, comme les autres écrans.
         self._consoles_diverses_screen = ConsolesDiversesScreen()
+        # Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien
+        # flux carte-SD-uniquement de cette tuile) -- écrans autonomes,
+        # même principe que `_consoles_diverses_screen` ci-dessus (pas un
+        # mode ad-hoc de `_main_view`).
+        self._doublons_folder_screen = DoublonsFolderScreen()
+        self._doublons_scan_progress_screen = DoublonsScanProgressScreen()
+        self._doublons_results_screen = DoublonsResultsScreen()
 
         self._root_stack = QStackedWidget()
         self._root_stack.addWidget(self._assisted_landing)
         self._root_stack.addWidget(self._main_view)
         self._root_stack.addWidget(self._fda_screen)
         self._root_stack.addWidget(self._consoles_diverses_screen)
+        self._root_stack.addWidget(self._doublons_folder_screen)
+        self._root_stack.addWidget(self._doublons_scan_progress_screen)
+        self._root_stack.addWidget(self._doublons_results_screen)
         self.setCentralWidget(self._root_stack)
 
         # Fenêtres modales (§5, refonte navigation) : construites une fois,
@@ -348,8 +441,53 @@ class MainWindow(QMainWindow):
         self._file_dialog = FileDialog(self)
         self._confirm_dialog = ConfirmDialog(self)
         self._help_dialog = HelpDialog(self)
+        # Tuile Aide de l'accueil assisté sur Windows/Linux (§5, refonte
+        # menu de tuiles) -- `_help_dialog` ci-dessus reste macOS (Accès
+        # complet au disque, §3), sans rapport avec ces deux OS.
+        self._about_dialog = AboutDialog(self)
         self._rocknix_variant_dialog = RocknixVariantDialog(self)
         self._backup_kind_dialog = BackupKindDialog(self)
+        # Instance séparée pour la tuile 3 de l'accueil assisté (§5, refonte
+        # menu de tuiles) -- `self._backup_kind_dialog` ci-dessus reste
+        # câblé à `_on_backup_kind_chosen`/`_cancel_wizard`, tous deux
+        # spécifiques au vrai parcours guidé (`self._wizard_source_device`,
+        # `self._wizard_backup_kind`...) : partager la même instance ferait
+        # tourner les deux jeux de gestionnaires à chaque clic, corrompant
+        # l'un ou l'autre selon le contexte réellement actif.
+        self._assisted_backup_kind_dialog = BackupKindDialog(self)
+        # Tuile « Rechercher ma console » (§5, refonte menu de tuiles) --
+        # instance dédiée de `DeviceDialog`, jamais `self._device_dialog`
+        # (câblé à `_on_device_chosen`, le grand dispatcher qui suppose un
+        # `self._mode` de flux normal/`_wizard_flow`/carte candidate ad-hoc
+        # déjà en place -- même raison que `_assisted_backup_kind_dialog`
+        # ci-dessus, une instance séparée par flux ponctuel plutôt qu'un
+        # cas de plus dans ce dispatcher déjà chargé).
+        self._identify_device_dialog = DeviceDialog(self)
+        self._identify_result_dialog = IdentifyResultDialog(self)
+        self._identify_runner: Optional[IdentifyRunner] = None
+        # Outil « Doublons de jeux » -- deux instances de la même fenêtre
+        # de confirmation, jamais une seule reconnectée dynamiquement
+        # selon le contexte (source d'erreurs de câblage) : l'une pour la
+        # confirmation avant analyse (racine de disque/dossier personnel
+        # entier), l'autre dédiée au seuil des 200 000 fichiers rencontré
+        # *pendant* l'analyse (doit débloquer le thread d'analyse même en
+        # cas d'Annuler, contrairement à la première -- `cancelled`
+        # câblée seulement ici).
+        self._doublons_risk_confirm_dialog = DoublonsRiskConfirmDialog(self)
+        self._doublons_large_folder_dialog = DoublonsRiskConfirmDialog(self)
+        self._confirm_move_doublons_dialog = ConfirmMoveDoublonsDialog(self)
+        self._confirm_undo_doublons_dialog = ConfirmUndoDoublonsDialog(self)
+        self._doublons_scan_runner: Optional[DoublonsScanRunner] = None
+        self._doublons_move_runner: Optional[DoublonsMoveRunner] = None
+        self._doublons_undo_runner: Optional[DoublonsUndoRunner] = None
+        # Dossier sur lequel le scan en cours/le dernier scan a porté --
+        # nécessaire pour relancer un déplacement puis un nouveau scan
+        # sans redemander le dossier à chaque fois pendant cette session
+        # de consultation de `_doublons_results_screen`.
+        self._doublons_root: Optional[str] = None
+        self._doublons_scan_result = None
+        self._pending_doublons_units: List[Unit] = []
+        self._doublons_pending_risk_action = None
         self._same_card_unverified_dialog = SameCardUnverifiedDialog(self)
         self._reset_card_label_dialog = ResetCardLabelDialog(self)
         self._consoles_diverses_settings_dialog = ConsolesDiversesSettingsDialog(self)
@@ -393,7 +531,11 @@ class MainWindow(QMainWindow):
         self._home.help_requested.connect(self._help_dialog.open)
         self._home.assisted_mode_requested.connect(self._switch_to_assisted_mode)
         self._home.consoles_diverses_requested.connect(self._open_consoles_diverses)
-        self._assisted_landing.consoles_diverses_requested.connect(self._open_consoles_diverses)
+        # Accueil assisté (§5, refonte menu de tuiles) : plus de tuile «
+        # Consoles diverses » séparée -- fusionnée dans « Identifier ma
+        # console », l'accès au catalogue se fait depuis son écran de
+        # résultat (`IdentifyResultDialog.catalog_requested`, câblé plus
+        # bas avec les autres signaux de ce dialogue).
         self._consoles_diverses_screen.back_requested.connect(self._show_startup_screen)
         self._consoles_diverses_screen.settings_requested.connect(self._on_consoles_diverses_settings_requested)
         self._consoles_diverses_settings_dialog.settings_saved.connect(self._on_consoles_diverses_settings_saved)
@@ -424,7 +566,43 @@ class MainWindow(QMainWindow):
 
         self._assisted_landing.prepare_requested.connect(self._start_wizard)
         self._assisted_landing.expert_mode_requested.connect(self._switch_to_expert_mode)
-        self._assisted_landing.backup_system_requested.connect(self._start_backup_system_from_assisted_landing)
+        self._assisted_landing.refresh_requested.connect(self._refresh_home_state)
+        self._assisted_landing.identify_requested.connect(self._start_assisted_identify)
+        self._assisted_landing.backup_requested.connect(self._on_assisted_backup_tile_clicked)
+        self._assisted_landing.flash_requested.connect(lambda: self._start_assisted_ad_hoc_job("flash"))
+        self._assisted_landing.copy_games_requested.connect(lambda: self._start_assisted_ad_hoc_job("copy_games"))
+        self._assisted_landing.find_duplicates_requested.connect(self._start_doublons_tool)
+        self._assisted_landing.eject_requested.connect(lambda: self._start_assisted_ad_hoc_job("eject"))
+        self._assisted_landing.reset_card_requested.connect(lambda: self._start_assisted_ad_hoc_job("reset_card"))
+        self._assisted_landing.help_requested.connect(self._on_assisted_help_requested)
+        self._assisted_backup_kind_dialog.full_copy_requested.connect(
+            lambda: self._start_assisted_ad_hoc_job("backup")
+        )
+        self._assisted_backup_kind_dialog.system_only_requested.connect(
+            lambda: self._start_assisted_ad_hoc_job("backup_system")
+        )
+        self._assisted_backup_kind_dialog.cancelled.connect(self._assisted_backup_kind_dialog.close)
+        self._identify_device_dialog.device_chosen.connect(self._on_identify_device_chosen)
+        self._identify_device_dialog.refresh_requested.connect(
+            lambda: self._identify_device_dialog.set_devices(self._list_safe_devices())
+        )
+        # Tuile fusionnée « Identifier ma console » (§5, refonte menu de
+        # tuiles) : accès au catalogue depuis l'écran de résultat.
+        self._identify_result_dialog.catalog_requested.connect(self._open_consoles_diverses)
+
+        self._doublons_folder_screen.back_requested.connect(self._show_startup_screen)
+        self._doublons_folder_screen.refresh_requested.connect(self._refresh_doublons_shortcuts)
+        self._doublons_folder_screen.folder_chosen.connect(self._on_doublons_folder_chosen)
+        self._doublons_risk_confirm_dialog.confirmed.connect(self._on_doublons_risk_confirmed)
+        self._doublons_large_folder_dialog.confirmed.connect(self._on_doublons_large_folder_confirmed)
+        self._doublons_large_folder_dialog.cancelled.connect(self._on_doublons_large_folder_cancelled)
+        self._doublons_scan_progress_screen.cancel_requested.connect(self._on_doublons_scan_cancel_requested)
+        self._doublons_results_screen.back_requested.connect(self._show_startup_screen)
+        self._doublons_results_screen.move_requested.connect(self._on_doublons_move_requested)
+        self._doublons_results_screen.export_requested.connect(self._on_doublons_export_requested)
+        self._doublons_results_screen.undo_requested.connect(self._on_doublons_undo_requested)
+        self._confirm_move_doublons_dialog.confirmed.connect(self._on_doublons_move_confirmed)
+        self._confirm_undo_doublons_dialog.confirmed.connect(self._on_doublons_undo_confirmed)
 
         self._wizard_panel.continue_requested.connect(self._on_wizard_continue)
         self._wizard_panel.cancel_requested.connect(self._cancel_wizard)
@@ -482,7 +660,12 @@ class MainWindow(QMainWindow):
         # candidates" (les deux valent `None`, §4.5) -- `has_device`,
         # séparément, sert justement à cette distinction pour « Par
         # sécurité » (§4.3) : au moins une carte suffit, même ambiguë.
-        self._home.set_status(detect_workflow_status(device), device, has_device=bool(devices))
+        status = detect_workflow_status(device)
+        self._home.set_status(status, device, has_device=bool(devices))
+        # Accueil assisté (§5, refonte menu de tuiles) : même dict déjà
+        # calculé ci-dessus, un second récepteur -- jamais une seconde
+        # détection dupliquée.
+        self._assisted_landing.set_status(status, device, has_device=bool(devices))
 
     # --- déclenchement d'une étape -> fenêtre Choix de la carte -------------
 
@@ -1260,20 +1443,18 @@ class MainWindow(QMainWindow):
             friendly = friendly_error_message(self._last_error_code or "")
             self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
 
-        if self._mode == "backup_system":
-            self._wizard_panel.show_next_step_choice(
-                tr("assisted_backup_system_done_title"),
-                tr("assisted_backup_system_done_instruction"),
-                show_prepare_card=ok,
-            )
-        else:
-            # Étape « Préparer une carte » (flash) : plus rien à proposer
-            # que revenir à l'accueil, succès ou échec.
-            self._wizard_panel.show_next_step_choice(
-                tr("assisted_prepare_card_done_title"),
-                tr("assisted_prepare_card_done_instruction"),
-                show_prepare_card=False,
-            )
+        # Table généralisée (§5, refonte menu de tuiles) -- remplace l'ancien
+        # `if self._mode == "backup_system": ... else: ...` écrit pour
+        # exactement 2 cas (le second étant du texte flash en dur, valable
+        # uniquement pour « Préparer une carte avec cette sauvegarde »).
+        # `show_prepare_card` n'a de sens (et n'est `True`) que pour
+        # "backup"/"backup_system" -- et seulement si l'opération a réussi.
+        title_key, instruction_key, offers_prepare_card = _ASSISTED_AD_HOC_DONE_STRINGS.get(
+            self._mode, ("assisted_prepare_card_done_title", "assisted_prepare_card_done_instruction", False)
+        )
+        self._wizard_panel.show_next_step_choice(
+            tr(title_key), tr(instruction_key), show_prepare_card=offers_prepare_card and ok
+        )
 
     def _on_prepare_card_requested(self) -> None:
         """« Préparer une carte avec cette sauvegarde » (§4.3) -- réutilise
@@ -1614,6 +1795,17 @@ class MainWindow(QMainWindow):
             self._log_panel.append_log(friendly_error_message(code or "EJECT_FAILED"))
             if msg:
                 self._log_panel.append_log(msg)
+        if self._assisted_ad_hoc_active:
+            # Tuile « Éjecter la carte » (§5, refonte menu de tuiles) --
+            # même principe que `_on_assisted_ad_hoc_worker_finished` :
+            # propose toujours une suite explicite plutôt qu'un retour
+            # silencieux à `_home` (jamais visible dans ce contexte,
+            # contrairement au mode expert où `_refresh_home_state()` a un
+            # sens) -- correctif du même défaut de parcours déjà corrigé
+            # pour les autres tuiles-job.
+            title_key, instruction_key, _ = _ASSISTED_AD_HOC_DONE_STRINGS["eject"]
+            self._wizard_panel.show_next_step_choice(tr(title_key), tr(instruction_key), show_prepare_card=False)
+            return
         self._refresh_home_state()
 
     def _on_eject_requested(self) -> None:
@@ -1650,29 +1842,286 @@ class MainWindow(QMainWindow):
         self._root_stack.setCurrentWidget(self._main_view)
         self._refresh_home_state()
 
-    def _start_backup_system_from_assisted_landing(self) -> None:
-        """Bouton « Sauvegarder mon système sans les jeux » de l'accueil
-        assisté (§4.3) -- réutilise `MainView`/`_log_panel` le temps de
-        l'opération, pour bénéficier du journal de bord et des états
-        occupé déjà en place, sans en faire un vrai changement de mode :
-        contrairement à `_switch_to_expert_mode`, `ui_mode` n'est jamais
-        modifié ni persisté ici. Reste dans l'habillage assisté
-        (`WizardStepPanel`), jamais l'écran expert (`HomeScreen`) --
-        correctif d'un défaut de parcours signalé : la version précédente
-        montrait l'écran expert pendant l'opération et n'offrait ensuite
-        aucune suite. `_on_worker_finished` consulte
+    def _start_assisted_ad_hoc_job(self, job_key: str) -> None:
+        """Lance un job (§4.6) depuis une tuile de l'accueil assisté (§5,
+        refonte menu de tuiles) -- généralise l'ancien `_start_backup_
+        system_from_assisted_landing` (qui ne gérait que `backup_system`
+        en dur) à tout `job_key` déjà géré par `_start_flow`
+        (`"backup"`/`"backup_system"`/`"flash"`/`"copy_games"`/
+        `"inject_boot"`/`"reset_card"`/`"eject"`). Réutilise `MainView`/
+        `_log_panel` le temps de l'opération, pour bénéficier du journal
+        de bord et des états occupé déjà en place, sans en faire un vrai
+        changement de mode : contrairement à `_switch_to_expert_mode`,
+        `ui_mode` n'est jamais modifié ni persisté ici. Reste dans
+        l'habillage assisté (`WizardStepPanel`), jamais l'écran expert
+        (`HomeScreen`). `_on_worker_finished` consulte
         `_assisted_ad_hoc_active` pour proposer explicitement la suite
-        (`WizardStepPanel.show_next_step_choice`) plutôt que de laisser
-        l'utilisateur sans issue une fois l'opération terminée."""
+        (`WizardStepPanel.show_next_step_choice`, `_on_assisted_ad_hoc_
+        worker_finished` ci-dessus) plutôt que de laisser l'utilisateur
+        sans issue une fois l'opération terminée."""
         self._assisted_ad_hoc_active = True
         self._main_view.show_wizard_panel()
-        self._wizard_panel.show_step(
-            tr("assisted_backup_system_running_title"),
-            tr("assisted_backup_system_running_instruction"),
-            can_continue=False,
-        )
+        running_title_key, running_instruction_key = _ASSISTED_AD_HOC_RUNNING_STRINGS[job_key]
+        self._wizard_panel.show_step(tr(running_title_key), tr(running_instruction_key), can_continue=False)
         self._root_stack.setCurrentWidget(self._main_view)
-        self._start_flow("backup_system")
+        self._start_flow(job_key)
+
+    def _on_assisted_backup_tile_clicked(self) -> None:
+        """Tuile « Sauvegarder ma carte » (§5, refonte menu de tuiles) --
+        ouvre `_assisted_backup_kind_dialog` (instance dédiée, jamais
+        `_backup_kind_dialog` du vrai parcours guidé, voir son
+        commentaire au constructeur) pour choisir complète vs système
+        seul avant de lancer `_start_assisted_ad_hoc_job` avec le
+        `job_key` correspondant -- une seule tuile, deux issues possibles,
+        même mécanisme final que le vrai parcours guidé en amont de la
+        création d'image (usage distinct, mécanisme partagé)."""
+        self._assisted_backup_kind_dialog.open()
+
+    def _on_assisted_help_requested(self) -> None:
+        """Tuile Aide de l'accueil assisté (§5, refonte menu de tuiles),
+        visible sur les trois OS contrairement au bouton d'aide de
+        `HomeScreen` (macOS uniquement) -- macOS ouvre `HelpDialog` (Accès
+        complet au disque, §3, contenu sans rapport avec les deux autres
+        OS) ; Windows/Linux ouvrent `_about_dialog`, minimaliste."""
+        if platform.system() == "Darwin":
+            self._help_dialog.open()
+        else:
+            self._about_dialog.open()
+
+    def _start_assisted_identify(self) -> None:
+        """Tuile « Rechercher ma console » (§5, refonte menu de tuiles) --
+        sélection de carte comme `_start_flow` (un seul candidat détecté ->
+        directement ; sinon `_identify_device_dialog`), puis `IdentifyRunner`
+        sur un thread séparé (montage du BOOT, potentiellement bloquant,
+        §4.4). Opération courte, sans progression à afficher -- pas de
+        bascule vers `_main_view`, juste `set_busy` autour de l'appel,
+        même principe que `_start_system_backup_estimate` pour un calcul
+        similaire."""
+        devices = self._list_safe_devices()
+        if len(devices) == 1:
+            self._run_identify(devices[0])
+            return
+        self._identify_device_dialog.set_devices(devices)
+        self._identify_device_dialog.open()
+
+    def _on_identify_device_chosen(self, device: Device) -> None:
+        self._identify_device_dialog.close()
+        self._run_identify(device)
+
+    def _run_identify(self, device: Device) -> None:
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        self._identify_runner = IdentifyRunner(device.path, parent=self)
+        self._identify_runner.finished_identify.connect(self._on_identify_finished)
+        self._identify_runner.start()
+
+    def _on_identify_finished(self, result: IdentifyResult) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        self._identify_runner = None
+        self._identify_result_dialog.set_result(result)
+        self._identify_result_dialog.open()
+
+    def _start_doublons_tool(self) -> None:
+        """Tuile « Chercher les doublons » (docs/doublons.md, remplace
+        l'ancien flux carte-SD-uniquement) -- outil autonome : ouvre le
+        choix du dossier plutôt qu'un choix de carte."""
+        self._refresh_doublons_shortcuts()
+        self._doublons_folder_screen.set_simulation_mode(self._app_config.doublons_simulation_mode)
+        self._doublons_folder_screen.set_ignored_folders(list(self._app_config.doublons_ignored_folders))
+        self._root_stack.setCurrentWidget(self._doublons_folder_screen)
+
+    def _refresh_doublons_shortcuts(self) -> None:
+        """Raccourcis cliquables vers les cartes/disques amovibles
+        détectés (même confort que l'ancien flux carte SD, demandé
+        explicitement) -- lecture seule (`list_partitions`, déjà utilisée
+        ailleurs sans élévation, §4.4), jamais un montage actif. Un
+        raccourci par point de montage déjà connu du périphérique, plus
+        un raccourci dédié vers EASYROMS quand elle est identifiable
+        pour une carte R36S reconnue."""
+        shortcuts: List[Tuple[str, str]] = []
+        for device in self._list_safe_devices():
+            for mountpoint in device.mountpoints:
+                shortcuts.append((f"{device.display} ({mountpoint})", mountpoint))
+            try:
+                partitions = list_partitions(device.path)
+            except OSError:
+                partitions = []
+            for partition in partitions:
+                if partition.label == EASYROMS_LABEL and partition.mountpoint:
+                    shortcuts.append((f"{device.display} — EASYROMS ({partition.mountpoint})", partition.mountpoint))
+        self._doublons_folder_screen.set_shortcuts(shortcuts)
+
+    def _on_doublons_folder_chosen(self, path: str) -> None:
+        self._app_config.doublons_simulation_mode = self._doublons_folder_screen.simulation_mode()
+        self._app_config.doublons_ignored_folders = self._doublons_folder_screen.ignored_folders()
+        app_config.save_config(self._app_config)
+
+        # Garde-fous ajoutés après validation du plan -- confirmation
+        # explicite avant de lancer une analyse à risque, jamais un scan
+        # démarré silencieusement sur un dossier hors de propos.
+        if is_filesystem_root(path):
+            self._doublons_pending_risk_action = lambda: self._start_doublons_scan(path)
+            self._doublons_risk_confirm_dialog.set_message(tr("doublons_risk_filesystem_root"))
+            self._doublons_risk_confirm_dialog.open()
+            return
+        if is_whole_user_folder(path):
+            self._doublons_pending_risk_action = lambda: self._start_doublons_scan(path)
+            self._doublons_risk_confirm_dialog.set_message(tr("doublons_risk_whole_user_folder"))
+            self._doublons_risk_confirm_dialog.open()
+            return
+        self._start_doublons_scan(path)
+
+    def _on_doublons_risk_confirmed(self) -> None:
+        action = self._doublons_pending_risk_action
+        self._doublons_pending_risk_action = None
+        if action is not None:
+            action()
+
+    def _start_doublons_scan(self, path: str) -> None:
+        self._doublons_root = path
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        self._doublons_scan_progress_screen.set_files_scanned(0)
+        self._root_stack.setCurrentWidget(self._doublons_scan_progress_screen)
+        self._doublons_scan_runner = DoublonsScanRunner(
+            path, self._app_config.doublons_ignored_folders, parent=self
+        )
+        self._doublons_scan_runner.progress.connect(self._doublons_scan_progress_screen.set_files_scanned)
+        self._doublons_scan_runner.large_folder_confirmation_needed.connect(
+            self._on_doublons_large_folder_confirmation_needed
+        )
+        self._doublons_scan_runner.finished_scan.connect(self._on_doublons_scan_finished)
+        self._doublons_scan_runner.cancelled.connect(self._on_doublons_scan_cancelled)
+        self._doublons_scan_runner.error.connect(self._on_doublons_scan_error)
+        self._doublons_scan_runner.start()
+
+    def _on_doublons_scan_cancel_requested(self) -> None:
+        if self._doublons_scan_runner is not None:
+            self._doublons_scan_runner.cancel()
+
+    def _on_doublons_large_folder_confirmation_needed(self) -> None:
+        self._doublons_large_folder_dialog.set_message(tr("doublons_risk_large_folder"))
+        self._doublons_large_folder_dialog.open()
+
+    def _on_doublons_large_folder_confirmed(self) -> None:
+        if self._doublons_scan_runner is not None:
+            self._doublons_scan_runner.resume_after_large_folder_confirmation(True)
+
+    def _on_doublons_large_folder_cancelled(self) -> None:
+        """Contrairement à `_doublons_risk_confirm_dialog`, Annuler ici
+        doit aussi débloquer le thread d'analyse resté en attente --
+        sinon `DoublonsScanRunner` ne se termine jamais."""
+        if self._doublons_scan_runner is not None:
+            self._doublons_scan_runner.resume_after_large_folder_confirmation(False)
+
+    def _end_doublons_scan(self) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        self._doublons_scan_runner = None
+
+    def _on_doublons_scan_finished(self, result) -> None:
+        self._end_doublons_scan()
+        self._doublons_scan_result = result
+        self._doublons_results_screen.set_simulation_mode(self._app_config.doublons_simulation_mode)
+        undo_available = self._doublons_root is not None and has_pending_journal_entries(self._doublons_root)
+        self._doublons_results_screen.set_undo_available(undo_available)
+        self._doublons_results_screen.set_results(result)
+        self._root_stack.setCurrentWidget(self._doublons_results_screen)
+
+    def _on_doublons_scan_cancelled(self) -> None:
+        self._end_doublons_scan()
+        self._root_stack.setCurrentWidget(self._doublons_folder_screen)
+
+    def _on_doublons_scan_error(self, code: str, msg: str) -> None:
+        self._end_doublons_scan()
+        self._last_error_code = code
+        self._last_error_msg = msg
+        QMessageBox.warning(self, tr("app_title"), friendly_error_message(code))
+        self._root_stack.setCurrentWidget(self._doublons_folder_screen)
+
+    def _on_doublons_move_requested(self, units: List[Unit]) -> None:
+        self._pending_doublons_units = units
+        self._confirm_move_doublons_dialog.set_units(units, self._app_config.doublons_simulation_mode)
+        self._confirm_move_doublons_dialog.open()
+
+    def _on_doublons_move_confirmed(self) -> None:
+        if self._doublons_root is None or not self._pending_doublons_units:
+            return
+        self._doublons_results_screen.setEnabled(False)
+        self._doublons_move_runner = DoublonsMoveRunner(
+            self._doublons_root,
+            self._pending_doublons_units,
+            self._app_config.doublons_simulation_mode,
+            parent=self,
+        )
+        self._doublons_move_runner.error.connect(self._on_doublons_move_error)
+        self._doublons_move_runner.finished_move.connect(self._on_doublons_move_finished)
+        self._doublons_move_runner.start()
+
+    def _on_doublons_move_error(self, code: str, msg: str) -> None:
+        self._last_error_code = code
+        self._last_error_msg = msg
+
+    def _on_doublons_move_finished(self, ok: bool) -> None:
+        self._doublons_results_screen.setEnabled(True)
+        self._doublons_move_runner = None
+        self._pending_doublons_units = []
+        if not ok:
+            friendly = friendly_error_message(self._last_error_code or "")
+            QMessageBox.warning(self, tr("app_title"), friendly)
+        # Relance toujours un scan frais après (succès ou échec partiel) --
+        # reflète l'état réel du dossier plutôt qu'une mise à jour
+        # partielle de l'affichage précédent, même principe que l'ancien
+        # flux carte SD.
+        if self._doublons_root is not None:
+            self._start_doublons_scan(self._doublons_root)
+
+    def _on_doublons_export_requested(self) -> None:
+        if self._doublons_scan_result is None or self._doublons_root is None:
+            return
+        default_dir = Path.home() / "Documents" / "R36S Studio" / "Doublons"
+        default_name = f"rapport_{datetime.now():%Y-%m-%d_%H-%M}.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("doublons_export_button"), str(default_dir / default_name), "Texte (*.txt)"
+        )
+        if not path:
+            return
+        report = build_report(self._doublons_scan_result, self._doublons_root)
+        try:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text(report, encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, tr("app_title"), str(exc))
+
+    def _on_doublons_undo_requested(self) -> None:
+        self._confirm_undo_doublons_dialog.open()
+
+    def _on_doublons_undo_confirmed(self) -> None:
+        if self._doublons_root is None:
+            return
+        self._doublons_results_screen.setEnabled(False)
+        self._doublons_undo_runner = DoublonsUndoRunner(self._doublons_root, parent=self)
+        self._doublons_undo_runner.error.connect(self._on_doublons_undo_error)
+        self._doublons_undo_runner.finished_undo.connect(self._on_doublons_undo_finished)
+        self._doublons_undo_runner.start()
+
+    def _on_doublons_undo_error(self, code: str, msg: str) -> None:
+        self._last_error_code = code
+        self._last_error_msg = msg
+
+    def _on_doublons_undo_finished(self, result) -> None:
+        self._doublons_results_screen.setEnabled(True)
+        self._doublons_undo_runner = None
+        if result is not None and result.conflicts:
+            # Signalé mais non bloquant -- chaque entrée en conflit reste
+            # dans le journal pour un futur essai (undo.py), rien n'est
+            # perdu.
+            QMessageBox.warning(
+                self, tr("app_title"), tr("doublons_undo_conflicts_warning", count=len(result.conflicts))
+            )
+        if self._doublons_root is not None:
+            self._start_doublons_scan(self._doublons_root)
 
     def _switch_to_assisted_mode(self) -> None:
         """Bouton « Mode assisté », symétrique de `_switch_to_expert_mode`

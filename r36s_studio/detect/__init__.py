@@ -62,6 +62,19 @@ EJECT = "eject"
 
 ALL_STEPS = [EXTRACT_BOOT, EXTRACT_EASYROMS, FLASH, INJECT_BOOT, COPY_GAMES, EJECT]
 
+# Clé de l'accueil assisté (menu de tuiles) uniquement -- jamais ajoutée
+# à `ALL_STEPS` ci-dessus, qui reste la liste des six étapes A-F du mode
+# expert. `HomeScreen.set_status` ignore déjà silencieusement toute clé
+# inconnue du dict retourné par `detect_workflow_status` : purement
+# additive, sans aucun risque de régression côté mode expert.
+#
+# `FIND_DUPLICATES` retirée (§ outil « Doublons de jeux ») : la tuile
+# « Chercher les doublons » ouvre désormais un outil autonome (n'importe
+# quel dossier, docs/doublons.md), qui n'a plus aucun rapport avec la
+# carte détectée -- jamais de badge de statut pour elle, comme la tuile
+# Aide.
+IDENTIFY = "identify"
+
 
 class StepStatus(Enum):
     AVAILABLE = "available"  # faisable
@@ -212,6 +225,12 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
             else _injection_status(is_arkos)
         ),
         EJECT: StepStatus.AVAILABLE if has_card else StepStatus.NOT_RELEVANT,
+        # Accueil assisté (menu de tuiles) uniquement, ci-dessous -- pas de
+        # cas ROCKNIX particulier pour "identify" : l'identification tente
+        # simplement de lire un .dtb, et `IdentifyFailureReason` (identify/
+        # __init__.py, déjà existant) gère proprement l'absence de .dtb
+        # exploitable sans qu'il soit utile de dupliquer cette logique ici.
+        IDENTIFY: StepStatus.AVAILABLE if can_boot else StepStatus.NOT_RELEVANT,
     }
 
 
@@ -228,4 +247,5 @@ __all__ = [
     "COPY_GAMES",
     "EJECT",
     "ALL_STEPS",
+    "IDENTIFY",
 ]

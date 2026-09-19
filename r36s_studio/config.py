@@ -31,8 +31,9 @@ from __future__ import annotations
 import json
 import os
 import platform
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import List
 
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 
@@ -75,6 +76,31 @@ _VALID_RESET_CARD_FILESYSTEMS = {"exfat", "fat32"}
 # diverses/settings_store.py::valider_adresse_serveur`, pas ici.
 DEFAULT_CONSOLES_DIVERSES_SERVER_URL = "http://localhost:8787"
 
+# Outil « Doublons de jeux » (docs/doublons.md) -- liste par défaut des
+# dossiers ignorés (« cochables », modifiable par l'utilisateur ensuite,
+# jamais un ensemble figé comme `_VALID_FIRMWARES` ci-dessus). "Tout
+# dossier commençant par un point" reste une règle structurelle du
+# parcours (`doublons/scan.py`), jamais une entrée de cette liste.
+DEFAULT_DOUBLONS_IGNORED_FOLDERS = [
+    "cubegm",
+    "rootfs",
+    "BGM",
+    "Music",
+    "Movie",
+    "Photo",
+    "Ebook",
+    "SteamLibrary",
+    ".res",
+    "Imgs",
+    "media",
+    "bios",
+]
+
+# Coché par défaut au premier lancement (§ garde-fou 1 de l'outil «
+# Doublons de jeux ») -- l'utilisateur décoche sciemment pour agir pour
+# de vrai, jamais l'inverse.
+DEFAULT_DOUBLONS_SIMULATION_MODE = True
+
 
 @dataclass
 class AppConfig:
@@ -82,6 +108,8 @@ class AppConfig:
     firmware: str = DEFAULT_FIRMWARE
     reset_card_filesystem: str = DEFAULT_RESET_CARD_FILESYSTEM
     consoles_diverses_server_url: str = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
+    doublons_ignored_folders: List[str] = field(default_factory=lambda: list(DEFAULT_DOUBLONS_IGNORED_FOLDERS))
+    doublons_simulation_mode: bool = DEFAULT_DOUBLONS_SIMULATION_MODE
 
 
 def config_dir() -> Path:
@@ -117,11 +145,21 @@ def load_config() -> AppConfig:
     consoles_diverses_server_url = raw.get("consoles_diverses_server_url")
     if not isinstance(consoles_diverses_server_url, str) or not consoles_diverses_server_url.strip():
         consoles_diverses_server_url = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
+    doublons_ignored_folders = raw.get("doublons_ignored_folders")
+    if not isinstance(doublons_ignored_folders, list) or not all(
+        isinstance(name, str) for name in doublons_ignored_folders
+    ):
+        doublons_ignored_folders = list(DEFAULT_DOUBLONS_IGNORED_FOLDERS)
+    doublons_simulation_mode = raw.get("doublons_simulation_mode")
+    if not isinstance(doublons_simulation_mode, bool):
+        doublons_simulation_mode = DEFAULT_DOUBLONS_SIMULATION_MODE
     return AppConfig(
         ui_mode=ui_mode,
         firmware=firmware,
         reset_card_filesystem=reset_card_filesystem,
         consoles_diverses_server_url=consoles_diverses_server_url,
+        doublons_ignored_folders=doublons_ignored_folders,
+        doublons_simulation_mode=doublons_simulation_mode,
     )
 
 

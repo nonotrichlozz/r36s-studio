@@ -5,6 +5,7 @@ mockés — aucune partition réelle n'est localisée ni montée."""
 from __future__ import annotations
 
 import plistlib
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -229,3 +230,4 @@ def test_copy_games_unmounts_forced_mount_after_copying(mock_locate, mock_copy, 
     copy_games(device, "/tmp/games")
 
     mock_unmount.assert_called_once_with(partition)
+

@@ -4,24 +4,34 @@ construction et logique des signaux, en mode Qt "offscreen" (fixture
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from r36s_studio.detect import StepStatus
 from r36s_studio.devices import Device
+from r36s_studio.doublons.scan import ExactDuplicateGroup, ExclusionWarning, ScanResult, Unit, VersionGroup
 from r36s_studio.gui.screens import (
+    AboutDialog,
     AssistedLandingScreen,
     BackupKindDialog,
     ConfirmDialog,
+    ConfirmMoveDoublonsDialog,
+    ConfirmUndoDoublonsDialog,
     ConsoleArt,
     ConsoleStage,
     ConsoleTerminalOverlay,
     DeviceDialog,
+    DoublonsFolderScreen,
+    DoublonsResultsScreen,
+    DoublonsRiskConfirmDialog,
+    DoublonsScanProgressScreen,
     FileDialog,
     FullDiskAccessScreen,
     HelpDialog,
     HomeScreen,
+    IdentifyResultDialog,
     LogPanel,
     MainView,
     ResetCardLabelDialog,
@@ -35,6 +45,9 @@ from r36s_studio.gui.screens import (
     build_window_backdrop,
     format_archive_label,
 )
+from r36s_studio.gui.strings import tr
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+from r36s_studio.identify.dtb import DtbInfo
 from PySide6.QtWidgets import QLabel, QWidget
 
 
@@ -849,15 +862,223 @@ def test_full_disk_access_screen_set_still_not_detected_shows_label(qapp):
 # --- AssistedLandingScreen : accueil du mode assisté (§5 mode assisté) -----
 
 
-def test_assisted_landing_screen_prepare_button_emits_signal(qapp):
+# Ordre de `_ASSISTED_TILE_SPECS` (screens.py) -- index dans `_all_tiles`
+# pour chacun des 9 signaux, tuile 1 (Préparer) en premier. « Rechercher
+# ma console »/« Consoles diverses » fusionnées en « Identifier ma
+# console » (§5, correctif visuel) -- plus de signal séparé pour cette
+# dernière, l'accès au catalogue passe par `IdentifyResultDialog.
+# catalog_requested` (voir test_gui_main_window.py). « Remettre l'écran
+# d'origine » (inject_boot) retirée de cette grille (§5, deuxième
+# correctif visuel) -- déjà couverte par le mode expert et le parcours
+# guidé, plus de tuile ni de signal correspondants ici.
+_ASSISTED_TILE_SIGNAL_INDEX = {
+    "prepare_requested": 0,
+    "identify_requested": 1,
+    "backup_requested": 2,
+    "flash_requested": 3,
+    "copy_games_requested": 4,
+    "find_duplicates_requested": 5,
+    "eject_requested": 6,
+    "reset_card_requested": 7,
+    "help_requested": 8,
+}
+
+
+def test_assisted_landing_screen_has_nine_tiles(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+
+    assert len(screen._all_tiles) == 9
+
+
+def test_assisted_landing_screen_grid_and_panel_never_stretch_with_window(qapp):
+    """Bug corrigé (correctif visuel, deuxième passe) : `QScrollArea` a par
+    défaut une `sizePolicy` Expanding/Expanding -- même avec `grid_widget`
+    fixe à l'intérieur et un facteur d'étirement nul dans
+    `content_row.addWidget`, la zone de la grille pouvait quand même se
+    voir attribuer une partie de l'espace en trop, ouvrant un vide entre
+    la grille visible et le panneau plutôt que de le laisser au
+    `addStretch()` final. Fixée explicitement à `Fixed`/`Fixed` --
+    vérifié ici en redimensionnant l'écran bien au-delà de sa taille
+    naturelle et en confirmant que rien ne bouge."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.resize(2000, 1400)
+    screen.show()
+
+    from r36s_studio.gui.screens import Tile
+
+    assert screen._grid_scroll.size().width() == Tile.SIZE * 4 + Tile.SPACING * 3
+    assert screen._grid_scroll.size().height() == Tile.SIZE * 3 + Tile.SPACING * 2
+    assert screen._panel.size().width() == 308
+    assert screen._panel.size().height() == screen._grid_scroll.size().height()
+    for tile in screen._all_tiles:
+        assert tile.size().height() == Tile.SIZE
+        assert tile.size().width() in (Tile.SIZE, Tile.SIZE * 2 + Tile.SPACING)
+
+
+def test_assisted_landing_screen_grid_panel_spacing_is_exact(qapp):
+    """Espacement demandé (§5, correctif visuel, point 2) : 40px entre la
+    grille et le panneau, jamais plus (le reste de l'espace disponible
+    doit revenir au `addStretch()` final, pas s'intercaler ici)."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.resize(2000, 1400)
+    screen.show()
+
+    grid_right_edge = screen._grid_scroll.geometry().x() + screen._grid_scroll.geometry().width()
+    gap = screen._panel.geometry().x() - grid_right_edge
+    assert gap == 40
+
+
+def test_assisted_landing_screen_content_block_is_horizontally_centered(qapp):
+    """§5, correctif de centrage : le vide restant de la fenêtre se
+    concentrait entièrement à droite (grille+panneau alignés en haut à
+    gauche). `addStretch(1)` de même facteur avant la grille et après le
+    panneau -- vérifié en redimensionnant bien au-delà de la largeur
+    naturelle du bloc et en confirmant des marges gauche/droite égales."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.resize(2000, 1400)
+    screen.show()
+
+    left_margin = screen._grid_scroll.geometry().x()
+    right_margin = screen.width() - (screen._panel.geometry().x() + screen._panel.geometry().width())
+    assert left_margin == right_margin
+    # La grille et le panneau gardent leur largeur fixe -- seul le vide de
+    # part et d'autre doit avoir grandi avec la fenêtre.
+    assert screen._grid_scroll.size().width() == 676
+    assert screen._panel.size().width() == 308
+
+
+def test_assisted_landing_screen_header_and_section_align_with_the_grid(qapp):
+    """§5, correctif de centrage, point 2 : sans conteneur de largeur
+    fixe centré de la même façon, le titre resterait collé au bord de la
+    fenêtre pendant que la grille se centre en dessous -- vérifié ici que
+    le bord gauche du titre (« R36S STUDIO ») et de l'étiquette de
+    section tombent exactement à la même abscisse que celui de la
+    grille, à une largeur de fenêtre qui n'est pas la largeur naturelle
+    de l'écran."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.resize(1900, 1200)
+    screen.show()
+
+    from PySide6.QtWidgets import QLabel
+
+    brand_title = next(label for label in screen.findChildren(QLabel) if label.property("role") == "brandTitle")
+    section_label = next(label for label in screen.findChildren(QLabel) if label.property("role") == "sectionLabel")
+
+    grid_x = screen._grid_scroll.geometry().x()
+    assert brand_title.mapTo(screen, brand_title.rect().topLeft()).x() == grid_x
+    assert section_label.mapTo(screen, section_label.rect().topLeft()).x() == grid_x
+
+    # Le bouton Mode expert reste sur le bord droit *du bloc centré*, pas
+    # sur celui de la fenêtre -- même abscisse que le bord droit du
+    # panneau.
+    expert_button_left = screen._expert_button.mapTo(screen, screen._expert_button.rect().topLeft()).x()
+    expert_button_right = expert_button_left + screen._expert_button.width()
+    panel_right = screen._panel.geometry().x() + screen._panel.geometry().width()
+    assert expert_button_right == panel_right
+
+
+def test_assisted_landing_screen_panel_content_is_vertically_centered(qapp):
+    """§5, correctif de centrage, point 3 : le contenu du panneau
+    (icône, modèle, état, bouton Rafraîchir) restait tassé en haut,
+    laissant tout le vide s'accumuler en dessous -- `addStretch(1)` de
+    même facteur avant et après ce bloc, vérifié en comparant l'espace
+    au-dessus de l'icône à celui sous le bouton Rafraîchir."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.show()
+
+    from r36s_studio.gui.screens import _ConsoleIcon
+
+    icon = screen._panel.findChild(_ConsoleIcon)
+    top_gap = icon.geometry().y()
+    bottom_gap = screen._panel.height() - (
+        screen._refresh_button.geometry().y() + screen._refresh_button.geometry().height()
+    )
+    assert top_gap == bottom_gap
+
+
+def test_assisted_landing_screen_fits_within_a_1366x728_screen(qapp):
+    """Écran de test réel (§5, deuxième correctif de taille) -- 1366x728,
+    la résolution rapportée comme défaillante. Premier correctif (marges
+    resserrées, plancher de taille minimale réduit) insuffisant à lui
+    seul : l'arithmétique ne rentrait structurellement pas à 200 par
+    tuile (96 + 3*200 + 2*12 = 720, déjà supérieur à la zone client
+    observée). Tuiles réduites à 160 (`Tile.SIZE`) pour de bon -- vérifié
+    ici directement sur l'écran seul, à la résolution exacte rapportée."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.resize(1366, 728)
+    screen.show()
+
+    from r36s_studio.gui.screens import Tile
+
+    assert Tile.SIZE == 160
+    assert screen._grid_scroll.size().width() == 676
+    grid_bottom = screen._grid_scroll.geometry().y() + screen._grid_scroll.geometry().height()
+    panel_bottom = screen._panel.geometry().y() + screen._panel.geometry().height()
+    assert grid_bottom <= 728
+    assert panel_bottom <= 728
+    # La 3e rangée (dernières tuiles de `_all_tiles`) doit être entièrement
+    # dans les limites de la grille, pas seulement la grille dans la
+    # fenêtre -- une grille qui rentre mais dont la dernière ligne aurait
+    # débordé de son propre `QScrollArea` passerait la vérif ci-dessus à
+    # tort.
+    for tile in screen._all_tiles:
+        tile_bottom_on_screen = screen._grid_scroll.geometry().y() + tile.geometry().y() + tile.geometry().height()
+        assert tile_bottom_on_screen <= 728
+
+
+def test_assisted_landing_screen_no_tile_label_is_ever_clipped(qapp):
+    """Aucun libellé de tuile ne doit dépasser de sa tuile, quel que soit
+    son texte -- « Remettre la carte à zéro » est le plus long des 8
+    tuiles standard (hauteur de libellé réservée pour 3 lignes, §5,
+    deuxième correctif de taille), mais la garantie doit tenir pour
+    toutes, tuile 1 (une seule ligne réservée, texte toujours court)
+    comprise."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.show()
+
+    for tile in screen._all_tiles:
+        label_bottom = tile._label.geometry().y() + tile._label.geometry().height()
+        assert label_bottom <= tile.height()
+
+
+def test_assisted_landing_screen_grid_rows_and_columns_never_stretch(qapp):
+    """Aucune ligne ni colonne extensible dans le `QGridLayout` (§5,
+    deuxième correctif de taille, contrainte explicite demandée) --
+    posé en plus du `Fixed`/`Fixed` déjà en place sur `QScrollArea`/
+    `grid_widget` (tests ci-dessus), pour qu'un futur ajout dans cette
+    grille ne puisse pas silencieusement réintroduire un étirement."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+
+    grid = screen._grid_scroll.widget().layout()
+    for row in range(grid.rowCount()):
+        assert grid.rowStretch(row) == 0
+    for column in range(grid.columnCount()):
+        assert grid.columnStretch(column) == 0
+
+
+def test_assisted_landing_screen_all_tiles_emit_their_signal_on_click(qapp):
+    """Chaque tuile de la grille (§5, refonte menu de tuiles) est câblée à
+    son propre signal -- vérifié en émettant le signal `clicked` de la
+    tuile elle-même (pas un raccourci qui contournerait le câblage)."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
     received = []
-    screen.prepare_requested.connect(lambda: received.append(True))
+    for signal_name in _ASSISTED_TILE_SIGNAL_INDEX:
+        getattr(screen, signal_name).connect(lambda name=signal_name: received.append(name))
 
-    screen._prepare_button.click()
+    for signal_name, index in _ASSISTED_TILE_SIGNAL_INDEX.items():
+        screen._all_tiles[index].clicked.emit()
 
-    assert received == [True]
+    assert received == list(_ASSISTED_TILE_SIGNAL_INDEX)
 
 
 def test_assisted_landing_screen_expert_mode_button_emits_signal(qapp):
@@ -871,84 +1092,428 @@ def test_assisted_landing_screen_expert_mode_button_emits_signal(qapp):
     assert received == [True]
 
 
-def test_assisted_landing_screen_works_without_console_stage(qapp):
-    """Asset absent (§5) : ne doit jamais empêcher la construction de
-    l'écran, même principe que MainView."""
+def test_assisted_landing_screen_prepare_tile_has_emphasized_role(qapp):
+    """Tuile 1 mise en avant (fond cyan plein, §5) -- double largeur dans
+    la grille, seule tuile en `role="tileEmphasized"`."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
-    assert screen.console_stage is None
+    assert screen._all_tiles[0].property("role") == "tileEmphasized"
 
 
-def test_assisted_landing_screen_shows_console_stage_when_asset_present(tmp_path, qapp):
-    fake_path = tmp_path / "console.png"
-    _fake_pixmap().save(str(fake_path))
-
-    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=fake_path):
-        screen = AssistedLandingScreen()
-
-    assert isinstance(screen.console_stage, ConsoleStage)
-
-
-def test_assisted_landing_screen_prepare_button_has_cta_role(qapp):
+def test_assisted_landing_screen_reset_card_tile_has_destructive_role(qapp):
+    """Seule action destructive de la grille (§5)."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
-    assert screen._prepare_button.property("role") == "cta"
+    assert screen._all_tiles[7].property("role") == "tileDestructive"
 
 
-def test_assisted_landing_screen_set_busy_disables_expert_button(qapp):
-    """Symétrique de HomeScreen.set_busy (§5 mode assisté) -- changer de
-    mode en plein flash ou en pleine copie laisserait un job orphelin."""
+def test_assisted_landing_screen_set_busy_disables_all_tiles_and_expert_button(qapp):
+    """Changer de mode ou lancer une deuxième action en plein flash/copie
+    laisserait un job orphelin (§5 mode assisté) -- même garde que
+    `HomeScreen.set_busy`, étendue aux 9 tuiles."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
     screen.set_busy(True)
+    assert all(tile.isEnabled() is False for tile in screen._all_tiles)
     assert screen._expert_button.isEnabled() is False
 
-
-def test_assisted_landing_screen_backup_system_button_emits_signal(qapp):
-    """Sauvegarde système sans les jeux, aussi proposée comme option du
-    mode assisté (§4.3), pas seulement depuis l'écran expert."""
-    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
-        screen = AssistedLandingScreen()
-    received = []
-    screen.backup_system_requested.connect(lambda: received.append(True))
-
-    screen._backup_system_button.click()
-
-    assert received == [True]
-
-
-def test_assisted_landing_screen_set_busy_disables_backup_system_button(qapp):
-    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
-        screen = AssistedLandingScreen()
-
-    screen.set_busy(True)
-    assert screen._backup_system_button.isEnabled() is False
-
-
-def test_assisted_landing_screen_consoles_diverses_button_emits_signal(qapp):
-    """Symétrique du bouton de HomeScreen (§ section « Consoles diverses »)."""
-    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
-        screen = AssistedLandingScreen()
-    received = []
-    screen.consoles_diverses_requested.connect(lambda: received.append(True))
-
-    screen._consoles_diverses_button.click()
-
-    assert received == [True]
-
-
-def test_assisted_landing_screen_set_busy_disables_consoles_diverses_button(qapp):
-    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
-        screen = AssistedLandingScreen()
-
-    screen.set_busy(True)
-    assert screen._consoles_diverses_button.isEnabled() is False
-
     screen.set_busy(False)
+    assert all(tile.isEnabled() is True for tile in screen._all_tiles)
     assert screen._expert_button.isEnabled() is True
+
+
+def test_assisted_landing_screen_set_status_pushes_badges_to_the_right_tiles(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    status = {
+        "identify": StepStatus.AVAILABLE,
+        "flash": StepStatus.DONE,
+        "copy_games": StepStatus.PLATFORM_LIMITED,
+        "eject": StepStatus.NOT_RELEVANT,
+    }
+
+    screen.set_status(status)
+
+    assert screen._tiles_by_status_key["identify"]._badge.isVisible() is True
+    assert screen._tiles_by_status_key["flash"]._badge.property("badgeKind") == "done"
+    assert screen._tiles_by_status_key["copy_games"]._badge.property("badgeKind") == "platform_limited"
+    # NOT_RELEVANT (§5, correctif visuel) : aucun texte, aucun badgeKind
+    # -- mais le widget reste visible pour réserver sa hauteur (jamais
+    # `setVisible(False)`, contrairement à avant ce correctif).
+    not_relevant_badge = screen._tiles_by_status_key["eject"]._badge
+    assert not_relevant_badge.text() == ""
+    assert not_relevant_badge.property("badgeKind") is None
+    assert not_relevant_badge.isVisible() is True
+    # « Chercher les doublons » (§ outil « Doublons de jeux ») n'a plus de
+    # clé de statut : c'est un outil autonome, sans rapport avec la carte
+    # détectée -- comme la tuile Aide, jamais dans ce dict.
+    assert set(screen._tiles_by_status_key) == {
+        "identify",
+        "flash",
+        "copy_games",
+        "eject",
+    }
+
+
+def test_tile_set_badge_none_reserves_height_without_showing_a_pill(qapp):
+    """Même garantie que ci-dessus, testée directement sur `Tile` --
+    aucun statut (tuiles 1/3/9/10, sans clé dans `detect.StepStatus`) se
+    traite comme NOT_RELEVANT : rien à afficher, hauteur réservée."""
+    from r36s_studio.gui.screens import Tile
+
+    tile = Tile("help", "Aide")
+    tile.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    tile.set_badge(None)
+
+    assert tile._badge.text() == ""
+    assert tile._badge.property("badgeKind") is None
+    assert tile._badge.isVisible() is True
+
+
+def test_assisted_landing_screen_panel_shows_none_state_without_device(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+
+    screen.set_status({}, device=None)
+
+    assert screen._panel_device_label.text() == tr("home_banner_state_none")
+
+
+def test_assisted_landing_screen_panel_shows_device_info_and_arkos_state(qapp):
+    """§5, correctif visuel : l'état est une pastille (`role="badge"`),
+    pas du texte nu."""
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    device = _make_device()
+
+    screen.set_status({"flash": StepStatus.DONE}, device=device)
+
+    assert device.display in screen._panel_device_label.text()
+    assert screen._panel_state_badge.text() == tr("home_banner_state_arkos")
+    assert screen._panel_state_badge.property("badgeKind") == "done"
+
+
+def test_assisted_landing_screen_panel_state_badge_cleared_without_device(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    device = _make_device()
+    screen.set_status({"flash": StepStatus.DONE}, device=device)
+
+    screen.set_status({}, device=None)
+
+    assert screen._panel_state_badge.text() == ""
+
+
+# --- IdentifyResultDialog : tuile « Identifier ma console » (§5) -----------
+
+
+def test_identify_result_dialog_shows_board_compatible_on_success(qapp):
+    dialog = IdentifyResultDialog()
+    result = IdentifyResult(info=DtbInfo(board_compatible="rk3326-r35s", panel_compatible=None))
+
+    dialog.set_result(result)
+
+    assert "rk3326-r35s" in dialog._message.text()
+    assert dialog._clone_warning_frame.isVisible() is False
+
+
+def test_identify_result_dialog_shows_clone_warning(qapp):
+    dialog = IdentifyResultDialog()
+    dialog.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    result = IdentifyResult(info=DtbInfo(board_compatible="rk3326-evb-lp3-v12", panel_compatible=None), is_clone=True)
+
+    dialog.set_result(result)
+
+    assert dialog._clone_warning_frame.isVisible() is True
+
+
+def test_identify_result_dialog_shows_failure_message(qapp):
+    dialog = IdentifyResultDialog()
+    result = IdentifyResult(failure_reason=IdentifyFailureReason.NO_DTB_FOUND)
+
+    dialog.set_result(result)
+
+    assert dialog._message.text() == tr("identify_failed_no_dtb_found")
+    assert dialog._clone_warning_frame.isVisible() is False
+
+
+def test_identify_result_dialog_catalog_button_emits_signal_and_closes(qapp):
+    """Fusion de « Rechercher ma console »/« Consoles diverses » (§5,
+    correctif visuel) -- l'accès au catalogue se fait depuis ce dialogue,
+    toujours proposé, succès ou échec de l'identification."""
+    dialog = IdentifyResultDialog()
+    dialog.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    received = []
+    dialog.catalog_requested.connect(lambda: received.append(True))
+
+    dialog._on_catalog_clicked()
+
+    assert received == [True]
+    assert dialog.isVisible() is False
+
+
+# --- AboutDialog : tuile Aide, Windows/Linux (§5) --------------------------
+
+
+def test_about_dialog_shows_version_label(qapp):
+    from r36s_studio import __version__
+
+    dialog = AboutDialog()
+
+    assert __version__ in dialog._version_label.text()
+
+
+# --- Outil « Doublons de jeux » (docs/doublons.md) -------------------------
+
+
+def _make_unit(path: str, size_bytes: int = 100, is_linked: bool = False):
+    p = Path(path)
+    return Unit(representative=p, members=[p], total_size_bytes=size_bytes, is_linked=is_linked)
+
+
+def _make_exact_group():
+    return ExactDuplicateGroup(
+        units=[
+            _make_unit("/EASYROMS/SNES/Aladdin.zip", 100),
+            _make_unit("/EASYROMS/SNES/Aladdin.7z", 100),
+        ]
+    )
+
+
+def _make_version_group():
+    kept = _make_unit("/EASYROMS/SNES/Game (France).sfc", 50)
+    other = _make_unit("/EASYROMS/SNES/Game (USA).sfc", 40)
+    return VersionGroup(
+        system_folder="SNES",
+        normalized_title="game",
+        units=[kept, other],
+        suggested_keep=kept,
+    )
+
+
+def test_doublons_folder_screen_shows_shortcuts_and_emits_folder_chosen(qapp):
+    from PySide6.QtWidgets import QListWidgetItem
+
+    screen = DoublonsFolderScreen()
+    screen.set_shortcuts([("Carte SD (E:)", "E:\\")])
+    received = []
+    screen.folder_chosen.connect(received.append)
+
+    item = screen._shortcuts_list.item(0)
+    assert isinstance(item, QListWidgetItem)
+    screen._on_shortcut_clicked(item)
+
+    assert received == ["E:\\"]
+
+
+def test_doublons_folder_screen_no_shortcuts_shows_empty_label(qapp):
+    screen = DoublonsFolderScreen()
+    screen.show()
+
+    screen.set_shortcuts([])
+
+    assert screen._shortcuts_empty_label.isVisible() is True
+
+
+def test_doublons_folder_screen_simulation_mode_round_trips(qapp):
+    screen = DoublonsFolderScreen()
+
+    screen.set_simulation_mode(True)
+    assert screen.simulation_mode() is True
+    screen.set_simulation_mode(False)
+    assert screen.simulation_mode() is False
+
+
+def test_doublons_folder_screen_ignored_folders_all_checked_by_default(qapp):
+    screen = DoublonsFolderScreen()
+
+    screen.set_ignored_folders(["media", "bios"])
+
+    assert set(screen.ignored_folders()) == {"media", "bios"}
+
+
+def test_doublons_folder_screen_unchecked_ignored_folder_is_excluded(qapp):
+    screen = DoublonsFolderScreen()
+    screen.set_ignored_folders(["media", "bios"])
+
+    screen._ignored_checkboxes["bios"].setChecked(False)
+
+    assert screen.ignored_folders() == ["media"]
+
+
+def test_doublons_scan_progress_screen_shows_count(qapp):
+    screen = DoublonsScanProgressScreen()
+
+    screen.set_files_scanned(42)
+
+    assert "42" in screen._count_label.text()
+
+
+def test_doublons_scan_progress_screen_cancel_button_emits_signal(qapp):
+    screen = DoublonsScanProgressScreen()
+    received = []
+    screen.cancel_requested.connect(lambda: received.append(True))
+
+    from PySide6.QtWidgets import QPushButton
+
+    cancel_button = [b for b in screen.findChildren(QPushButton) if b.text() == tr("doublons_scan_cancel_button")][0]
+    cancel_button.click()
+
+    assert received == [True]
+
+
+def test_doublons_risk_confirm_dialog_confirm_emits_confirmed(qapp):
+    dialog = DoublonsRiskConfirmDialog()
+    dialog.set_message("Attention")
+    received = []
+    dialog.confirmed.connect(lambda: received.append(True))
+
+    from PySide6.QtWidgets import QPushButton
+
+    confirm_button = [b for b in dialog.findChildren(QPushButton) if b.text() == tr("doublons_risk_continue")][0]
+    confirm_button.click()
+
+    assert received == [True]
+
+
+def test_doublons_risk_confirm_dialog_cancel_emits_cancelled(qapp):
+    """Nécessaire pour débloquer `DoublonsScanRunner` en attente de
+    confirmation au seuil des 200 000 fichiers -- Annuler ne doit jamais
+    se contenter de fermer silencieusement la fenêtre ici."""
+    dialog = DoublonsRiskConfirmDialog()
+    received = []
+    dialog.cancelled.connect(lambda: received.append(True))
+
+    from PySide6.QtWidgets import QPushButton
+
+    cancel_button = [b for b in dialog.findChildren(QPushButton) if b.text() == tr("doublons_risk_cancel")][0]
+    cancel_button.click()
+
+    assert received == [True]
+
+
+def test_doublons_results_screen_shows_empty_state_without_groups(qapp):
+    screen = DoublonsResultsScreen()
+    screen.show()
+
+    screen.set_results(ScanResult())
+
+    assert screen._empty_label.isVisible() is True
+
+
+def test_doublons_results_screen_exact_group_precheck_all_but_first(qapp):
+    """Palier 1 (copies identiques) : « certain », précoché sauf le
+    fichier gardé -- seule exception documentée à la règle générale de
+    ce projet contre toute présélection."""
+    from PySide6.QtWidgets import QCheckBox
+
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(exact_duplicate_groups=[_make_exact_group()]))
+
+    checkboxes = [
+        box for box in screen._list_container.findChildren(QCheckBox) if box.text() == tr("doublons_move_this_one")
+    ]
+    assert len(checkboxes) == 2
+    assert checkboxes[0].isChecked() is False
+    assert checkboxes[1].isChecked() is True
+
+
+def test_doublons_results_screen_version_group_never_prechecked(qapp):
+    from PySide6.QtWidgets import QCheckBox
+
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(version_groups=[_make_version_group()]))
+
+    checkboxes = [
+        box for box in screen._list_container.findChildren(QCheckBox) if box.text() == tr("doublons_move_this_one")
+    ]
+    assert len(checkboxes) == 2
+    assert all(box.isChecked() is False for box in checkboxes)
+
+
+def test_doublons_results_screen_move_requested_emits_only_checked_units(qapp):
+    from PySide6.QtWidgets import QCheckBox, QPushButton
+
+    screen = DoublonsResultsScreen()
+    group = _make_version_group()
+    screen.set_results(ScanResult(version_groups=[group]))
+    received = []
+    screen.move_requested.connect(received.append)
+
+    checkboxes = [
+        box for box in screen._list_container.findChildren(QCheckBox) if box.text() == tr("doublons_move_this_one")
+    ]
+    checkboxes[1].setChecked(True)  # écarte le second (non suggéré)
+    move_button = [
+        b for b in screen._list_container.findChildren(QPushButton) if b.text() == tr("doublons_move_selected_button")
+    ][0]
+    move_button.click()
+
+    assert received == [[group.units[1]]]
+
+
+def test_doublons_results_screen_excluded_groups_are_shown(qapp):
+    screen = DoublonsResultsScreen()
+    excluded = [ExclusionWarning(manifest=Path("/EASYROMS/PSX/Game.cue"), missing=["Game.bin"])]
+
+    screen.set_results(ScanResult(excluded=excluded))
+
+    labels = [label.text() for label in screen._list_container.findChildren(QLabel)]
+    assert any("Game.cue" in text for text in labels)
+
+
+def test_doublons_results_screen_simulation_banner_visibility(qapp):
+    screen = DoublonsResultsScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    screen.set_simulation_mode(True)
+    assert screen._simulation_banner.isVisible() is True
+    screen.set_simulation_mode(False)
+    assert screen._simulation_banner.isVisible() is False
+
+
+def test_doublons_results_screen_undo_button_availability(qapp):
+    screen = DoublonsResultsScreen()
+
+    screen.set_undo_available(True)
+    assert screen._undo_button.isEnabled() is True
+    screen.set_undo_available(False)
+    assert screen._undo_button.isEnabled() is False
+
+
+def test_confirm_move_doublons_dialog_message_normal(qapp):
+    dialog = ConfirmMoveDoublonsDialog()
+
+    dialog.set_units([_make_unit("/EASYROMS/SNES/Game.sfc", 1024)], dry_run=False)
+
+    assert tr("doublons_confirm_button") == dialog._confirm_button.text()
+    assert "1" in dialog._message.text()
+
+
+def test_confirm_move_doublons_dialog_message_simulation(qapp):
+    dialog = ConfirmMoveDoublonsDialog()
+
+    dialog.set_units([_make_unit("/EASYROMS/SNES/Game.sfc", 1024)], dry_run=True)
+
+    assert dialog._confirm_button.text() == tr("doublons_confirm_button_simulation")
+
+
+def test_confirm_undo_doublons_dialog_confirm_emits_signal(qapp):
+    dialog = ConfirmUndoDoublonsDialog()
+    received = []
+    dialog.confirmed.connect(lambda: received.append(True))
+
+    from PySide6.QtWidgets import QPushButton
+
+    confirm_button = [b for b in dialog.findChildren(QPushButton) if b.text() == tr("doublons_undo_confirm_button")][0]
+    confirm_button.click()
+
+    assert received == [True]
 
 
 # --- WizardStepPanel : une étape à la fois, mode assisté (§5) --------------

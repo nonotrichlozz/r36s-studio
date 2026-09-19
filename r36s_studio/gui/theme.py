@@ -228,6 +228,91 @@ QLabel:disabled {{
     color: {TEXT_SECONDARY};
 }}
 
+/* Tuiles de l'accueil assisté (§5, refonte menu de tuiles) : même
+   famille que QFrame[role="row"] ci-dessus (surface/bordure/hover),
+   déclinée en trois rôles -- normale, mise en avant (l'action
+   principale, tuile 1), destructive (la seule qui efface, tuile 9). */
+QFrame[role="tile"] {{
+    background-color: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+}}
+QFrame[role="tile"]:hover {{
+    border-color: {BORDER_CYAN};
+}}
+QFrame[role="tile"]:disabled {{
+    background-color: {BG_DARK};
+}}
+QFrame[role="tileEmphasized"] {{
+    background-color: {ACCENT_CYAN};
+    border: none;
+    border-radius: 10px;
+}}
+QFrame[role="tileEmphasized"]:disabled {{
+    background-color: {SURFACE};
+}}
+QFrame[role="tileDestructive"] {{
+    background-color: {DANGER_BG};
+    border: 1px solid {DANGER_BORDER};
+    border-radius: 10px;
+}}
+QFrame[role="tileDestructive"]:hover {{
+    border-color: {DANGER_FG};
+}}
+QFrame[role="tileDestructive"]:disabled {{
+    background-color: {BG_DARK};
+}}
+/* Libellé bas-gauche d'une tuile -- couleur par défaut surchargée sur
+   fond plein (tuile 1) et sur fond danger (tuile 9), pour rester lisible
+   sur ces deux fonds non neutres. */
+QLabel[role="tileLabel"] {{
+    font-size: 14px;
+    font-weight: 600;
+    color: {TEXT_PRIMARY};
+}}
+QFrame[role="tileEmphasized"] QLabel[role="tileLabel"] {{
+    color: {BG_DARK};
+}}
+QFrame[role="tileDestructive"] QLabel[role="tileLabel"] {{
+    color: {DANGER_FG};
+}}
+/* Tuile 1 (« Préparer ma carte ») uniquement -- seule tuile qui porte une
+   description sous son libellé, l'un comme l'autre plus grands que le
+   reste de la grille (§5, correctif visuel : « c'est l'icône qui doit
+   porter la tuile », mais la tuile mise en avant reste un cran au-dessus
+   du reste). */
+QLabel[role="tileLabelLarge"] {{
+    font-size: 16px;
+    font-weight: 700;
+    color: {BG_DARK};
+}}
+/* Description de la tuile 1 uniquement -- `BG_DARK` comme le libellé
+   ci-dessus, jamais `role="rowDesc"` (TEXT_SECONDARY, illisible sur le
+   fond cyan plein de cette tuile -- correctif visuel demandé). */
+QLabel[role="tileDescLarge"] {{
+    font-size: 11px;
+    color: {BG_DARK};
+}}
+
+/* En-tête de l'accueil assisté (§5, refonte menu de tuiles) : nom de
+   l'application, espacement des lettres géré en Python
+   (`QFont.setLetterSpacing` -- non supporté par Qt Style Sheets,
+   contrairement à CSS). */
+QLabel[role="brandTitle"] {{
+    font-size: 22px;
+    font-weight: 700;
+    color: {ACCENT_CYAN};
+}}
+/* Étiquette de section au-dessus de la grille de tuiles (« POUR
+   COMMENCER », maquette de référence) -- lettres espacées (Python,
+   `QFont.setLetterSpacing`, même raison que `brandTitle`), petite et
+   discrète. */
+QLabel[role="sectionLabel"] {{
+    font-size: 11px;
+    font-weight: 600;
+    color: {TEXT_SECONDARY};
+}}
+
 QLabel[role="stepIcon"] {{
     border: 1px solid {BORDER_CYAN};
     border-radius: 6px;

@@ -1,0 +1,286 @@
+# R36S Studio
+# Copyright (C) 2026 nonotrichlozz
+#
+# Ce fichier fait partie de R36S Studio. R36S Studio est un logiciel libre :
+# vous pouvez le redistribuer et/ou le modifier selon les termes de la GNU
+# General Public License telle que publiée par la Free Software Foundation,
+# version 3 de la licence.
+#
+# R36S Studio est distribué dans l'espoir qu'il sera utile, mais SANS
+# AUCUNE GARANTIE ; sans même la garantie implicite de QUALITÉ MARCHANDE ou
+# d'ADÉQUATION À UN USAGE PARTICULIER. Consultez la GNU General Public
+# License pour plus de détails.
+#
+# Vous devez avoir reçu une copie de la GNU General Public License avec
+# R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
+
+"""Analyse récursive d'un dossier et détection des doublons
+(docs/doublons.md) -- lecture seule stricte, aucune écriture ici.
+
+Un `Unit` (fichier seul, ou manifeste `.cue`/`.m3u`/`.gdi` + les fichiers
+qu'il référence) est l'élément atomique de toute cette détection :
+jamais scindé, jamais comparé par morceaux. Un fichier référencé par un
+manifeste mais introuvable sur le disque exclut tout le groupe --
+signalé séparément (`ScanResult.excluded`), jamais silencieusement
+ignoré (règle critique du brief).
+
+Deux paliers, comme demandé :
+
+- **Palier 1 (copies identiques)** -- même taille puis même SHA-256,
+  uniquement entre `Unit` à fichier unique en v1 (simplification
+  assumée : comparer des groupes multi-fichiers liés octet par octet
+  serait possible mais nettement plus complexe pour un bénéfice
+  marginal, ces groupes restent couverts par le palier 2).
+- **Palier 2 (versions du même jeu)** -- titre normalisé identique
+  (`normalize.py`) au sein du même dossier de système (premier niveau
+  de chemin sous la racine analysée -- jamais par nom seul, un même
+  titre dans deux dossiers différents n'est jamais un doublon)."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+
+from .extensions import ExtensionKind, classify
+from .linked_files import resolve_manifest
+from .normalize import normalize_title, priority_score
+from .safety import LARGE_FOLDER_FILE_THRESHOLD
+
+__all__ = [
+    "Unit",
+    "ExclusionWarning",
+    "ExactDuplicateGroup",
+    "VersionGroup",
+    "ScanResult",
+    "OperationCancelled",
+    "find_duplicates",
+]
+
+# Jamais redescendu : un fichier déjà écarté lors d'un scan précédent ne
+# doit jamais réapparaître comme "nouveau doublon" à découvrir (§move.py).
+DUPLICATES_DIR_NAME = "_doublons"
+
+_HASH_BLOCK_SIZE = 1024 * 1024
+
+
+@dataclass
+class Unit:
+    """Élément atomique de détection -- `representative` sert de nom pour
+    la normalisation de titre et le regroupement par dossier de système ;
+    `members` contient tous les fichiers réellement déplacés ensemble."""
+
+    representative: Path
+    members: List[Path]
+    total_size_bytes: int
+    is_linked: bool
+
+
+@dataclass
+class ExclusionWarning:
+    manifest: Path
+    missing: List[str]
+
+
+@dataclass
+class ExactDuplicateGroup:
+    units: List[Unit]
+
+
+@dataclass
+class VersionGroup:
+    system_folder: str
+    normalized_title: str
+    units: List[Unit]
+    suggested_keep: Unit
+
+
+@dataclass
+class ScanResult:
+    exact_duplicate_groups: List[ExactDuplicateGroup] = field(default_factory=list)
+    version_groups: List[VersionGroup] = field(default_factory=list)
+    excluded: List[ExclusionWarning] = field(default_factory=list)
+    files_scanned: int = 0
+
+
+class OperationCancelled(Exception):
+    def __init__(self, files_scanned: int):
+        super().__init__(f"Analyse annulée après {files_scanned} fichier(s).")
+        self.files_scanned = files_scanned
+
+
+def _walk_files(directory: Path, ignored_dirs_lower: frozenset) -> Iterator[Path]:
+    """Même principe que `partitions/copy.py::_walk_files`/l'ancien
+    `partitions/dedupe.py::_walk_rom_candidate_files` (`os.scandir`, un
+    seul passage par dossier) -- un dossier ignoré (nom exact, insensible
+    à la casse, ou commençant par un point) n'est jamais descendu, pas
+    seulement filtré après coup."""
+    try:
+        entries = os.scandir(directory)
+    except OSError:
+        return
+    with entries:
+        for entry in entries:
+            if entry.is_dir():
+                name_lower = entry.name.lower()
+                if name_lower.startswith(".") or name_lower in ignored_dirs_lower or entry.name == DUPLICATES_DIR_NAME:
+                    continue
+                yield from _walk_files(Path(entry.path), ignored_dirs_lower)
+            elif entry.is_file():
+                yield Path(entry.path)
+
+
+def _hash_file(path: Path) -> Optional[str]:
+    hasher = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(_HASH_BLOCK_SIZE), b""):
+                hasher.update(chunk)
+    except OSError:
+        return None
+    return hasher.hexdigest()
+
+
+def _find_exact_duplicates(units: List[Unit]) -> List[ExactDuplicateGroup]:
+    by_size: Dict[int, List[Unit]] = defaultdict(list)
+    for unit in units:
+        if not unit.is_linked:
+            by_size[unit.total_size_bytes].append(unit)
+
+    groups: List[ExactDuplicateGroup] = []
+    for same_size_units in by_size.values():
+        if len(same_size_units) < 2:
+            continue
+        by_hash: Dict[str, List[Unit]] = defaultdict(list)
+        for unit in same_size_units:
+            digest = _hash_file(unit.representative)
+            if digest is not None:
+                by_hash[digest].append(unit)
+        for hash_units in by_hash.values():
+            if len(hash_units) >= 2:
+                groups.append(ExactDuplicateGroup(units=hash_units))
+    return groups
+
+
+def _system_folder(root: Path, unit: Unit) -> str:
+    try:
+        relative_parts = unit.representative.relative_to(root).parts
+    except ValueError:
+        return ""
+    return relative_parts[0] if len(relative_parts) > 1 else ""
+
+
+def _find_version_groups(root: Path, units: List[Unit]) -> List[VersionGroup]:
+    grouped: Dict[Tuple[str, str], List[Unit]] = defaultdict(list)
+    for unit in units:
+        key = (_system_folder(root, unit), normalize_title(unit.representative.stem))
+        grouped[key].append(unit)
+
+    result: List[VersionGroup] = []
+    for (system_folder, normalized_title), group_units in grouped.items():
+        if len(group_units) < 2:
+            continue
+        suggested = max(
+            group_units,
+            key=lambda u: priority_score(u.representative.stem, u.total_size_bytes),
+        )
+        result.append(
+            VersionGroup(
+                system_folder=system_folder,
+                normalized_title=normalized_title,
+                units=group_units,
+                suggested_keep=suggested,
+            )
+        )
+    return result
+
+
+def find_duplicates(
+    root: str,
+    ignored_dirs: Iterable[str] = (),
+    on_progress: Optional[Callable[[int], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+    confirm_large_folder: Optional[Callable[[], bool]] = None,
+) -> ScanResult:
+    """Analyse `root` (dossier déjà accessible, choisi par l'utilisateur --
+    PC, carte SD ou disque externe, aucune notion de périphérique ici).
+
+    `on_progress(nombre_de_fichiers_vus)` est appelé à chaque fichier
+    rencontré (pas seulement les candidats retenus) -- une barre de
+    progression a besoin de savoir que l'analyse avance, même sur un
+    dossier qui ne contient presque aucune ROM. `should_cancel()` est
+    vérifié à chaque fichier (annulation coopérative, même principe que
+    partout ailleurs dans ce projet). `confirm_large_folder()`, s'il est
+    fourni, n'est appelé qu'une fois, au franchissement de
+    `LARGE_FOLDER_FILE_THRESHOLD` -- il doit bloquer jusqu'à obtenir une
+    réponse (ex. un `threading.Event.wait()` côté appelant GUI) et
+    renvoyer `True` pour continuer, `False` pour annuler ; `None` (par
+    défaut, utilisé par les tests) désactive complètement ce garde-fou."""
+    root_path = Path(root)
+    ignored_dirs_lower = frozenset(name.lower() for name in ignored_dirs)
+
+    candidate_files: List[Path] = []
+    manifest_files: List[Path] = []
+    count = 0
+    threshold_confirmed = False
+
+    for path in _walk_files(root_path, ignored_dirs_lower):
+        if should_cancel is not None and should_cancel():
+            raise OperationCancelled(count)
+
+        count += 1
+        if on_progress is not None:
+            on_progress(count)
+
+        if count >= LARGE_FOLDER_FILE_THRESHOLD and not threshold_confirmed and confirm_large_folder is not None:
+            if not confirm_large_folder():
+                raise OperationCancelled(count)
+            threshold_confirmed = True
+
+        kind = classify(path.suffix)
+        if kind is ExtensionKind.MANIFEST:
+            manifest_files.append(path)
+        elif kind is ExtensionKind.ATOMIC:
+            candidate_files.append(path)
+        # COMPANION_ONLY/UNKNOWN : jamais un candidat, jamais un manifeste --
+        # ignorés ici, un COMPANION_ONLY n'est repris que s'il est
+        # explicitement référencé par un manifeste (resolve_manifest fait
+        # sa propre lecture du dossier, indépendante de cette liste).
+
+    units: List[Unit] = []
+    excluded: List[ExclusionWarning] = []
+    consumed: Set[Path] = set()
+
+    for manifest_path in manifest_files:
+        resolution = resolve_manifest(manifest_path)
+        if resolution.missing:
+            excluded.append(ExclusionWarning(manifest=manifest_path, missing=resolution.missing))
+            continue
+        members = [manifest_path, *resolution.members]
+        consumed.update(members)
+        try:
+            total_size = sum(member.stat().st_size for member in members)
+        except OSError:
+            continue
+        units.append(Unit(representative=manifest_path, members=members, total_size_bytes=total_size, is_linked=True))
+
+    for file_path in candidate_files:
+        if file_path in consumed:
+            # Déjà absorbé par un manifeste (ex. un .chd listé dans un
+            # .m3u) -- ne doit jamais aussi compter comme unité solo.
+            continue
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            continue
+        units.append(Unit(representative=file_path, members=[file_path], total_size_bytes=size, is_linked=False))
+
+    return ScanResult(
+        exact_duplicate_groups=_find_exact_duplicates(units),
+        version_groups=_find_version_groups(root_path, units),
+        excluded=excluded,
+        files_scanned=count,
+    )

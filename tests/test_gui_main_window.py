@@ -512,7 +512,8 @@ def test_backup_system_reachable_from_assisted_landing(mock_list, mock_filter, m
     window = MainWindow()
     assert window._root_stack.currentWidget() is window._assisted_landing
 
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
 
     assert window._root_stack.currentWidget() is window._main_view
     assert window._main_view._left_stack.currentWidget() is window._wizard_panel
@@ -528,7 +529,8 @@ def test_backup_system_from_assisted_landing_does_not_persist_expert_mode(mock_l
     à retrouver en mode expert au prochain lancement."""
     with patch("r36s_studio.gui.main_window.app_config.save_config") as mock_save:
         window = MainWindow()
-        window._assisted_landing.backup_system_requested.emit()
+        window._assisted_landing.backup_requested.emit()
+        window._assisted_backup_kind_dialog.system_only_requested.emit()
 
     mock_save.assert_not_called()
     assert window._app_config.ui_mode == "assisted"
@@ -543,7 +545,8 @@ def test_backup_system_success_offers_prepare_card_and_return_home(mock_list, mo
     de suite -- deux choix explicites sur le panneau assisté."""
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
 
@@ -564,7 +567,8 @@ def test_backup_system_failure_only_offers_return_home(mock_list, mock_filter, m
     jamais un choix qui n'en a pas."""
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._last_error_code = "IO_ERROR"
@@ -581,7 +585,8 @@ def test_backup_system_failure_only_offers_return_home(mock_list, mock_filter, m
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_backup_system_return_home_switches_to_assisted_landing(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._on_worker_finished(True)
@@ -604,7 +609,8 @@ def test_backup_system_prepare_card_starts_polling_with_continue_disabled(
     câblée. Doit démarrer le même sondage automatique que les étapes 1/4,
     Continuer désactivé tant qu'aucune carte n'est trouvée."""
     window = MainWindow()
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device_dialog.close()  # fenêtre Choix de la carte de l'étape backup_system, non simulée ici
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
@@ -631,7 +637,8 @@ def test_backup_system_prepare_card_single_candidate_enables_continue(
     mock_list.return_value = [new_device]
     mock_filter.return_value = [new_device]
     window = MainWindow()
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._on_worker_finished(True)
@@ -660,7 +667,8 @@ def test_backup_system_prepare_card_continue_proceeds_to_confirmation(
     mock_list.return_value = [new_device]
     mock_filter.return_value = [new_device]
     window = MainWindow()
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._on_worker_finished(True)
@@ -688,7 +696,8 @@ def test_backup_system_prepare_card_multiple_candidates_falls_back_to_device_dia
     mock_list.return_value = devices
     mock_filter.return_value = devices
     window = MainWindow()
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._on_worker_finished(True)
@@ -714,7 +723,8 @@ def test_backup_system_prepare_card_multiple_candidates_falls_back_to_device_dia
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_backup_system_prepare_card_no_candidate_keeps_waiting(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device_dialog.close()  # fenêtre Choix de la carte de l'étape backup_system, non simulée ici
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
@@ -742,7 +752,8 @@ def test_backup_system_prepare_card_refresh_button_polls_the_right_target(
     mock_list.return_value = [new_device]
     mock_filter.return_value = [new_device]
     window = MainWindow()
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._on_worker_finished(True)
@@ -759,7 +770,8 @@ def test_backup_system_prepare_card_refresh_button_polls_the_right_target(
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_backup_system_prepare_card_cancel_stops_polling(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._on_worker_finished(True)
@@ -782,7 +794,8 @@ def test_backup_system_prepare_card_flash_finished_only_offers_return_home(
     -- seul le retour à l'accueil reste proposé."""
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
-    window._assisted_landing.backup_system_requested.emit()
+    window._assisted_landing.backup_requested.emit()
+    window._assisted_backup_kind_dialog.system_only_requested.emit()
     window._device = _make_device()
     window._file_path = "/tmp/systeme.img"
     window._on_worker_finished(True)
@@ -794,6 +807,190 @@ def test_backup_system_prepare_card_flash_finished_only_offers_return_home(
     assert window._mode == "flash"
     assert window._wizard_panel._prepare_card_button.isVisible() is False
     assert window._wizard_panel._return_home_button.isVisible() is True
+
+
+# --- Mécanisme ad-hoc généralisé (§5, refonte menu de tuiles) : vérifié ---
+# --- ci-dessus pour backup/backup_system, ici pour un second job_key -----
+# --- (copy_games) et pour l'éjection (chemin d'exécution distinct, -------
+# --- _perform_eject/_on_perform_eject_finished, jamais _start_worker). ---
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_copy_games_ad_hoc_from_assisted_landing_offers_next_step_choice(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """Généralisation du mécanisme ad-hoc à un job_key au-delà de backup/
+    backup_system -- même mécanisme (`_start_assisted_ad_hoc_job`), une
+    table de chaînes au lieu d'un `if`/`else` en dur pour exactement deux
+    cas."""
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    window._assisted_landing.copy_games_requested.emit()
+
+    assert window._mode == "copy_games"
+    assert window._root_stack.currentWidget() is window._main_view
+    assert window._main_view._left_stack.currentWidget() is window._wizard_panel
+
+    window._device = _make_device()
+    window._file_path = "/tmp/games"
+    window._on_worker_finished(True)
+
+    assert window._wizard_panel._return_home_button.isVisible() is True
+    # "Préparer une carte avec cette sauvegarde" n'a de sens qu'après une
+    # sauvegarde (backup/backup_system) -- jamais pour copy_games.
+    assert window._wizard_panel._prepare_card_button.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_eject_ad_hoc_from_assisted_landing_offers_next_step_choice_not_refresh_home(
+    mock_list, mock_filter, mock_load, qapp
+):
+    """§5, refonte menu de tuiles -- correctif du même défaut de parcours
+    déjà corrigé pour les autres tuiles-job : l'éjection ad-hoc doit
+    proposer une suite explicite (`show_next_step_choice`), jamais un
+    `_refresh_home_state()` qui ne fait rien d'utile pour un écran de
+    tuiles jamais visible à ce moment (`_home` n'est pas affiché)."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    def _fake_start_eject(dev, on_finished):
+        on_finished(True, None, None)
+
+    with patch.object(window, "_start_eject", side_effect=_fake_start_eject), patch.object(
+        window, "_refresh_home_state"
+    ) as mock_refresh:
+        window._assisted_landing.eject_requested.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+
+    mock_refresh.assert_not_called()
+    assert window._wizard_panel._return_home_button.isVisible() is True
+
+
+# --- Tuile « Rechercher ma console » (identification DTB, §5) --------------
+
+
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_start_assisted_identify_single_device_runs_identify_and_shows_result(mock_list, mock_filter, qapp):
+    from r36s_studio.identify import IdentifyResult
+    from r36s_studio.identify.dtb import DtbInfo
+
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    with patch("r36s_studio.gui.main_window.IdentifyRunner") as mock_runner_class:
+        instance = MagicMock()
+        mock_runner_class.return_value = instance
+        window._assisted_landing.identify_requested.emit()
+
+        mock_runner_class.assert_called_once_with(device.path, parent=window)
+        instance.start.assert_called_once()
+        callback = instance.finished_identify.connect.call_args[0][0]
+        callback(IdentifyResult(info=DtbInfo(board_compatible="rk3326-r35s", panel_compatible=None)))
+
+    assert window._identify_result_dialog.isVisible() is True
+    assert "rk3326-r35s" in window._identify_result_dialog._message.text()
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_assisted_identify_multiple_devices_opens_dedicated_device_dialog(mock_list, mock_filter, qapp):
+    """Instance dédiée (`_identify_device_dialog`), jamais `_device_dialog`
+    (câblé au grand dispatcher `_on_device_chosen`, sans rapport avec ce
+    flux ponctuel)."""
+    devices = [_make_device(path="/dev/fake-disk-test-a"), _make_device(path="/dev/fake-disk-test-b")]
+    mock_list.return_value = devices
+    mock_filter.return_value = devices
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    window._assisted_landing.identify_requested.emit()
+
+    assert window._identify_device_dialog.isVisible() is True
+    assert window._device_dialog.isVisible() is False
+
+
+# --- Outil « Doublons de jeux » (docs/doublons.md, outil autonome) --------
+# Remplace l'ancien flux carte-SD-uniquement (`partitions.dedupe`, jamais
+# implémenté au-delà de ce test mort) : la tuile ouvre désormais un choix
+# de dossier quelconque, plus aucun rapport avec une carte détectée.
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_find_duplicates_tile_opens_folder_screen_then_scan_shows_results(mock_list, mock_filter, qapp, tmp_path):
+    from r36s_studio.doublons.scan import ExactDuplicateGroup, ScanResult, Unit
+
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    window._assisted_landing.find_duplicates_requested.emit()
+    assert window._root_stack.currentWidget() is window._doublons_folder_screen
+
+    unit_a = Unit(tmp_path / "Aladdin.zip", [tmp_path / "Aladdin.zip"], 10, False)
+    unit_b = Unit(tmp_path / "Aladdin.7z", [tmp_path / "Aladdin.7z"], 10, False)
+    result = ScanResult(exact_duplicate_groups=[ExactDuplicateGroup([unit_a, unit_b])], files_scanned=2)
+
+    with patch("r36s_studio.gui.main_window.DoublonsScanRunner") as mock_runner_class:
+        instance = MagicMock()
+        mock_runner_class.return_value = instance
+        window._doublons_folder_screen.folder_chosen.emit(str(tmp_path))
+
+        mock_runner_class.assert_called_once_with(
+            str(tmp_path), window._app_config.doublons_ignored_folders, parent=window
+        )
+        callback = instance.finished_scan.connect.call_args[0][0]
+        callback(result)
+
+    assert window._root_stack.currentWidget() is window._doublons_results_screen
+    assert window._doublons_results_screen._empty_label.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_confirmed_starts_move_runner_and_rescans(mock_list, mock_filter, qapp, tmp_path):
+    from r36s_studio.doublons.scan import Unit
+
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._doublons_root = str(tmp_path)
+    dry_run = window._app_config.doublons_simulation_mode
+    units = [Unit(tmp_path / "Aladdin.7z", [tmp_path / "Aladdin.7z"], 10, False)]
+
+    with patch("r36s_studio.gui.main_window.DoublonsMoveRunner") as mock_move_class, patch(
+        "r36s_studio.gui.main_window.DoublonsScanRunner"
+    ) as mock_scan_class:
+        move_instance = MagicMock()
+        mock_move_class.return_value = move_instance
+        scan_instance = MagicMock()
+        mock_scan_class.return_value = scan_instance
+
+        window._doublons_results_screen.move_requested.emit(units)
+        window._confirm_move_doublons_dialog.confirmed.emit()
+
+        mock_move_class.assert_called_once_with(str(tmp_path), units, dry_run, parent=window)
+        move_instance.start.assert_called_once()
+
+        finished_callback = move_instance.finished_move.connect.call_args[0][0]
+        finished_callback(True)
+
+        # Relance toujours un scan frais après un déplacement -- reflète
+        # l'état réel du dossier plutôt qu'une mise à jour partielle.
+        mock_scan_class.assert_called_once_with(
+            str(tmp_path), window._app_config.doublons_ignored_folders, parent=window
+        )
 
 
 # --- Écran de bienvenue macOS : Accès complet au disque (§3) ---------------
@@ -2608,15 +2805,18 @@ def test_expert_mode_button_from_landing_persists_config_and_shows_home(
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_consoles_diverses_button_from_assisted_landing_switches_screen(
+def test_catalog_access_from_identify_result_dialog_switches_screen(
     mock_list, mock_filter, mock_detect, mock_load, qapp
 ):
     """Section « Consoles diverses » (consoles_diverses/, étape 1) --
-    bouton discret présent sur les deux accueils, jamais un changement de
-    `ui_mode` (ce n'est pas un mode, juste une section indépendante)."""
+    plus de tuile séparée dans l'accueil assisté (§5, correctif visuel :
+    fusionnée dans « Identifier ma console »), l'accès au catalogue se
+    fait désormais depuis l'écran de résultat de l'identification, jamais
+    un changement de `ui_mode` (ce n'est pas un mode, juste une section
+    indépendante)."""
     window = MainWindow()
 
-    window._assisted_landing.consoles_diverses_requested.emit()
+    window._identify_result_dialog.catalog_requested.emit()
 
     assert window._root_stack.currentWidget() is window._consoles_diverses_screen
 

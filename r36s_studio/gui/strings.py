@@ -93,9 +93,136 @@ STRINGS = {
     # Sauvegarde système sans les jeux (§4.3), aussi proposée comme option
     # du mode assisté -- discrète, sous le bouton principal.
     "assisted_backup_system_button": "Sauvegarder mon système sans les jeux",
-    # Section « Consoles diverses » (consoles_diverses/, étape 1) --
-    # symétrique de "home_consoles_diverses_button".
-    "assisted_consoles_diverses_button": "Consoles diverses",
+    # Libellés courts des 10 tuiles de l'accueil assisté (refonte menu de
+    # tuiles, §5) -- un seul libellé par tuile, bas-gauche, pas de
+    # description séparée contrairement aux lignes de HomeScreen (préfixe
+    # distinct de "home_tile_*", qui reste celui des lignes du mode
+    # expert -- même concept, texte plus court pour tenir dans une tuile).
+    # Tuile 1 seule à porter aussi une description (correctif visuel,
+    # icône/libellé agrandis) ; "Rechercher ma console"/"Consoles
+    # diverses" fusionnées en une seule tuile « Identifier ma console »
+    # (correctif visuel) -- l'accès au catalogue se fait désormais depuis
+    # l'écran de résultat de l'identification (`IdentifyResultDialog`).
+    "assisted_tile_prepare": "Préparer ma carte",
+    "assisted_tile_prepare_desc": "Copie complète de l'ancienne carte vers la neuve, étape par étape.",
+    "assisted_tile_identify": "Identifier ma console",
+    "assisted_tile_backup": "Sauvegarder ma carte",
+    "assisted_tile_flash": "Installer un système",
+    "assisted_tile_copy_games": "Copier mes jeux",
+    "assisted_tile_find_duplicates": "Chercher les doublons",
+    "assisted_tile_eject": "Éjecter la carte",
+    "assisted_tile_reset_card": "Remettre la carte à zéro",
+    "assisted_tile_help": "Aide",
+    # En-tête de l'accueil assisté (§5, correctif visuel -- manquait
+    # entièrement). Le nom de l'app lui-même réutilise "app_title", jamais
+    # dupliqué ici.
+    "assisted_brand_subtitle": "Choisis ce que tu veux faire avec ta carte SD.",
+    # Étiquette de section au-dessus de la grille (maquette de référence,
+    # docs/screenshots/maquette-accueil.png) -- manquait entièrement.
+    "assisted_section_label": "Pour commencer",
+    # Titre/message du nouveau dialogue "À propos" (Windows/Linux, tuile
+    # Aide) -- macOS ouvre HelpDialog (Accès complet au disque) à la
+    # place, sans rapport avec ces deux OS.
+    "about_title": "À propos de R36S Studio",
+    "about_orientation": (
+        "Chaque tuile de l'accueil correspond à une action sur ta carte SD. "
+        "Branche ta carte, l'appli détecte ce qu'il y a dessus et propose "
+        "l'action pertinente avec un badge (faisable, déjà faite, non "
+        "pertinente pour cette carte). Rien n'est jamais fait sans que tu "
+        "cliques dessus, et toute action qui efface quelque chose te le "
+        "demande explicitement avant de commencer."
+    ),
+    "about_close": "Fermer",
+    # Résultat de la tuile « Rechercher ma console » (§5, refonte menu de
+    # tuiles) -- `identify/__init__.py::identify_from_boot_directory`,
+    # jamais un nom convivial inventé pour l'identifiant du .dtb (convention
+    # déjà suivie ailleurs dans ce projet, §4.6).
+    "identify_result_title": "Ta console",
+    "identify_result_board": "Identifiant détecté : {board}",
+    # Accès au catalogue (consoles_diverses/, ex-tuile « Consoles diverses »
+    # fusionnée ici, §5 correctif visuel) -- toujours affiché, succès ou
+    # échec de l'identification.
+    "identify_result_catalog_button": "Voir le catalogue des consoles",
+    "identify_result_clone_warning": (
+        "Cette carte semble être une console clone (matériel différent d'une R36S/R35S standard). "
+        "ArkOS et ROCKNIX ne démarrent généralement pas dessus -- EmuELEC, lui, fonctionne."
+    ),
+    "identify_failed_mount_failed": (
+        "Impossible de lire le système de la carte. Débranche-la et rebranche-la, puis réessaie."
+    ),
+    "identify_failed_no_dtb_found": (
+        "Aucune information de modèle trouvée sur cette carte -- c'est normal pour une carte tout juste flashée."
+    ),
+    "identify_failed_all_dtb_invalid": (
+        "Les informations de modèle présentes sur cette carte sont illisibles ou corrompues."
+    ),
+    # Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien flux
+    # carte-SD-uniquement) -- déplacement vers un dossier _doublons/,
+    # jamais une suppression : le vocabulaire choisi ("écarter") reflète
+    # ça, jamais "supprimer".
+    "doublons_back_button": "Retour",
+    "doublons_folder_title": "Choisir un dossier",
+    "doublons_folder_hint": (
+        "Choisis le dossier à analyser -- sur ton ordinateur, une carte SD ou un disque externe."
+    ),
+    "doublons_folder_no_shortcuts": "Aucune carte ni disque amovible détecté pour l'instant.",
+    "doublons_browse_button": "Parcourir…",
+    "doublons_options_title": "OPTIONS",
+    "doublons_simulation_checkbox": "Simuler sans rien déplacer",
+    "doublons_ignored_folders_title": "Dossiers ignorés :",
+    "doublons_scan_progress_title": "Analyse en cours",
+    "doublons_scan_progress_count": "{count} fichier(s) analysé(s)",
+    "doublons_scan_cancel_button": "Annuler",
+    "doublons_risk_title": "Ce dossier peut prendre du temps à analyser",
+    "doublons_risk_cancel": "Annuler",
+    "doublons_risk_continue": "Continuer",
+    "doublons_risk_filesystem_root": (
+        "Tu as choisi la racine entière d'un disque -- l'analyse peut prendre très "
+        "longtemps et parcourir des dossiers sans rapport avec tes jeux. Continuer quand même ?"
+    ),
+    "doublons_risk_whole_user_folder": (
+        "Tu as choisi un dossier personnel entier plutôt qu'un dossier de jeux précis -- "
+        "l'analyse peut prendre très longtemps. Continuer quand même ?"
+    ),
+    "doublons_risk_large_folder": (
+        "Ce dossier contient déjà plus de 200 000 fichiers et l'analyse continue -- "
+        "ça peut prendre du temps. Continuer ?"
+    ),
+    "doublons_results_title": "Doublons trouvés",
+    "doublons_undo_button": "Tout annuler",
+    "doublons_undo_conflicts_warning": (
+        "{count} fichier(s) n'ont pas pu être restauré(s) automatiquement -- "
+        "vérifie le contenu du dossier _doublons/."
+    ),
+    "doublons_export_button": "Exporter le rapport",
+    "doublons_simulation_banner": "Mode simulation actif -- rien ne sera déplacé.",
+    "doublons_summary": (
+        "{files} fichier(s) analysé(s) -- {exact} groupe(s) de copies identiques, "
+        "{versions} groupe(s) de versions différentes."
+    ),
+    "doublons_empty": "Aucun doublon trouvé.",
+    "doublons_group_exact_title": "Copies identiques",
+    "doublons_move_this_one": "Écarter celui-ci",
+    "doublons_move_selected_button": "Écarter la sélection",
+    "doublons_excluded_title": "Groupes exclus -- fichier lié introuvable",
+    "doublons_excluded_entry": "{manifest} : {missing} introuvable(s)",
+    "doublons_confirm_title": "Écarter ces doublons ?",
+    "doublons_confirm_message": (
+        "{count} fichier(s) ({size}) seront déplacés dans un dossier _doublons/ -- "
+        "pas supprimés, tu peux les remettre à leur place plus tard si besoin."
+    ),
+    "doublons_confirm_message_simulation": (
+        "Simulation : {count} fichier(s) ({size}) seraient déplacés dans un dossier "
+        "_doublons/ -- rien ne sera réellement touché."
+    ),
+    "doublons_confirm_button": "Écarter",
+    "doublons_confirm_button_simulation": "Simuler",
+    "doublons_confirm_cancel": "Annuler",
+    "doublons_undo_confirm_title": "Tout annuler ?",
+    "doublons_undo_confirm_message": (
+        "Tous les fichiers déplacés dans _doublons/ seront remis à leur emplacement d'origine."
+    ),
+    "doublons_undo_confirm_button": "Tout annuler",
     # Sauvegarde système lancée depuis l'accueil assisté (§4.3) : reste
     # entièrement dans l'habillage assisté (WizardStepPanel), jamais
     # l'écran expert -- correctif d'un défaut de parcours signalé (bascule
@@ -105,6 +232,31 @@ STRINGS = {
     "assisted_backup_system_running_instruction": "Ne débranche pas ta carte pendant la sauvegarde.",
     "assisted_backup_system_done_title": "Sauvegarde terminée",
     "assisted_backup_system_done_instruction": "Que veux-tu faire maintenant ?",
+    # Mécanisme ad-hoc généralisé (§5, refonte menu de tuiles) -- même
+    # principe que les paires backup_system ci-dessus, pour chacun des
+    # autres job_keys déclenchables depuis une tuile de l'accueil assisté.
+    # "flash" réutilise volontairement les paires "assisted_prepare_card_
+    # done_*" existantes (ci-dessous) : même situation finale ("carte
+    # préparée"), qu'on y soit arrivé via cette tuile ou via « Préparer une
+    # carte avec cette sauvegarde ».
+    "assisted_backup_running_title": "Sauvegarde de la carte en cours",
+    "assisted_backup_running_instruction": "Ne débranche pas ta carte pendant la sauvegarde.",
+    "assisted_backup_done_title": "Sauvegarde terminée",
+    "assisted_backup_done_instruction": "Que veux-tu faire maintenant ?",
+    "assisted_flash_running_title": "Installation du système en cours",
+    "assisted_flash_running_instruction": "Ne débranche pas ta carte pendant l'installation.",
+    "assisted_copy_games_running_title": "Copie des jeux en cours",
+    "assisted_copy_games_running_instruction": "Ne débranche pas ta carte pendant la copie.",
+    "assisted_copy_games_done_title": "Jeux copiés",
+    "assisted_copy_games_done_instruction": "Que veux-tu faire maintenant ?",
+    "assisted_reset_card_running_title": "Remise à zéro de la carte en cours",
+    "assisted_reset_card_running_instruction": "Ne débranche pas ta carte pendant l'opération.",
+    "assisted_reset_card_done_title": "Carte remise à zéro",
+    "assisted_reset_card_done_instruction": "Que veux-tu faire maintenant ?",
+    "assisted_eject_running_title": "Éjection de la carte en cours",
+    "assisted_eject_running_instruction": "Ne débranche pas ta carte.",
+    "assisted_eject_done_title": "Carte éjectée",
+    "assisted_eject_done_instruction": "Tu peux retirer ta carte en toute sécurité.",
     "assisted_prepare_card_button": "Préparer une carte avec cette sauvegarde",
     "assisted_return_home_button": "Revenir à l'accueil",
     "assisted_prepare_card_choose_device_title": "Choisis la carte à préparer",
@@ -505,6 +657,21 @@ STRINGS = {
     # commandes CLI pour une erreur disque/E-S imprévue (carte débranchée
     # en cours de copie, permission refusée...) : le plus susceptible
     # d'apparaître en usage réel de tous les codes qui manquaient.
+    # Outil « Doublons de jeux » (docs/doublons.md, § garde-fous ajoutés
+    # après validation du plan) -- codes propres à `gui/doublons_runner.py`,
+    # jamais réutilisés depuis les messages carte-SD ci-dessus/dessous
+    # (`error_io_error` mentionne explicitement "la carte", trompeur pour
+    # un dossier quelconque du PC).
+    "error_doublons_io_error": (
+        "Une erreur de lecture ou d'écriture est survenue. Vérifie que le dossier est toujours accessible."
+    ),
+    "error_destination_not_writable": (
+        "Impossible d'écrire dans le dossier _doublons/ -- vérifie qu'il n'est pas en lecture seule."
+    ),
+    "error_volume_mismatch": (
+        "Le dossier _doublons/ se trouve sur un disque différent de celui analysé -- opération annulée par prudence."
+    ),
+    "error_path_outside_root": "Un fichier à déplacer ne se trouve plus dans le dossier analysé.",
     "error_output_exists": "Un fichier du même nom existe déjà à cet emplacement. Choisis un autre nom ou un autre dossier.",
     "error_image_not_found": "Le fichier image choisi est introuvable. Il a peut-être été déplacé ou supprimé.",
     "error_io_error": "Une erreur de lecture ou d'écriture est survenue. Vérifie que la carte est toujours branchée.",
@@ -576,6 +743,10 @@ _ERROR_MESSAGE_KEYS = {
     "UNSUPPORTED_OS": "error_unsupported_os",
     "CONFIRMATION_REFUSED": "error_confirmation_refused",
     "INVALID_ARGS": "error_invalid_args",
+    "DOUBLONS_IO_ERROR": "error_doublons_io_error",
+    "DESTINATION_NOT_WRITABLE": "error_destination_not_writable",
+    "VOLUME_MISMATCH": "error_volume_mismatch",
+    "PATH_OUTSIDE_ROOT": "error_path_outside_root",
 }
 
 

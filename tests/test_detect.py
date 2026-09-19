@@ -14,6 +14,7 @@ from r36s_studio.detect import (
     EXTRACT_BOOT,
     EXTRACT_EASYROMS,
     FLASH,
+    IDENTIFY,
     INJECT_BOOT,
     CardSystem,
     StepStatus,
@@ -44,7 +45,15 @@ def test_no_device_marks_every_step_not_relevant(mock_platform):
     status = detect_workflow_status(None)
 
     assert all(value == StepStatus.NOT_RELEVANT for value in status.values())
-    assert set(status) == {EXTRACT_BOOT, EXTRACT_EASYROMS, FLASH, INJECT_BOOT, COPY_GAMES, EJECT}
+    assert set(status) == {
+        EXTRACT_BOOT,
+        EXTRACT_EASYROMS,
+        FLASH,
+        INJECT_BOOT,
+        COPY_GAMES,
+        EJECT,
+        IDENTIFY,
+    }
 
 
 # --- carte vierge (BLANK) : seul le flash est faisable ---------------------
@@ -320,3 +329,35 @@ def test_rocknix_card_copy_games_is_system_incompatible_even_on_macos(mock_list,
     status = detect_workflow_status(_make_device())
 
     assert status[COPY_GAMES] == StepStatus.SYSTEM_INCOMPATIBLE
+
+
+# --- identify (accueil assisté, menu de tuiles) ---------------------------
+
+
+@patch("r36s_studio.detect.platform.system", return_value="Linux")
+@patch("r36s_studio.detect.archives.list_archives", return_value=[])
+@patch("r36s_studio.detect.list_partitions")
+def test_identify_available_when_boot_partition_present(mock_list, mock_archives, mock_platform):
+    mock_list.return_value = [
+        PartitionInfo("/dev/fake-disk-test-3s1", "", "fat16", "/Volumes/NO NAME"),
+        PartitionInfo("/dev/fake-disk-test-3s2", "", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-3s3", "EASYROMS", "ntfs", "/Volumes/EASYROMS"),
+    ]
+
+    status = detect_workflow_status(_make_device())
+
+    assert status[IDENTIFY] == StepStatus.AVAILABLE
+
+
+@patch("r36s_studio.detect.platform.system", return_value="Linux")
+@patch("r36s_studio.detect.list_partitions", return_value=[])
+def test_identify_not_relevant_without_boot_partition(mock_list, mock_platform):
+    status = detect_workflow_status(_make_device())
+
+    assert status[IDENTIFY] == StepStatus.NOT_RELEVANT
+
+
+def test_identify_not_relevant_without_any_card():
+    status = detect_workflow_status(None)
+
+    assert status[IDENTIFY] == StepStatus.NOT_RELEVANT

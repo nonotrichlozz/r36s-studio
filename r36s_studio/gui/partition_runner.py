@@ -27,6 +27,7 @@ privilège à franchir : on les appelle directement, dans ce process, sur un
 
 from __future__ import annotations
 
+import platform
 import subprocess
 import time
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ from typing import Optional
 from PySide6.QtCore import QThread, Signal
 
 from r36s_studio.devices import Device
-from r36s_studio.identify import identify_from_boot_directory
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, identify_from_boot_directory
 from r36s_studio.identify.rocknix import (
     ChecksumMismatchError,
     DownloadCancelledError,
@@ -50,6 +51,7 @@ from r36s_studio.imaging.copy import PROGRESS_INTERVAL, OperationCancelled, Prog
 from r36s_studio.imaging.system_backup import GamesPartitionNotFound, estimate_system_backup_size_unprivileged
 from r36s_studio.partitions import (
     BOOT_LABEL,
+    EASYROMS_LABEL,
     MacosNtfsWriteUnsupported,
     MountpointNotWritable,
     PartitionNotFound,
@@ -293,6 +295,39 @@ class SystemBackupEstimate:
     detail: Optional[str] = None
     board_compatible: Optional[str] = None
     needs_elevation: bool = False
+
+
+class IdentifyRunner(QThread):
+    """Tuile « Rechercher ma console » de l'accueil assisté (§5, refonte
+    menu de tuiles) -- version non décorative de `_best_effort_board_
+    compatible` ci-dessous : celle-ci avale toute exception (son résultat
+    n'est qu'un bonus pour un nom de fichier suggéré), celle-ci doit au
+    contraire remonter un vrai résultat -- succès ou échec -- à afficher.
+    Sur un thread séparé comme les autres runners de ce module : monter le
+    BOOT peut bloquer jusqu'à `MOUNT_WAIT_SECONDS` (`locate_mounted`)."""
+
+    finished_identify = Signal(object)  # IdentifyResult
+
+    def __init__(self, device_path: str, parent=None):
+        super().__init__(parent)
+        self._device_path = device_path
+
+    def run(self) -> None:
+        try:
+            boot = locate_mounted(self._device_path, BOOT_LABEL)
+        except (PartitionNotFound, PartitionNotMounted) as exc:
+            # Carte sans BOOT lisible -- `IdentifyResultDialog` n'a alors
+            # qu'un seul type d'entrée à gérer (un `IdentifyResult`,
+            # succès ou échec confondus), jamais une exception à part.
+            self.finished_identify.emit(
+                IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED, detail=str(exc))
+            )
+            return
+        try:
+            result = identify_from_boot_directory(boot.mountpoint)
+        finally:
+            unmount_forced(boot)
+        self.finished_identify.emit(result)
 
 
 def _best_effort_board_compatible(device_path: str) -> Optional[str]:

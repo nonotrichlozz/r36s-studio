@@ -1439,17 +1439,116 @@ def test_doublons_results_screen_exact_group_shows_hash_and_identical_notice(qap
     assert tr("doublons_exact_group_identical_notice") in labels
 
 
-def test_doublons_results_screen_version_group_never_prechecked(qapp):
+def test_doublons_results_screen_version_group_prechecks_all_but_starred(qapp):
+    """docs/doublons-selection.md point 1 -- constat réel : 1272 groupes de
+    versions, jamais précochés, compteur à 3 fichiers. Tout sauf la
+    version suggérée (étoile) doit désormais être coché d'office."""
     from PySide6.QtWidgets import QCheckBox
 
+    kept = _make_unit("/EASYROMS/SNES/Game (France).sfc", 50)
+    other_a = _make_unit("/EASYROMS/SNES/Game (USA).sfc", 40)
+    other_b = _make_unit("/EASYROMS/SNES/Game (Japan).sfc", 30)
+    group = VersionGroup(
+        system_folder="SNES", normalized_title="game", units=[kept, other_a, other_b], suggested_keep=kept
+    )
     screen = DoublonsResultsScreen()
-    screen.set_results(ScanResult(version_groups=[_make_version_group()]))
 
-    checkboxes = [
-        box for box in screen._list_container.findChildren(QCheckBox) if box.text() == tr("doublons_move_this_one")
+    screen.set_results(ScanResult(version_groups=[group]))
+
+    # `Unit` n'est pas hashable (dataclass ordinaire) -- indexé par chemin.
+    boxes_by_path = {
+        unit.representative: box for box, unit in zip(screen._list_container.findChildren(QCheckBox), group.units)
+    }
+    assert boxes_by_path[kept.representative].isChecked() is False
+    assert boxes_by_path[other_a.representative].isChecked() is True
+    assert boxes_by_path[other_b.representative].isChecked() is True
+
+
+def test_doublons_results_screen_selection_summary_reflects_default_version_precheck(qapp):
+    """docs/doublons-selection.md point 2 -- le compteur doit refléter la
+    sélection automatique dès l'affichage, sans qu'aucune case n'ait été
+    touchée, sur plusieurs groupes à la fois (constat réel : 1272 groupes)."""
+    groups = []
+    for index in range(3):
+        kept = _make_unit(f"/EASYROMS/SNES/Game{index} (France).sfc", 50)
+        other = _make_unit(f"/EASYROMS/SNES/Game{index} (USA).sfc", 40)
+        groups.append(
+            VersionGroup(system_folder="SNES", normalized_title=f"game{index}", units=[kept, other], suggested_keep=kept)
+        )
+    screen = DoublonsResultsScreen()
+
+    screen.set_results(ScanResult(version_groups=groups))
+
+    # 1 fichier écarté par groupe (celui non suggéré), 3 groupes.
+    assert screen._selection_label.text() == tr("doublons_selection_summary", count=3, size=_format_size(120))
+
+
+def test_doublons_results_screen_auto_selection_banner_visible_only_with_groups(qapp):
+    screen = DoublonsResultsScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    screen.set_results(ScanResult(version_groups=[_make_version_group()]))
+    assert screen._auto_selection_banner.isVisible() is True
+    assert screen._selection_buttons_row.isVisible() is True
+
+    screen.set_results(ScanResult())
+    assert screen._auto_selection_banner.isVisible() is False
+    assert screen._selection_buttons_row.isVisible() is False
+
+
+def test_doublons_results_screen_select_all_and_select_none_buttons(qapp):
+    """docs/doublons-selection.md point 4 -- « Tout cocher »/« Tout
+    décocher » doivent porter sur toutes les cases, palier 1 et palier 2
+    confondus."""
+    from PySide6.QtWidgets import QCheckBox, QPushButton
+
+    screen = DoublonsResultsScreen()
+    screen.set_results(
+        ScanResult(exact_duplicate_groups=[_make_exact_group()], version_groups=[_make_version_group()])
+    )
+    checkboxes = screen._list_container.findChildren(QCheckBox)
+    buttons = {b.text(): b for b in screen.findChildren(QPushButton)}
+
+    buttons[tr("doublons_select_all_button")].click()
+    assert all(box.isChecked() for box in checkboxes)
+
+    buttons[tr("doublons_select_none_button")].click()
+    assert all(not box.isChecked() for box in checkboxes)
+
+
+def test_doublons_results_screen_keep_only_french_european_button(qapp):
+    """docs/doublons-selection.md point 4 -- ne touche que le palier 2 ;
+    garde (décoche) France/Fr et Europe, écarte (coche) tout le reste."""
+    from PySide6.QtWidgets import QPushButton
+
+    france = _make_unit("/EASYROMS/SNES/Game (France).sfc", 50)
+    usa = _make_unit("/EASYROMS/SNES/Game (USA).sfc", 40)
+    japan = _make_unit("/EASYROMS/SNES/Game (Japan).sfc", 30)
+    version_group = VersionGroup(
+        system_folder="SNES", normalized_title="game", units=[france, usa, japan], suggested_keep=usa
+    )
+    exact_group = _make_exact_group()
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(exact_duplicate_groups=[exact_group], version_groups=[version_group]))
+
+    button = [b for b in screen.findChildren(QPushButton) if b.text() == tr("doublons_keep_french_european_button")][
+        0
     ]
-    assert len(checkboxes) == 2
-    assert all(box.isChecked() is False for box in checkboxes)
+    button.click()
+
+    # `Unit` n'est pas hashable (dataclass ordinaire) -- indexé par chemin.
+    boxes_by_path = {
+        unit.representative: box for box, unit in screen._version_group_checkboxes.items()
+    }
+    assert boxes_by_path[france.representative].isChecked() is False
+    assert boxes_by_path[usa.representative].isChecked() is True
+    assert boxes_by_path[japan.representative].isChecked() is True
+    # Palier 1, non affecté par ce bouton -- toujours l'état par défaut
+    # (tout sauf le premier).
+    exact_paths = {unit.representative for unit in exact_group.units}
+    exact_only = [box for box, unit in screen._all_checkboxes.items() if unit.representative in exact_paths]
+    assert exact_only[0].isChecked() is False
+    assert exact_only[1].isChecked() is True
 
 
 def test_doublons_results_screen_move_requested_emits_only_checked_units(qapp):

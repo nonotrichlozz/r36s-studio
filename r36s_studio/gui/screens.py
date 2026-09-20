@@ -67,6 +67,7 @@ from r36s_studio.detect import (
     StepStatus,
 )
 from r36s_studio.devices import Device
+from r36s_studio.doublons.normalize import extract_tags, region_rank
 from r36s_studio.doublons.scan import ExactDuplicateGroup, ExclusionWarning, ScanResult, Unit, VersionGroup
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID, FIRMWARE_CATALOG
@@ -3142,6 +3143,38 @@ class DoublonsResultsScreen(Screen):
         self._simulation_banner.setVisible(False)
         root.addWidget(self._simulation_banner)
 
+        # Sélection automatique (docs/doublons-selection.md) -- rappel
+        # permanent qu'une case cochée par défaut reste une suggestion,
+        # jamais une garantie, tant qu'il reste au moins un groupe affiché.
+        self._auto_selection_banner = QLabel(tr("doublons_auto_selection_banner"))
+        self._auto_selection_banner.setProperty("role", "warning")
+        self._auto_selection_banner.setVisible(False)
+        root.addWidget(self._auto_selection_banner)
+
+        # Trois actions globales (docs/doublons-selection.md) -- à l'échelle
+        # de milliers de groupes, rouvrir chacun pour ajuster sa sélection
+        # à la main serait irréaliste. `_version_group_checkboxes` (distinct
+        # de `_all_checkboxes` ci-dessous) ne retient que les cases du
+        # palier 2 : « ne garder que France/Europe » n'a de sens que pour
+        # des versions du même jeu, jamais pour des copies strictement
+        # identiques (palier 1, aucune notion de région à départager).
+        self._version_group_checkboxes: Dict[QCheckBox, Unit] = {}
+        self._selection_buttons_row = QWidget()
+        buttons_row = QHBoxLayout(self._selection_buttons_row)
+        buttons_row.setContentsMargins(0, 0, 0, 0)
+        select_all_button = QPushButton(tr("doublons_select_all_button"))
+        select_all_button.clicked.connect(self._on_select_all)
+        buttons_row.addWidget(select_all_button)
+        select_none_button = QPushButton(tr("doublons_select_none_button"))
+        select_none_button.clicked.connect(self._on_select_none)
+        buttons_row.addWidget(select_none_button)
+        keep_french_european_button = QPushButton(tr("doublons_keep_french_european_button"))
+        keep_french_european_button.clicked.connect(self._on_keep_only_french_european)
+        buttons_row.addWidget(keep_french_european_button)
+        buttons_row.addStretch()
+        self._selection_buttons_row.setVisible(False)
+        root.addWidget(self._selection_buttons_row)
+
         # Compteur global (toutes cases à cocher confondues, tous groupes) --
         # demandé après un essai réel sur des milliers de fichiers, où le
         # total à écarter n'était visible qu'en dépliant chaque groupe un
@@ -3188,9 +3221,12 @@ class DoublonsResultsScreen(Screen):
                 widget.deleteLater()
 
         self._all_checkboxes = {}
+        self._version_group_checkboxes = {}
 
         has_groups = bool(scan_result.exact_duplicate_groups or scan_result.version_groups)
         self._empty_label.setVisible(not has_groups)
+        self._auto_selection_banner.setVisible(has_groups)
+        self._selection_buttons_row.setVisible(has_groups)
         self._summary_label.setText(
             tr(
                 "doublons_summary",
@@ -3220,6 +3256,24 @@ class DoublonsResultsScreen(Screen):
         self._selection_label.setText(
             tr("doublons_selection_summary", count=total_files, size=_format_size(total_bytes))
         )
+
+    def _on_select_all(self) -> None:
+        for checkbox in self._all_checkboxes:
+            checkbox.setChecked(True)
+
+    def _on_select_none(self) -> None:
+        for checkbox in self._all_checkboxes:
+            checkbox.setChecked(False)
+
+    def _on_keep_only_french_european(self) -> None:
+        """Ne touche que le palier 2 -- une copie strictement identique
+        (palier 1) n'a pas de région à départager entre ses membres."""
+        for checkbox, unit in self._version_group_checkboxes.items():
+            _title, tags = extract_tags(unit.representative.stem)
+            # Rangs 0 (France/Fr) et 1 (Europe) -- `region_rank`,
+            # normalize.py -- gardés (décochés) ; tout le reste écarté.
+            keep = region_rank(tags) <= 1
+            checkbox.setChecked(not keep)
 
     def _build_exact_group_row(self, group: ExactDuplicateGroup, macos_move_blocked: bool) -> QWidget:
         frame = QFrame()
@@ -3306,13 +3360,20 @@ class DoublonsResultsScreen(Screen):
 
         for unit in group.units:
             row = QHBoxLayout()
-            # Jamais précoché (palier 2, règle générale du projet --
-            # contrairement au palier 1 ci-dessus).
             checkbox = QCheckBox(tr("doublons_move_this_one"))
             checkbox.toggled.connect(_on_toggled)
             checkboxes[checkbox] = unit
             self._all_checkboxes[checkbox] = unit
+            self._version_group_checkboxes[checkbox] = unit
             checkbox.toggled.connect(self._update_selection_summary)
+            # Sélection automatique (docs/doublons-selection.md) : tout
+            # sauf la version suggérée (étoile) précoché par défaut --
+            # sans quoi l'outil reste inutilisable à l'échelle de milliers
+            # de groupes de versions (constat réel : 1272 groupes, 3
+            # fichiers sélectionnés). Toujours modifiable à la main
+            # ensuite (point 5 du brief) -- une suggestion, pas une
+            # garantie (bandeau ci-dessus).
+            checkbox.setChecked(unit is not group.suggested_keep)
             row.addWidget(checkbox)
             suggested_marker = " ★" if unit is group.suggested_keep else ""
             path_label = QLabel(f"{unit.representative} — {_format_size(unit.total_size_bytes)}{suggested_marker}")

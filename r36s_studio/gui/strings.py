@@ -196,6 +196,10 @@ STRINGS = {
     ),
     "doublons_export_button": "Exporter le rapport",
     "doublons_simulation_banner": "Mode simulation actif -- rien ne sera déplacé.",
+    "doublons_auto_selection_banner": "Sélection automatique : vérifiez avant de déplacer.",
+    "doublons_select_all_button": "Tout cocher",
+    "doublons_select_none_button": "Tout décocher",
+    "doublons_keep_french_european_button": "Ne garder que les versions françaises et européennes",
     "doublons_summary": (
         "{files} fichier(s) analysé(s) -- {exact} groupe(s) de copies identiques, "
         "{versions} groupe(s) de versions différentes."

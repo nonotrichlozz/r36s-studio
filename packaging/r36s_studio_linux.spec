@@ -43,6 +43,16 @@ EXTRA_DATAS = [
     if (ASSETS_DIR / name).exists()
 ]
 
+# Catalogue local des émulateurs Android (android/emulators.py, étape 1,
+# docs/android-adb.md) -- même principe que les illustrations ci-dessus :
+# un fichier de données ordinaire, jamais embarqué automatiquement dans le
+# PYZ par PyInstaller. Destination alignée sur `android/emulators.py::
+# _data_dir`.
+ANDROID_DATA_DIR = PROJECT_ROOT / "r36s_studio" / "android" / "data"
+EXTRA_DATAS += [
+    (str(ANDROID_DATA_DIR / name), "android/data") for name in ("emulateurs.json",) if (ANDROID_DATA_DIR / name).exists()
+]
+
 # `keyring` (consoles_diverses/settings_store.py) : aucun `hiddenimports`
 # manuel nécessaire ici -- PyInstaller fournit son propre hook officiel
 # (`hook-keyring.py`, `collect_submodules('keyring.backends')` +

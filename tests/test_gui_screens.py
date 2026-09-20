@@ -921,10 +921,11 @@ def test_assisted_landing_screen_has_nine_tiles(qapp):
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
-    # 9 tuiles ordinaires + la tuile personnelle « Web », toujours
+    # 9 tuiles ordinaires + la tuile « Console Android » (android/, étape
+    # 1, toujours visible) + la tuile personnelle « Web », toujours
     # construite mais cachée par défaut (config.py::personal_web_url,
     # jamais visible sans MainWindow.set_web_tile_visible(True)).
-    assert len(screen._all_tiles) == 10
+    assert len(screen._all_tiles) == 11
     assert screen._web_tile.isHidden() is True
 
 

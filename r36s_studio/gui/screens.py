@@ -32,9 +32,10 @@ import platform
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPixmap, QPolygon
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QPainter, QPen, QPixmap, QPolygon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -59,6 +60,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from r36s_studio.android.emulators import EmulatorCatalog, EmulatorEntry, SENTINEL_A_VERIFIER
+from r36s_studio.android.models import VALEUR_INCONNUE, AndroidDeviceInfo, DetectionResult
+# Réutilisation explicitement demandée par docs/android-adb.md (§ Identification
+# et propositions : "réutiliser le client de consoles_diverses") -- lecture
+# seule d'un type de données public et d'une fonction de traduction déjà
+# publique, jamais une modification du package (règle d'isolation, son
+# propre CLAUDE.md : "Ne modifie jamais r36s-studio-cloud"/"Ne touche pas
+# ... à consoles_diverses/").
+from r36s_studio.consoles_diverses.models import FicheConsole
+from r36s_studio.consoles_diverses.strings import tr as _consoles_diverses_tr
 from r36s_studio.detect import (
     COPY_GAMES,
     EJECT,
@@ -388,6 +399,23 @@ def _tile_icon_web(painter: QPainter, rect: QRect, color: QColor) -> None:
     painter.drawEllipse(meridian)
 
 
+def _tile_icon_android(painter: QPainter, rect: QRect, color: QColor) -> None:
+    """Téléphone/console portable simple (rectangle arrondi vertical +
+    petite barre « bouton » en bas) -- tuile « Console Android »
+    (android/, étape 1)."""
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    body = rect.adjusted(round(4 * s), round(1 * s), -round(4 * s), -round(1 * s))
+    painter.drawRoundedRect(body, round(2 * s), round(2 * s))
+    painter.drawLine(
+        body.center().x() - round(2 * s),
+        body.bottom() - round(3 * s),
+        body.center().x() + round(2 * s),
+        body.bottom() - round(3 * s),
+    )
+
+
 _TILE_ICON_PAINTERS = {
     "prepare": _tile_icon_prepare,
     "identify": _tile_icon_identify,
@@ -397,6 +425,7 @@ _TILE_ICON_PAINTERS = {
     "duplicates": _tile_icon_duplicates,
     "inject_boot": _tile_icon_inject_boot,
     "eject": _tile_icon_eject,
+    "android": _tile_icon_android,
     "reset_card": _tile_icon_reset_card,
     "help": _tile_icon_help,
     "web": _tile_icon_web,
@@ -970,6 +999,10 @@ class HomeScreen(Screen):
     # qu'émettre un signal, c'est main_window.py qui sait quoi en faire
     # (règle d'isolation, consoles_diverses/CLAUDE.md).
     consoles_diverses_requested = Signal()
+    # Outil « Console Android » (android/, étape 1, docs/android-adb.md) --
+    # même principe : bouton discret, cet écran ne fait qu'émettre un
+    # signal, c'est main_window.py qui décide quoi en faire.
+    android_requested = Signal()
     # Tuile personnelle « Web » (config.py::personal_web_url, jamais
     # distribuée) -- signal distinct des six étapes, jamais ajouté à
     # `ALL_STEPS`/`detect.py`.
@@ -1001,6 +1034,10 @@ class HomeScreen(Screen):
         self._consoles_diverses_button.setProperty("role", "flat")
         self._consoles_diverses_button.clicked.connect(self.consoles_diverses_requested.emit)
         title_row.addWidget(self._consoles_diverses_button)
+        self._android_button = QPushButton(tr("home_android_button"))
+        self._android_button.setProperty("role", "flat")
+        self._android_button.clicked.connect(self.android_requested.emit)
+        title_row.addWidget(self._android_button)
         self._assisted_mode_button = QPushButton(tr("home_assisted_mode_button"))
         self._assisted_mode_button.setProperty("role", "flat")
         self._assisted_mode_button.clicked.connect(self.assisted_mode_requested.emit)
@@ -1135,6 +1172,7 @@ class HomeScreen(Screen):
         # job orphelin (§5 mode assisté) -- même garde que les étapes.
         self._assisted_mode_button.setEnabled(not busy)
         self._consoles_diverses_button.setEnabled(not busy)
+        self._android_button.setEnabled(not busy)
         self._web_row.setEnabled(not busy)
 
     def set_web_tile_visible(self, visible: bool) -> None:
@@ -2526,6 +2564,10 @@ class AssistedLandingScreen(Screen):
     help_requested = Signal()
     expert_mode_requested = Signal()
     refresh_requested = Signal()
+    # Outil « Console Android » (android/, étape 1) -- même signal que
+    # HomeScreen.android_requested, MainWindow connecte les deux au même
+    # gestionnaire.
+    android_requested = Signal()
     # Tuile personnelle « Web » (config.py::personal_web_url, jamais
     # distribuée) -- même signal que HomeScreen.web_requested, MainWindow
     # connecte les deux au même gestionnaire.
@@ -2666,15 +2708,25 @@ class AssistedLandingScreen(Screen):
                 col_index = 0
                 row_index += 1
 
+        # Outil « Console Android » (android/, étape 1) -- occupe la
+        # prochaine cellule libre de la grille (row_index/col_index laissés
+        # par la boucle ci-dessus, ici row2/col2) ; toujours visible,
+        # contrairement à la tuile Web ci-dessous (réservée à l'auteur du
+        # projet).
+        android_tile = Tile("android", tr("assisted_tile_android"), role="tile", icon_color=theme.ACCENT_CYAN)
+        android_tile.clicked.connect(self.android_requested.emit)
+        grid.addWidget(android_tile, row_index, col_index, 1, 1)
+        self._all_tiles.append(android_tile)
+        col_index += 1
+
         # Tuile personnelle « Web » (config.py::personal_web_url, jamais
         # distribuée à un client) -- construite inconditionnellement,
         # comme la tuile Aide de `HomeScreen`, mais cachée par défaut ;
-        # occupe la prochaine cellule libre de la grille (row_index/
-        # col_index laissés par la boucle ci-dessus), qui tient déjà dans
-        # les 3 rangées fixes (`_ASSISTED_GRID_ROWS`) sans agrandir la
-        # fenêtre. `MainWindow` seule décide de l'afficher, une fois, via
-        # `set_web_tile_visible` -- cet écran ne lit lui-même ni variable
-        # d'environnement ni config.
+        # occupe la toute dernière cellule de la grille (row2/col3), qui
+        # tient déjà dans les 3 rangées fixes (`_ASSISTED_GRID_ROWS`) sans
+        # agrandir la fenêtre. `MainWindow` seule décide de l'afficher, une
+        # fois, via `set_web_tile_visible` -- cet écran ne lit lui-même ni
+        # variable d'environnement ni config.
         self._web_tile = Tile("web", tr("assisted_tile_web"), role="tile", icon_color=theme.ACCENT_CYAN)
         self._web_tile.clicked.connect(self.web_requested.emit)
         grid.addWidget(self._web_tile, row_index, col_index, 1, 1)
@@ -2940,6 +2992,405 @@ class IdentifyResultDialog(Dialog):
     def _on_catalog_clicked(self) -> None:
         self.close()
         self.catalog_requested.emit()
+
+
+# --- Outil « Console Android » (android/, étape 1, docs/android-adb.md)
+# -- écran dédié, écran/chaînes câblés « comme le reste » plutôt qu'isolés
+# dans un package séparé comme consoles_diverses/ (dont la règle
+# d'isolation ne s'applique qu'à ce package-là). Jamais d'écriture disque,
+# jamais d'élévation de privilèges : adb en lecture seule uniquement. ----
+
+# État -> (titre, texte d'aide) affichés dans la carte de statut quand
+# aucun appareil exploitable n'est détecté (§ Détection/Interface du
+# brief). `adb_missing` n'y figure pas : ce cas ouvre l'écran de
+# consentement au téléchargement (`show_need_consent`), jamais cette carte.
+_ANDROID_STATE_HELP_KEYS = {
+    "no_device": ("android_state_no_device_title", "android_state_no_device_help"),
+    "unauthorized": ("android_state_unauthorized_title", "android_state_unauthorized_help"),
+    "multiple_devices": ("android_state_multiple_title", "android_state_multiple_help"),
+    "adb_error": ("android_state_adb_error_title", "android_state_adb_error_help"),
+}
+
+# Les cinq propriétés de `android.models.AndroidDeviceInfo` (§ Détection du
+# brief), dans l'ordre d'affichage de la carte « Console détectée ».
+_ANDROID_DEVICE_FIELDS = [
+    ("android_device_label_manufacturer", "manufacturer"),
+    ("android_device_label_model", "model"),
+    ("android_device_label_product_name", "product_name"),
+    ("android_device_label_android_version", "android_version"),
+    ("android_device_label_abi", "abi"),
+]
+
+
+def _android_plain_label(text: str, role: Optional[str] = None, wrap: bool = False) -> QLabel:
+    """`QLabel` verrouillée sur `PlainText` -- une donnée d'appareil (dump
+    `getprop`) ou de serveur (fiche catalogue) n'est jamais interprétée
+    comme du HTML, même garantie que `consoles_diverses/screen.py::
+    _plain_label` (fonction privée à ce module-là, § règle d'isolation --
+    non réutilisée directement, même contrat réécrit ici)."""
+    label = QLabel(text)
+    label.setTextFormat(Qt.PlainText)
+    if role:
+        label.setProperty("role", role)
+    if wrap:
+        label.setWordWrap(True)
+    return label
+
+
+def _android_is_safe_external_url(url: Optional[str]) -> bool:
+    """Un lien n'est cliquable que s'il s'agit explicitement d'une URL
+    http(s) -- même garde que `consoles_diverses/screen.py::
+    _est_url_externe_sure`, appliquée ici à `android/data/emulateurs.json`
+    (un fichier du dépôt, donc a priori sûr, mais cette garde ne coûte
+    rien et évite qu'une future entrée mal formée n'ouvre un schéma
+    inattendu, ex. `file:`)."""
+    if not url:
+        return False
+    try:
+        scheme = urlsplit(url).scheme.lower()
+    except ValueError:
+        return False
+    return scheme in ("http", "https")
+
+
+def _android_link_button(url: str, label: str) -> QWidget:
+    if not _android_is_safe_external_url(url):
+        return _android_plain_label(url, role="secondary", wrap=True)
+    button = QPushButton(label)
+    button.setProperty("role", "link")
+    button.setCursor(Qt.PointingHandCursor)
+    button.setToolTip(url)
+    button.clicked.connect(lambda checked=False, u=url: QDesktopServices.openUrl(QUrl(u)))
+    return button
+
+
+def _android_badge(text: str, badge_kind: str = "neutral") -> QLabel:
+    label = QLabel(text)
+    label.setTextFormat(Qt.PlainText)
+    label.setProperty("role", "badge")
+    label.setProperty("badgeKind", badge_kind)
+    return label
+
+
+def _android_clear_layout(layout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        widget = item.widget()
+        if widget is not None:
+            widget.deleteLater()
+
+
+def _android_build_emulator_row(entry: EmulatorEntry) -> QWidget:
+    """Une carte par émulateur du catalogue local (`android/data/
+    emulateurs.json`) -- licence/prix affichés « à vérifier » tant que
+    l'entrée porte `SENTINEL_A_VERIFIER` (demandé explicitement : jamais
+    "gratuit"/"payant" affirmé sans vérification humaine sur la page
+    officielle du projet, § avertissement permanent de la liste)."""
+    frame = QFrame()
+    frame.setProperty("role", "row")
+    layout = QVBoxLayout(frame)
+    layout.addWidget(_android_plain_label(entry.nom, role="rowTitle"))
+    if entry.systemes_emules:
+        layout.addWidget(_android_plain_label(", ".join(entry.systemes_emules), role="rowDesc", wrap=True))
+
+    badges_row = QHBoxLayout()
+    licence_text = tr("android_emulator_licence_a_verifier") if entry.licence == SENTINEL_A_VERIFIER else entry.licence
+    badges_row.addWidget(_android_badge(licence_text))
+    prix_text = tr("android_emulator_prix_a_verifier") if entry.prix == SENTINEL_A_VERIFIER else entry.prix
+    badges_row.addWidget(_android_badge(prix_text))
+    badges_row.addStretch()
+    layout.addLayout(badges_row)
+
+    links_row = QHBoxLayout()
+    links_row.addWidget(_android_link_button(entry.url_officielle, tr("android_emulator_official_link")))
+    links_row.addWidget(_android_link_button(entry.source_url, tr("android_emulator_source_link")))
+    links_row.addStretch()
+    layout.addLayout(links_row)
+    return frame
+
+
+class AndroidScreen(Screen):
+    """Écran de l'outil « Console Android » (étape 1, docs/android-adb.md)
+    -- détection d'une console Android en USB via adb (lecture seule),
+    fiche catalogue (réutilisation explicitement demandée du client
+    `consoles_diverses`, jamais de modification de ce package), liste
+    d'émulateurs recommandés. Chaque état est piloté par `main_window.py`
+    via les méthodes publiques ci-dessous -- cet écran ne connaît ni adb
+    ni le réseau, uniquement des signaux et des setters, même principe que
+    le reste de ce fichier (§5 du CLAUDE.md racine)."""
+
+    back_requested = Signal()
+    refresh_requested = Signal()
+    consent_download_requested = Signal()
+    cancel_download_requested = Signal()
+    search_catalog_requested = Signal(str)  # référence (modèle lu par getprop)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._current_model = ""
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 16, 24, 24)
+
+        header = QHBoxLayout()
+        back_button = QPushButton(tr("android_back_button"))
+        back_button.setProperty("role", "flat")
+        back_button.clicked.connect(self.back_requested.emit)
+        header.addWidget(back_button)
+        title = QLabel(tr("android_screen_title"))
+        title.setProperty("role", "title")
+        header.addWidget(title)
+        header.addStretch()
+        self._refresh_button = QPushButton(tr("android_refresh_button"))
+        self._refresh_button.clicked.connect(self.refresh_requested.emit)
+        header.addWidget(self._refresh_button)
+        root.addLayout(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setSpacing(12)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
+
+        # --- Consentement au téléchargement d'adb (brief § adb) --------
+        self._consent_frame = QFrame()
+        self._consent_frame.setProperty("role", "row")
+        consent_layout = QVBoxLayout(self._consent_frame)
+        consent_layout.addWidget(_android_plain_label(tr("android_consent_title"), role="rowTitle"))
+        consent_layout.addWidget(_android_plain_label(tr("android_consent_body"), role="rowDesc", wrap=True))
+        self._consent_url_label = _android_plain_label("", role="secondary", wrap=True)
+        consent_layout.addWidget(self._consent_url_label)
+        self._consent_size_label = _android_plain_label("", role="secondary")
+        consent_layout.addWidget(self._consent_size_label)
+        self._consent_download_button = QPushButton(tr("android_consent_download_button"))
+        self._consent_download_button.setProperty("role", "primary")
+        self._consent_download_button.clicked.connect(self.consent_download_requested.emit)
+        consent_layout.addWidget(self._consent_download_button, alignment=Qt.AlignLeft)
+        self._download_status_label = _android_plain_label(tr("android_downloading_status"), role="secondary")
+        self._download_status_label.setVisible(False)
+        consent_layout.addWidget(self._download_status_label)
+        self._download_bar = QProgressBar()
+        self._download_bar.setRange(0, 100)
+        self._download_bar.setVisible(False)
+        consent_layout.addWidget(self._download_bar)
+        self._download_cancel_button = QPushButton(tr("android_download_cancel_button"))
+        self._download_cancel_button.setVisible(False)
+        self._download_cancel_button.clicked.connect(self.cancel_download_requested.emit)
+        consent_layout.addWidget(self._download_cancel_button, alignment=Qt.AlignLeft)
+        self._download_error_label = _android_plain_label("", role="warning", wrap=True)
+        self._download_error_label.setVisible(False)
+        consent_layout.addWidget(self._download_error_label)
+        content_layout.addWidget(self._consent_frame)
+
+        # --- Détection en cours / états informatifs (aucun appareil,
+        # non autorisé, plusieurs appareils, erreur adb) -----------------
+        self._status_frame = QFrame()
+        self._status_frame.setProperty("role", "row")
+        status_layout = QVBoxLayout(self._status_frame)
+        self._status_title_label = _android_plain_label("", role="rowTitle")
+        status_layout.addWidget(self._status_title_label)
+        self._status_help_label = _android_plain_label("", role="rowDesc", wrap=True)
+        status_layout.addWidget(self._status_help_label)
+        # Sortie adb en texte brut (brief § Interface : "Textes serveur et
+        # sortie adb affichés en texte brut") -- `role="log"` déjà utilisé
+        # par `LogPanel` (police monospace, fond sombre, texte vert clair).
+        self._status_raw_output = QPlainTextEdit()
+        self._status_raw_output.setProperty("role", "log")
+        self._status_raw_output.setReadOnly(True)
+        self._status_raw_output.setMaximumHeight(120)
+        self._status_raw_output.setVisible(False)
+        status_layout.addWidget(self._status_raw_output)
+        content_layout.addWidget(self._status_frame)
+
+        # --- Console détectée --------------------------------------------
+        self._device_frame = QFrame()
+        self._device_frame.setProperty("role", "row")
+        device_layout = QVBoxLayout(self._device_frame)
+        device_layout.addWidget(_android_plain_label(tr("android_device_card_title"), role="title"))
+        device_grid = QGridLayout()
+        device_grid.setColumnStretch(1, 1)
+        self._device_value_labels: Dict[str, QLabel] = {}
+        for row_index, (label_key, field_name) in enumerate(_ANDROID_DEVICE_FIELDS):
+            device_grid.addWidget(_android_plain_label(tr(label_key), role="secondary"), row_index, 0)
+            value_label = _android_plain_label("", wrap=True)
+            device_grid.addWidget(value_label, row_index, 1)
+            self._device_value_labels[field_name] = value_label
+        device_layout.addLayout(device_grid)
+        content_layout.addWidget(self._device_frame)
+
+        # --- Catalogue (réutilise `consoles_diverses.client`, demandé
+        # explicitement par le brief -- jamais de recherche automatique,
+        # cohérent avec le reste du projet : `consoles_diverses/screen.py`
+        # exige elle aussi un clic explicite avant tout appel réseau) ----
+        self._catalog_frame = QFrame()
+        self._catalog_frame.setProperty("role", "row")
+        catalog_layout = QVBoxLayout(self._catalog_frame)
+        self._catalog_search_button = QPushButton(tr("android_catalog_search_button"))
+        self._catalog_search_button.clicked.connect(self._on_search_catalog_clicked)
+        catalog_layout.addWidget(self._catalog_search_button, alignment=Qt.AlignLeft)
+        self._catalog_status_label = _android_plain_label("", role="secondary", wrap=True)
+        self._catalog_status_label.setVisible(False)
+        catalog_layout.addWidget(self._catalog_status_label)
+        self._catalog_result_layout = QVBoxLayout()
+        catalog_layout.addLayout(self._catalog_result_layout)
+        content_layout.addWidget(self._catalog_frame)
+
+        # --- Émulateurs recommandés (`android/data/emulateurs.json`) ---
+        self._emulators_frame = QFrame()
+        self._emulators_frame.setProperty("role", "row")
+        emulators_layout = QVBoxLayout(self._emulators_frame)
+        emulators_layout.addWidget(_android_plain_label(tr("android_emulators_title"), role="title"))
+        self._emulators_warning_label = _android_plain_label("", role="warning", wrap=True)
+        self._emulators_warning_label.setVisible(False)
+        emulators_layout.addWidget(self._emulators_warning_label)
+        self._emulators_list_layout = QVBoxLayout()
+        emulators_layout.addLayout(self._emulators_list_layout)
+        content_layout.addWidget(self._emulators_frame)
+
+        content_layout.addStretch()
+
+        self._show_zone("detecting")
+        self._status_title_label.setText(tr("android_detecting_status"))
+
+    # --- Zones --------------------------------------------------------
+
+    def _show_zone(self, zone: str) -> None:
+        self._consent_frame.setVisible(zone == "consent")
+        self._status_frame.setVisible(zone in ("detecting", "status"))
+        self._device_frame.setVisible(zone == "ready")
+        self._catalog_frame.setVisible(zone == "ready")
+        self._emulators_frame.setVisible(zone == "ready")
+
+    # --- Consentement / téléchargement d'adb ---------------------------
+
+    def show_need_consent(self, url: str) -> None:
+        self._show_zone("consent")
+        self._consent_url_label.setText(tr("android_consent_url_label", url=url))
+        self._consent_size_label.setText(tr("android_consent_size_unknown"))
+        self._set_consent_downloading(False)
+        self._download_error_label.setVisible(False)
+
+    def set_platform_tools_size(self, size_bytes: Optional[int]) -> None:
+        if size_bytes is None:
+            self._consent_size_label.setText(tr("android_consent_size_unknown"))
+        else:
+            self._consent_size_label.setText(tr("android_consent_size_label", size=_format_size(size_bytes)))
+
+    def _set_consent_downloading(self, downloading: bool) -> None:
+        self._consent_download_button.setVisible(not downloading)
+        self._download_status_label.setVisible(downloading)
+        self._download_bar.setVisible(downloading)
+        self._download_cancel_button.setVisible(downloading)
+
+    def show_downloading(self) -> None:
+        self._show_zone("consent")
+        self._download_error_label.setVisible(False)
+        self._set_consent_downloading(True)
+        self._download_bar.setRange(0, 0)  # indéterminé tant qu'aucun octet n'est encore arrivé
+
+    def set_download_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            self._download_bar.setRange(0, 100)
+            self._download_bar.setValue(int(done * 100 / total))
+        else:
+            self._download_bar.setRange(0, 0)
+
+    def show_download_error(self, message: str) -> None:
+        self._set_consent_downloading(False)
+        self._download_error_label.setText(message)
+        self._download_error_label.setVisible(True)
+
+    # --- Détection ------------------------------------------------------
+
+    def show_detecting(self) -> None:
+        self._show_zone("detecting")
+        self._status_title_label.setText(tr("android_detecting_status"))
+        self._status_help_label.setText("")
+        self._status_raw_output.setVisible(False)
+
+    def show_detection_result(self, result: DetectionResult) -> None:
+        if result.state == "ready" and result.device is not None:
+            self._show_zone("ready")
+            self._populate_device(result.device)
+            self._current_model = result.device.model
+            self._reset_catalog_section()
+            return
+
+        self._show_zone("status")
+        title_key, help_key = _ANDROID_STATE_HELP_KEYS.get(
+            result.state, ("android_state_adb_error_title", "android_state_adb_error_help")
+        )
+        self._status_title_label.setText(tr(title_key))
+        self._status_help_label.setText(tr(help_key))
+
+        raw_lines = [f"{entry.serial}\t{entry.state}" for entry in result.devices]
+        if result.error_detail:
+            raw_lines.append(result.error_detail)
+        self._status_raw_output.setPlainText("\n".join(raw_lines))
+        self._status_raw_output.setVisible(bool(raw_lines))
+
+    def _populate_device(self, device: AndroidDeviceInfo) -> None:
+        for field_name, label in self._device_value_labels.items():
+            raw = getattr(device, field_name)
+            unknown = raw == VALEUR_INCONNUE
+            label.setText(tr("android_value_not_found") if unknown else raw)
+            label.setProperty("role", "secondary" if unknown else "")
+            theme.repolish(label)
+
+    # --- Catalogue --------------------------------------------------------
+
+    def _reset_catalog_section(self) -> None:
+        self._catalog_search_button.setText(tr("android_catalog_search_button"))
+        self._catalog_search_button.setEnabled(True)
+        self._catalog_status_label.setVisible(False)
+        _android_clear_layout(self._catalog_result_layout)
+
+    def _on_search_catalog_clicked(self) -> None:
+        self.search_catalog_requested.emit(self._current_model)
+
+    def show_catalog_searching(self) -> None:
+        self._catalog_search_button.setEnabled(False)
+        self._catalog_status_label.setText(tr("android_catalog_searching"))
+        self._catalog_status_label.setVisible(True)
+        _android_clear_layout(self._catalog_result_layout)
+
+    def show_catalog_not_found(self) -> None:
+        self._catalog_search_button.setEnabled(True)
+        self._catalog_status_label.setText(tr("android_catalog_not_found"))
+        self._catalog_status_label.setVisible(True)
+        _android_clear_layout(self._catalog_result_layout)
+
+    def show_catalog_error(self, message: str) -> None:
+        self._catalog_search_button.setEnabled(True)
+        self._catalog_status_label.setText(message)
+        self._catalog_status_label.setVisible(True)
+        _android_clear_layout(self._catalog_result_layout)
+
+    def show_catalog_found(self, fiche: FicheConsole) -> None:
+        self._catalog_search_button.setEnabled(True)
+        self._catalog_status_label.setVisible(False)
+        _android_clear_layout(self._catalog_result_layout)
+        self._catalog_result_layout.addWidget(_android_plain_label(fiche.nom, role="rowTitle"))
+        badge_text = _consoles_diverses_tr("badge_verified" if fiche.verifiee else "badge_unverified")
+        self._catalog_result_layout.addWidget(
+            _android_badge(badge_text, "maintained" if fiche.verifiee else "experimental"), alignment=Qt.AlignLeft
+        )
+        details = ", ".join(
+            part for part in (fiche.fabricant, fiche.soc, fiche.os_type) if part and part != "inconnu"
+        )
+        if details:
+            self._catalog_result_layout.addWidget(_android_plain_label(details, role="secondary", wrap=True))
+
+    # --- Émulateurs recommandés ------------------------------------------
+
+    def set_emulator_catalog(self, catalog: EmulatorCatalog) -> None:
+        self._emulators_warning_label.setText(catalog.avertissement)
+        self._emulators_warning_label.setVisible(bool(catalog.avertissement))
+        _android_clear_layout(self._emulators_list_layout)
+        for entry in catalog.emulateurs:
+            self._emulators_list_layout.addWidget(_android_build_emulator_row(entry))
 
 
 # --- Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien flux

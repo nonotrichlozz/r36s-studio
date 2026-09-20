@@ -42,6 +42,10 @@ STRINGS = {
     # (règle d'isolation, consoles_diverses/CLAUDE.md). Symétrique sur les
     # deux accueils (expert et assisté).
     "home_consoles_diverses_button": "Consoles diverses",
+    # Outil « Console Android » (android/, étape 1, docs/android-adb.md) --
+    # bouton discret, même emplacement/rôle que "home_consoles_diverses_
+    # button" : détection en USB via adb, indépendant du parcours carte SD.
+    "home_android_button": "Console Android",
     "home_step_a_title": "A. Copier le BOOT de la SD d'origine",
     "home_step_a_desc": "Enregistre l'écran et les réglages de ton ancienne carte sur ton ordinateur.",
     "home_step_b_title": "B. Copier l'EASYROMS de la SD d'origine",
@@ -118,6 +122,10 @@ STRINGS = {
     "assisted_tile_eject": "Éjecter la carte",
     "assisted_tile_reset_card": "Remettre la carte à zéro",
     "assisted_tile_help": "Aide",
+    # Outil « Console Android » (android/, étape 1) -- dernière cellule
+    # libre de la grille fixe (row2, col3), toujours visible (contrairement
+    # à la tuile Web ci-dessous, réservée à l'auteur du projet).
+    "assisted_tile_android": "Console Android",
     # Tuile personnelle « Web » (config.py::personal_web_url) -- jamais
     # visible dans la version distribuée à un client.
     "assisted_tile_web": "Web",
@@ -722,6 +730,80 @@ STRINGS = {
     # Même information, affichée directement sur la fenêtre Choix du
     # fichier plutôt que seulement dans le journal de bord (§4.3).
     "file_system_backup_size": "Taille estimée : environ {size} (sans les jeux).",
+    # Outil « Console Android » (android/, étape 1, docs/android-adb.md) --
+    # écran dédié, câblé comme les autres écrans « comme le reste » (brief :
+    # jamais isolé dans son propre fichier de chaînes contrairement à
+    # consoles_diverses/, qui reste un package volontairement indépendant).
+    "android_screen_title": "Console Android",
+    "android_back_button": "← Retour à l'accueil",
+    "android_refresh_button": "Actualiser",
+    # Consentement au téléchargement d'adb (§ adb du brief : "après accord
+    # explicite de l'utilisateur (afficher l'URL et la taille)") -- jamais
+    # de téléchargement avant ce clic.
+    "android_consent_title": "adb n'est pas installé",
+    "android_consent_body": (
+        "Cet outil a besoin d'adb (les « platform-tools » officiels de "
+        "Google) pour lire les informations de ta console Android en USB. "
+        "Rien n'est encore installé — cette page ne fait que te le proposer."
+    ),
+    "android_consent_url_label": "Adresse : {url}",
+    "android_consent_size_label": "Taille du téléchargement : environ {size}",
+    "android_consent_size_unknown": "Taille du téléchargement : inconnue",
+    "android_consent_download_button": "Télécharger adb",
+    "android_downloading_status": "Téléchargement d'adb…",
+    "android_download_cancel_button": "Annuler",
+    "android_download_error": "Le téléchargement d'adb a échoué.",
+    "android_detecting_status": "Détection en cours…",
+    # État « aucun appareil » -- pas à pas, § Détection du brief : "écran
+    # d'aide expliquant, en français et pas à pas, comment activer le mode
+    # développeur et le débogage USB (7 appuis sur le numéro de build,
+    # etc.), avec la mention que ça varie selon la console."
+    "android_state_no_device_title": "Aucune console détectée",
+    "android_state_no_device_help": (
+        "1. Sur ta console, ouvre Réglages → À propos du téléphone.\n"
+        "2. Appuie 7 fois de suite sur le numéro de build (ou une ligne "
+        "équivalente) pour activer le mode développeur.\n"
+        "3. Ouvre Réglages → Options pour les développeurs, puis active le "
+        "débogage USB.\n"
+        "4. Branche la console à cet ordinateur avec un câble USB.\n"
+        "Le menu exact varie selon la console — cherche « débogage USB » "
+        "dans les réglages si ces étapes ne correspondent pas exactement."
+    ),
+    "android_state_unauthorized_title": "Console détectée, mais non autorisée",
+    "android_state_unauthorized_help": (
+        "Ta console est branchée, mais elle n'a pas encore accepté cet "
+        "ordinateur. Un message devrait s'afficher sur son écran : accepte "
+        "la demande de débogage USB, puis clique sur Actualiser."
+    ),
+    "android_state_multiple_title": "Plusieurs consoles détectées",
+    "android_state_multiple_help": (
+        "Plusieurs consoles Android sont branchées en même temps. "
+        "Débranche toutes les consoles sauf celle que tu veux préparer, "
+        "puis clique sur Actualiser."
+    ),
+    "android_state_adb_error_title": "adb n'a pas répondu",
+    "android_state_adb_error_help": (
+        "adb n'a pas répondu correctement. Vérifie que la console est bien "
+        "branchée, puis clique sur Actualiser. Si le problème persiste, "
+        "débranche et rebranche le câble USB."
+    ),
+    "android_device_card_title": "Console détectée",
+    "android_device_label_manufacturer": "Fabricant",
+    "android_device_label_model": "Modèle",
+    "android_device_label_product_name": "Nom de produit",
+    "android_device_label_android_version": "Version d'Android",
+    "android_device_label_abi": "Architecture",
+    "android_value_not_found": "Non trouvé",
+    "android_catalog_search_button": "Rechercher cette console dans le catalogue",
+    "android_catalog_searching": "Recherche en cours…",
+    "android_catalog_not_found": "Cette console n'a pas été trouvée dans le catalogue.",
+    "android_catalog_found_title": "Fiche trouvée",
+    "android_emulators_title": "Émulateurs recommandés",
+    "android_emulator_licence_a_verifier": "Licence à vérifier",
+    "android_emulator_prix_a_verifier": "Prix à vérifier",
+    "android_emulator_official_link": "Ouvrir la page officielle",
+    "android_emulator_source_link": "Voir la source",
+    "android_raw_output_title": "Sortie technique (adb)",
 }
 
 

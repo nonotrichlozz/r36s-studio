@@ -43,9 +43,16 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QStackedWidget
 
 from r36s_studio import config as app_config
+from r36s_studio.android import adb as android_adb
+from r36s_studio.android import emulators as android_emulators
+from r36s_studio.android import platform_tools as android_platform_tools
+from r36s_studio.android.models import DetectionResult
 from r36s_studio.consoles_diverses import settings_store as consoles_diverses_settings_store
+from r36s_studio.consoles_diverses.client import ResultatRecherche
 from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
+from r36s_studio.consoles_diverses.search_runner import ConsoleSearchRunner
 from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettingsDialog
+from r36s_studio.consoles_diverses.strings import friendly_error_message as consoles_diverses_friendly_error_message
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons.move import has_pending_journal_entries
@@ -69,6 +76,7 @@ from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
 
 from . import elevate
+from .android_runner import AndroidDetectRunner, AndroidPlatformToolsDownloadRunner, AndroidPlatformToolsSizeRunner
 from .doublons_runner import DoublonsMoveRunner, DoublonsScanRunner, DoublonsUndoRunner
 from .partition_runner import (
     IdentifyRunner,
@@ -82,6 +90,7 @@ from .partition_runner import (
 from .reveal import reveal
 from .screens import (
     AboutDialog,
+    AndroidScreen,
     AssistedLandingScreen,
     BackupKindDialog,
     ConfirmDialog,
@@ -427,6 +436,22 @@ class MainWindow(QMainWindow):
         # pipeline flash/backup/worker élevé ci-dessus, un simple appel
         # réseau en lecture. Construit une fois, comme les autres écrans.
         self._consoles_diverses_screen = ConsolesDiversesScreen()
+        # Outil « Console Android » (android/, étape 1, docs/android-adb.md)
+        # -- écran dédié, même principe que `_consoles_diverses_screen`
+        # ci-dessus (pas un mode ad-hoc de `_main_view`) : détection en USB
+        # via adb, indépendant du parcours carte SD, jamais d'élévation de
+        # privilèges. Catalogue d'émulateurs local chargé une seule fois ici
+        # -- best-effort, une erreur de packaging/données ne doit jamais
+        # empêcher le reste de l'app de démarrer (même esprit que les
+        # illustrations optionnelles, `asset_paths.py`).
+        self._android_screen = AndroidScreen()
+        try:
+            self._android_screen.set_emulator_catalog(android_emulators.load_emulators())
+        except (OSError, ValueError) as exc:
+            print(f"[Android] Catalogue d'émulateurs indisponible : {exc}", file=sys.stderr)
+        self._android_detect_runner: Optional[AndroidDetectRunner] = None
+        self._android_download_runner: Optional[AndroidPlatformToolsDownloadRunner] = None
+        self._android_search_runner: Optional[ConsoleSearchRunner] = None
         # Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien
         # flux carte-SD-uniquement de cette tuile) -- écrans autonomes,
         # même principe que `_consoles_diverses_screen` ci-dessus (pas un
@@ -441,6 +466,7 @@ class MainWindow(QMainWindow):
         self._root_stack.addWidget(self._main_view)
         self._root_stack.addWidget(self._fda_screen)
         self._root_stack.addWidget(self._consoles_diverses_screen)
+        self._root_stack.addWidget(self._android_screen)
         self._root_stack.addWidget(self._doublons_folder_screen)
         self._root_stack.addWidget(self._doublons_scan_progress_screen)
         self._root_stack.addWidget(self._doublons_results_screen)
@@ -544,6 +570,7 @@ class MainWindow(QMainWindow):
         self._home.help_requested.connect(self._help_dialog.open)
         self._home.assisted_mode_requested.connect(self._switch_to_assisted_mode)
         self._home.consoles_diverses_requested.connect(self._open_consoles_diverses)
+        self._home.android_requested.connect(self._open_android_screen)
         self._home.web_requested.connect(self._on_web_requested)
         # Accueil assisté (§5, refonte menu de tuiles) : plus de tuile «
         # Consoles diverses » séparée -- fusionnée dans « Identifier ma
@@ -553,6 +580,15 @@ class MainWindow(QMainWindow):
         self._consoles_diverses_screen.back_requested.connect(self._show_startup_screen)
         self._consoles_diverses_screen.settings_requested.connect(self._on_consoles_diverses_settings_requested)
         self._consoles_diverses_settings_dialog.settings_saved.connect(self._on_consoles_diverses_settings_saved)
+
+        # Outil « Console Android » (android/, étape 1) -- même principe
+        # que la section `consoles_diverses` ci-dessus : un écran
+        # indépendant, jamais un mode ad-hoc de `_main_view`.
+        self._android_screen.back_requested.connect(self._show_startup_screen)
+        self._android_screen.refresh_requested.connect(self._start_android_detection)
+        self._android_screen.consent_download_requested.connect(self._on_android_consent_download_requested)
+        self._android_screen.cancel_download_requested.connect(self._on_android_cancel_download_requested)
+        self._android_screen.search_catalog_requested.connect(self._on_android_search_catalog_requested)
 
         self._help_dialog.open_settings_requested.connect(self._on_open_settings_requested)
         self._fda_screen.open_settings_requested.connect(self._on_open_settings_requested)
@@ -586,6 +622,7 @@ class MainWindow(QMainWindow):
         self._assisted_landing.flash_requested.connect(lambda: self._start_assisted_ad_hoc_job("flash"))
         self._assisted_landing.copy_games_requested.connect(lambda: self._start_assisted_ad_hoc_job("copy_games"))
         self._assisted_landing.find_duplicates_requested.connect(self._start_doublons_tool)
+        self._assisted_landing.android_requested.connect(self._open_android_screen)
         self._assisted_landing.web_requested.connect(self._on_web_requested)
         self._assisted_landing.eject_requested.connect(lambda: self._start_assisted_ad_hoc_job("eject"))
         self._assisted_landing.reset_card_requested.connect(lambda: self._start_assisted_ad_hoc_job("reset_card"))
@@ -2177,6 +2214,106 @@ class MainWindow(QMainWindow):
             consoles_diverses_settings_store.lire_licence() or "",
         )
         self._root_stack.setCurrentWidget(self._consoles_diverses_screen)
+
+    # --- Outil « Console Android » (android/, étape 1, docs/android-
+    # adb.md) -- détection en USB via adb, jamais d'élévation de
+    # privilèges (contrairement au pipeline backup/flash/worker élevé
+    # ci-dessus) : ces méthodes ne font qu'orchestrer les threads dédiés
+    # (`android_runner.py`) et traduire leurs résultats pour `AndroidScreen`,
+    # qui ne connaît elle-même ni adb ni le réseau. ----------------------
+
+    def _open_android_screen(self) -> None:
+        self._root_stack.setCurrentWidget(self._android_screen)
+        self._start_android_detection()
+
+    def _start_android_detection(self) -> None:
+        """Point d'entrée unique de (re)détection -- adb déjà disponible
+        (PATH ou déjà téléchargé par l'app, `resolve_adb_path`) : lance la
+        détection directement ; sinon affiche l'écran de consentement au
+        téléchargement (brief § adb : jamais de téléchargement avant un
+        accord explicite) et récupère la taille annoncée en parallèle."""
+        adb_path = android_adb.resolve_adb_path()
+        if adb_path is None:
+            self._android_screen.show_need_consent(android_platform_tools.platform_tools_url())
+            size_runner = AndroidPlatformToolsSizeRunner(self)
+            size_runner.finished_size.connect(self._on_android_platform_tools_size_ready)
+            size_runner.finished.connect(size_runner.deleteLater)
+            size_runner.start()
+            return
+
+        self._android_screen.show_detecting()
+        runner = AndroidDetectRunner(adb_path, self)
+        runner.finished_detect.connect(self._on_android_detect_finished)
+        runner.finished.connect(runner.deleteLater)
+        self._android_detect_runner = runner
+        runner.start()
+
+    def _on_android_detect_finished(self, result: DetectionResult) -> None:
+        self._android_detect_runner = None
+        self._android_screen.show_detection_result(result)
+
+    def _on_android_platform_tools_size_ready(self, size_bytes) -> None:
+        self._android_screen.set_platform_tools_size(size_bytes)
+
+    def _on_android_consent_download_requested(self) -> None:
+        self._android_screen.show_downloading()
+        runner = AndroidPlatformToolsDownloadRunner(self)
+        runner.progress.connect(self._android_screen.set_download_progress)
+        runner.error.connect(self._on_android_download_error)
+        runner.finished_download.connect(self._on_android_download_finished)
+        runner.finished.connect(runner.deleteLater)
+        self._android_download_runner = runner
+        runner.start()
+
+    def _on_android_cancel_download_requested(self) -> None:
+        if self._android_download_runner is not None:
+            self._android_download_runner.cancel()
+
+    def _on_android_download_error(self, code: str, message: str) -> None:
+        if code == "CANCELLED":
+            # Annulation volontaire (bouton Annuler) -- retour silencieux à
+            # l'écran de consentement, jamais un message d'erreur pour une
+            # action demandée par l'utilisateur lui-même.
+            self._android_screen.show_need_consent(android_platform_tools.platform_tools_url())
+            return
+        self._android_screen.show_download_error(tr("android_download_error"))
+
+    def _on_android_download_finished(self, ok: bool, adb_path: str) -> None:
+        self._android_download_runner = None
+        if not ok:
+            return  # `_on_android_download_error` a déjà affiché le message
+        self._start_android_detection()
+
+    def _on_android_search_catalog_requested(self, reference: str) -> None:
+        """Le brief distingue « Trouvée » et « Non trouvée -- proposer un
+        bouton pour lancer la recherche IA », comme deux étapes séparées --
+        mais le contrat réel du serveur (`POST /recherche`, consoles_
+        diverses/CLAUDE.md) fait déjà les deux en un seul appel : `statut`
+        vaut `trouve_dans_catalogue`, `trouve_par_ia` ou `aucune_
+        information_trouvee`. Un seul bouton suffit donc ici -- jamais de
+        second appel « IA » distinct, qui n'existe pas côté serveur."""
+        reference = reference.strip()
+        if not reference:
+            return
+        self._android_screen.show_catalog_searching()
+        licence_key = consoles_diverses_settings_store.lire_licence() or ""
+        runner = ConsoleSearchRunner(reference, self._app_config.consoles_diverses_server_url, licence_key)
+        runner.finished_ok.connect(self._on_android_search_finished)
+        runner.error.connect(self._on_android_search_error)
+        runner.finished.connect(runner.deleteLater)
+        self._android_search_runner = runner
+        runner.start()
+
+    def _on_android_search_finished(self, resultat: ResultatRecherche) -> None:
+        self._android_search_runner = None
+        if resultat.statut == "aucune_information_trouvee" or resultat.console is None:
+            self._android_screen.show_catalog_not_found()
+            return
+        self._android_screen.show_catalog_found(resultat.console)
+
+    def _on_android_search_error(self, code: str, message_serveur: str) -> None:
+        self._android_search_runner = None
+        self._android_screen.show_catalog_error(consoles_diverses_friendly_error_message(code, message_serveur))
 
     def _on_web_requested(self) -> None:
         """Tuile personnelle « Web » (config.py::personal_web_url, jamais

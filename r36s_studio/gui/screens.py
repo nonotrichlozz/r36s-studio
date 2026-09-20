@@ -3142,6 +3142,15 @@ class DoublonsResultsScreen(Screen):
         self._simulation_banner.setVisible(False)
         root.addWidget(self._simulation_banner)
 
+        # Compteur global (toutes cases à cocher confondues, tous groupes) --
+        # demandé après un essai réel sur des milliers de fichiers, où le
+        # total à écarter n'était visible qu'en dépliant chaque groupe un
+        # par un. `_all_checkboxes` reconstruit à chaque `set_results`.
+        self._all_checkboxes: Dict[QCheckBox, Unit] = {}
+        self._selection_label = QLabel()
+        self._selection_label.setProperty("role", "secondary")
+        root.addWidget(self._selection_label)
+
         self._summary_label = QLabel()
         self._summary_label.setWordWrap(True)
         self._summary_label.setProperty("role", "secondary")
@@ -3178,6 +3187,8 @@ class DoublonsResultsScreen(Screen):
             if widget is not None:
                 widget.deleteLater()
 
+        self._all_checkboxes = {}
+
         has_groups = bool(scan_result.exact_duplicate_groups or scan_result.version_groups)
         self._empty_label.setVisible(not has_groups)
         self._summary_label.setText(
@@ -3199,6 +3210,16 @@ class DoublonsResultsScreen(Screen):
         for group in scan_result.version_groups:
             self._list_layout.insertWidget(insert_at, self._build_version_group_row(group, macos_move_blocked))
             insert_at += 1
+
+        self._update_selection_summary()
+
+    def _update_selection_summary(self) -> None:
+        selected = [unit for checkbox, unit in self._all_checkboxes.items() if checkbox.isChecked()]
+        total_files = sum(len(unit.members) for unit in selected)
+        total_bytes = sum(unit.total_size_bytes for unit in selected)
+        self._selection_label.setText(
+            tr("doublons_selection_summary", count=total_files, size=_format_size(total_bytes))
+        )
 
     def _build_exact_group_row(self, group: ExactDuplicateGroup, macos_move_blocked: bool) -> QWidget:
         frame = QFrame()
@@ -3225,6 +3246,8 @@ class DoublonsResultsScreen(Screen):
             # générale de ce projet contre toute présélection).
             checkbox.setChecked(index != 0)
             checkboxes[checkbox] = unit
+            self._all_checkboxes[checkbox] = unit
+            checkbox.toggled.connect(self._update_selection_summary)
             row.addWidget(checkbox)
             label = QLabel(f"{unit.representative} — {_format_size(unit.total_size_bytes)}")
             label.setProperty("role", "secondary")
@@ -3276,6 +3299,8 @@ class DoublonsResultsScreen(Screen):
             checkbox = QCheckBox(tr("doublons_move_this_one"))
             checkbox.toggled.connect(_on_toggled)
             checkboxes[checkbox] = unit
+            self._all_checkboxes[checkbox] = unit
+            checkbox.toggled.connect(self._update_selection_summary)
             row.addWidget(checkbox)
             suggested_marker = " ★" if unit is group.suggested_keep else ""
             path_label = QLabel(f"{unit.representative} — {_format_size(unit.total_size_bytes)}{suggested_marker}")

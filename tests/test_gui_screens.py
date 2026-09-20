@@ -1486,6 +1486,49 @@ def test_doublons_results_screen_undo_button_availability(qapp):
     assert screen._undo_button.isEnabled() is False
 
 
+def test_doublons_results_screen_selection_summary_reflects_default_precheck(qapp):
+    """Compteur global (§ essai réel sur des milliers de fichiers) -- doit
+    déjà refléter la présélection du palier 1 (tout sauf le premier) sans
+    qu'aucune case n'ait encore été touchée par l'utilisateur."""
+    screen = DoublonsResultsScreen()
+
+    screen.set_results(ScanResult(exact_duplicate_groups=[_make_exact_group()]))
+
+    assert screen._selection_label.text() == tr("doublons_selection_summary", count=1, size=_format_size(100))
+
+
+def test_doublons_results_screen_selection_summary_updates_across_all_groups(qapp):
+    """Le compteur doit sommer les cases cochées de *tous* les groupes,
+    palier 1 et palier 2 confondus -- pas seulement celui qu'on vient de
+    toucher."""
+    from PySide6.QtWidgets import QCheckBox
+
+    screen = DoublonsResultsScreen()
+    screen.set_results(
+        ScanResult(exact_duplicate_groups=[_make_exact_group()], version_groups=[_make_version_group()])
+    )
+
+    checkboxes = [
+        box for box in screen._list_container.findChildren(QCheckBox) if box.text() == tr("doublons_move_this_one")
+    ]
+    for box in checkboxes:
+        box.setChecked(True)
+
+    # Toutes les cases cochées : palier 1 (100 + 100) + palier 2 (50 + 40).
+    assert screen._selection_label.text() == tr("doublons_selection_summary", count=4, size=_format_size(290))
+
+
+def test_doublons_results_screen_selection_summary_resets_on_new_results(qapp):
+    """Un nouveau `set_results` (rescan après déplacement) ne doit jamais
+    laisser le compteur compter d'anciennes cases déjà détruites."""
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(exact_duplicate_groups=[_make_exact_group()]))
+
+    screen.set_results(ScanResult())
+
+    assert screen._selection_label.text() == tr("doublons_selection_summary", count=0, size=_format_size(0))
+
+
 def test_confirm_move_doublons_dialog_message_normal(qapp):
     dialog = ConfirmMoveDoublonsDialog()
 

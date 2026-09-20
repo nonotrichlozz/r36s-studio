@@ -201,6 +201,7 @@ STRINGS = {
         "{versions} groupe(s) de versions différentes."
     ),
     "doublons_empty": "Aucun doublon trouvé.",
+    "doublons_selection_summary": "{count} fichier(s) sélectionné(s) -- {size} récupérables",
     "doublons_group_exact_title": "Copies identiques",
     "doublons_move_this_one": "Écarter celui-ci",
     "doublons_move_selected_button": "Écarter la sélection",

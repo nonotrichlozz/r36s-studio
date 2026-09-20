@@ -76,6 +76,11 @@ STRINGS = {
     # Aide macOS uniquement (§3/§5 -- HomeScreen n'ajoute ce bouton que sur
     # macOS, seul OS concerné par cette autorisation).
     "home_help": "Aide : autoriser l'accès à la carte (Mac)",
+    # Tuile personnelle « Web » (config.py::personal_web_url) -- jamais
+    # visible dans la version distribuée à un client (visible seulement
+    # si R36S_STUDIO_WEB_URL est définie en https).
+    "home_tile_web": "Web",
+    "home_tile_web_desc": "Ouvre le site dans ton navigateur.",
     "status_available": "Faisable",
     "status_done": "Déjà faite",
     "status_not_relevant": "Non pertinente pour cette carte",
@@ -113,6 +118,9 @@ STRINGS = {
     "assisted_tile_eject": "Éjecter la carte",
     "assisted_tile_reset_card": "Remettre la carte à zéro",
     "assisted_tile_help": "Aide",
+    # Tuile personnelle « Web » (config.py::personal_web_url) -- jamais
+    # visible dans la version distribuée à un client.
+    "assisted_tile_web": "Web",
     # En-tête de l'accueil assisté (§5, correctif visuel -- manquait
     # entièrement). Le nom de l'app lui-même réutilise "app_title", jamais
     # dupliqué ici.

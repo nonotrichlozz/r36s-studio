@@ -3,6 +3,8 @@ notamment le mode d'interface (assisté/expert, §5 mode assisté)."""
 
 from __future__ import annotations
 
+import sys
+from dataclasses import fields
 from unittest.mock import patch
 
 from r36s_studio import config
@@ -173,3 +175,57 @@ def test_save_config_never_stores_a_secret_looking_key(tmp_path):
     assert "token" not in raw.lower()
     assert "password" not in raw.lower()
     assert "secret" not in raw.lower()
+
+
+# --- Tuile personnelle « Web » (jamais distribuée à un client) -------------
+# Lue uniquement depuis R36S_STUDIO_WEB_URL, jamais un champ d'AppConfig
+# (donc jamais dans config.json, jamais dans le repli save/load ci-dessus).
+
+
+def test_personal_web_url_absent_by_default(monkeypatch):
+    monkeypatch.delenv("R36S_STUDIO_WEB_URL", raising=False)
+
+    assert config.personal_web_url() is None
+
+
+def test_personal_web_url_returns_https_value(monkeypatch):
+    monkeypatch.setenv("R36S_STUDIO_WEB_URL", "https://nonotrichlozz.github.io/mon-dashboard/")
+
+    assert config.personal_web_url() == "https://nonotrichlozz.github.io/mon-dashboard/"
+
+
+def test_personal_web_url_strips_whitespace(monkeypatch):
+    monkeypatch.setenv("R36S_STUDIO_WEB_URL", "  https://exemple.invalid/  ")
+
+    assert config.personal_web_url() == "https://exemple.invalid/"
+
+
+def test_personal_web_url_rejects_non_https_scheme(monkeypatch):
+    monkeypatch.setenv("R36S_STUDIO_WEB_URL", "http://exemple.invalid/")
+
+    assert config.personal_web_url() is None
+
+
+def test_personal_web_url_rejects_blank_value(monkeypatch):
+    monkeypatch.setenv("R36S_STUDIO_WEB_URL", "   ")
+
+    assert config.personal_web_url() is None
+
+
+def test_personal_web_url_absent_by_default_even_when_frozen(monkeypatch):
+    """Signalement utilisateur : doit rester absente dans un binaire
+    PyInstaller comme en développement -- `os.environ.get` ne se comporte
+    pas différemment une fois figé (`sys.frozen`), rien de spécifique à
+    ce cas ne doit jamais faire apparaître une valeur par défaut."""
+    monkeypatch.delenv("R36S_STUDIO_WEB_URL", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert config.personal_web_url() is None
+
+
+def test_personal_web_url_never_persisted_in_app_config_fields():
+    """Garde-fou de conception : cette URL ne doit jamais devenir un champ
+    d'`AppConfig` (donc jamais écrite dans config.json, §9 -- une variable
+    d'environnement ne quitte jamais la machine qui la définit)."""
+    field_names = {f.name for f in fields(config.AppConfig)}
+    assert not any("web" in name for name in field_names)

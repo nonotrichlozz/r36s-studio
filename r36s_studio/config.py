@@ -33,7 +33,7 @@ import os
 import platform
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 
@@ -166,3 +166,24 @@ def load_config() -> AppConfig:
 def save_config(config: AppConfig) -> None:
     path = config_path()
     path.write_text(json.dumps(asdict(config), indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+# Tuile « Web » personnelle (accueil, réservée à l'auteur du projet --
+# jamais destinée à un client). Lue uniquement depuis cette variable
+# d'environnement à chaque appel, jamais un champ d'`AppConfig` : un
+# champ persisté finirait dans `config.json` sur le disque, copiable par
+# erreur dans un rapport de bug ou une capture d'écran -- une variable
+# d'environnement ne quitte jamais la machine qui la définit. Absente par
+# défaut, y compris dans tout binaire empaqueté distribué (aucun script
+# de `packaging/`, aucun `.spec`, ne la définit ni ne la code en dur) --
+# `os.environ.get` se comporte identiquement en développement et dans un
+# exécutable PyInstaller figé (`sys.frozen`), rien de spécifique à gérer
+# pour ce dernier cas.
+def personal_web_url() -> Optional[str]:
+    """URL du tableau de bord personnel si configurée pour cette session,
+    `None` si la variable est absente ou si elle n'est pas en https --
+    jamais d'URL non sécurisée ouverte automatiquement."""
+    url = os.environ.get("R36S_STUDIO_WEB_URL", "").strip()
+    if not url.startswith("https://"):
+        return None
+    return url

@@ -375,6 +375,19 @@ def _tile_icon_help(painter: QPainter, rect: QRect, color: QColor) -> None:
     painter.drawText(circle, Qt.AlignCenter, "?")
 
 
+def _tile_icon_web(painter: QPainter, rect: QRect, color: QColor) -> None:
+    """Globe simple (cercle + équateur + méridien) -- tuile personnelle
+    « Web », jamais distribuée (config.py::personal_web_url)."""
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    circle = rect.adjusted(round(2 * s), round(2 * s), -round(2 * s), -round(2 * s))
+    painter.drawEllipse(circle)
+    painter.drawLine(circle.left(), circle.center().y(), circle.right(), circle.center().y())
+    meridian = QRect(circle.center().x() - round(4 * s), circle.top(), round(8 * s), circle.height())
+    painter.drawEllipse(meridian)
+
+
 _TILE_ICON_PAINTERS = {
     "prepare": _tile_icon_prepare,
     "identify": _tile_icon_identify,
@@ -386,6 +399,7 @@ _TILE_ICON_PAINTERS = {
     "eject": _tile_icon_eject,
     "reset_card": _tile_icon_reset_card,
     "help": _tile_icon_help,
+    "web": _tile_icon_web,
 }
 
 
@@ -956,6 +970,10 @@ class HomeScreen(Screen):
     # qu'émettre un signal, c'est main_window.py qui sait quoi en faire
     # (règle d'isolation, consoles_diverses/CLAUDE.md).
     consoles_diverses_requested = Signal()
+    # Tuile personnelle « Web » (config.py::personal_web_url, jamais
+    # distribuée) -- signal distinct des six étapes, jamais ajouté à
+    # `ALL_STEPS`/`detect.py`.
+    web_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1075,6 +1093,19 @@ class HomeScreen(Screen):
         reset_card_badge.setVisible(False)  # jamais de badge de statut pour cette ligne (§5)
         layout.addWidget(self._reset_card_row)
 
+        # Tuile personnelle « Web » -- construite inconditionnellement
+        # (même principe que `HelpDialog`, dont le bouton déclencheur n'est
+        # lui non plus affiché que sur macOS) mais cachée par défaut ;
+        # `MainWindow` décide seule de l'afficher, une fois, via
+        # `set_web_tile_visible`, selon `config.personal_web_url()` --
+        # cet écran ne lit lui-même ni variable d'environnement ni config.
+        self._web_row, web_badge = self._build_row(
+            "◆", tr("home_tile_web"), tr("home_tile_web_desc"), self.web_requested
+        )
+        web_badge.setVisible(False)  # jamais de badge de statut pour cette ligne (§5)
+        self._web_row.setVisible(False)
+        layout.addWidget(self._web_row)
+
         layout.addStretch()
 
         # Numéro de version + horodatage de construction (§5, à la demande
@@ -1104,6 +1135,10 @@ class HomeScreen(Screen):
         # job orphelin (§5 mode assisté) -- même garde que les étapes.
         self._assisted_mode_button.setEnabled(not busy)
         self._consoles_diverses_button.setEnabled(not busy)
+        self._web_row.setEnabled(not busy)
+
+    def set_web_tile_visible(self, visible: bool) -> None:
+        self._web_row.setVisible(visible)
 
     def _update_backup_rows_enabled(self) -> None:
         """« Par sécurité » (§4.3) exige une carte -- contrairement aux
@@ -2491,6 +2526,10 @@ class AssistedLandingScreen(Screen):
     help_requested = Signal()
     expert_mode_requested = Signal()
     refresh_requested = Signal()
+    # Tuile personnelle « Web » (config.py::personal_web_url, jamais
+    # distribuée) -- même signal que HomeScreen.web_requested, MainWindow
+    # connecte les deux au même gestionnaire.
+    web_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2627,6 +2666,21 @@ class AssistedLandingScreen(Screen):
                 col_index = 0
                 row_index += 1
 
+        # Tuile personnelle « Web » (config.py::personal_web_url, jamais
+        # distribuée à un client) -- construite inconditionnellement,
+        # comme la tuile Aide de `HomeScreen`, mais cachée par défaut ;
+        # occupe la prochaine cellule libre de la grille (row_index/
+        # col_index laissés par la boucle ci-dessus), qui tient déjà dans
+        # les 3 rangées fixes (`_ASSISTED_GRID_ROWS`) sans agrandir la
+        # fenêtre. `MainWindow` seule décide de l'afficher, une fois, via
+        # `set_web_tile_visible` -- cet écran ne lit lui-même ni variable
+        # d'environnement ni config.
+        self._web_tile = Tile("web", tr("assisted_tile_web"), role="tile", icon_color=theme.ACCENT_CYAN)
+        self._web_tile.clicked.connect(self.web_requested.emit)
+        grid.addWidget(self._web_tile, row_index, col_index, 1, 1)
+        self._web_tile.setVisible(False)
+        self._all_tiles.append(self._web_tile)
+
         # Zone de la grille dans un `QScrollArea` (§5, correctif visuel) :
         # la dernière rangée sortait de la fenêtre quand celle-ci n'était
         # pas assez haute. `MainWindow` fixe une taille initiale assez
@@ -2718,7 +2772,8 @@ class AssistedLandingScreen(Screen):
         root.addStretch()  # respire en bas
 
     def set_busy(self, busy: bool) -> None:
-        """Désactive les 9 tuiles et le bouton Mode expert pendant
+        """Désactive toutes les tuiles (9, ou 10 avec la tuile personnelle
+        « Web » quand elle est visible) et le bouton Mode expert pendant
         qu'une opération est en cours (§5, refonte menu de tuiles) --
         même garde que `HomeScreen.set_busy` : changer de mode ou lancer
         une deuxième action en plein flash/copie laisserait un job
@@ -2729,6 +2784,9 @@ class AssistedLandingScreen(Screen):
         for tile in self._all_tiles:
             tile.setEnabled(not busy)
         self._expert_button.setEnabled(not busy)
+
+    def set_web_tile_visible(self, visible: bool) -> None:
+        self._web_tile.setVisible(visible)
 
     def set_status(
         self, status: Dict[str, StepStatus], device: Optional[Device] = None, has_device: Optional[bool] = None

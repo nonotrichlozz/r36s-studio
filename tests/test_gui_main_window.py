@@ -5065,3 +5065,79 @@ def test_rocknix_download_failure_shows_friendly_message_in_log_panel(
     log_text = window._log_panel._log_view.toPlainText()
     assert "corrompu ou incomplet" in log_text
     assert window._confirm_dialog.isVisible() is False
+
+
+# --- Tuile personnelle « Web » (config.py::personal_web_url) ---------------
+# Réservée à l'auteur du projet -- jamais visible dans la version
+# distribuée à un client (aucune valeur par défaut, aucune persistance).
+
+
+@patch("r36s_studio.gui.main_window.app_config.personal_web_url", return_value="https://nonotrichlozz.github.io/mon-dashboard/")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_web_tile_visible_in_both_modes_when_url_configured(mock_list, mock_filter, mock_web_url, qapp):
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    # `_home` vit dans `_main_view` (mode expert) -- pas l'écran actif par
+    # défaut (mode assisté) : un widget non courant d'un `QStackedWidget`
+    # reste caché quel que soit `setVisible`, il faut donc le rendre actif
+    # pour que `isVisible()` reflète l'appel fait à la construction.
+    assert window._assisted_landing._web_tile.isVisible() is True
+    window._root_stack.setCurrentWidget(window._main_view)
+    assert window._home._web_row.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.personal_web_url", return_value=None)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_web_tile_hidden_in_both_modes_when_url_not_configured(mock_list, mock_filter, mock_web_url, qapp):
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    assert window._assisted_landing._web_tile.isVisible() is False
+    window._root_stack.setCurrentWidget(window._main_view)
+    assert window._home._web_row.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.QDesktopServices.openUrl")
+@patch("r36s_studio.gui.main_window.app_config.personal_web_url", return_value="https://nonotrichlozz.github.io/mon-dashboard/")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_web_requested_from_home_opens_configured_url(mock_list, mock_filter, mock_web_url, mock_open_url, qapp):
+    window = MainWindow()
+
+    window._home.web_requested.emit()
+
+    mock_open_url.assert_called_once()
+    (opened_url,), _kwargs = mock_open_url.call_args
+    assert opened_url.toString() == "https://nonotrichlozz.github.io/mon-dashboard/"
+
+
+@patch("r36s_studio.gui.main_window.QDesktopServices.openUrl")
+@patch("r36s_studio.gui.main_window.app_config.personal_web_url", return_value="https://nonotrichlozz.github.io/mon-dashboard/")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_web_requested_from_assisted_landing_opens_same_url(mock_list, mock_filter, mock_web_url, mock_open_url, qapp):
+    window = MainWindow()
+
+    window._assisted_landing.web_requested.emit()
+
+    mock_open_url.assert_called_once()
+    (opened_url,), _kwargs = mock_open_url.call_args
+    assert opened_url.toString() == "https://nonotrichlozz.github.io/mon-dashboard/"
+
+
+@patch("r36s_studio.gui.main_window.QDesktopServices.openUrl")
+@patch("r36s_studio.gui.main_window.app_config.personal_web_url", return_value=None)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_web_requested_does_nothing_when_url_not_https(mock_list, mock_filter, mock_web_url, mock_open_url, qapp):
+    """Défense en profondeur : `personal_web_url()` est relue au clic --
+    une valeur devenue invalide (ou absente) entre le démarrage et le
+    clic ne doit jamais ouvrir quoi que ce soit, jamais planter non plus."""
+    window = MainWindow()
+
+    window._home.web_requested.emit()
+
+    mock_open_url.assert_not_called()

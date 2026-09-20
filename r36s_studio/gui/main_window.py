@@ -38,7 +38,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import QTimer, Slot
+from PySide6.QtCore import QTimer, QUrl, Slot
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QStackedWidget
 
 from r36s_studio import config as app_config
@@ -405,6 +406,15 @@ class MainWindow(QMainWindow):
         self._wizard_panel = WizardStepPanel()
         self._main_view = MainView(self._home, self._console_stage, self._log_panel, wizard_panel=self._wizard_panel)
         self._assisted_landing = AssistedLandingScreen()
+        # Tuile personnelle « Web » (config.py::personal_web_url) -- jamais
+        # visible dans la version distribuée à un client : décidé une
+        # seule fois ici, à la construction, à partir de la variable
+        # d'environnement (stable pour toute la durée du processus,
+        # jamais relue ensuite) -- les deux écrans ne lisent eux-mêmes ni
+        # variable d'environnement ni config.
+        web_tile_visible = app_config.personal_web_url() is not None
+        self._home.set_web_tile_visible(web_tile_visible)
+        self._assisted_landing.set_web_tile_visible(web_tile_visible)
         # Écran de bienvenue macOS uniquement (§3) : construit
         # inconditionnellement (même principe que `_help_dialog`, dont le
         # bouton déclencheur n'apparaît lui aussi que sur macOS), mais
@@ -534,6 +544,7 @@ class MainWindow(QMainWindow):
         self._home.help_requested.connect(self._help_dialog.open)
         self._home.assisted_mode_requested.connect(self._switch_to_assisted_mode)
         self._home.consoles_diverses_requested.connect(self._open_consoles_diverses)
+        self._home.web_requested.connect(self._on_web_requested)
         # Accueil assisté (§5, refonte menu de tuiles) : plus de tuile «
         # Consoles diverses » séparée -- fusionnée dans « Identifier ma
         # console », l'accès au catalogue se fait depuis son écran de
@@ -575,6 +586,7 @@ class MainWindow(QMainWindow):
         self._assisted_landing.flash_requested.connect(lambda: self._start_assisted_ad_hoc_job("flash"))
         self._assisted_landing.copy_games_requested.connect(lambda: self._start_assisted_ad_hoc_job("copy_games"))
         self._assisted_landing.find_duplicates_requested.connect(self._start_doublons_tool)
+        self._assisted_landing.web_requested.connect(self._on_web_requested)
         self._assisted_landing.eject_requested.connect(lambda: self._start_assisted_ad_hoc_job("eject"))
         self._assisted_landing.reset_card_requested.connect(lambda: self._start_assisted_ad_hoc_job("reset_card"))
         self._assisted_landing.help_requested.connect(self._on_assisted_help_requested)
@@ -2165,6 +2177,20 @@ class MainWindow(QMainWindow):
             consoles_diverses_settings_store.lire_licence() or "",
         )
         self._root_stack.setCurrentWidget(self._consoles_diverses_screen)
+
+    def _on_web_requested(self) -> None:
+        """Tuile personnelle « Web » (config.py::personal_web_url, jamais
+        distribuée à un client) -- relit la variable d'environnement au
+        clic plutôt que de faire confiance à un état capturé au démarrage
+        (défense en profondeur : le même contrôle a déjà décidé si la
+        tuile est même visible, `set_web_tile_visible`). Ouvre dans le
+        navigateur par défaut de l'OS -- jamais QtWebEngine, aucune
+        nouvelle dépendance."""
+        url = app_config.personal_web_url()
+        if url is None:
+            print("[Web] R36S_STUDIO_WEB_URL absente ou non https -- ouverture refusée.", file=sys.stderr)
+            return
+        QDesktopServices.openUrl(QUrl(url))
 
     def _on_consoles_diverses_settings_requested(self) -> None:
         licence = consoles_diverses_settings_store.lire_licence() or ""

@@ -105,6 +105,38 @@ def test_home_screen_reset_card_tile_emits_signal(qapp):
     assert received == [True]
 
 
+def test_home_screen_web_row_hidden_by_default_and_toggled_by_set_web_tile_visible(qapp):
+    screen = HomeScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    assert screen._web_row.isVisible() is False
+
+    screen.set_web_tile_visible(True)
+    assert screen._web_row.isVisible() is True
+
+    screen.set_web_tile_visible(False)
+    assert screen._web_row.isVisible() is False
+
+
+def test_home_screen_web_row_click_emits_signal(qapp):
+    screen = HomeScreen()
+    screen.set_web_tile_visible(True)
+    received = []
+    screen.web_requested.connect(lambda: received.append(True))
+
+    screen._web_row.clicked.emit()
+
+    assert received == [True]
+
+
+def test_home_screen_set_busy_also_disables_web_row(qapp):
+    screen = HomeScreen()
+
+    screen.set_busy(True)
+
+    assert screen._web_row.isEnabled() is False
+
+
 def test_home_screen_shows_version_label(qapp):
     """À la demande explicite d'un utilisateur ayant perdu le fil entre
     plusieurs reconstructions locales de l'app -- sans repère visible,
@@ -889,7 +921,37 @@ def test_assisted_landing_screen_has_nine_tiles(qapp):
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
-    assert len(screen._all_tiles) == 9
+    # 9 tuiles ordinaires + la tuile personnelle « Web », toujours
+    # construite mais cachée par défaut (config.py::personal_web_url,
+    # jamais visible sans MainWindow.set_web_tile_visible(True)).
+    assert len(screen._all_tiles) == 10
+    assert screen._web_tile.isHidden() is True
+
+
+def test_assisted_landing_screen_web_tile_shown_only_via_set_web_tile_visible(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    assert screen._web_tile.isVisible() is False
+
+    screen.set_web_tile_visible(True)
+    assert screen._web_tile.isVisible() is True
+
+    screen.set_web_tile_visible(False)
+    assert screen._web_tile.isVisible() is False
+
+
+def test_assisted_landing_screen_web_tile_click_emits_signal(qapp):
+    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
+        screen = AssistedLandingScreen()
+    screen.set_web_tile_visible(True)
+    received = []
+    screen.web_requested.connect(lambda: received.append(True))
+
+    screen._web_tile.clicked.emit()
+
+    assert received == [True]
 
 
 def test_assisted_landing_screen_grid_and_panel_never_stretch_with_window(qapp):

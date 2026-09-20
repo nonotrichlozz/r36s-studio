@@ -24,6 +24,7 @@ from r36s_studio.gui.screens import (
     ConsoleTerminalOverlay,
     DeviceDialog,
     DoublonsFolderScreen,
+    DoublonsMoveProgressScreen,
     DoublonsResultsScreen,
     DoublonsRiskConfirmDialog,
     DoublonsScanProgressScreen,
@@ -1368,6 +1369,30 @@ def test_doublons_scan_progress_screen_cancel_button_emits_signal(qapp):
     assert received == [True]
 
 
+def test_doublons_move_progress_screen_shows_progress(qapp):
+    screen = DoublonsMoveProgressScreen()
+
+    screen.set_progress(120, 1900)
+
+    assert screen._progress_bar.minimum() == 0
+    assert screen._progress_bar.maximum() == 1900
+    assert screen._progress_bar.value() == 120
+    assert screen._count_label.text() == tr("doublons_move_progress_count", done=120, total=1900)
+
+
+def test_doublons_move_progress_screen_cancel_button_emits_signal(qapp):
+    screen = DoublonsMoveProgressScreen()
+    received = []
+    screen.cancel_requested.connect(lambda: received.append(True))
+
+    from PySide6.QtWidgets import QPushButton
+
+    cancel_button = [b for b in screen.findChildren(QPushButton) if b.text() == tr("doublons_scan_cancel_button")][0]
+    cancel_button.click()
+
+    assert received == [True]
+
+
 def test_doublons_risk_confirm_dialog_confirm_emits_confirmed(qapp):
     dialog = DoublonsRiskConfirmDialog()
     dialog.set_message("Attention")
@@ -1570,6 +1595,67 @@ def test_doublons_results_screen_move_requested_emits_only_checked_units(qapp):
     move_button.click()
 
     assert received == [[group.units[1]]]
+
+
+def test_doublons_results_screen_move_all_button_label_and_enabled_state(qapp):
+    """Signalement utilisateur -- le libellé reprend le compteur en
+    direct, et le bouton est désactivé quand la sélection est vide.
+    Vérifié sur les deux instances (haut de l'écran, bas de la liste)."""
+    from PySide6.QtWidgets import QCheckBox
+
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(exact_duplicate_groups=[_make_exact_group()]))
+
+    expected_label = tr("doublons_move_all_button", count=1, size=_format_size(100))
+    assert screen._move_all_button_top.text() == expected_label
+    assert screen._move_all_button_top.isEnabled() is True
+    assert screen._move_all_button_bottom.text() == expected_label
+    assert screen._move_all_button_bottom.isEnabled() is True
+
+    for box in screen._list_container.findChildren(QCheckBox):
+        box.setChecked(False)
+
+    empty_label = tr("doublons_move_all_button", count=0, size=_format_size(0))
+    assert screen._move_all_button_top.text() == empty_label
+    assert screen._move_all_button_top.isEnabled() is False
+    assert screen._move_all_button_bottom.text() == empty_label
+    assert screen._move_all_button_bottom.isEnabled() is False
+
+
+def test_doublons_results_screen_move_all_button_absent_without_groups(qapp):
+    screen = DoublonsResultsScreen()
+
+    screen.set_results(ScanResult())
+
+    assert screen._move_all_button_bottom is None
+    assert screen._move_all_button_top.isEnabled() is False
+
+
+def test_doublons_results_screen_move_all_button_emits_every_selected_unit(qapp):
+    """Contrairement au bouton par groupe, celui-ci doit couvrir TOUTE la
+    sélection, tous groupes confondus (palier 1 et palier 2)."""
+    exact_group = _make_exact_group()
+    version_group = _make_version_group()
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(exact_duplicate_groups=[exact_group], version_groups=[version_group]))
+    received = []
+    screen.move_requested.connect(received.append)
+
+    screen._move_all_button_top.click()
+
+    # `Unit` n'est pas hashable (dataclass ordinaire) -- comparé par chemin.
+    expected_paths = {exact_group.units[1].representative, version_group.units[1].representative}
+    assert len(received) == 1
+    # Précoché par défaut : le second de chaque groupe (palier 1 index 1,
+    # palier 2 la version non suggérée).
+    assert {unit.representative for unit in received[0]} == expected_paths
+
+    received.clear()
+    screen.set_results(ScanResult(exact_duplicate_groups=[exact_group], version_groups=[version_group]))
+    screen._move_all_button_bottom.click()
+
+    assert len(received) == 1
+    assert {unit.representative for unit in received[0]} == expected_paths
 
 
 def test_doublons_results_screen_excluded_groups_are_shown(qapp):

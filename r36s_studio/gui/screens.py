@@ -3044,6 +3044,45 @@ class DoublonsScanProgressScreen(Screen):
         self._count_label.setText(tr("doublons_scan_progress_count", count=count))
 
 
+class DoublonsMoveProgressScreen(Screen):
+    """Déplacement en cours (signalement utilisateur -- bouton principal
+    « Écarter X fichiers ») -- contrairement au scan ci-dessus, le total
+    est connu dès le départ (`DoublonsMoveRunner.progress` émet
+    `(fait, total)`), donc une barre déterminée plutôt qu'indéterminée."""
+
+    cancel_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 16, 24, 24)
+        root.addStretch()
+
+        title = QLabel(tr("doublons_move_progress_title"))
+        title.setProperty("role", "title")
+        title.setAlignment(Qt.AlignCenter)
+        root.addWidget(title)
+
+        self._count_label = QLabel("")
+        self._count_label.setAlignment(Qt.AlignCenter)
+        self._count_label.setProperty("role", "secondary")
+        root.addWidget(self._count_label)
+
+        self._progress_bar = QProgressBar()
+        root.addWidget(self._progress_bar)
+
+        cancel_button = QPushButton(tr("doublons_scan_cancel_button"))
+        cancel_button.clicked.connect(self.cancel_requested.emit)
+        root.addWidget(cancel_button, 0, Qt.AlignCenter)
+
+        root.addStretch()
+
+    def set_progress(self, done: int, total: int) -> None:
+        self._progress_bar.setRange(0, total)
+        self._progress_bar.setValue(done)
+        self._count_label.setText(tr("doublons_move_progress_count", done=done, total=total))
+
+
 class DoublonsRiskConfirmDialog(Dialog):
     """Confirmation dédiée avant de lancer une analyse à risque (§ garde-
     fous ajoutés après validation du plan : racine de disque, dossier
@@ -3133,6 +3172,17 @@ class DoublonsResultsScreen(Screen):
         export_button = QPushButton(tr("doublons_export_button"))
         export_button.clicked.connect(self.export_requested.emit)
         header.addWidget(export_button)
+        # Bouton principal (signalement utilisateur -- 1900 fichiers sur
+        # 1272 groupes) -- sans lui, traiter toute la sélection à cette
+        # échelle demandait de rouvrir chaque groupe un par un pour son
+        # propre « Écarter la sélection ». Répété en bas de la liste
+        # (reconstruit à chaque `set_results`, ci-dessous) ; les deux
+        # instances sont tenues synchronisées par `_update_selection_summary`.
+        self._move_all_button_top = QPushButton()
+        self._move_all_button_top.setProperty("role", "primary")
+        self._move_all_button_top.clicked.connect(self._on_move_all_selected)
+        header.addWidget(self._move_all_button_top)
+        self._move_all_button_bottom: Optional[QPushButton] = None
         root.addLayout(header)
 
         # Bandeau permanent tant que le mode simulation est actif (§
@@ -3247,6 +3297,23 @@ class DoublonsResultsScreen(Screen):
             self._list_layout.insertWidget(insert_at, self._build_version_group_row(group, macos_move_blocked))
             insert_at += 1
 
+        # Répété en bas de la liste -- sur 1272 groupes (signalement
+        # utilisateur), faire défiler jusqu'en haut pour agir n'est pas
+        # raisonnable. `None` quand la liste est vide : rien à déplacer,
+        # même logique que `_selection_buttons_row` ci-dessus.
+        self._move_all_button_bottom = None
+        if has_groups:
+            bottom_wrapper = QWidget()
+            bottom_layout = QHBoxLayout(bottom_wrapper)
+            bottom_layout.setContentsMargins(0, 8, 0, 8)
+            bottom_layout.addStretch()
+            self._move_all_button_bottom = QPushButton()
+            self._move_all_button_bottom.setProperty("role", "primary")
+            self._move_all_button_bottom.clicked.connect(self._on_move_all_selected)
+            bottom_layout.addWidget(self._move_all_button_bottom)
+            self._list_layout.insertWidget(insert_at, bottom_wrapper)
+            insert_at += 1
+
         self._update_selection_summary()
 
     def _update_selection_summary(self) -> None:
@@ -3256,6 +3323,16 @@ class DoublonsResultsScreen(Screen):
         self._selection_label.setText(
             tr("doublons_selection_summary", count=total_files, size=_format_size(total_bytes))
         )
+        move_all_label = tr("doublons_move_all_button", count=total_files, size=_format_size(total_bytes))
+        for button in (self._move_all_button_top, self._move_all_button_bottom):
+            if button is not None:
+                button.setText(move_all_label)
+                button.setEnabled(total_files > 0)
+
+    def _on_move_all_selected(self) -> None:
+        selected = [unit for checkbox, unit in self._all_checkboxes.items() if checkbox.isChecked()]
+        if selected:
+            self.move_requested.emit(selected)
 
     def _on_select_all(self) -> None:
         for checkbox in self._all_checkboxes:

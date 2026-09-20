@@ -88,6 +88,7 @@ from .screens import (
     ConfirmUndoDoublonsDialog,
     DeviceDialog,
     DoublonsFolderScreen,
+    DoublonsMoveProgressScreen,
     DoublonsResultsScreen,
     DoublonsRiskConfirmDialog,
     DoublonsScanProgressScreen,
@@ -423,6 +424,7 @@ class MainWindow(QMainWindow):
         self._doublons_folder_screen = DoublonsFolderScreen()
         self._doublons_scan_progress_screen = DoublonsScanProgressScreen()
         self._doublons_results_screen = DoublonsResultsScreen()
+        self._doublons_move_progress_screen = DoublonsMoveProgressScreen()
 
         self._root_stack = QStackedWidget()
         self._root_stack.addWidget(self._assisted_landing)
@@ -432,6 +434,7 @@ class MainWindow(QMainWindow):
         self._root_stack.addWidget(self._doublons_folder_screen)
         self._root_stack.addWidget(self._doublons_scan_progress_screen)
         self._root_stack.addWidget(self._doublons_results_screen)
+        self._root_stack.addWidget(self._doublons_move_progress_screen)
         self.setCentralWidget(self._root_stack)
 
         # Fenêtres modales (§5, refonte navigation) : construites une fois,
@@ -601,6 +604,7 @@ class MainWindow(QMainWindow):
         self._doublons_results_screen.move_requested.connect(self._on_doublons_move_requested)
         self._doublons_results_screen.export_requested.connect(self._on_doublons_export_requested)
         self._doublons_results_screen.undo_requested.connect(self._on_doublons_undo_requested)
+        self._doublons_move_progress_screen.cancel_requested.connect(self._on_doublons_move_cancel_requested)
         self._confirm_move_doublons_dialog.confirmed.connect(self._on_doublons_move_confirmed)
         self._confirm_undo_doublons_dialog.confirmed.connect(self._on_doublons_undo_confirmed)
 
@@ -2048,32 +2052,44 @@ class MainWindow(QMainWindow):
     def _on_doublons_move_confirmed(self) -> None:
         if self._doublons_root is None or not self._pending_doublons_units:
             return
-        self._doublons_results_screen.setEnabled(False)
+        # Barre de progression réelle (signalement utilisateur -- 1900
+        # fichiers sur 1272 groupes, règle §2 n°5) -- le total est connu
+        # d'avance (§ garde-fou 1, jamais un membre isolé d'une unité
+        # liée), donc déterminée dès le départ.
+        total = sum(len(unit.members) for unit in self._pending_doublons_units)
+        self._doublons_move_progress_screen.set_progress(0, total)
+        self._root_stack.setCurrentWidget(self._doublons_move_progress_screen)
         self._doublons_move_runner = DoublonsMoveRunner(
             self._doublons_root,
             self._pending_doublons_units,
             self._app_config.doublons_simulation_mode,
             parent=self,
         )
+        self._doublons_move_runner.progress.connect(self._doublons_move_progress_screen.set_progress)
         self._doublons_move_runner.error.connect(self._on_doublons_move_error)
         self._doublons_move_runner.finished_move.connect(self._on_doublons_move_finished)
         self._doublons_move_runner.start()
+
+    def _on_doublons_move_cancel_requested(self) -> None:
+        if self._doublons_move_runner is not None:
+            self._doublons_move_runner.cancel()
 
     def _on_doublons_move_error(self, code: str, msg: str) -> None:
         self._last_error_code = code
         self._last_error_msg = msg
 
     def _on_doublons_move_finished(self, ok: bool) -> None:
-        self._doublons_results_screen.setEnabled(True)
         self._doublons_move_runner = None
         self._pending_doublons_units = []
         if not ok:
             friendly = friendly_error_message(self._last_error_code or "")
             QMessageBox.warning(self, tr("app_title"), friendly)
-        # Relance toujours un scan frais après (succès ou échec partiel) --
-        # reflète l'état réel du dossier plutôt qu'une mise à jour
-        # partielle de l'affichage précédent, même principe que l'ancien
-        # flux carte SD.
+        # Relance toujours un scan frais après (succès, échec partiel ou
+        # annulation) -- reflète l'état réel du dossier plutôt qu'une mise
+        # à jour partielle de l'affichage précédent, même principe que
+        # l'ancien flux carte SD. Ce qui a déjà été déplacé avant une
+        # annulation reste dans le journal (move.py, écriture au fil de
+        # l'eau) -- restaurable via « Tout annuler », jamais perdu.
         if self._doublons_root is not None:
             self._start_doublons_scan(self._doublons_root)
 

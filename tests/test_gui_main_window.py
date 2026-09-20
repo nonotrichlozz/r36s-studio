@@ -995,6 +995,72 @@ def test_doublons_move_confirmed_starts_move_runner_and_rescans(mock_list, mock_
         )
 
 
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_confirmed_shows_real_progress(mock_list, mock_filter, qapp, tmp_path):
+    """Signalement utilisateur (1900 fichiers, 1272 groupes), règle §2
+    n°5 -- une barre de progression réelle, jamais simulée, pendant le
+    déplacement de la sélection."""
+    from r36s_studio.doublons.scan import Unit
+
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._doublons_root = str(tmp_path)
+    units = [
+        Unit(tmp_path / "a.7z", [tmp_path / "a.7z"], 10, False),
+        Unit(tmp_path / "b.7z", [tmp_path / "b.7z"], 10, False),
+    ]
+
+    with patch("r36s_studio.gui.main_window.DoublonsMoveRunner") as mock_move_class:
+        move_instance = MagicMock()
+        mock_move_class.return_value = move_instance
+
+        window._doublons_results_screen.move_requested.emit(units)
+        window._confirm_move_doublons_dialog.confirmed.emit()
+
+        assert window._root_stack.currentWidget() is window._doublons_move_progress_screen
+        assert window._doublons_move_progress_screen._progress_bar.maximum() == 2
+
+        progress_callback = move_instance.progress.connect.call_args[0][0]
+        progress_callback(1, 2)
+
+    assert window._doublons_move_progress_screen._progress_bar.value() == 1
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_progress_screen_cancel_button_cancels_runner(mock_list, mock_filter, qapp, tmp_path):
+    """Si l'utilisateur annule en cours, ce qui a déjà été déplacé reste
+    dans le journal (move.py, écriture au fil de l'eau) -- ce test vérifie
+    seulement que le clic Annuler atteint bien le runner en cours."""
+    from r36s_studio.doublons.scan import Unit
+
+    window = MainWindow()
+    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    window._doublons_root = str(tmp_path)
+    units = [Unit(tmp_path / "a.7z", [tmp_path / "a.7z"], 10, False)]
+
+    with patch("r36s_studio.gui.main_window.DoublonsMoveRunner") as mock_move_class:
+        move_instance = MagicMock()
+        mock_move_class.return_value = move_instance
+
+        window._doublons_results_screen.move_requested.emit(units)
+        window._confirm_move_doublons_dialog.confirmed.emit()
+
+        from PySide6.QtWidgets import QPushButton
+
+        from r36s_studio.gui.strings import tr
+
+        cancel_button = [
+            b
+            for b in window._doublons_move_progress_screen.findChildren(QPushButton)
+            if b.text() == tr("doublons_scan_cancel_button")
+        ][0]
+        cancel_button.click()
+
+        move_instance.cancel.assert_called_once()
+
+
 # --- Écran de bienvenue macOS : Accès complet au disque (§3) ---------------
 # `elevate.has_full_disk_access` est forcée à `True` par l'autofixture
 # `_default_full_disk_access_granted` (tests/conftest.py) sauf ici, où

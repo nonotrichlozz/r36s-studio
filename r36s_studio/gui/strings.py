@@ -173,6 +173,8 @@ STRINGS = {
     "doublons_scan_progress_title": "Analyse en cours",
     "doublons_scan_progress_count": "{count} fichier(s) analysé(s)",
     "doublons_scan_cancel_button": "Annuler",
+    "doublons_move_progress_title": "Déplacement en cours",
+    "doublons_move_progress_count": "{done} / {total} fichier(s)",
     "doublons_risk_title": "Ce dossier peut prendre du temps à analyser",
     "doublons_risk_cancel": "Annuler",
     "doublons_risk_continue": "Continuer",
@@ -206,6 +208,7 @@ STRINGS = {
     ),
     "doublons_empty": "Aucun doublon trouvé.",
     "doublons_selection_summary": "{count} fichier(s) sélectionné(s) -- {size} récupérables",
+    "doublons_move_all_button": "Écarter les {count} fichiers sélectionnés ({size})",
     "doublons_group_exact_title": "Copies identiques",
     "doublons_exact_group_hash_label": "SHA-256 : {hash}",
     "doublons_exact_group_identical_notice": (

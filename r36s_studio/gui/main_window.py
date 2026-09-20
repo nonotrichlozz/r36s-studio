@@ -76,6 +76,7 @@ from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
 
 from . import elevate
+from . import logs as gui_logs
 from .android_runner import AndroidDetectRunner, AndroidPlatformToolsDownloadRunner, AndroidPlatformToolsSizeRunner
 from .doublons_runner import DoublonsMoveRunner, DoublonsScanRunner, DoublonsUndoRunner
 from .partition_runner import (
@@ -242,6 +243,49 @@ _ASSISTED_AD_HOC_DONE_STRINGS = {
 # taille des tuiles l'était.
 _ASSISTED_MIN_WIDTH = _ASSISTED_GRID_TOTAL_WIDTH + _ASSISTED_CONTENT_SPACING + _ASSISTED_PANEL_WIDTH + 60
 _ASSISTED_MIN_HEIGHT = _ASSISTED_GRID_TOTAL_HEIGHT + 96
+
+
+def _android_catalog_search_url(server_url: str) -> str:
+    """Même construction d'URL que `consoles_diverses/client.py::
+    rechercher_console` (jamais réimportée : fonction privée de ce
+    module-là) -- uniquement pour le diagnostic ci-dessous, ne remplace
+    jamais l'URL réellement construite par le client lui-même."""
+    return server_url.rstrip("/") + "/recherche"
+
+
+def _journaliser_android_recherche(url: str, reference: str) -> None:
+    """Diagnostic pour le signalement « Impossible de joindre le serveur
+    depuis l'écran Console Android, alors que la recherche marche depuis
+    Consoles diverses » -- les deux écrans utilisent pourtant exactement
+    la même source de configuration (`AppConfig.consoles_diverses_server_
+    url`, `consoles_diverses_settings_store.lire_licence()`, voir `_on_
+    android_search_catalog_requested` ci-dessous et le test dédié qui
+    compare les deux chemins d'appel). Consigne l'URL réellement appelée,
+    pour comparer d'une session à l'autre plutôt que de deviner --
+    best-effort, un journal inaccessible ne doit jamais empêcher la
+    recherche elle-même de continuer normalement."""
+    try:
+        chemin = gui_logs.android_log_path()
+        horodatage = datetime.now().isoformat(timespec="seconds")
+        with open(chemin, "a", encoding="utf-8") as fichier:
+            fichier.write(f"{horodatage} recherche catalogue : url={url!r}, reference={reference!r}\n")
+    except OSError:
+        pass
+
+
+def _journaliser_android_erreur_recherche(url: str, code: str, message: str) -> None:
+    """Même journal que `_journaliser_android_recherche` ci-dessus, pour le
+    code d'erreur reçu -- demandé explicitement (« journalise l'URL
+    appelée et le code d'erreur »)."""
+    try:
+        chemin = gui_logs.android_log_path()
+        horodatage = datetime.now().isoformat(timespec="seconds")
+        with open(chemin, "a", encoding="utf-8") as fichier:
+            fichier.write(
+                f"{horodatage} erreur recherche catalogue : url={url!r}, code={code!r}, message={message!r}\n"
+            )
+    except OSError:
+        pass
 
 
 class MainWindow(QMainWindow):
@@ -452,6 +496,11 @@ class MainWindow(QMainWindow):
         self._android_detect_runner: Optional[AndroidDetectRunner] = None
         self._android_download_runner: Optional[AndroidPlatformToolsDownloadRunner] = None
         self._android_search_runner: Optional[ConsoleSearchRunner] = None
+        # URL de la dernière recherche lancée depuis cet écran -- retenue
+        # uniquement pour le diagnostic (`_journaliser_android_erreur_
+        # recherche`, signal `error` du runner ne porte que code/message,
+        # jamais l'URL elle-même).
+        self._android_last_search_url: str = ""
         # Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien
         # flux carte-SD-uniquement de cette tuile) -- écrans autonomes,
         # même principe que `_consoles_diverses_screen` ci-dessus (pas un
@@ -2296,8 +2345,15 @@ class MainWindow(QMainWindow):
         if not reference:
             return
         self._android_screen.show_catalog_searching()
+        server_url = self._app_config.consoles_diverses_server_url
         licence_key = consoles_diverses_settings_store.lire_licence() or ""
-        runner = ConsoleSearchRunner(reference, self._app_config.consoles_diverses_server_url, licence_key)
+        # URL/clé venant strictement de la même source que `_open_consoles_
+        # diverses` (`AppConfig.consoles_diverses_server_url`, `consoles_
+        # diverses_settings_store.lire_licence()`) -- pas de configuration
+        # séparée pour cet écran, vérifié par un test dédié.
+        self._android_last_search_url = _android_catalog_search_url(server_url)
+        _journaliser_android_recherche(self._android_last_search_url, reference)
+        runner = ConsoleSearchRunner(reference, server_url, licence_key)
         runner.finished_ok.connect(self._on_android_search_finished)
         runner.error.connect(self._on_android_search_error)
         runner.finished.connect(runner.deleteLater)
@@ -2313,6 +2369,7 @@ class MainWindow(QMainWindow):
 
     def _on_android_search_error(self, code: str, message_serveur: str) -> None:
         self._android_search_runner = None
+        _journaliser_android_erreur_recherche(self._android_last_search_url, code, message_serveur)
         self._android_screen.show_catalog_error(consoles_diverses_friendly_error_message(code, message_serveur))
 
     def _on_web_requested(self) -> None:

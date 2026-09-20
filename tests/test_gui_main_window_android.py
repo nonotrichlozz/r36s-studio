@@ -300,6 +300,85 @@ def test_search_finished_not_found_shows_message(mock_list, mock_filter, mock_lo
     assert window._android_screen._catalog_status_label.isVisible()
 
 
+@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="cle-partagee")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch(
+    "r36s_studio.gui.main_window.app_config.load_config",
+    return_value=AppConfig(ui_mode="expert", consoles_diverses_server_url="https://exemple.invalid"),
+)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_android_search_uses_exactly_the_same_config_as_consoles_diverses(
+    mock_list, mock_filter, mock_load, mock_save, mock_lire_licence, qapp
+):
+    """Signalé : « Impossible de joindre le serveur » depuis l'écran
+    Console Android alors que la recherche marche depuis Consoles
+    diverses -- vérifie que les deux chemins d'appel utilisent strictement
+    la même URL de serveur et la même clé de licence (pas de configuration
+    séparée pour cet écran, jamais une valeur par défaut différente)."""
+    window = MainWindow()
+
+    # Chemin « Consoles diverses » -- valeurs passées à `set_network_config`.
+    window._open_consoles_diverses()
+    consoles_diverses_url = window._consoles_diverses_screen._server_url
+    consoles_diverses_licence = window._consoles_diverses_screen._licence_key
+
+    # Chemin « Console Android » -- valeurs passées au constructeur du runner.
+    search_runner_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.ConsoleSearchRunner", search_runner_class):
+        window._android_screen.search_catalog_requested.emit("RP Flip 2")
+    android_call = search_runner_class.instances[0].init_args
+    android_url, android_licence = android_call[1], android_call[2]
+
+    assert android_url == consoles_diverses_url == "https://exemple.invalid"
+    assert android_licence == consoles_diverses_licence == "cle-partagee"
+
+
+@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="cle")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch(
+    "r36s_studio.gui.main_window.app_config.load_config",
+    return_value=AppConfig(ui_mode="expert", consoles_diverses_server_url="https://exemple.invalid/"),
+)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_android_search_logs_the_called_url(
+    mock_list, mock_filter, mock_load, mock_save, mock_lire_licence, qapp, tmp_path
+):
+    """Demandé explicitement : « Journalise l'URL appelée ». Le fixture
+    autouse `_android_log_isolated` (tests/conftest.py) redirige `gui_logs.
+    android_log_path` vers `tmp_path / "android.log"` -- même `tmp_path`
+    que celui reçu ici (fixture function-scopée, une seule instance par
+    test)."""
+    window = MainWindow()
+    search_runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.ConsoleSearchRunner", search_runner_class):
+        window._android_screen.search_catalog_requested.emit("RP Flip 2")
+
+    log_content = (tmp_path / "android.log").read_text(encoding="utf-8")
+    assert "https://exemple.invalid/recherche" in log_content
+    assert "RP Flip 2" in log_content
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_android_search_error_logs_url_and_error_code(mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path):
+    """Demandé explicitement : « ... et le code d'erreur »."""
+    window = MainWindow()
+    search_runner_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.ConsoleSearchRunner", search_runner_class):
+        window._android_screen.search_catalog_requested.emit("RP Flip 2")
+
+    window._on_android_search_error("serveur_injoignable", "")
+
+    log_content = (tmp_path / "android.log").read_text(encoding="utf-8")
+    assert "serveur_injoignable" in log_content
+    assert "/recherche" in log_content
+
+
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])

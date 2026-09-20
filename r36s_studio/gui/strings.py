@@ -799,6 +799,14 @@ STRINGS = {
     "android_catalog_not_found": "Cette console n'a pas été trouvée dans le catalogue.",
     "android_catalog_found_title": "Fiche trouvée",
     "android_emulators_title": "Émulateurs recommandés",
+    # Signalé : « la liste d'émulateurs est identique quelle que soit la
+    # console » -- affiché quand aucun filtrage n'a pu être appliqué
+    # (architecture/version d'Android non lues, android/emulators.py::
+    # filter_for_device), jamais un filtrage silencieux ni une liste vide.
+    "android_emulators_generic_notice": (
+        "Liste générique : impossible d'adapter cette liste à ta console "
+        "(architecture ou version d'Android non lues)."
+    ),
     "android_emulator_licence_a_verifier": "Licence à vérifier",
     "android_emulator_prix_a_verifier": "Prix à vérifier",
     # Statut du projet lui-même (android/emulators.py::STATUT_PROJET_VALUES,

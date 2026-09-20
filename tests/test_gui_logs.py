@@ -46,3 +46,13 @@ def test_consoles_diverses_log_path_is_inside_log_dir(mock_system, tmp_path):
 
     assert path == tmp_path / ".config" / "r36s-studio" / "logs" / "consoles_diverses.log"
     assert isinstance(path, Path)
+
+
+@pytest.mark.real_android_log_path
+@patch("r36s_studio.gui.logs.platform.system", return_value="Darwin")
+def test_android_log_path_is_inside_log_dir(mock_system, tmp_path):
+    with patch("r36s_studio.gui.logs.Path.home", return_value=tmp_path):
+        path = logs.android_log_path()
+
+    assert path == tmp_path / ".config" / "r36s-studio" / "logs" / "android.log"
+    assert isinstance(path, Path)

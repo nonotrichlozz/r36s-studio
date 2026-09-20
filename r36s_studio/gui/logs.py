@@ -56,3 +56,18 @@ def consoles_diverses_log_path() -> Path:
     écrasé à chaque lancement) -- une ligne par fiche rejetée, pas un seul
     incident à la fois."""
     return log_dir() / "consoles_diverses.log"
+
+
+def android_log_path() -> Path:
+    """Journal de l'outil « Console Android » (android/, étape 1) --
+    signalé : « Impossible de joindre le serveur » affiché depuis cet
+    écran alors que la même recherche fonctionne depuis Consoles diverses,
+    bien que `main_window.py` construise le client avec exactement la même
+    source de configuration (`AppConfig.consoles_diverses_server_url`,
+    `consoles_diverses_settings_store.lire_licence()`) -- voir le test
+    dédié qui compare les deux chemins d'appel. En l'absence d'un accès
+    au serveur réel pour reproduire ici, ce journal consigne l'URL
+    effectivement appelée et le code d'erreur reçu, pour comparer d'une
+    session à l'autre plutôt que de deviner. Ajouté en continu, comme
+    `consoles_diverses_log_path` -- jamais écrasé."""
+    return log_dir() / "android.log"

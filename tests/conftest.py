@@ -166,6 +166,25 @@ def _consoles_diverses_log_isolated(request, tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _android_log_isolated(request, tmp_path, monkeypatch):
+    """Même garde-fou que `_consoles_diverses_log_isolated` ci-dessus, pour
+    `gui/logs.py::android_log_path` (outil « Console Android », signalé :
+    « Impossible de joindre le serveur » depuis cet écran) -- redirige
+    vers un fichier temporaire pour tous les tests, jamais le vrai journal
+    de la machine de développement. `tests/test_gui_logs.py` la repatche
+    explicitement pour tester la fonction elle-même, marquée
+    `@pytest.mark.real_android_log_path`."""
+    if request.node.get_closest_marker("real_android_log_path"):
+        yield
+        return
+
+    from r36s_studio.gui import logs as gui_logs
+
+    monkeypatch.setattr(gui_logs, "android_log_path", lambda: tmp_path / "android.log")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_privileged_mount_hook():
     """`partitions/locate.py::_privileged_mount_hook` est un point
     d'extension au niveau module que `MainWindow.__init__` installe sur

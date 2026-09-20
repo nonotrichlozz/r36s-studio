@@ -11,6 +11,33 @@ import json
 import pytest
 
 from r36s_studio.android import emulators
+from r36s_studio.android.models import VALEUR_INCONNUE, AndroidDeviceInfo
+
+
+def _device(abi="arm64-v8a", android_version="13"):
+    return AndroidDeviceInfo(
+        serial="SER1",
+        manufacturer="Retroid",
+        model="RP Flip 2",
+        product_name="flip2",
+        android_version=android_version,
+        abi=abi,
+    )
+
+
+def _entry(**overrides):
+    defaults = dict(
+        id="x",
+        nom="X",
+        systemes_emules=["Y"],
+        licence=emulators.SENTINEL_A_VERIFIER,
+        prix=emulators.SENTINEL_A_VERIFIER,
+        statut_projet="actif",
+        url_officielle="https://example.invalid/",
+        source_url="https://example.invalid/",
+    )
+    defaults.update(overrides)
+    return emulators.EmulatorEntry(**defaults)
 
 
 def test_load_emulators_reads_the_real_data_file():
@@ -194,3 +221,165 @@ def test_load_emulators_entries_have_a_known_statut_projet():
 
     for entry in catalog.emulateurs:
         assert entry.statut_projet in emulators.STATUT_PROJET_VALUES, entry.id
+
+
+def test_load_emulators_optional_capability_fields_default_to_none(tmp_path):
+    """`architecture_minimale`/`android_minimum` sont optionnels -- absents
+    du JSON, ils valent `None` (aucune restriction connue), jamais une
+    valeur inventée."""
+    path = tmp_path / "emulateurs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "emulateurs": [
+                    {
+                        "id": "x",
+                        "nom": "X",
+                        "systemes_emules": ["Y"],
+                        "licence": "a_verifier",
+                        "prix": "a_verifier",
+                        "statut_projet": "actif",
+                        "url_officielle": "https://example.invalid/",
+                        "source_url": "https://example.invalid/",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = emulators.load_emulators(path)
+
+    assert catalog.emulateurs[0].architecture_minimale is None
+    assert catalog.emulateurs[0].android_minimum is None
+
+
+def test_load_emulators_reads_optional_capability_fields_when_present(tmp_path):
+    path = tmp_path / "emulateurs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "emulateurs": [
+                    {
+                        "id": "x",
+                        "nom": "X",
+                        "systemes_emules": ["Y"],
+                        "licence": "a_verifier",
+                        "prix": "a_verifier",
+                        "statut_projet": "actif",
+                        "url_officielle": "https://example.invalid/",
+                        "source_url": "https://example.invalid/",
+                        "architecture_minimale": "arm64-v8a",
+                        "android_minimum": "12",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = emulators.load_emulators(path)
+
+    assert catalog.emulateurs[0].architecture_minimale == "arm64-v8a"
+    assert catalog.emulateurs[0].android_minimum == "12"
+
+
+# --- is_realistic_for_device / filter_for_device --------------------------
+
+
+def test_is_realistic_for_device_true_when_no_restriction():
+    entry = _entry()
+
+    assert emulators.is_realistic_for_device(entry, _device(abi="armeabi-v7a", android_version="5.0")) is True
+
+
+def test_is_realistic_for_device_false_when_architecture_does_not_match():
+    entry = _entry(architecture_minimale="arm64-v8a")
+
+    assert emulators.is_realistic_for_device(entry, _device(abi="armeabi-v7a")) is False
+
+
+def test_is_realistic_for_device_true_when_architecture_matches():
+    entry = _entry(architecture_minimale="arm64-v8a")
+
+    assert emulators.is_realistic_for_device(entry, _device(abi="arm64-v8a")) is True
+
+
+def test_is_realistic_for_device_false_when_android_version_too_old():
+    entry = _entry(android_minimum="12")
+
+    assert emulators.is_realistic_for_device(entry, _device(android_version="8.1")) is False
+
+
+def test_is_realistic_for_device_true_when_android_version_meets_minimum():
+    entry = _entry(android_minimum="8.0")
+
+    assert emulators.is_realistic_for_device(entry, _device(android_version="8.0")) is True
+    assert emulators.is_realistic_for_device(entry, _device(android_version="13")) is True
+
+
+def test_is_realistic_for_device_handles_multi_segment_versions():
+    entry = _entry(android_minimum="8.0")
+
+    assert emulators.is_realistic_for_device(entry, _device(android_version="7.1.2")) is False
+    assert emulators.is_realistic_for_device(entry, _device(android_version="9.0.1")) is True
+
+
+def test_is_realistic_for_device_never_rejects_on_unparseable_version():
+    """Un format de version inattendu ne doit jamais faire disparaître une
+    entrée sur une simple supposition."""
+    entry = _entry(android_minimum="8.0")
+
+    assert emulators.is_realistic_for_device(entry, _device(android_version="Q")) is True
+
+
+def test_filter_for_device_returns_generic_catalog_when_device_is_none():
+    catalog = emulators.EmulatorCatalog(avertissement="A.", emulateurs=[_entry(id="a"), _entry(id="b")])
+
+    result = emulators.filter_for_device(catalog, None)
+
+    assert result.generique is True
+    assert [entry.id for entry in result.emulateurs] == ["a", "b"]
+    assert result.avertissement == "A."
+
+
+def test_filter_for_device_returns_generic_catalog_when_abi_unknown():
+    catalog = emulators.EmulatorCatalog(avertissement="", emulateurs=[_entry()])
+    device = _device(abi=VALEUR_INCONNUE)
+
+    result = emulators.filter_for_device(catalog, device)
+
+    assert result.generique is True
+
+
+def test_filter_for_device_returns_generic_catalog_when_android_version_unknown():
+    catalog = emulators.EmulatorCatalog(avertissement="", emulateurs=[_entry()])
+    device = _device(android_version=VALEUR_INCONNUE)
+
+    result = emulators.filter_for_device(catalog, device)
+
+    assert result.generique is True
+
+
+def test_filter_for_device_filters_when_device_info_is_known():
+    catalog = emulators.EmulatorCatalog(
+        avertissement="",
+        emulateurs=[
+            _entry(id="leger"),
+            _entry(id="exigeant", architecture_minimale="arm64-v8a", android_minimum="12"),
+        ],
+    )
+
+    result = emulators.filter_for_device(catalog, _device(abi="armeabi-v7a", android_version="8.0"))
+
+    assert result.generique is False
+    assert [entry.id for entry in result.emulateurs] == ["leger"]
+
+
+def test_filter_for_device_keeps_full_list_for_a_capable_device():
+    catalog = emulators.load_emulators()
+
+    result = emulators.filter_for_device(catalog, _device(abi="arm64-v8a", android_version="13"))
+
+    assert result.generique is False
+    assert len(result.emulateurs) == len(catalog.emulateurs)

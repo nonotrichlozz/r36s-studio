@@ -60,7 +60,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from r36s_studio.android.emulators import EmulatorCatalog, EmulatorEntry, SENTINEL_A_VERIFIER
+from r36s_studio.android.emulators import (
+    SENTINEL_A_VERIFIER,
+    EmulatorCatalog,
+    EmulatorEntry,
+    filter_for_device as android_filter_emulators_for_device,
+)
 from r36s_studio.android.models import VALEUR_INCONNUE, AndroidDeviceInfo, DetectionResult
 # Réutilisation explicitement demandée par docs/android-adb.md (§ Identification
 # et propositions : "réutiliser le client de consoles_diverses") -- lecture
@@ -3148,6 +3153,14 @@ class AndroidScreen(Screen):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_model = ""
+        # Filtrage de la liste d'émulateurs par appareil détecté (signalé :
+        # « la liste d'émulateurs est identique quelle que soit la console »)
+        # -- catalogue complet mémorisé une fois (`set_emulator_catalog`),
+        # appareil courant mémorisé à chaque détection (`_populate_device`),
+        # `_render_emulator_list` recombine les deux à chaque changement de
+        # l'un ou l'autre.
+        self._emulator_catalog: Optional[EmulatorCatalog] = None
+        self._current_device: Optional[AndroidDeviceInfo] = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 16, 24, 24)
@@ -3265,6 +3278,14 @@ class AndroidScreen(Screen):
         self._emulators_warning_label = _android_plain_label("", role="warning", wrap=True)
         self._emulators_warning_label.setVisible(False)
         emulators_layout.addWidget(self._emulators_warning_label)
+        # Mention « liste générique » (signalé : liste identique quelle que
+        # soit la console) -- distincte de l'avertissement ci-dessus (qui
+        # porte sur la fiabilité des données, pas sur le filtrage).
+        self._emulators_generic_label = _android_plain_label(
+            tr("android_emulators_generic_notice"), role="secondary", wrap=True
+        )
+        self._emulators_generic_label.setVisible(False)
+        emulators_layout.addWidget(self._emulators_generic_label)
         self._emulators_list_layout = QVBoxLayout()
         emulators_layout.addLayout(self._emulators_list_layout)
         content_layout.addWidget(self._emulators_frame)
@@ -3358,6 +3379,8 @@ class AndroidScreen(Screen):
             label.setText(tr("android_value_not_found") if unknown else raw)
             label.setProperty("role", "secondary" if unknown else "")
             theme.repolish(label)
+        self._current_device = device
+        self._render_emulator_list()
 
     # --- Catalogue --------------------------------------------------------
 
@@ -3406,10 +3429,22 @@ class AndroidScreen(Screen):
     # --- Émulateurs recommandés ------------------------------------------
 
     def set_emulator_catalog(self, catalog: EmulatorCatalog) -> None:
-        self._emulators_warning_label.setText(catalog.avertissement)
-        self._emulators_warning_label.setVisible(bool(catalog.avertissement))
+        self._emulator_catalog = catalog
+        self._render_emulator_list()
+
+    def _render_emulator_list(self) -> None:
+        """Recombine le catalogue complet (`set_emulator_catalog`) et
+        l'appareil actuellement détecté (`_populate_device`) à chaque
+        changement de l'un ou l'autre -- signalé : « la liste d'émulateurs
+        est identique quelle que soit la console détectée »."""
+        if self._emulator_catalog is None:
+            return
+        filtered = android_filter_emulators_for_device(self._emulator_catalog, self._current_device)
+        self._emulators_warning_label.setText(filtered.avertissement)
+        self._emulators_warning_label.setVisible(bool(filtered.avertissement))
+        self._emulators_generic_label.setVisible(filtered.generique)
         _android_clear_layout(self._emulators_list_layout)
-        for entry in catalog.emulateurs:
+        for entry in filtered.emulateurs:
             self._emulators_list_layout.addWidget(_android_build_emulator_row(entry))
 
 

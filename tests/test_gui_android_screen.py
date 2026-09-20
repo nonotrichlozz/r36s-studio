@@ -346,6 +346,97 @@ def test_set_emulator_catalog_hides_warning_when_empty(qapp):
     assert screen._emulators_list_layout.count() == 0
 
 
+# --- Filtrage par appareil (signalé : liste identique quelle que soit la
+# console détectée) -----------------------------------------------------
+
+
+def _capability_catalog():
+    return EmulatorCatalog(
+        avertissement="",
+        emulateurs=[
+            EmulatorEntry(
+                id="leger",
+                nom="Léger",
+                systemes_emules=["Y"],
+                licence=SENTINEL_A_VERIFIER,
+                prix=SENTINEL_A_VERIFIER,
+                statut_projet="actif",
+                url_officielle="https://example.invalid/",
+                source_url="https://example.invalid/",
+            ),
+            EmulatorEntry(
+                id="exigeant",
+                nom="Exigeant",
+                systemes_emules=["Z"],
+                licence=SENTINEL_A_VERIFIER,
+                prix=SENTINEL_A_VERIFIER,
+                statut_projet="actif",
+                url_officielle="https://example.invalid/",
+                source_url="https://example.invalid/",
+                architecture_minimale="arm64-v8a",
+                android_minimum="12",
+            ),
+        ],
+    )
+
+
+def _device(abi="arm64-v8a", android_version="13"):
+    return AndroidDeviceInfo(
+        serial="SER1", manufacturer="Retroid", model="RP Flip 2", product_name="flip2", android_version=android_version, abi=abi
+    )
+
+
+def test_emulator_list_is_filtered_for_a_capable_device(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+
+    screen.show_detection_result(DetectionResult(state="ready", device=_device(abi="arm64-v8a", android_version="13")))
+
+    assert screen._emulators_list_layout.count() == 2
+    assert not screen._emulators_generic_label.isVisible()
+
+
+def test_emulator_list_is_filtered_for_a_limited_device(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+
+    screen.show_detection_result(
+        DetectionResult(state="ready", device=_device(abi="armeabi-v7a", android_version="8.0"))
+    )
+
+    assert screen._emulators_list_layout.count() == 1
+    assert not screen._emulators_generic_label.isVisible()
+
+
+def test_emulator_list_shows_generic_notice_when_device_info_is_unknown(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+
+    screen.show_detection_result(
+        DetectionResult(state="ready", device=_device(abi="inconnu", android_version="inconnu"))
+    )
+
+    assert screen._emulators_list_layout.count() == 2
+    assert screen._emulators_generic_label.isVisible()
+
+
+def test_emulator_list_refilters_when_a_new_device_is_detected(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device(abi="arm64-v8a", android_version="13")))
+    assert screen._emulators_list_layout.count() == 2
+
+    screen.show_detection_result(
+        DetectionResult(state="ready", device=_device(abi="armeabi-v7a", android_version="8.0"))
+    )
+
+    assert screen._emulators_list_layout.count() == 1
+
+
 # --- Signaux de base -----------------------------------------------------
 
 

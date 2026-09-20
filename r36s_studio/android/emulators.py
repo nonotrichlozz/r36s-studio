@@ -38,7 +38,9 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
+
+from .models import VALEUR_INCONNUE, AndroidDeviceInfo
 
 # Jamais affirmé sans vérification humaine sur la page officielle du
 # projet (demandé explicitement) -- l'écran affiche "à vérifier" plutôt
@@ -78,12 +80,39 @@ class EmulatorEntry:
     url_officielle: str
     source_url: str
     telechargement_auto_autorise: bool = False
+    # Filtre par capacité de l'appareil (signalé : "la liste d'émulateurs
+    # est identique quelle que soit la console"), optionnels -- `None`
+    # signifie "aucune restriction connue sur cet axe", jamais une
+    # restriction inventée faute de mieux. Vérifiés individuellement sur
+    # la page/le dépôt officiel de chaque projet avant d'être renseignés
+    # (ex. Eden : "32-bit Android is unsupported" + "Android 12 or newer
+    # required") -- jamais une estimation à partir du SoC/de la puissance
+    # perçue, ce projet ne lit d'ailleurs aucune information de SoC
+    # (§ Détection du brief : seulement fabricant/modèle/nom de produit/
+    # version d'Android/architecture, `android.adb.get_device_props`).
+    architecture_minimale: Optional[str] = None  # ex. "arm64-v8a"
+    android_minimum: Optional[str] = None  # ex. "8.0", "12"
 
 
 @dataclass
 class EmulatorCatalog:
     avertissement: str
     emulateurs: List[EmulatorEntry]
+
+
+@dataclass
+class FilteredEmulatorCatalog:
+    """Résultat de `filter_for_device` -- `generique` est vrai quand
+    aucun filtrage n'a pu être appliqué (aucun appareil détecté, ou
+    architecture/version d'Android non lues, `android.models.
+    VALEUR_INCONNUE`) : `emulateurs` contient alors le catalogue complet,
+    jamais une liste vide faute d'information (demandé explicitement :
+    "Si l'information manque, affiche toute la liste avec une mention
+    « liste générique »")."""
+
+    avertissement: str
+    emulateurs: List[EmulatorEntry]
+    generique: bool
 
 
 def _data_dir() -> Path:
@@ -111,6 +140,8 @@ def _entry_from_json(data: Any) -> EmulatorEntry:
             f"Entrée d'émulateur invalide : 'statut_projet' doit être l'un de {sorted(STATUT_PROJET_VALUES)}, "
             f"reçu {statut_projet!r}."
         )
+    architecture_minimale = data.get("architecture_minimale")
+    android_minimum = data.get("android_minimum")
     return EmulatorEntry(
         id=str(data["id"]),
         nom=str(data["nom"]),
@@ -121,6 +152,8 @@ def _entry_from_json(data: Any) -> EmulatorEntry:
         url_officielle=str(data["url_officielle"]),
         source_url=str(data["source_url"]),
         telechargement_auto_autorise=bool(data.get("telechargement_auto_autorise", False)),
+        architecture_minimale=str(architecture_minimale) if architecture_minimale else None,
+        android_minimum=str(android_minimum) if android_minimum else None,
     )
 
 
@@ -138,10 +171,59 @@ def load_emulators(path: Optional[Path] = None) -> EmulatorCatalog:
     return EmulatorCatalog(avertissement=avertissement, emulateurs=emulateurs)
 
 
+def _parse_version(version: str) -> Optional[Tuple[int, ...]]:
+    """`"8.0"`/`"12"`/`"13.1"` -> `(8, 0)`/`(12,)`/`(13, 1)` -- `None` si le
+    format ne suit pas ce schéma simple (jamais deviné, la comparaison
+    d'`is_realistic_for_device` laisse alors passer plutôt que de risquer
+    un rejet sur une donnée mal comprise)."""
+    parts = version.strip().split(".")
+    if not parts or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def is_realistic_for_device(entry: EmulatorEntry, device: AndroidDeviceInfo) -> bool:
+    """Compare aux deux seuls axes que `android.adb.get_device_props` lit
+    réellement (§ Détection du brief) -- architecture et version d'Android,
+    jamais le SoC (non lu par ce projet, voir le commentaire sur `Emulator
+    Entry.architecture_minimale`). Une comparaison qui ne peut pas être
+    tranchée (version dans un format inattendu) laisse toujours passer
+    plutôt que d'écarter une entrée sur une supposition."""
+    if entry.architecture_minimale and device.abi != VALEUR_INCONNUE and device.abi != entry.architecture_minimale:
+        return False
+    if entry.android_minimum and device.android_version != VALEUR_INCONNUE:
+        device_version = _parse_version(device.android_version)
+        minimum_version = _parse_version(entry.android_minimum)
+        if device_version is not None and minimum_version is not None and device_version < minimum_version:
+            return False
+    return True
+
+
+def filter_for_device(catalog: EmulatorCatalog, device: Optional[AndroidDeviceInfo]) -> FilteredEmulatorCatalog:
+    """Signalé : « la liste d'émulateurs est identique quelle que soit la
+    console détectée ». Ne retient que les entrées réalistes pour
+    `device` (architecture/version d'Android, ci-dessus) -- `generique`
+    vrai (catalogue complet, non filtré) si `device` est absent ou si
+    l'une ou l'autre de ces deux propriétés n'a pas pu être lue
+    (`android.models.VALEUR_INCONNUE`) : un filtrage partiel, appliqué
+    sur un seul axe alors que l'autre est inconnu, resterait trompeur --
+    demandé explicitement plutôt qu'une liste vide ou un filtrage
+    hasardeux sur une information manquante."""
+    if device is None or device.abi == VALEUR_INCONNUE or device.android_version == VALEUR_INCONNUE:
+        return FilteredEmulatorCatalog(
+            avertissement=catalog.avertissement, emulateurs=list(catalog.emulateurs), generique=True
+        )
+    emulateurs = [entry for entry in catalog.emulateurs if is_realistic_for_device(entry, device)]
+    return FilteredEmulatorCatalog(avertissement=catalog.avertissement, emulateurs=emulateurs, generique=False)
+
+
 __all__ = [
     "SENTINEL_A_VERIFIER",
     "STATUT_PROJET_VALUES",
     "EmulatorEntry",
     "EmulatorCatalog",
+    "FilteredEmulatorCatalog",
     "load_emulators",
+    "is_realistic_for_device",
+    "filter_for_device",
 ]

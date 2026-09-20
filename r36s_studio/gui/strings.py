@@ -801,6 +801,11 @@ STRINGS = {
     "android_emulators_title": "Émulateurs recommandés",
     "android_emulator_licence_a_verifier": "Licence à vérifier",
     "android_emulator_prix_a_verifier": "Prix à vérifier",
+    # Statut du projet lui-même (android/emulators.py::STATUT_PROJET_VALUES,
+    # demandé explicitement) -- distinct de la licence/du prix ci-dessus.
+    "android_emulator_status_actif": "Projet actif",
+    "android_emulator_status_abandonne": "Projet abandonné",
+    "android_emulator_status_a_verifier": "Statut à vérifier",
     "android_emulator_official_link": "Ouvrir la page officielle",
     "android_emulator_source_link": "Voir la source",
     "android_raw_output_title": "Sortie technique (adb)",

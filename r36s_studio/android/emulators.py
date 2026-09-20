@@ -45,6 +45,13 @@ from typing import Any, List, Optional
 # que "gratuit"/"payant" tant qu'une entrée porte cette valeur.
 SENTINEL_A_VERIFIER = "a_verifier"
 
+# Statut du projet lui-même (demandé explicitement, distinct de `licence`/
+# `prix` ci-dessus) : `actif`/`abandonne` sont vérifiés au moment de
+# l'ajout d'une entrée (date du dernier commit/release, annonce officielle
+# d'arrêt...), `a_verifier` quand la recherche n'a pas permis de trancher
+# avec certitude -- jamais affirmé "actif" par défaut faute de mieux.
+STATUT_PROJET_VALUES = {"actif", "abandonne", "a_verifier"}
+
 _DATA_SUBDIR = "android/data"
 _DATA_FILENAME = "emulateurs.json"
 
@@ -54,6 +61,7 @@ _REQUIRED_FIELDS = (
     "systemes_emules",
     "licence",
     "prix",
+    "statut_projet",
     "url_officielle",
     "source_url",
 )
@@ -66,6 +74,7 @@ class EmulatorEntry:
     systemes_emules: List[str]
     licence: str
     prix: str
+    statut_projet: str
     url_officielle: str
     source_url: str
     telechargement_auto_autorise: bool = False
@@ -96,12 +105,19 @@ def _entry_from_json(data: Any) -> EmulatorEntry:
             raise ValueError(f"Entrée d'émulateur invalide : champ '{champ}' manquant.")
     if not isinstance(data["systemes_emules"], list):
         raise ValueError("Entrée d'émulateur invalide : 'systemes_emules' doit être une liste.")
+    statut_projet = str(data["statut_projet"])
+    if statut_projet not in STATUT_PROJET_VALUES:
+        raise ValueError(
+            f"Entrée d'émulateur invalide : 'statut_projet' doit être l'un de {sorted(STATUT_PROJET_VALUES)}, "
+            f"reçu {statut_projet!r}."
+        )
     return EmulatorEntry(
         id=str(data["id"]),
         nom=str(data["nom"]),
         systemes_emules=[str(item) for item in data["systemes_emules"]],
         licence=str(data["licence"]),
         prix=str(data["prix"]),
+        statut_projet=statut_projet,
         url_officielle=str(data["url_officielle"]),
         source_url=str(data["source_url"]),
         telechargement_auto_autorise=bool(data.get("telechargement_auto_autorise", False)),
@@ -124,6 +140,7 @@ def load_emulators(path: Optional[Path] = None) -> EmulatorCatalog:
 
 __all__ = [
     "SENTINEL_A_VERIFIER",
+    "STATUT_PROJET_VALUES",
     "EmulatorEntry",
     "EmulatorCatalog",
     "load_emulators",

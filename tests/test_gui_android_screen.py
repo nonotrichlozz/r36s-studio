@@ -301,6 +301,7 @@ def test_set_emulator_catalog_builds_one_row_per_entry(qapp):
                 systemes_emules=["Y"],
                 licence=SENTINEL_A_VERIFIER,
                 prix=SENTINEL_A_VERIFIER,
+                statut_projet="actif",
                 url_officielle="https://example.invalid/",
                 source_url="https://example.invalid/",
             ),
@@ -310,6 +311,7 @@ def test_set_emulator_catalog_builds_one_row_per_entry(qapp):
                 systemes_emules=["W"],
                 licence=SENTINEL_A_VERIFIER,
                 prix=SENTINEL_A_VERIFIER,
+                statut_projet="abandonne",
                 url_officielle="https://example.invalid/",
                 source_url="https://example.invalid/",
             ),
@@ -321,6 +323,17 @@ def test_set_emulator_catalog_builds_one_row_per_entry(qapp):
     assert screen._emulators_list_layout.count() == 2
     assert screen._emulators_warning_label.isVisible()
     assert screen._emulators_warning_label.text() == "Vérifie toujours la source."
+
+    # Badge de statut du projet (demandé explicitement) -- un par carte,
+    # texte convivial plutôt que le mot-clé brut "actif"/"abandonne".
+    from PySide6.QtWidgets import QLabel
+
+    first_row = screen._emulators_list_layout.itemAt(0).widget()
+    second_row = screen._emulators_list_layout.itemAt(1).widget()
+    first_row_texts = [label.text().lower() for label in first_row.findChildren(QLabel)]
+    second_row_texts = [label.text().lower() for label in second_row.findChildren(QLabel)]
+    assert any("actif" in text for text in first_row_texts)
+    assert any("abandonné" in text for text in second_row_texts)
 
 
 def test_set_emulator_catalog_hides_warning_when_empty(qapp):

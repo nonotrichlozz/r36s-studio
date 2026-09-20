@@ -7,6 +7,7 @@
       "systemes_emules": ["Multi-système (cœurs libretro)"],
       "licence": "a_verifier",
       "prix": "a_verifier",
+      "statut_projet": "actif",
       "url_officielle": "https://www.retroarch.com/",
       "source_url": "https://www.retroarch.com/",
       "telechargement_auto_autorise": false
@@ -17,6 +18,7 @@
       "systemes_emules": ["PSP"],
       "licence": "a_verifier",
       "prix": "a_verifier",
+      "statut_projet": "actif",
       "url_officielle": "https://www.ppsspp.org/",
       "source_url": "https://www.ppsspp.org/",
       "telechargement_auto_autorise": false
@@ -27,6 +29,7 @@
       "systemes_emules": ["PlayStation (PS1)"],
       "licence": "a_verifier",
       "prix": "a_verifier",
+      "statut_projet": "actif",
       "url_officielle": "https://github.com/stenzek/duckstation",
       "source_url": "https://github.com/stenzek/duckstation",
       "telechargement_auto_autorise": false
@@ -37,6 +40,7 @@
       "systemes_emules": ["GameCube", "Wii"],
       "licence": "a_verifier",
       "prix": "a_verifier",
+      "statut_projet": "actif",
       "url_officielle": "https://dolphin-emu.org/",
       "source_url": "https://dolphin-emu.org/",
       "telechargement_auto_autorise": false
@@ -47,6 +51,7 @@
       "systemes_emules": ["Nintendo 64"],
       "licence": "a_verifier",
       "prix": "a_verifier",
+      "statut_projet": "actif",
       "url_officielle": "https://github.com/mupen64plus-ae/mupen64plus-ae",
       "source_url": "https://github.com/mupen64plus-ae/mupen64plus-ae",
       "telechargement_auto_autorise": false
@@ -57,8 +62,92 @@
       "systemes_emules": ["Applications et jeux Windows (via Wine)"],
       "licence": "a_verifier",
       "prix": "a_verifier",
+      "statut_projet": "actif",
       "url_officielle": "https://github.com/brunodev85/winlator",
       "source_url": "https://github.com/brunodev85/winlator",
+      "telechargement_auto_autorise": false
+    },
+    {
+      "id": "eden",
+      "nom": "Eden",
+      "systemes_emules": ["Nintendo Switch"],
+      "licence": "a_verifier",
+      "prix": "a_verifier",
+      "statut_projet": "actif",
+      "url_officielle": "https://eden-emu.dev/",
+      "source_url": "https://git.eden-emu.dev/eden-emu/eden",
+      "telechargement_auto_autorise": false
+    },
+    {
+      "id": "nethersx2",
+      "nom": "NetherSX2",
+      "systemes_emules": [
+        "PlayStation 2",
+        "Suite communautaire d'AetherSX2, dont le développement a été arrêté par son auteur en 2023"
+      ],
+      "licence": "a_verifier",
+      "prix": "a_verifier",
+      "statut_projet": "actif",
+      "url_officielle": "https://github.com/Trixarian/NetherSX2-patch",
+      "source_url": "https://github.com/Trixarian/NetherSX2-patch",
+      "telechargement_auto_autorise": false
+    },
+    {
+      "id": "vita3k",
+      "nom": "Vita3K",
+      "systemes_emules": ["PlayStation Vita"],
+      "licence": "a_verifier",
+      "prix": "a_verifier",
+      "statut_projet": "actif",
+      "url_officielle": "https://vita3k.org/",
+      "source_url": "https://github.com/Vita3K/Vita3K-Android",
+      "telechargement_auto_autorise": false
+    },
+    {
+      "id": "azahar",
+      "nom": "Azahar",
+      "systemes_emules": [
+        "Nintendo 3DS",
+        "Successeur de Citra (fermé par Nintendo en 2024), né de la fusion du fork de PabloMK7 et de Lime3DS"
+      ],
+      "licence": "a_verifier",
+      "prix": "a_verifier",
+      "statut_projet": "actif",
+      "url_officielle": "https://azahar-emu.org/",
+      "source_url": "https://github.com/azahar-emu/azahar",
+      "telechargement_auto_autorise": false
+    },
+    {
+      "id": "melonds_android",
+      "nom": "melonDS (portage Android)",
+      "systemes_emules": ["Nintendo DS", "Nintendo DSi"],
+      "licence": "a_verifier",
+      "prix": "a_verifier",
+      "statut_projet": "actif",
+      "url_officielle": "https://github.com/rafaelvcaetano/melonDS-android",
+      "source_url": "https://github.com/rafaelvcaetano/melonDS-android",
+      "telechargement_auto_autorise": false
+    },
+    {
+      "id": "flycast",
+      "nom": "Flycast",
+      "systemes_emules": ["Dreamcast", "Naomi", "Naomi 2", "Atomiswave"],
+      "licence": "a_verifier",
+      "prix": "a_verifier",
+      "statut_projet": "actif",
+      "url_officielle": "https://github.com/flyinghead/flycast",
+      "source_url": "https://github.com/flyinghead/flycast",
+      "telechargement_auto_autorise": false
+    },
+    {
+      "id": "redream",
+      "nom": "Redream",
+      "systemes_emules": ["Dreamcast"],
+      "licence": "a_verifier",
+      "prix": "a_verifier",
+      "statut_projet": "actif",
+      "url_officielle": "https://redream.io/",
+      "source_url": "https://redream.io/",
       "telechargement_auto_autorise": false
     }
   ]

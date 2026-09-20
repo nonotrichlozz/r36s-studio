@@ -3080,6 +3080,23 @@ def _android_clear_layout(layout) -> None:
             widget.deleteLater()
 
 
+# Statut du projet (android/emulators.py::STATUT_PROJET_VALUES, demandé
+# explicitement) -- même réutilisation des couleurs de badge déjà établie
+# pour le statut d'un firmware du catalogue (`identify/firmware_catalog.py`,
+# maintenu/archivé/expérimental) : même trio vert/gris-bleu/orange, même
+# incertitude "à vérifier" traitée comme "expérimental" (orange, prudence).
+_ANDROID_STATUS_BADGE_KIND = {
+    "actif": "maintained",
+    "abandonne": "archived",
+    "a_verifier": "experimental",
+}
+_ANDROID_STATUS_LABEL_KEY = {
+    "actif": "android_emulator_status_actif",
+    "abandonne": "android_emulator_status_abandonne",
+    "a_verifier": "android_emulator_status_a_verifier",
+}
+
+
 def _android_build_emulator_row(entry: EmulatorEntry) -> QWidget:
     """Une carte par émulateur du catalogue local (`android/data/
     emulateurs.json`) -- licence/prix affichés « à vérifier » tant que
@@ -3094,6 +3111,9 @@ def _android_build_emulator_row(entry: EmulatorEntry) -> QWidget:
         layout.addWidget(_android_plain_label(", ".join(entry.systemes_emules), role="rowDesc", wrap=True))
 
     badges_row = QHBoxLayout()
+    status_kind = _ANDROID_STATUS_BADGE_KIND.get(entry.statut_projet, "neutral")
+    status_label_key = _ANDROID_STATUS_LABEL_KEY.get(entry.statut_projet, "android_emulator_status_a_verifier")
+    badges_row.addWidget(_android_badge(tr(status_label_key), status_kind))
     licence_text = tr("android_emulator_licence_a_verifier") if entry.licence == SENTINEL_A_VERIFIER else entry.licence
     badges_row.addWidget(_android_badge(licence_text))
     prix_text = tr("android_emulator_prix_a_verifier") if entry.prix == SENTINEL_A_VERIFIER else entry.prix

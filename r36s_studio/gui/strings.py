@@ -203,6 +203,10 @@ STRINGS = {
     "doublons_empty": "Aucun doublon trouvé.",
     "doublons_selection_summary": "{count} fichier(s) sélectionné(s) -- {size} récupérables",
     "doublons_group_exact_title": "Copies identiques",
+    "doublons_exact_group_hash_label": "SHA-256 : {hash}",
+    "doublons_exact_group_identical_notice": (
+        "Contenu strictement identique (même empreinte SHA-256), malgré des noms différents."
+    ),
     "doublons_move_this_one": "Écarter celui-ci",
     "doublons_move_selected_button": "Écarter la sélection",
     "doublons_excluded_title": "Groupes exclus -- fichier lié introuvable",

@@ -6,6 +6,8 @@ vérifier ici, en particulier la règle critique des fichiers liés."""
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from r36s_studio.doublons.scan import OperationCancelled, find_duplicates
@@ -45,8 +47,12 @@ def test_identical_content_same_size_is_an_exact_duplicate(tmp_path):
     result = find_duplicates(str(tmp_path))
 
     assert len(result.exact_duplicate_groups) == 1
-    names = {unit.representative.name for unit in result.exact_duplicate_groups[0].units}
+    group = result.exact_duplicate_groups[0]
+    names = {unit.representative.name for unit in group.units}
     assert names == {"Game (USA).sfc", "Game (Europe).sfc"}
+    # § affichée à côté du titre du groupe -- doit être la vraie empreinte
+    # du contenu, pas une valeur arbitraire.
+    assert group.sha256 == hashlib.sha256(b"identical-content").hexdigest()
 
 
 def test_same_size_different_content_is_never_an_exact_duplicate(tmp_path):

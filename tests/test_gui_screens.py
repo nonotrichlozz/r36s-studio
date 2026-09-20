@@ -1276,12 +1276,13 @@ def _make_unit(path: str, size_bytes: int = 100, is_linked: bool = False):
     return Unit(representative=p, members=[p], total_size_bytes=size_bytes, is_linked=is_linked)
 
 
-def _make_exact_group():
+def _make_exact_group(sha256="2f9d475fa089bed3f77a3344ea23af0663b30ffe9a2bc0b803bcae389480a15"):
     return ExactDuplicateGroup(
         units=[
             _make_unit("/EASYROMS/SNES/Aladdin.zip", 100),
             _make_unit("/EASYROMS/SNES/Aladdin.7z", 100),
-        ]
+        ],
+        sha256=sha256,
     )
 
 
@@ -1421,6 +1422,21 @@ def test_doublons_results_screen_exact_group_precheck_all_but_first(qapp):
     assert len(checkboxes) == 2
     assert checkboxes[0].isChecked() is False
     assert checkboxes[1].isChecked() is True
+
+
+def test_doublons_results_screen_exact_group_shows_hash_and_identical_notice(qapp):
+    """Vérifié après un signalement utilisateur (`Get-FileHash` sur du
+    vrai matériel) : deux noms différents peuvent être un contenu
+    strictement identique -- affiché explicitement, pas seulement déduit
+    du badge « Copies identiques »."""
+    screen = DoublonsResultsScreen()
+    group = _make_exact_group(sha256="2f9d475fa089bed3f77a3344ea23af0663b30ffe9a2bc0b803bcae389480a15")
+
+    screen.set_results(ScanResult(exact_duplicate_groups=[group]))
+
+    labels = [label.text() for label in screen._list_container.findChildren(QLabel)]
+    assert tr("doublons_exact_group_hash_label", hash="2f9d475f") in labels
+    assert tr("doublons_exact_group_identical_notice") in labels
 
 
 def test_doublons_results_screen_version_group_never_prechecked(qapp):

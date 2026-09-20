@@ -941,7 +941,9 @@ def test_find_duplicates_tile_opens_folder_screen_then_scan_shows_results(mock_l
 
     unit_a = Unit(tmp_path / "Aladdin.zip", [tmp_path / "Aladdin.zip"], 10, False)
     unit_b = Unit(tmp_path / "Aladdin.7z", [tmp_path / "Aladdin.7z"], 10, False)
-    result = ScanResult(exact_duplicate_groups=[ExactDuplicateGroup([unit_a, unit_b])], files_scanned=2)
+    result = ScanResult(
+        exact_duplicate_groups=[ExactDuplicateGroup([unit_a, unit_b], sha256="a" * 64)], files_scanned=2
+    )
 
     with patch("r36s_studio.gui.main_window.DoublonsScanRunner") as mock_runner_class:
         instance = MagicMock()

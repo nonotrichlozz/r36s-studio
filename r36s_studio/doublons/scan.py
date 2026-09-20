@@ -88,6 +88,10 @@ class ExclusionWarning:
 @dataclass
 class ExactDuplicateGroup:
     units: List[Unit]
+    # Empreinte SHA-256 commune aux `units` (§ interface, affichée à côté
+    # du titre du groupe) -- confirme visuellement que deux noms différents
+    # peuvent être un contenu strictement identique, pas une coïncidence.
+    sha256: str
 
 
 @dataclass
@@ -159,9 +163,9 @@ def _find_exact_duplicates(units: List[Unit]) -> List[ExactDuplicateGroup]:
             digest = _hash_file(unit.representative)
             if digest is not None:
                 by_hash[digest].append(unit)
-        for hash_units in by_hash.values():
+        for digest, hash_units in by_hash.items():
             if len(hash_units) >= 2:
-                groups.append(ExactDuplicateGroup(units=hash_units))
+                groups.append(ExactDuplicateGroup(units=hash_units, sha256=digest))
     return groups
 
 

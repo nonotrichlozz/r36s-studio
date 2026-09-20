@@ -3230,12 +3230,24 @@ class DoublonsResultsScreen(Screen):
         title = QLabel(tr("doublons_group_exact_title"))
         title.setProperty("role", "rowTitle")
         header.addWidget(title)
+        # 8 premiers caractères de l'empreinte (§ vérifiée par
+        # `Get-FileHash` sur du vrai matériel, aucune coïncidence de
+        # taille -- le contenu est bel et bien identique octet pour
+        # octet) -- à côté du titre, pas dans un texte à déplier.
+        hash_label = QLabel(tr("doublons_exact_group_hash_label", hash=group.sha256[:8]))
+        hash_label.setProperty("role", "secondary")
+        header.addWidget(hash_label)
         header.addStretch()
         badge = QLabel(tr("status_done"))
         badge.setProperty("role", "badge")
         badge.setProperty("badgeKind", "done")
         header.addWidget(badge)
         layout.addLayout(header)
+
+        notice = QLabel(tr("doublons_exact_group_identical_notice"))
+        notice.setProperty("role", "secondary")
+        notice.setWordWrap(True)
+        layout.addWidget(notice)
 
         checkboxes: Dict[QCheckBox, Unit] = {}
         for index, unit in enumerate(group.units):

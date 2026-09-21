@@ -98,7 +98,19 @@
       "source_url": "https://github.com/Trixarian/NetherSX2-patch",
       "telechargement_auto_autorise": false,
       "architecture_minimale": "arm64-v8a",
-      "android_minimum": "8.0"
+      "android_minimum": "8.0",
+      "variantes": [
+        {
+          "nom": "NetherSX2-patch (base AetherSX2 4248, la plus récente)",
+          "url_officielle": "https://github.com/Trixarian/NetherSX2-patch",
+          "source_url": "https://github.com/Trixarian/NetherSX2-patch"
+        },
+        {
+          "nom": "NetherSX2-classic (base AetherSX2 3668, plus performante mais moins de correctifs)",
+          "url_officielle": "https://github.com/Trixarian/NetherSX2-classic",
+          "source_url": "https://github.com/Trixarian/NetherSX2-classic"
+        }
+      ]
     },
     {
       "id": "vita3k",
@@ -138,7 +150,19 @@
       "statut_projet": "actif",
       "url_officielle": "https://github.com/rafaelvcaetano/melonDS-android",
       "source_url": "https://github.com/rafaelvcaetano/melonDS-android",
-      "telechargement_auto_autorise": false
+      "telechargement_auto_autorise": false,
+      "variantes": [
+        {
+          "nom": "melonDS-android (rafaelvcaetano, portage historique)",
+          "url_officielle": "https://github.com/rafaelvcaetano/melonDS-android",
+          "source_url": "https://github.com/rafaelvcaetano/melonDS-android"
+        },
+        {
+          "nom": "WatermelonDS (SapphireRhodonite, fork indépendant)",
+          "url_officielle": "https://github.com/SapphireRhodonite/melonDS-android",
+          "source_url": "https://github.com/SapphireRhodonite/melonDS-android"
+        }
+      ]
     },
     {
       "id": "flycast",

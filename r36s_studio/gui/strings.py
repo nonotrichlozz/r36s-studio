@@ -816,6 +816,18 @@ STRINGS = {
     "android_emulator_status_a_verifier": "Statut à vérifier",
     "android_emulator_official_link": "Ouvrir la page officielle",
     "android_emulator_source_link": "Voir la source",
+    # Choix de variante (§ écran Console Android, demandé explicitement --
+    # "un émulateur peut proposer plusieurs variantes (standard, edge,
+    # DS...)") : menu déroulant sur la carte, uniquement quand `android/
+    # emulators.py::EmulatorEntry.variantes` n'est pas vide.
+    "android_emulator_variant_label": "Variante :",
+    # Classement par console émulée (§ écran Console Android, demandé
+    # explicitement) -- colonne de gauche, pseudo-catégorie "Toutes" en
+    # tête de liste, suivie des quatorze catégories nommées.
+    "android_category_all": "Toutes ({count})",
+    "android_check_all_button": "Tout cocher",
+    "android_uncheck_all_button": "Tout décocher",
+    "android_checked_counter": "{checked}/{total} cochés",
     "android_raw_output_title": "Sortie technique (adb)",
 }
 

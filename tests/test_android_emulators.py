@@ -383,3 +383,231 @@ def test_filter_for_device_keeps_full_list_for_a_capable_device():
 
     assert result.generique is False
     assert len(result.emulateurs) == len(catalog.emulateurs)
+
+
+# --- Classement par console émulée (categorize/count_by_category/
+# filter_by_category) -----------------------------------------------------
+
+
+def test_categorize_falls_back_to_retro_for_multi_system_text():
+    assert emulators.categorize(_entry(systemes_emules=["Multi-système (cœurs libretro)"])) == ["retro"]
+
+
+def test_categorize_falls_back_to_retro_for_a_system_not_in_the_named_categories():
+    """Nintendo 64 n'est pas l'une des quatorze catégories demandées --
+    repli sur « Rétro », jamais une catégorie inventée."""
+    assert emulators.categorize(_entry(systemes_emules=["Nintendo 64"])) == ["retro"]
+
+
+@pytest.mark.parametrize(
+    "systemes, expected",
+    [
+        (["GameCube"], ["gc_wii"]),
+        (["Wii"], ["gc_wii"]),
+        (["GameCube", "Wii"], ["gc_wii"]),  # une seule catégorie, jamais dupliquée
+        (["Wii U"], ["wii_u"]),
+        (["Nintendo Switch"], ["switch"]),
+        (["Nintendo DS"], ["ds"]),
+        (["Nintendo DSi"], ["ds"]),
+        (["Nintendo 3DS"], ["n3ds"]),
+        (["PlayStation (PS1)"], ["ps1"]),
+        (["PlayStation 2"], ["ps2"]),
+        (["PlayStation 3"], ["ps3"]),
+        (["PSP"], ["psp"]),
+        (["PlayStation Vita"], ["ps_vita"]),
+        (["Xbox"], ["xbox"]),
+        (["Xbox 360"], ["xbox360"]),
+        (["Dreamcast"], ["dreamcast"]),
+        (["Applications et jeux Windows (via Wine)"], ["pc"]),
+    ],
+)
+def test_categorize_matches_each_named_category(systemes, expected):
+    assert emulators.categorize(_entry(systemes_emules=systemes)) == expected
+
+
+def test_categorize_wii_u_never_also_matches_gc_wii():
+    """Bug potentiel écarté explicitement : "Wii" est un mot complet à
+    l'intérieur de "Wii U", un classement naïf y verrait aussi GC/Wii."""
+    assert emulators.categorize(_entry(systemes_emules=["Wii U"])) == ["wii_u"]
+
+
+def test_categorize_xbox_360_never_also_matches_xbox():
+    assert emulators.categorize(_entry(systemes_emules=["Xbox 360"])) == ["xbox360"]
+
+
+def test_categorize_n3ds_never_also_matches_ds():
+    assert emulators.categorize(_entry(systemes_emules=["Nintendo 3DS"])) == ["n3ds"]
+
+
+def test_categorize_ignores_descriptive_sentences_that_name_no_console():
+    """Certaines entrées portent une phrase descriptive en plus du nom du
+    système (ex. NetherSX2/Azahar) -- ignorée par le classement, elle ne
+    doit jamais produire de catégorie fantôme ni faire échouer le calcul."""
+    entry = _entry(
+        systemes_emules=[
+            "PlayStation 2",
+            "Suite communautaire d'AetherSX2, dont le développement a été arrêté par son auteur en 2023",
+        ]
+    )
+
+    assert emulators.categorize(entry) == ["ps2"]
+
+
+def test_categorize_can_return_multiple_categories_for_one_entry():
+    entry = _entry(systemes_emules=["PlayStation 2", "Nintendo Switch"])
+
+    assert set(emulators.categorize(entry)) == {"ps2", "switch"}
+
+
+def test_count_by_category_includes_every_category_even_at_zero():
+    counts = emulators.count_by_category([_entry(systemes_emules=["PSP"])])
+
+    assert set(counts) == {category_id for category_id, _ in emulators.CATEGORIES}
+    assert counts["psp"] == 1
+    assert counts["xbox"] == 0
+
+
+def test_count_by_category_on_the_real_catalog_matches_manual_expectations():
+    catalog = emulators.load_emulators()
+    counts = emulators.count_by_category(catalog.emulateurs)
+
+    assert counts["xbox"] == 0
+    assert counts["xbox360"] == 0
+    assert counts["wii_u"] == 0
+    assert counts["ps3"] == 0
+    assert counts["dreamcast"] == 2  # flycast + redream
+    assert sum(counts.values()) >= len(catalog.emulateurs)  # >= : une entrée peut compter dans 2 catégories
+
+
+def test_filter_by_category_none_returns_full_list():
+    entries = [_entry(id="a"), _entry(id="b", systemes_emules=["PSP"])]
+
+    assert emulators.filter_by_category(entries, None) == entries
+
+
+def test_filter_by_category_returns_only_matching_entries():
+    entries = [
+        _entry(id="a", systemes_emules=["PSP"]),
+        _entry(id="b", systemes_emules=["Nintendo Switch"]),
+    ]
+
+    assert [e.id for e in emulators.filter_by_category(entries, "psp")] == ["a"]
+
+
+def test_filter_by_category_unknown_category_returns_empty_list():
+    entries = [_entry(id="a", systemes_emules=["PSP"])]
+
+    assert emulators.filter_by_category(entries, "wii_u") == []
+
+
+# --- Variantes (EmulatorVariant) -------------------------------------------
+
+
+def test_load_emulators_entries_without_variantes_default_to_empty_list(tmp_path):
+    path = tmp_path / "emulateurs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "emulateurs": [
+                    {
+                        "id": "x",
+                        "nom": "X",
+                        "systemes_emules": ["Y"],
+                        "licence": "a_verifier",
+                        "prix": "a_verifier",
+                        "statut_projet": "actif",
+                        "url_officielle": "https://example.invalid/",
+                        "source_url": "https://example.invalid/",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = emulators.load_emulators(path)
+
+    assert catalog.emulateurs[0].variantes == []
+
+
+def test_load_emulators_reads_variantes_when_present(tmp_path):
+    path = tmp_path / "emulateurs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "emulateurs": [
+                    {
+                        "id": "x",
+                        "nom": "X",
+                        "systemes_emules": ["Y"],
+                        "licence": "a_verifier",
+                        "prix": "a_verifier",
+                        "statut_projet": "actif",
+                        "url_officielle": "https://example.invalid/",
+                        "source_url": "https://example.invalid/",
+                        "variantes": [
+                            {
+                                "nom": "Standard",
+                                "url_officielle": "https://example.invalid/standard",
+                                "source_url": "https://example.invalid/standard",
+                            },
+                            {
+                                "nom": "Edge",
+                                "url_officielle": "https://example.invalid/edge",
+                                "source_url": "https://example.invalid/edge",
+                            },
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = emulators.load_emulators(path)
+
+    variantes = catalog.emulateurs[0].variantes
+    assert [v.nom for v in variantes] == ["Standard", "Edge"]
+    assert variantes[0].url_officielle == "https://example.invalid/standard"
+
+
+def test_load_emulators_raises_on_variante_missing_required_field(tmp_path):
+    path = tmp_path / "emulateurs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "emulateurs": [
+                    {
+                        "id": "x",
+                        "nom": "X",
+                        "systemes_emules": ["Y"],
+                        "licence": "a_verifier",
+                        "prix": "a_verifier",
+                        "statut_projet": "actif",
+                        "url_officielle": "https://example.invalid/",
+                        "source_url": "https://example.invalid/",
+                        "variantes": [{"nom": "Standard"}],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        emulators.load_emulators(path)
+
+
+def test_load_emulators_real_catalog_variant_entries_have_at_least_two_variants():
+    """Vérifié individuellement avant l'ajout (deux forks communautaires
+    réels et distincts) -- jamais une seule variante isolée, qui n'aurait
+    aucun sens dans un menu déroulant."""
+    catalog = emulators.load_emulators()
+    with_variants = [entry for entry in catalog.emulateurs if entry.variantes]
+
+    assert len(with_variants) >= 1
+    for entry in with_variants:
+        assert len(entry.variantes) >= 2, entry.id
+        for variant in entry.variantes:
+            assert variant.url_officielle.startswith("http")
+            assert variant.source_url.startswith("http")

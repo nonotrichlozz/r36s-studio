@@ -35,10 +35,11 @@ licence/du prix, à vérifier séparément avant toute diffusion."""
 from __future__ import annotations
 
 import json
+import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .models import VALEUR_INCONNUE, AndroidDeviceInfo
 
@@ -70,6 +71,22 @@ _REQUIRED_FIELDS = (
 
 
 @dataclass
+class EmulatorVariant:
+    """Une variante téléchargeable distincte du même émulateur (signalé :
+    "un émulateur peut proposer plusieurs variantes (standard, edge,
+    DS...)") -- ex. deux forks communautaires réels et vérifiés
+    individuellement (`NetherSX2-patch`/`NetherSX2-classic`,
+    `melonDS-android`/`WatermelonDS`), jamais une variante inventée.
+    Mêmes deux liens que l'entrée elle-même (`url_officielle`/
+    `source_url`), jamais une licence/un prix séparés -- ce niveau de
+    détail n'a jamais été demandé par le brief."""
+
+    nom: str
+    url_officielle: str
+    source_url: str
+
+
+@dataclass
 class EmulatorEntry:
     id: str
     nom: str
@@ -92,6 +109,9 @@ class EmulatorEntry:
     # version d'Android/architecture, `android.adb.get_device_props`).
     architecture_minimale: Optional[str] = None  # ex. "arm64-v8a"
     android_minimum: Optional[str] = None  # ex. "8.0", "12"
+    # Variantes téléchargeables distinctes (ci-dessus) -- liste vide pour
+    # la grande majorité des entrées, jamais inventée faute de mieux.
+    variantes: List[EmulatorVariant] = field(default_factory=list)
 
 
 @dataclass
@@ -154,7 +174,28 @@ def _entry_from_json(data: Any) -> EmulatorEntry:
         telechargement_auto_autorise=bool(data.get("telechargement_auto_autorise", False)),
         architecture_minimale=str(architecture_minimale) if architecture_minimale else None,
         android_minimum=str(android_minimum) if android_minimum else None,
+        variantes=_variantes_from_json(data.get("variantes")),
     )
+
+
+def _variantes_from_json(data: Any) -> List[EmulatorVariant]:
+    if not isinstance(data, list):
+        return []
+    variantes = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise ValueError("Variante d'émulateur invalide (pas un objet JSON).")
+        for champ in ("nom", "url_officielle", "source_url"):
+            if champ not in item:
+                raise ValueError(f"Variante d'émulateur invalide : champ '{champ}' manquant.")
+        variantes.append(
+            EmulatorVariant(
+                nom=str(item["nom"]),
+                url_officielle=str(item["url_officielle"]),
+                source_url=str(item["source_url"]),
+            )
+        )
+    return variantes
 
 
 def load_emulators(path: Optional[Path] = None) -> EmulatorCatalog:
@@ -217,13 +258,122 @@ def filter_for_device(catalog: EmulatorCatalog, device: Optional[AndroidDeviceIn
     return FilteredEmulatorCatalog(avertissement=catalog.avertissement, emulateurs=emulateurs, generique=False)
 
 
+# --- Classement par console émulée (§ écran Console Android) --------------
+#
+# Demandé explicitement : "Le champ 'systemes' de emulateurs.json sert au
+# classement" -- aucun nouveau champ de données pour la catégorie, une
+# classification calculée à partir du texte déjà présent dans `systemes_
+# emules` (dont certaines entrées, ex. NetherSX2/Azahar, portent aussi une
+# phrase descriptive qui ne nomme aucun système -- volontairement ignorée
+# ici, `_CATEGORY_PATTERNS` ne cherche que des motifs de nom de console).
+#
+# Liste et ordre d'affichage exacts demandés ; "Rétro" sert de repli pour
+# tout émulateur multi-système/généraliste (RetroArch) ou dont le système
+# ne correspond à aucune des quatorze consoles nommées (ex. Nintendo 64,
+# absent de la liste demandée).
+CATEGORIES: List[Tuple[str, str]] = [
+    ("gc_wii", "GameCube / Wii"),
+    ("wii_u", "Wii U"),
+    ("switch", "Switch"),
+    ("ds", "DS"),
+    ("n3ds", "3DS"),
+    ("ps1", "PS1"),
+    ("ps2", "PS2"),
+    ("ps3", "PS3"),
+    ("psp", "PSP"),
+    ("ps_vita", "PS Vita"),
+    ("xbox", "Xbox"),
+    ("xbox360", "Xbox 360"),
+    ("dreamcast", "Dreamcast"),
+    ("pc", "PC"),
+    ("retro", "Rétro"),
+]
+CATEGORY_LABELS: Dict[str, str] = dict(CATEGORIES)
+
+# Ordre déterminant : les catégories les plus spécifiques d'abord, pour
+# qu'un texte contenant "3DS" ne matche jamais "DS", ni "Wii U" "GameCube /
+# Wii" -- chaque motif est une regex insensible à la casse, `\b` pour ne
+# jamais matcher un sous-mot (ex. "PS1" ne doit pas matcher dans un futur
+# "PS10" hypothétique).
+_CATEGORY_PATTERNS: List[Tuple[str, "re.Pattern[str]"]] = [
+    # "Wii U" doit primer sur "Wii" seul (gc_wii) -- lookahead négatif sur
+    # la branche "wii" de gc_wii, ci-dessous, plutôt qu'un simple ordre de
+    # priorité : `categorize` collecte tous les motifs qui correspondent,
+    # un ordre de liste seul ne suffirait pas à empêcher un double
+    # classement sur le même texte.
+    ("wii_u", re.compile(r"\bwii\s*u\b", re.IGNORECASE)),
+    ("n3ds", re.compile(r"\b3ds\b", re.IGNORECASE)),
+    ("xbox360", re.compile(r"\bxbox\s*360\b", re.IGNORECASE)),
+    ("gc_wii", re.compile(r"\bgamecube\b|\bwii\b(?!\s*u\b)", re.IGNORECASE)),
+    ("ds", re.compile(r"\bdsi?\b", re.IGNORECASE)),
+    ("switch", re.compile(r"\bswitch\b", re.IGNORECASE)),
+    ("ps1", re.compile(r"\bps ?1\b|\bplaystation 1\b", re.IGNORECASE)),
+    ("ps2", re.compile(r"\bps ?2\b|\bplaystation 2\b", re.IGNORECASE)),
+    ("ps3", re.compile(r"\bps ?3\b|\bplaystation 3\b", re.IGNORECASE)),
+    ("psp", re.compile(r"\bpsp\b", re.IGNORECASE)),
+    ("ps_vita", re.compile(r"\bvita\b", re.IGNORECASE)),
+    # "Xbox 360" doit primer sur "Xbox" seul -- même principe que wii_u/
+    # gc_wii ci-dessus (lookahead négatif plutôt qu'un ordre de liste).
+    ("xbox", re.compile(r"\bxbox\b(?!\s*360\b)", re.IGNORECASE)),
+    ("dreamcast", re.compile(r"\bdreamcast\b", re.IGNORECASE)),
+    ("pc", re.compile(r"\bwindows\b|\bwine\b", re.IGNORECASE)),
+]
+
+
+def categorize(entry: EmulatorEntry) -> List[str]:
+    """Catégories (identifiants de `CATEGORIES`) correspondant à `entry`,
+    déduites de `systemes_emules` -- jamais vide : repli sur `["retro"]`
+    si aucun motif ne correspond à aucune des chaînes de la liste
+    (généraliste/multi-système, ou système non couvert par les quatorze
+    catégories nommées). Un émulateur peut apparaître dans plusieurs
+    catégories à la fois (demandé explicitement) si son texte nomme
+    plusieurs consoles distinctes."""
+    matched: List[str] = []
+    for texte in entry.systemes_emules:
+        for category_id, pattern in _CATEGORY_PATTERNS:
+            if category_id not in matched and pattern.search(texte):
+                matched.append(category_id)
+    if not matched:
+        return ["retro"]
+    return matched
+
+
+def count_by_category(emulateurs: List[EmulatorEntry]) -> Dict[str, int]:
+    """Nombre d'émulateurs par catégorie (§ écran Console Android, colonne
+    de gauche) -- toutes les catégories de `CATEGORIES` sont présentes,
+    y compris à 0 (ex. Xbox/Xbox 360/Wii U/PS3, aucun émulateur Android
+    fonctionnel connu à ce jour, § android/data/emulateurs.json) : la
+    colonne reste stable plutôt que de faire disparaître une catégorie
+    vide, qui resterait alors invisible sans explication."""
+    counts = {category_id: 0 for category_id, _ in CATEGORIES}
+    for entry in emulateurs:
+        for category_id in categorize(entry):
+            counts[category_id] += 1
+    return counts
+
+
+def filter_by_category(emulateurs: List[EmulatorEntry], category_id: Optional[str]) -> List[EmulatorEntry]:
+    """`category_id=None` (pseudo-catégorie "Toutes") renvoie la liste
+    complète, inchangée -- même convention que `filter_for_device`
+    (`device=None` -> catalogue complet)."""
+    if category_id is None:
+        return list(emulateurs)
+    return [entry for entry in emulateurs if category_id in categorize(entry)]
+
+
 __all__ = [
     "SENTINEL_A_VERIFIER",
     "STATUT_PROJET_VALUES",
+    "CATEGORIES",
+    "CATEGORY_LABELS",
     "EmulatorEntry",
+    "EmulatorVariant",
     "EmulatorCatalog",
     "FilteredEmulatorCatalog",
     "load_emulators",
     "is_realistic_for_device",
     "filter_for_device",
+    "categorize",
+    "count_by_category",
+    "filter_by_category",
 ]

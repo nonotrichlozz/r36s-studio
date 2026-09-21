@@ -31,7 +31,7 @@ from __future__ import annotations
 import platform
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
@@ -39,6 +39,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QPainte
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -61,9 +62,12 @@ from PySide6.QtWidgets import (
 )
 
 from r36s_studio.android.emulators import (
+    CATEGORIES as ANDROID_EMULATOR_CATEGORIES,
     SENTINEL_A_VERIFIER,
     EmulatorCatalog,
     EmulatorEntry,
+    count_by_category as android_count_emulators_by_category,
+    filter_by_category as android_filter_emulators_by_category,
     filter_for_device as android_filter_emulators_for_device,
 )
 from r36s_studio.android.models import VALEUR_INCONNUE, AndroidDeviceInfo, DetectionResult
@@ -3102,16 +3106,31 @@ _ANDROID_STATUS_LABEL_KEY = {
 }
 
 
-def _android_build_emulator_row(entry: EmulatorEntry) -> QWidget:
+def _android_build_emulator_row(
+    entry: EmulatorEntry, checked: bool, on_toggle: Callable[[str, bool], None]
+) -> Tuple[QWidget, QCheckBox]:
     """Une carte par émulateur du catalogue local (`android/data/
     emulateurs.json`) -- licence/prix affichés « à vérifier » tant que
     l'entrée porte `SENTINEL_A_VERIFIER` (demandé explicitement : jamais
     "gratuit"/"payant" affirmé sans vérification humaine sur la page
-    officielle du projet, § avertissement permanent de la liste)."""
+    officielle du projet, § avertissement permanent de la liste).
+
+    Retourne aussi la case à cocher (jamais reconstruite ailleurs) pour
+    que l'appelant (`AndroidScreen._render_visible_emulator_cards`) puisse
+    la piloter directement depuis « Tout cocher »/« Tout décocher », même
+    principe que `DoublonsResultsScreen._all_checkboxes`."""
     frame = QFrame()
     frame.setProperty("role", "row")
     layout = QVBoxLayout(frame)
-    layout.addWidget(_android_plain_label(entry.nom, role="rowTitle"))
+
+    header_row = QHBoxLayout()
+    checkbox = QCheckBox()
+    checkbox.setChecked(checked)
+    checkbox.toggled.connect(lambda value, entry_id=entry.id: on_toggle(entry_id, value))
+    header_row.addWidget(checkbox)
+    header_row.addWidget(_android_plain_label(entry.nom, role="rowTitle"), 1)
+    layout.addLayout(header_row)
+
     if entry.systemes_emules:
         layout.addWidget(_android_plain_label(", ".join(entry.systemes_emules), role="rowDesc", wrap=True))
 
@@ -3127,11 +3146,45 @@ def _android_build_emulator_row(entry: EmulatorEntry) -> QWidget:
     layout.addLayout(badges_row)
 
     links_row = QHBoxLayout()
-    links_row.addWidget(_android_link_button(entry.url_officielle, tr("android_emulator_official_link")))
-    links_row.addWidget(_android_link_button(entry.source_url, tr("android_emulator_source_link")))
-    links_row.addStretch()
     layout.addLayout(links_row)
-    return frame
+    # Exposé pour les tests uniquement -- `QWidget.deleteLater()` (via
+    # `_android_clear_layout` ci-dessous) diffère la destruction réelle
+    # des anciens boutons à l'itération suivante de la boucle d'événements
+    # Qt, donc `frame.findChildren(QPushButton)` resterait trompeur juste
+    # après un changement de variante sans faire tourner cette boucle ;
+    # lire `links_row` directement reflète toujours l'état réel et
+    # immédiat de la mise en page, indépendamment de ce délai.
+    frame._links_row = links_row
+
+    def _show_links(url_officielle: str, source_url: str) -> None:
+        _android_clear_layout(links_row)
+        links_row.addWidget(_android_link_button(url_officielle, tr("android_emulator_official_link")))
+        links_row.addWidget(_android_link_button(source_url, tr("android_emulator_source_link")))
+        links_row.addStretch()
+
+    if entry.variantes:
+        # Menu déroulant (demandé explicitement) -- remplace les deux
+        # boutons de lien de base par ceux de la variante choisie, jamais
+        # les deux affichés à la fois (une seule paire de liens visible,
+        # toujours cohérente avec la variante sélectionnée).
+        variant_row = QHBoxLayout()
+        variant_row.addWidget(_android_plain_label(tr("android_emulator_variant_label"), role="secondary"))
+        variant_combo = QComboBox()
+        for variant in entry.variantes:
+            variant_combo.addItem(variant.nom)
+        variant_row.addWidget(variant_combo, 1)
+        layout.addLayout(variant_row)
+
+        def _on_variant_changed(index: int, variants=entry.variantes) -> None:
+            if 0 <= index < len(variants):
+                _show_links(variants[index].url_officielle, variants[index].source_url)
+
+        variant_combo.currentIndexChanged.connect(_on_variant_changed)
+        _show_links(entry.variantes[0].url_officielle, entry.variantes[0].source_url)
+    else:
+        _show_links(entry.url_officielle, entry.source_url)
+
+    return frame, checkbox
 
 
 class AndroidScreen(Screen):
@@ -3161,6 +3214,21 @@ class AndroidScreen(Screen):
         # l'un ou l'autre.
         self._emulator_catalog: Optional[EmulatorCatalog] = None
         self._current_device: Optional[AndroidDeviceInfo] = None
+        # Sous-ensemble déjà filtré par appareil (ci-dessus), avant tout
+        # filtrage par catégorie -- sert de base au classement par console
+        # émulée (colonne de gauche) et au compteur global "cochés"
+        # (demandés explicitement).
+        self._device_filtered_emulateurs: List[EmulatorEntry] = []
+        # `None` == pseudo-catégorie "Toutes" (§ classement par console).
+        self._selected_category: Optional[str] = None
+        # État de sélection global (id d'émulateur -> coché), indépendant
+        # de la catégorie actuellement affichée -- une case cochée dans
+        # une catégorie reste cochée en changeant de catégorie.
+        self._checked_emulator_ids: set = set()
+        # Cases à cocher actuellement affichées (id -> widget), jamais
+        # reconstruites pour « Tout cocher »/« Tout décocher » -- même
+        # principe que `DoublonsResultsScreen._all_checkboxes`.
+        self._visible_checkboxes: Dict[str, QCheckBox] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 16, 24, 24)
@@ -3286,8 +3354,38 @@ class AndroidScreen(Screen):
         )
         self._emulators_generic_label.setVisible(False)
         emulators_layout.addWidget(self._emulators_generic_label)
+
+        # Classement par console émulée (demandé explicitement, inspiré
+        # d'un logiciel concurrent) -- colonne de gauche (catégories +
+        # nombre d'émulateurs par catégorie), liste filtrée à droite.
+        emulators_content_row = QHBoxLayout()
+        self._category_list = QListWidget()
+        self._category_list.setSelectionMode(QListWidget.SingleSelection)
+        # Largeur fixe, raisonnable pour les libellés les plus longs
+        # ("GameCube / Wii (1)") -- pas de constante partagée ailleurs
+        # dans ce fichier pour ce cas précis, une valeur simple suffit.
+        self._category_list.setFixedWidth(170)
+        self._category_list.currentItemChanged.connect(self._on_category_row_changed)
+        emulators_content_row.addWidget(self._category_list)
+
+        emulators_right_column = QVBoxLayout()
+        selection_toolbar = QHBoxLayout()
+        self._check_all_button = QPushButton(tr("android_check_all_button"))
+        self._check_all_button.clicked.connect(self._on_check_all_clicked)
+        selection_toolbar.addWidget(self._check_all_button)
+        self._uncheck_all_button = QPushButton(tr("android_uncheck_all_button"))
+        self._uncheck_all_button.clicked.connect(self._on_uncheck_all_clicked)
+        selection_toolbar.addWidget(self._uncheck_all_button)
+        selection_toolbar.addStretch()
+        self._checked_counter_label = _android_plain_label("", role="secondary")
+        selection_toolbar.addWidget(self._checked_counter_label)
+        emulators_right_column.addLayout(selection_toolbar)
+
         self._emulators_list_layout = QVBoxLayout()
-        emulators_layout.addLayout(self._emulators_list_layout)
+        emulators_right_column.addLayout(self._emulators_list_layout)
+        emulators_content_row.addLayout(emulators_right_column, 1)
+
+        emulators_layout.addLayout(emulators_content_row)
         content_layout.addWidget(self._emulators_frame)
 
         content_layout.addStretch()
@@ -3443,9 +3541,103 @@ class AndroidScreen(Screen):
         self._emulators_warning_label.setText(filtered.avertissement)
         self._emulators_warning_label.setVisible(bool(filtered.avertissement))
         self._emulators_generic_label.setVisible(filtered.generique)
+        self._device_filtered_emulateurs = filtered.emulateurs
+        # Un nouvel appareil détecté peut rendre une entrée cochée non
+        # réaliste (ex. remplacé par un appareil moins capable) -- jamais
+        # comptée dans le compteur global une fois disparue de la liste.
+        visible_ids = {entry.id for entry in filtered.emulateurs}
+        self._checked_emulator_ids &= visible_ids
+        self._render_category_sidebar()
+        self._render_visible_emulator_cards()
+
+    def _render_category_sidebar(self) -> None:
+        """Classement par console émulée (§ écran Console Android, demandé
+        explicitement, « inspiré d'un logiciel concurrent ») -- pseudo-
+        catégorie « Toutes » en tête, puis les quatorze catégories de
+        `android.emulators.CATEGORIES`, toujours toutes présentes (y
+        compris à 0) pour que la colonne reste stable d'un appareil à
+        l'autre. Reconstruite à chaque rendu (peu coûteux, quinze entrées
+        fixes) plutôt que mise à jour en place -- même principe que le
+        reste de cet écran (`_android_clear_layout`)."""
+        counts = android_count_emulators_by_category(self._device_filtered_emulateurs)
+        total = len(self._device_filtered_emulateurs)
+        previous_selection = self._selected_category
+
+        self._category_list.blockSignals(True)
+        self._category_list.clear()
+        all_item = QListWidgetItem(tr("android_category_all", count=total))
+        all_item.setData(Qt.UserRole, None)
+        self._category_list.addItem(all_item)
+        for category_id, label in ANDROID_EMULATOR_CATEGORIES:
+            item = QListWidgetItem(f"{label} ({counts[category_id]})")
+            item.setData(Qt.UserRole, category_id)
+            self._category_list.addItem(item)
+
+        # Restaure la sélection précédente par identifiant (pas par index,
+        # même si l'ordre ne change jamais) -- « Toutes » par défaut, y
+        # compris au tout premier rendu (`previous_selection` vaut alors
+        # déjà `None`, la valeur de « Toutes »).
+        target_row = 0
+        for row in range(self._category_list.count()):
+            if self._category_list.item(row).data(Qt.UserRole) == previous_selection:
+                target_row = row
+                break
+        self._category_list.setCurrentRow(target_row)
+        self._category_list.blockSignals(False)
+
+    def _on_category_row_changed(self, current: Optional[QListWidgetItem], previous) -> None:
+        if current is None:
+            return
+        self._selected_category = current.data(Qt.UserRole)
+        self._render_visible_emulator_cards()
+
+    def _render_visible_emulator_cards(self) -> None:
+        """Reconstruit uniquement les cartes (la colonne de gauche garde
+        son état, gérée séparément par `_render_category_sidebar`) --
+        appelée à chaque changement de catégorie, en plus d'un rendu
+        complet (`_render_emulator_list`)."""
+        visible = android_filter_emulators_by_category(self._device_filtered_emulateurs, self._selected_category)
         _android_clear_layout(self._emulators_list_layout)
-        for entry in filtered.emulateurs:
-            self._emulators_list_layout.addWidget(_android_build_emulator_row(entry))
+        self._visible_checkboxes = {}
+        for entry in visible:
+            row, checkbox = _android_build_emulator_row(
+                entry, entry.id in self._checked_emulator_ids, self._on_emulator_checked
+            )
+            self._visible_checkboxes[entry.id] = checkbox
+            self._emulators_list_layout.addWidget(row)
+        self._update_checked_counter()
+
+    def _on_emulator_checked(self, entry_id: str, checked: bool) -> None:
+        if checked:
+            self._checked_emulator_ids.add(entry_id)
+        else:
+            self._checked_emulator_ids.discard(entry_id)
+        self._update_checked_counter()
+
+    def _update_checked_counter(self) -> None:
+        """Compteur global (§ écran Console Android, demandé explicitement)
+        -- porte sur l'ensemble filtré par appareil (`_device_filtered_
+        emulateurs`), pas seulement la catégorie actuellement affichée :
+        rester exact en changeant de catégorie, sans jamais perdre le
+        compte des cases cochées ailleurs."""
+        total = len(self._device_filtered_emulateurs)
+        checked = len(self._checked_emulator_ids)
+        self._checked_counter_label.setText(tr("android_checked_counter", checked=checked, total=total))
+
+    def _on_check_all_clicked(self) -> None:
+        """« Tout cocher », par catégorie (demandé explicitement) -- ne
+        coche que les cartes actuellement affichées (`_visible_
+        checkboxes`, déjà limitées à la catégorie en cours), jamais tout
+        le catalogue derrière. Pilote les cases existantes directement
+        (`setChecked`, qui déclenche `toggled` -> `_on_emulator_checked`)
+        plutôt que de reconstruire les cartes -- même principe que
+        `DoublonsResultsScreen._on_select_all`."""
+        for checkbox in self._visible_checkboxes.values():
+            checkbox.setChecked(True)
+
+    def _on_uncheck_all_clicked(self) -> None:
+        for checkbox in self._visible_checkboxes.values():
+            checkbox.setChecked(False)
 
 
 # --- Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien flux

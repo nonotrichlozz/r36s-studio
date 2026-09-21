@@ -5,10 +5,19 @@ ferait `main_window.py`."""
 
 from __future__ import annotations
 
-from r36s_studio.android.emulators import EmulatorCatalog, EmulatorEntry, SENTINEL_A_VERIFIER
+from PySide6.QtCore import Qt
+
+from r36s_studio.android.emulators import EmulatorCatalog, EmulatorEntry, EmulatorVariant, SENTINEL_A_VERIFIER
 from r36s_studio.android.models import AdbDeviceEntry, AndroidDeviceInfo, DetectionResult
 from r36s_studio.consoles_diverses.models import fiche_depuis_json
 from r36s_studio.gui.screens import AndroidScreen
+
+
+def _find_category_row(screen: AndroidScreen, category_id) -> int:
+    for row in range(screen._category_list.count()):
+        if screen._category_list.item(row).data(Qt.UserRole) == category_id:
+            return row
+    raise AssertionError(f"catégorie {category_id!r} introuvable dans la colonne de gauche")
 
 
 def _fiche(statut="verifie"):
@@ -435,6 +444,261 @@ def test_emulator_list_refilters_when_a_new_device_is_detected(qapp):
     )
 
     assert screen._emulators_list_layout.count() == 1
+
+
+# --- Classement par console émulée (colonne de gauche) --------------------
+
+
+def test_category_sidebar_lists_all_and_the_fourteen_categories(qapp):
+    from r36s_studio.android.emulators import CATEGORIES
+
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+
+    assert screen._category_list.count() == 1 + len(CATEGORIES)
+    assert screen._category_list.item(0).data(Qt.UserRole) is None  # "Toutes" en tête
+
+
+def test_category_sidebar_shows_zero_for_categories_with_no_entry(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+
+    xbox_row = _find_category_row(screen, "xbox")
+    assert "(0)" in screen._category_list.item(xbox_row).text()
+
+
+def test_selecting_a_category_filters_the_card_list(qapp):
+    catalog = EmulatorCatalog(
+        avertissement="",
+        emulateurs=[
+            EmulatorEntry(
+                id="ps2_emu",
+                nom="PS2 emu",
+                systemes_emules=["PlayStation 2"],
+                licence=SENTINEL_A_VERIFIER,
+                prix=SENTINEL_A_VERIFIER,
+                statut_projet="actif",
+                url_officielle="https://example.invalid/",
+                source_url="https://example.invalid/",
+            ),
+            EmulatorEntry(
+                id="switch_emu",
+                nom="Switch emu",
+                systemes_emules=["Nintendo Switch"],
+                licence=SENTINEL_A_VERIFIER,
+                prix=SENTINEL_A_VERIFIER,
+                statut_projet="actif",
+                url_officielle="https://example.invalid/",
+                source_url="https://example.invalid/",
+            ),
+        ],
+    )
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(catalog)
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+    assert screen._emulators_list_layout.count() == 2
+
+    screen._category_list.setCurrentRow(_find_category_row(screen, "ps2"))
+
+    assert screen._emulators_list_layout.count() == 1
+    assert screen._selected_category == "ps2"
+
+
+def test_selecting_toutes_shows_the_full_list_again(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+    screen._category_list.setCurrentRow(_find_category_row(screen, "retro"))
+    assert screen._emulators_list_layout.count() != screen._category_list.count()  # sanity
+
+    screen._category_list.setCurrentRow(0)  # "Toutes"
+
+    assert screen._selected_category is None
+    assert screen._emulators_list_layout.count() == len(_capability_catalog().emulateurs)
+
+
+def test_category_selection_survives_a_re_render(qapp):
+    """Une nouvelle détection (même appareil, ou un autre) ne doit pas
+    ramener silencieusement l'utilisateur sur "Toutes" s'il avait choisi
+    une catégorie précise."""
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+    screen._category_list.setCurrentRow(_find_category_row(screen, "retro"))
+    assert screen._selected_category == "retro"
+
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+
+    assert screen._selected_category == "retro"
+
+
+# --- Compteur « cochés » et Tout cocher / Tout décocher -------------------
+
+
+def test_checked_counter_starts_at_zero(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+
+    assert screen._checked_counter_label.text() == "0/2 cochés"
+
+
+def test_checking_a_card_updates_the_counter(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+
+    screen._visible_checkboxes["leger"].setChecked(True)
+
+    assert screen._checked_counter_label.text() == "1/2 cochés"
+
+
+def test_check_all_button_checks_only_the_visible_category(qapp):
+    catalog = EmulatorCatalog(
+        avertissement="",
+        emulateurs=[
+            EmulatorEntry(
+                id="a",
+                nom="A",
+                systemes_emules=["PSP"],
+                licence=SENTINEL_A_VERIFIER,
+                prix=SENTINEL_A_VERIFIER,
+                statut_projet="actif",
+                url_officielle="https://example.invalid/",
+                source_url="https://example.invalid/",
+            ),
+            EmulatorEntry(
+                id="b",
+                nom="B",
+                systemes_emules=["Nintendo Switch"],
+                licence=SENTINEL_A_VERIFIER,
+                prix=SENTINEL_A_VERIFIER,
+                statut_projet="actif",
+                url_officielle="https://example.invalid/",
+                source_url="https://example.invalid/",
+            ),
+        ],
+    )
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(catalog)
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+    screen._category_list.setCurrentRow(_find_category_row(screen, "psp"))
+
+    screen._check_all_button.click()
+
+    assert screen._checked_emulator_ids == {"a"}
+    assert screen._checked_counter_label.text() == "1/2 cochés"
+
+
+def test_uncheck_all_button_unchecks_only_the_visible_category(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+    screen._on_check_all_clicked()  # sur "Toutes" -- tout coché
+    assert screen._checked_counter_label.text() == "2/2 cochés"
+
+    screen._on_uncheck_all_clicked()
+
+    assert screen._checked_counter_label.text() == "0/2 cochés"
+
+
+def test_checked_state_survives_switching_category(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+    screen._visible_checkboxes["leger"].setChecked(True)
+
+    screen._category_list.setCurrentRow(_find_category_row(screen, "retro"))
+    screen._category_list.setCurrentRow(0)  # retour à "Toutes"
+
+    assert screen._visible_checkboxes["leger"].isChecked() is True
+    assert screen._checked_counter_label.text() == "1/2 cochés"
+
+
+def test_checked_counter_drops_ids_no_longer_realistic_for_a_new_device(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device(abi="arm64-v8a", android_version="13")))
+    screen._visible_checkboxes["exigeant"].setChecked(True)
+    assert screen._checked_counter_label.text() == "1/2 cochés"
+
+    screen.show_detection_result(
+        DetectionResult(state="ready", device=_device(abi="armeabi-v7a", android_version="8.0"))
+    )
+
+    assert "exigeant" not in screen._checked_emulator_ids
+    assert screen._checked_counter_label.text() == "0/1 cochés"
+
+
+# --- Variantes ------------------------------------------------------------
+
+
+def test_card_without_variants_shows_base_links_only(qapp):
+    from PySide6.QtWidgets import QComboBox
+
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(_capability_catalog())
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+
+    row = screen._emulators_list_layout.itemAt(0).widget()
+    assert row.findChildren(QComboBox) == []
+
+
+def test_card_with_variants_shows_a_dropdown_and_switches_links(qapp):
+    from PySide6.QtWidgets import QComboBox
+
+    entry = EmulatorEntry(
+        id="x",
+        nom="X",
+        systemes_emules=["PSP"],
+        licence=SENTINEL_A_VERIFIER,
+        prix=SENTINEL_A_VERIFIER,
+        statut_projet="actif",
+        url_officielle="https://example.invalid/standard",
+        source_url="https://example.invalid/standard",
+        variantes=[
+            EmulatorVariant(nom="Standard", url_officielle="https://example.invalid/standard", source_url="https://example.invalid/standard"),
+            EmulatorVariant(nom="Edge", url_officielle="https://example.invalid/edge", source_url="https://example.invalid/edge"),
+        ],
+    )
+    catalog = EmulatorCatalog(avertissement="", emulateurs=[entry])
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_emulator_catalog(catalog)
+    screen.show_detection_result(DetectionResult(state="ready", device=_device()))
+
+    row = screen._emulators_list_layout.itemAt(0).widget()
+    combos = row.findChildren(QComboBox)
+    assert len(combos) == 1
+    combo = combos[0]
+    assert [combo.itemText(i) for i in range(combo.count())] == ["Standard", "Edge"]
+
+    def link_targets():
+        return [
+            row._links_row.itemAt(i).widget().toolTip()
+            for i in range(row._links_row.count())
+            if row._links_row.itemAt(i).widget() is not None
+        ]
+
+    assert link_targets() == ["https://example.invalid/standard", "https://example.invalid/standard"]
+
+    combo.setCurrentIndex(1)
+
+    assert link_targets() == ["https://example.invalid/edge", "https://example.invalid/edge"]
 
 
 # --- Signaux de base -----------------------------------------------------

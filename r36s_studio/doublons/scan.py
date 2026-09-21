@@ -71,12 +71,23 @@ _HASH_BLOCK_SIZE = 1024 * 1024
 class Unit:
     """Élément atomique de détection -- `representative` sert de nom pour
     la normalisation de titre et le regroupement par dossier de système ;
-    `members` contient tous les fichiers réellement déplacés ensemble."""
+    `members` contient tous les fichiers réellement déplacés ensemble.
+
+    `known_sha256` : empreinte déjà calculée pendant l'analyse pour
+    `representative` -- renseignée uniquement pour les unités d'une
+    `ExactDuplicateGroup` (palier 1, `_find_exact_duplicates` ci-dessous),
+    `None` sinon (palier 2, jamais recalculée ici pour ça). Réutilisée par
+    `move.py` lors d'un déplacement vers un autre disque (copie + vérifie
+    + supprime la source) pour vérifier « le SHA-256 si déjà calculé »
+    (demandé explicitement) sans jamais imposer un nouveau calcul de
+    hachage à ce stade -- potentiellement coûteux sur un gros fichier dont
+    la taille seule suffisait jusqu'ici."""
 
     representative: Path
     members: List[Path]
     total_size_bytes: int
     is_linked: bool
+    known_sha256: Optional[str] = None
 
 
 @dataclass
@@ -165,6 +176,10 @@ def _find_exact_duplicates(units: List[Unit]) -> List[ExactDuplicateGroup]:
                 by_hash[digest].append(unit)
         for digest, hash_units in by_hash.items():
             if len(hash_units) >= 2:
+                for unit in hash_units:
+                    # Déjà calculé ici (palier 1) -- réutilisé par move.py
+                    # sans jamais recalculer, § docstring de `Unit`.
+                    unit.known_sha256 = digest
                 groups.append(ExactDuplicateGroup(units=hash_units, sha256=digest))
     return groups
 

@@ -25,13 +25,18 @@ from __future__ import annotations
 from .extensions import ROM_EXTENSIONS, ExtensionKind, classify
 from .linked_files import LinkedResolution, resolve_manifest
 from .move import (
+    CopyVerificationFailed,
+    DestinationInsideRootNotAllowed,
+    DestinationIsFilesystemRoot,
     DestinationNotWritable,
     DuplicatesOutsideRoot,
     InsufficientDiskSpace,
     MoveCancelled,
     MoveProgressCallback,
-    VolumeMismatch,
+    check_destination_allowed,
+    default_destination,
     has_pending_journal_entries,
+    is_cross_volume_destination,
     move_duplicates,
 )
 from .normalize import extract_tags, normalize_title, priority_score, region_rank, revision_score
@@ -75,8 +80,13 @@ __all__ = [
     "MoveCancelled",
     "DestinationNotWritable",
     "InsufficientDiskSpace",
-    "VolumeMismatch",
+    "DestinationInsideRootNotAllowed",
+    "DestinationIsFilesystemRoot",
+    "CopyVerificationFailed",
     "DuplicatesOutsideRoot",
+    "default_destination",
+    "check_destination_allowed",
+    "is_cross_volume_destination",
     "move_duplicates",
     "has_pending_journal_entries",
     "UndoConflict",

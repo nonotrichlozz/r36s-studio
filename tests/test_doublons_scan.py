@@ -53,6 +53,25 @@ def test_identical_content_same_size_is_an_exact_duplicate(tmp_path):
     # § affichée à côté du titre du groupe -- doit être la vraie empreinte
     # du contenu, pas une valeur arbitraire.
     assert group.sha256 == hashlib.sha256(b"identical-content").hexdigest()
+    # Réutilisée par move.py pour un déplacement vers un autre disque
+    # (copie + vérifie + supprime la source, jamais recalculée) -- déjà
+    # posée sur chaque `Unit` du groupe, pas seulement sur le groupe.
+    for unit in group.units:
+        assert unit.known_sha256 == group.sha256
+
+
+def test_units_in_a_version_group_have_no_known_sha256(tmp_path):
+    """Palier 2 (versions différentes) -- jamais de hachage déjà connu,
+    contrairement au palier 1 ci-dessus : ces unités ont un contenu
+    différent par construction, aucune empreinte commune à réutiliser."""
+    _touch(tmp_path / "SNES" / "Game (USA).sfc", b"contenu americain")
+    _touch(tmp_path / "SNES" / "Game (Europe).sfc", b"contenu different, taille differente aussi!")
+
+    result = find_duplicates(str(tmp_path))
+
+    assert result.exact_duplicate_groups == []
+    assert len(result.version_groups) == 1
+    assert all(unit.known_sha256 is None for unit in result.version_groups[0].units)
 
 
 def test_same_size_different_content_is_never_an_exact_duplicate(tmp_path):

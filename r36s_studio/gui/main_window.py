@@ -55,7 +55,15 @@ from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettin
 from r36s_studio.consoles_diverses.strings import friendly_error_message as consoles_diverses_friendly_error_message
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
-from r36s_studio.doublons.move import has_pending_journal_entries
+from r36s_studio.doublons.move import (
+    DestinationInsideRootNotAllowed,
+    DestinationIsFilesystemRoot,
+    DestinationNotWritable,
+    check_destination_allowed,
+    default_destination as default_doublons_destination,
+    has_pending_journal_entries,
+    is_cross_volume_destination,
+)
 from r36s_studio.doublons.report import build_report
 from r36s_studio.doublons.safety import is_filesystem_root, is_whole_user_folder
 from r36s_studio.doublons.scan import Unit
@@ -573,6 +581,11 @@ class MainWindow(QMainWindow):
         # sans redemander le dossier à chaque fois pendant cette session
         # de consultation de `_doublons_results_screen`.
         self._doublons_root: Optional[str] = None
+        # Destination du déplacement pour la session en cours (signalé :
+        # « permettre de choisir l'emplacement du dossier de destination »)
+        # -- recalculée à chaque nouveau scan (`_on_doublons_scan_finished`),
+        # jamais laissée à `None` tant qu'un dossier a été analysé.
+        self._doublons_destination: Optional[str] = None
         self._doublons_scan_result = None
         self._pending_doublons_units: List[Unit] = []
         self._doublons_pending_risk_action = None
@@ -702,6 +715,7 @@ class MainWindow(QMainWindow):
         self._doublons_results_screen.move_requested.connect(self._on_doublons_move_requested)
         self._doublons_results_screen.export_requested.connect(self._on_doublons_export_requested)
         self._doublons_results_screen.undo_requested.connect(self._on_doublons_undo_requested)
+        self._doublons_results_screen.destination_chosen.connect(self._on_doublons_destination_chosen)
         self._doublons_move_progress_screen.cancel_requested.connect(self._on_doublons_move_cancel_requested)
         self._confirm_move_doublons_dialog.confirmed.connect(self._on_doublons_move_confirmed)
         self._confirm_undo_doublons_dialog.confirmed.connect(self._on_doublons_undo_confirmed)
@@ -2126,10 +2140,78 @@ class MainWindow(QMainWindow):
         self._end_doublons_scan()
         self._doublons_scan_result = result
         self._doublons_results_screen.set_simulation_mode(self._app_config.doublons_simulation_mode)
-        undo_available = self._doublons_root is not None and has_pending_journal_entries(self._doublons_root)
+        if self._doublons_root is not None:
+            self._doublons_destination = self._default_doublons_destination(self._doublons_root)
+            self._doublons_results_screen.set_destination(self._doublons_destination)
+            self._update_doublons_cross_volume_warning()
+        undo_available = has_pending_journal_entries(self._doublons_known_destinations())
         self._doublons_results_screen.set_undo_available(undo_available)
         self._doublons_results_screen.set_results(result)
         self._root_stack.setCurrentWidget(self._doublons_results_screen)
+
+    def _default_doublons_destination(self, root: str) -> str:
+        """`AppConfig.doublons_last_destination` (§5 demandé : « mémoriser
+        la dernière destination choisie comme proposition suivante »)
+        quand il reste valable pour `root` -- `doublons.move.default_
+        destination(root)` (`root/_doublons`) sinon, y compris si la
+        valeur mémorisée est refusée pour ce dossier précis (ex. mémorisée
+        pour un tout autre dossier analysé lors d'une session
+        précédente, désormais à l'intérieur de celui-ci par coïncidence)."""
+        remembered = self._app_config.doublons_last_destination
+        if remembered:
+            try:
+                check_destination_allowed(root, remembered)
+                return remembered
+            except (DestinationInsideRootNotAllowed, DestinationIsFilesystemRoot, DestinationNotWritable):
+                pass
+        return default_doublons_destination(root)
+
+    def _update_doublons_cross_volume_warning(self) -> None:
+        if self._doublons_root is None or self._doublons_destination is None:
+            return
+        cross_volume = is_cross_volume_destination(self._doublons_root, self._doublons_destination)
+        self._doublons_results_screen.set_cross_volume_warning(cross_volume)
+
+    def _doublons_known_destinations(self) -> List[str]:
+        """Destinations à balayer pour « Tout annuler » (§4 demandé
+        explicitement : « pour que Tout annuler retrouve le journal même
+        si la destination a changé ») -- la destination de la session en
+        cours, l'historique mémorisé (`AppConfig.doublons_recent_
+        destinations`, mis à jour uniquement lors d'un déplacement réel,
+        `_on_doublons_move_confirmed`) et, par prudence, la destination
+        par défaut du dossier actuellement analysé même si elle n'a
+        jamais été explicitement choisie ni utilisée pour de vrai."""
+        destinations = list(self._app_config.doublons_recent_destinations)
+        if self._doublons_destination and self._doublons_destination not in destinations:
+            destinations.insert(0, self._doublons_destination)
+        if self._doublons_root is not None:
+            default = default_doublons_destination(self._doublons_root)
+            if default not in destinations:
+                destinations.append(default)
+        return destinations
+
+    def _on_doublons_destination_chosen(self, path: str) -> None:
+        if self._doublons_root is None:
+            return
+        try:
+            check_destination_allowed(self._doublons_root, path)
+        except DestinationInsideRootNotAllowed:
+            QMessageBox.warning(self, tr("app_title"), friendly_error_message("DESTINATION_INSIDE_ROOT"))
+            return
+        except DestinationIsFilesystemRoot:
+            QMessageBox.warning(self, tr("app_title"), friendly_error_message("DESTINATION_FILESYSTEM_ROOT"))
+            return
+        except DestinationNotWritable:
+            QMessageBox.warning(self, tr("app_title"), friendly_error_message("DESTINATION_NOT_WRITABLE"))
+            return
+        self._doublons_destination = path
+        # Mémorisé tout de suite (§5) -- pas seulement au moment d'un
+        # déplacement réel (`AppConfig.doublons_recent_destinations`,
+        # mis à jour séparément, seulement pour un déplacement réel).
+        self._app_config.doublons_last_destination = path
+        app_config.save_config(self._app_config)
+        self._doublons_results_screen.set_destination(path)
+        self._update_doublons_cross_volume_warning()
 
     def _on_doublons_scan_cancelled(self) -> None:
         self._end_doublons_scan()
@@ -2150,6 +2232,7 @@ class MainWindow(QMainWindow):
     def _on_doublons_move_confirmed(self) -> None:
         if self._doublons_root is None or not self._pending_doublons_units:
             return
+        destination = self._doublons_destination or default_doublons_destination(self._doublons_root)
         # Barre de progression réelle (signalement utilisateur -- 1900
         # fichiers sur 1272 groupes, règle §2 n°5) -- le total est connu
         # d'avance (§ garde-fou 1, jamais un membre isolé d'une unité
@@ -2157,10 +2240,19 @@ class MainWindow(QMainWindow):
         total = sum(len(unit.members) for unit in self._pending_doublons_units)
         self._doublons_move_progress_screen.set_progress(0, total)
         self._root_stack.setCurrentWidget(self._doublons_move_progress_screen)
+        if not self._app_config.doublons_simulation_mode:
+            # Mémorisé avant même le résultat -- une interruption en cours
+            # de lot laisse quand même un journal exploitable à cette
+            # destination (écriture au fil de l'eau, move.py), qui doit
+            # rester trouvable par « Tout annuler » (§4) même si le lot ne
+            # se termine pas. Jamais en simulation : rien n'y est écrit.
+            app_config.record_doublons_destination(self._app_config, destination)
+            app_config.save_config(self._app_config)
         self._doublons_move_runner = DoublonsMoveRunner(
             self._doublons_root,
             self._pending_doublons_units,
             self._app_config.doublons_simulation_mode,
+            destination=destination,
             parent=self,
         )
         self._doublons_move_runner.progress.connect(self._doublons_move_progress_screen.set_progress)
@@ -2212,10 +2304,8 @@ class MainWindow(QMainWindow):
         self._confirm_undo_doublons_dialog.open()
 
     def _on_doublons_undo_confirmed(self) -> None:
-        if self._doublons_root is None:
-            return
         self._doublons_results_screen.setEnabled(False)
-        self._doublons_undo_runner = DoublonsUndoRunner(self._doublons_root, parent=self)
+        self._doublons_undo_runner = DoublonsUndoRunner(self._doublons_known_destinations(), parent=self)
         self._doublons_undo_runner.error.connect(self._on_doublons_undo_error)
         self._doublons_undo_runner.finished_undo.connect(self._on_doublons_undo_finished)
         self._doublons_undo_runner.start()

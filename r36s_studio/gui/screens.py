@@ -3906,6 +3906,15 @@ class DoublonsResultsScreen(Screen):
     move_requested = Signal(list)  # List[Unit] à écarter (jamais le fichier gardé)
     export_requested = Signal()
     undo_requested = Signal()
+    # Signalé : « permettre de choisir l'emplacement du dossier de
+    # destination » -- ce champ ouvre lui-même le sélecteur de dossier
+    # (même principe que `DoublonsFolderScreen._on_browse_clicked`) et
+    # n'émet que le chemin choisi ; la validation (dossier refusé --
+    # à l'intérieur du dossier analysé ailleurs qu'en _doublons, racine
+    # d'un disque, lecture seule) reste à la charge de `main_window.py`,
+    # qui seul connaît `doublons.move.check_destination_allowed` et le
+    # dossier actuellement analysé.
+    destination_chosen = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3940,6 +3949,36 @@ class DoublonsResultsScreen(Screen):
         header.addWidget(self._move_all_button_top)
         self._move_all_button_bottom: Optional[QPushButton] = None
         root.addLayout(header)
+
+        # Emplacement du dossier de destination (signalé explicitement :
+        # « permettre de choisir l'emplacement... au lieu de _doublons
+        # imposé à la racine du dossier analysé ») -- champ en lecture
+        # seule (jamais tapé à la main, seul un vrai sélecteur de dossier
+        # garantit un chemin valide) prérempli par `main_window.py` via
+        # `set_destination` (`<dossier analysé>/_doublons` par défaut, ou
+        # la dernière destination mémorisée, § point 5).
+        destination_row = QHBoxLayout()
+        destination_label = QLabel(tr("doublons_destination_label"))
+        destination_label.setProperty("role", "secondary")
+        destination_row.addWidget(destination_label)
+        self._destination_edit = QLineEdit()
+        self._destination_edit.setReadOnly(True)
+        destination_row.addWidget(self._destination_edit, 1)
+        change_destination_button = QPushButton(tr("doublons_destination_change_button"))
+        change_destination_button.clicked.connect(self._on_change_destination_clicked)
+        destination_row.addWidget(change_destination_button)
+        root.addLayout(destination_row)
+
+        # Signalé (point 2) : disque différent du dossier analysé --
+        # copie puis suppression de la source, plus lent qu'un
+        # déplacement instantané. Jamais bloquant, seulement informatif
+        # (même famille visuelle que `_simulation_banner`/`_auto_
+        # selection_banner` ci-dessous, `role="warning"`).
+        self._cross_volume_banner = QLabel(tr("doublons_destination_cross_volume_warning"))
+        self._cross_volume_banner.setProperty("role", "warning")
+        self._cross_volume_banner.setWordWrap(True)
+        self._cross_volume_banner.setVisible(False)
+        root.addWidget(self._cross_volume_banner)
 
         # Bandeau permanent tant que le mode simulation est actif (§
         # garde-fou 1) -- jamais un simple détail dans le journal, ce
@@ -4014,6 +4053,21 @@ class DoublonsResultsScreen(Screen):
 
     def set_undo_available(self, available: bool) -> None:
         self._undo_button.setEnabled(available)
+
+    def set_destination(self, path: str) -> None:
+        self._destination_edit.setText(path)
+        self._destination_edit.setToolTip(path)
+
+    def destination(self) -> str:
+        return self._destination_edit.text()
+
+    def set_cross_volume_warning(self, cross_volume: bool) -> None:
+        self._cross_volume_banner.setVisible(cross_volume)
+
+    def _on_change_destination_clicked(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, tr("doublons_destination_change_button"))
+        if path:
+            self.destination_chosen.emit(path)
 
     def set_results(self, scan_result: ScanResult, macos_move_blocked: bool = False) -> None:
         """Reconstruit entièrement la liste -- appelé après chaque scan,

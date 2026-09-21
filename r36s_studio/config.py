@@ -101,6 +101,20 @@ DEFAULT_DOUBLONS_IGNORED_FOLDERS = [
 # de vrai, jamais l'inverse.
 DEFAULT_DOUBLONS_SIMULATION_MODE = True
 
+# Destination du déplacement des doublons (signalé : « permettre de
+# choisir l'emplacement du dossier de destination, au lieu de _doublons
+# imposé à la racine ») -- `doublons_last_destination` mémorise le
+# dernier choix explicite (§5 demandé : « proposition suivante »), `None`
+# tant qu'aucun choix explicite n'a encore été fait (repli sur
+# `doublons.move.default_destination(root)`, jamais cette valeur-ci
+# directement). `doublons_recent_destinations` est un historique distinct
+# -- toutes les destinations réellement utilisées pour un déplacement
+# réel (jamais en simulation, rien n'y est écrit), pour que « Tout
+# annuler » retrouve un journal même après un changement de destination
+# entre deux sessions (§4 demandé explicitement) ; plafonné pour ne
+# jamais grossir sans limite, le plus récent en tête.
+_MAX_DOUBLONS_RECENT_DESTINATIONS = 10
+
 
 @dataclass
 class AppConfig:
@@ -110,6 +124,8 @@ class AppConfig:
     consoles_diverses_server_url: str = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
     doublons_ignored_folders: List[str] = field(default_factory=lambda: list(DEFAULT_DOUBLONS_IGNORED_FOLDERS))
     doublons_simulation_mode: bool = DEFAULT_DOUBLONS_SIMULATION_MODE
+    doublons_last_destination: Optional[str] = None
+    doublons_recent_destinations: List[str] = field(default_factory=list)
 
 
 def config_dir() -> Path:
@@ -153,6 +169,14 @@ def load_config() -> AppConfig:
     doublons_simulation_mode = raw.get("doublons_simulation_mode")
     if not isinstance(doublons_simulation_mode, bool):
         doublons_simulation_mode = DEFAULT_DOUBLONS_SIMULATION_MODE
+    doublons_last_destination = raw.get("doublons_last_destination")
+    if not isinstance(doublons_last_destination, str) or not doublons_last_destination.strip():
+        doublons_last_destination = None
+    doublons_recent_destinations = raw.get("doublons_recent_destinations")
+    if not isinstance(doublons_recent_destinations, list) or not all(
+        isinstance(path, str) for path in doublons_recent_destinations
+    ):
+        doublons_recent_destinations = []
     return AppConfig(
         ui_mode=ui_mode,
         firmware=firmware,
@@ -160,12 +184,28 @@ def load_config() -> AppConfig:
         consoles_diverses_server_url=consoles_diverses_server_url,
         doublons_ignored_folders=doublons_ignored_folders,
         doublons_simulation_mode=doublons_simulation_mode,
+        doublons_last_destination=doublons_last_destination,
+        doublons_recent_destinations=doublons_recent_destinations[:_MAX_DOUBLONS_RECENT_DESTINATIONS],
     )
 
 
 def save_config(config: AppConfig) -> None:
     path = config_path()
     path.write_text(json.dumps(asdict(config), indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def record_doublons_destination(config: AppConfig, destination: str) -> None:
+    """Mémorise `destination` comme dernier choix (`doublons_last_
+    destination`, § proposition suivante) et l'ajoute en tête de
+    l'historique (`doublons_recent_destinations`, dédupliqué, plafonné à
+    `_MAX_DOUBLONS_RECENT_DESTINATIONS`) -- modifie `config` en place,
+    ne sauvegarde jamais elle-même (`save_config` reste à la charge de
+    l'appelant, comme pour toute autre modification de configuration dans
+    ce module). Appelée uniquement pour un déplacement réel (jamais en
+    simulation, où rien n'est écrit sur disque -- § docstring du champ)."""
+    config.doublons_last_destination = destination
+    remaining = [path for path in config.doublons_recent_destinations if path != destination]
+    config.doublons_recent_destinations = [destination, *remaining][:_MAX_DOUBLONS_RECENT_DESTINATIONS]
 
 
 # Tuile « Web » personnelle (accueil, réservée à l'auteur du projet --

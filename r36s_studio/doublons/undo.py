@@ -15,18 +15,26 @@
 # R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
 
 """« Tout annuler » (docs/doublons.md) -- restaure les fichiers déplacés
-vers `_doublons/` à partir de `journal.json` (écrit au fil de l'eau par
-`move.py`, donc fidèle même après une interruption brutale en cours de
-lot).
+à partir de `journal.json`, écrit au fil de l'eau par `move.py` dans le
+dossier de destination lui-même (donc fidèle même après une interruption
+brutale en cours de lot).
 
-Le journal accumule toutes les sessions de déplacement (jamais écrasé) :
-une restauration traite *toutes* les entrées qu'il contient, pas
-seulement la dernière session. Chaque entrée restaurée avec succès est
+**Plusieurs destinations possibles** (signalé : « garder aussi dans la
+config de l'app la liste des dernières destinations utilisées, pour que
+Tout annuler retrouve le journal même si la destination a changé ») --
+`undo_all` reçoit désormais la liste des destinations connues (session en
+cours + historique mémorisé, `AppConfig.doublons_recent_destinations`) et
+balaie chacune : une même carte a pu être traitée avec des destinations
+différentes d'une session à l'autre, rien ne doit rester injoignable.
+
+Chaque journal accumule toutes ses sessions de déplacement (jamais
+écrasé) : une restauration traite *toutes* les entrées qu'il contient,
+pas seulement la dernière. Chaque entrée restaurée avec succès est
 retirée du journal -- un second clic, ou une session ultérieure, ne
 retente jamais une entrée déjà traitée. Jamais d'écrasement : un conflit
-(le fichier d'origine a été récréé entre-temps, ou le fichier dans
-`_doublons/` n'y est plus) est signalé plutôt que résolu silencieusement,
-et l'entrée correspondante reste dans le journal pour un futur essai."""
+(le fichier d'origine a été récréé entre-temps, ou le fichier déplacé
+n'y est plus) est signalé plutôt que résolu silencieusement, et l'entrée
+correspondante reste dans le journal pour un futur essai."""
 
 from __future__ import annotations
 
@@ -36,7 +44,6 @@ from pathlib import Path
 from typing import List
 
 from .move import JOURNAL_FILENAME, _read_journal, _write_journal
-from .scan import DUPLICATES_DIR_NAME
 
 __all__ = ["UndoConflict", "UndoResult", "undo_all"]
 
@@ -54,13 +61,13 @@ class UndoResult:
     conflicts: List[UndoConflict] = field(default_factory=list)
 
 
-def undo_all(root: str) -> UndoResult:
-    root_path = Path(root).resolve()
-    journal_path = root_path / DUPLICATES_DIR_NAME / JOURNAL_FILENAME
+def _undo_one_destination(destination: str) -> UndoResult:
+    destination_path = Path(destination).resolve()
+    journal_path = destination_path / JOURNAL_FILENAME
     entries = _read_journal(journal_path)
     if not entries:
-        # Rien à annuler -- jamais créer `_doublons/` comme effet de bord
-        # d'un « Tout annuler » qui n'avait rien à faire.
+        # Rien à annuler -- jamais créer ce dossier comme effet de bord
+        # d'un « Tout annuler » qui n'avait rien à faire ici.
         return UndoResult()
 
     remaining: List[dict] = []
@@ -69,24 +76,42 @@ def undo_all(root: str) -> UndoResult:
 
     for entry in entries:
         source = Path(entry["source"])
-        destination = Path(entry["destination"])
+        destination_file = Path(entry["destination"])
 
-        if not destination.exists():
+        if not destination_file.exists():
             conflicts.append(
-                UndoConflict(source=str(source), destination=str(destination), reason="destination_missing")
+                UndoConflict(source=str(source), destination=str(destination_file), reason="destination_missing")
             )
             remaining.append(entry)
             continue
         if source.exists():
             conflicts.append(
-                UndoConflict(source=str(source), destination=str(destination), reason="source_occupied")
+                UndoConflict(source=str(source), destination=str(destination_file), reason="source_occupied")
             )
             remaining.append(entry)
             continue
 
         source.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(destination), str(source))
+        shutil.move(str(destination_file), str(source))
         restored += 1
 
     _write_journal(journal_path, remaining)
     return UndoResult(restored=restored, conflicts=conflicts)
+
+
+def undo_all(destinations: List[str]) -> UndoResult:
+    """Agrège la restauration sur toutes les `destinations` connues --
+    dédupliquées (chemins résolus) pour ne jamais traiter deux fois le
+    même journal si la même destination apparaît plusieurs fois dans
+    l'historique mémorisé."""
+    aggregate = UndoResult()
+    seen: set = set()
+    for destination in destinations:
+        resolved = str(Path(destination).resolve())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        result = _undo_one_destination(destination)
+        aggregate.restored += result.restored
+        aggregate.conflicts.extend(result.conflicts)
+    return aggregate

@@ -3,6 +3,7 @@ notamment le mode d'interface (assisté/expert, §5 mode assisté)."""
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import fields
 from unittest.mock import patch
@@ -229,3 +230,91 @@ def test_personal_web_url_never_persisted_in_app_config_fields():
     d'environnement ne quitte jamais la machine qui la définit)."""
     field_names = {f.name for f in fields(config.AppConfig)}
     assert not any("web" in name for name in field_names)
+
+
+# --- Destination de l'outil « Doublons de jeux » (signalé : « permettre
+# de choisir l'emplacement du dossier de destination ») -------------------
+
+
+def test_load_config_defaults_doublons_destination_fields_when_no_file_exists(tmp_path):
+    with patch("r36s_studio.config.config_path", return_value=tmp_path / "config.json"):
+        loaded = config.load_config()
+
+    assert loaded.doublons_last_destination is None
+    assert loaded.doublons_recent_destinations == []
+
+
+def test_save_then_load_roundtrips_doublons_last_destination(tmp_path):
+    path = tmp_path / "config.json"
+    with patch("r36s_studio.config.config_path", return_value=path):
+        config.save_config(config.AppConfig(doublons_last_destination="D:/Backup"))
+        loaded = config.load_config()
+
+    assert loaded.doublons_last_destination == "D:/Backup"
+
+
+def test_load_config_falls_back_to_none_when_last_destination_is_blank(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"doublons_last_destination": "   "}', encoding="utf-8")
+
+    with patch("r36s_studio.config.config_path", return_value=path):
+        loaded = config.load_config()
+
+    assert loaded.doublons_last_destination is None
+
+
+def test_load_config_falls_back_to_empty_list_when_recent_destinations_malformed(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text('{"doublons_recent_destinations": "not a list"}', encoding="utf-8")
+
+    with patch("r36s_studio.config.config_path", return_value=path):
+        loaded = config.load_config()
+
+    assert loaded.doublons_recent_destinations == []
+
+
+def test_load_config_truncates_an_overly_long_recent_destinations_list(tmp_path):
+    path = tmp_path / "config.json"
+    long_list = [f"D:/Backup{i}" for i in range(50)]
+    path.write_text(json.dumps({"doublons_recent_destinations": long_list}), encoding="utf-8")
+
+    with patch("r36s_studio.config.config_path", return_value=path):
+        loaded = config.load_config()
+
+    assert len(loaded.doublons_recent_destinations) <= 10
+
+
+def test_record_doublons_destination_sets_last_destination():
+    app_config = config.AppConfig()
+
+    config.record_doublons_destination(app_config, "D:/Backup")
+
+    assert app_config.doublons_last_destination == "D:/Backup"
+    assert app_config.doublons_recent_destinations == ["D:/Backup"]
+
+
+def test_record_doublons_destination_moves_existing_entry_to_front():
+    app_config = config.AppConfig(doublons_recent_destinations=["A", "B", "C"])
+
+    config.record_doublons_destination(app_config, "B")
+
+    assert app_config.doublons_recent_destinations == ["B", "A", "C"]
+
+
+def test_record_doublons_destination_never_duplicates_an_entry():
+    app_config = config.AppConfig()
+
+    config.record_doublons_destination(app_config, "D:/Backup")
+    config.record_doublons_destination(app_config, "D:/Backup")
+
+    assert app_config.doublons_recent_destinations == ["D:/Backup"]
+
+
+def test_record_doublons_destination_caps_the_recent_list():
+    app_config = config.AppConfig(doublons_recent_destinations=[f"D{i}" for i in range(10)])
+
+    config.record_doublons_destination(app_config, "new")
+
+    assert len(app_config.doublons_recent_destinations) == 10
+    assert app_config.doublons_recent_destinations[0] == "new"
+    assert "D9" not in app_config.doublons_recent_destinations  # le plus ancien tombe

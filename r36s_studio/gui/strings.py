@@ -213,6 +213,15 @@ STRINGS = {
         "vérifie le contenu du dossier _doublons/."
     ),
     "doublons_export_button": "Exporter le rapport",
+    # Emplacement du dossier de destination (signalé explicitement :
+    # « permettre de choisir l'emplacement... au lieu de _doublons imposé
+    # à la racine du dossier analysé »).
+    "doublons_destination_label": "Destination :",
+    "doublons_destination_change_button": "Changer…",
+    "doublons_destination_cross_volume_warning": (
+        "Destination sur un autre disque : les fichiers seront copiés puis "
+        "supprimés de la source (plus lent)."
+    ),
     "doublons_simulation_banner": "Mode simulation actif -- rien ne sera déplacé.",
     "doublons_auto_selection_banner": "Sélection automatique : vérifiez avant de déplacer.",
     "doublons_select_all_button": "Tout cocher",
@@ -694,12 +703,20 @@ STRINGS = {
         "Une erreur de lecture ou d'écriture est survenue. Vérifie que le dossier est toujours accessible."
     ),
     "error_destination_not_writable": (
-        "Impossible d'écrire dans le dossier _doublons/ -- vérifie qu'il n'est pas en lecture seule."
-    ),
-    "error_volume_mismatch": (
-        "Le dossier _doublons/ se trouve sur un disque différent de celui analysé -- opération annulée par prudence."
+        "Impossible d'écrire dans le dossier de destination -- vérifie qu'il n'est pas en lecture seule."
     ),
     "error_path_outside_root": "Un fichier à déplacer ne se trouve plus dans le dossier analysé.",
+    # Signalé explicitement : refus d'un dossier de destination situé à
+    # l'intérieur du dossier analysé ailleurs qu'en _doublons -- la
+    # prochaine analyse le retrouverait et le reproposerait comme doublon.
+    "error_destination_inside_root": (
+        "Ce dossier est à l'intérieur du dossier analysé -- la prochaine analyse le retrouverait. "
+        "Choisis un dossier en dehors, ou laisse la destination par défaut (_doublons)."
+    ),
+    "error_destination_filesystem_root": "Ce dossier est la racine d'un disque entier -- choisis un sous-dossier.",
+    "error_copy_verification_failed": (
+        "La copie vers l'autre disque n'a pas pu être vérifiée -- le fichier d'origine n'a pas été touché."
+    ),
     "error_output_exists": "Un fichier du même nom existe déjà à cet emplacement. Choisis un autre nom ou un autre dossier.",
     "error_image_not_found": "Le fichier image choisi est introuvable. Il a peut-être été déplacé ou supprimé.",
     "error_io_error": "Une erreur de lecture ou d'écriture est survenue. Vérifie que la carte est toujours branchée.",
@@ -872,8 +889,10 @@ _ERROR_MESSAGE_KEYS = {
     "INVALID_ARGS": "error_invalid_args",
     "DOUBLONS_IO_ERROR": "error_doublons_io_error",
     "DESTINATION_NOT_WRITABLE": "error_destination_not_writable",
-    "VOLUME_MISMATCH": "error_volume_mismatch",
     "PATH_OUTSIDE_ROOT": "error_path_outside_root",
+    "DESTINATION_INSIDE_ROOT": "error_destination_inside_root",
+    "DESTINATION_FILESYSTEM_ROOT": "error_destination_filesystem_root",
+    "COPY_VERIFICATION_FAILED": "error_copy_verification_failed",
 }
 
 

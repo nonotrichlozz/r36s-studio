@@ -1750,6 +1750,53 @@ def test_doublons_results_screen_undo_button_availability(qapp):
     assert screen._undo_button.isEnabled() is False
 
 
+# --- Emplacement du dossier de destination (signalé explicitement :
+# « permettre de choisir l'emplacement du dossier de destination, au
+# lieu de _doublons imposé à la racine du dossier analysé ») ------------
+
+
+def test_doublons_results_screen_set_destination_updates_the_readonly_field(qapp):
+    screen = DoublonsResultsScreen()
+
+    screen.set_destination("/mnt/roms/_doublons")
+
+    assert screen.destination() == "/mnt/roms/_doublons"
+    assert screen._destination_edit.isReadOnly() is True
+
+
+@patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/mnt/backup")
+def test_doublons_results_screen_change_button_emits_destination_chosen(mock_dialog, qapp):
+    screen = DoublonsResultsScreen()
+    received = []
+    screen.destination_chosen.connect(lambda path: received.append(path))
+
+    screen._on_change_destination_clicked()
+
+    assert received == ["/mnt/backup"]
+    mock_dialog.assert_called_once()
+
+
+@patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="")
+def test_doublons_results_screen_change_button_emits_nothing_when_dialog_cancelled(mock_dialog, qapp):
+    screen = DoublonsResultsScreen()
+    received = []
+    screen.destination_chosen.connect(lambda path: received.append(path))
+
+    screen._on_change_destination_clicked()
+
+    assert received == []
+
+
+def test_doublons_results_screen_cross_volume_warning_visibility(qapp):
+    screen = DoublonsResultsScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+
+    screen.set_cross_volume_warning(True)
+    assert screen._cross_volume_banner.isVisible() is True
+    screen.set_cross_volume_warning(False)
+    assert screen._cross_volume_banner.isVisible() is False
+
+
 def test_doublons_results_screen_selection_summary_reflects_default_precheck(qapp):
     """Compteur global (§ essai réel sur des milliers de fichiers) -- doit
     déjà refléter la présélection du palier 1 (tout sauf le premier) sans

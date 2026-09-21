@@ -27,11 +27,13 @@ from typing import Iterable, List, Optional
 from PySide6.QtCore import QThread, Signal
 
 from r36s_studio.doublons.move import (
+    CopyVerificationFailed,
+    DestinationInsideRootNotAllowed,
+    DestinationIsFilesystemRoot,
     DestinationNotWritable,
     DuplicatesOutsideRoot,
     InsufficientDiskSpace,
     MoveCancelled,
-    VolumeMismatch,
     move_duplicates,
 )
 from r36s_studio.doublons.scan import OperationCancelled, Unit, find_duplicates
@@ -120,11 +122,15 @@ class DoublonsMoveRunner(QThread):
     error = Signal(str, str)
     finished_move = Signal(bool)
 
-    def __init__(self, root: str, units: List[Unit], dry_run: bool, parent=None):
+    def __init__(self, root: str, units: List[Unit], dry_run: bool, destination: Optional[str] = None, parent=None):
         super().__init__(parent)
         self._root = root
         self._units = units
         self._dry_run = dry_run
+        # `None` retombe sur `root/_doublons` (comportement historique) --
+        # voir `move.py::default_destination`. Signalé : « permettre de
+        # choisir l'emplacement du dossier de destination ».
+        self._destination = destination
         self._cancel_requested = False
 
     def cancel(self) -> None:
@@ -144,6 +150,7 @@ class DoublonsMoveRunner(QThread):
                 dry_run=self._dry_run,
                 on_progress=on_progress,
                 should_cancel=should_cancel,
+                destination=self._destination,
             )
         except MoveCancelled as exc:
             self.error.emit("CANCELLED", str(exc))
@@ -157,8 +164,16 @@ class DoublonsMoveRunner(QThread):
             self.error.emit("INSUFFICIENT_DISK_SPACE", str(exc))
             self.finished_move.emit(False)
             return
-        except VolumeMismatch as exc:
-            self.error.emit("VOLUME_MISMATCH", str(exc))
+        except DestinationInsideRootNotAllowed as exc:
+            self.error.emit("DESTINATION_INSIDE_ROOT", str(exc))
+            self.finished_move.emit(False)
+            return
+        except DestinationIsFilesystemRoot as exc:
+            self.error.emit("DESTINATION_FILESYSTEM_ROOT", str(exc))
+            self.finished_move.emit(False)
+            return
+        except CopyVerificationFailed as exc:
+            self.error.emit("COPY_VERIFICATION_FAILED", str(exc))
             self.finished_move.emit(False)
             return
         except DuplicatesOutsideRoot as exc:
@@ -175,19 +190,22 @@ class DoublonsMoveRunner(QThread):
 
 class DoublonsUndoRunner(QThread):
     """« Tout annuler » (§ garde-fou 5, journal au fil de l'eau) -- lit et
-    restaure directement depuis `_doublons/journal.json`, aucun paramètre
-    au-delà du dossier racine."""
+    restaure depuis le(s) journal(aux) de `destinations` (la destination
+    de la session en cours, plus l'historique mémorisé, `AppConfig.
+    doublons_recent_destinations`) : une même carte a pu être traitée
+    avec des destinations différentes d'une session à l'autre (signalé
+    explicitement), aucune ne doit rester injoignable."""
 
     finished_undo = Signal(object)  # UndoResult
     error = Signal(str, str)
 
-    def __init__(self, root: str, parent=None):
+    def __init__(self, destinations: List[str], parent=None):
         super().__init__(parent)
-        self._root = root
+        self._destinations = list(destinations)
 
     def run(self) -> None:
         try:
-            result: Optional[UndoResult] = undo_all(self._root)
+            result: Optional[UndoResult] = undo_all(self._destinations)
         except OSError as exc:
             self.error.emit("DOUBLONS_IO_ERROR", str(exc))
             return

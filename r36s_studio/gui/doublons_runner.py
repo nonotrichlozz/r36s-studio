@@ -36,10 +36,11 @@ from r36s_studio.doublons.move import (
     MoveCancelled,
     move_duplicates,
 )
-from r36s_studio.doublons.scan import OperationCancelled, Unit, find_duplicates
+from r36s_studio.doublons.scan import HashCache, OperationCancelled, ScanResult, Unit, find_duplicates
+from r36s_studio.doublons.scan_cache import CachedScan, verify_scan_cache
 from r36s_studio.doublons.undo import UndoResult, undo_all
 
-__all__ = ["DoublonsScanRunner", "DoublonsMoveRunner", "DoublonsUndoRunner"]
+__all__ = ["DoublonsScanRunner", "DoublonsMoveRunner", "DoublonsUndoRunner", "DoublonsResumeRunner"]
 
 
 class DoublonsScanRunner(QThread):
@@ -62,13 +63,20 @@ class DoublonsScanRunner(QThread):
     cancelled = Signal()
     error = Signal(str, str)  # code, msg
 
-    def __init__(self, root: str, ignored_dirs: Iterable[str], parent=None):
+    def __init__(self, root: str, ignored_dirs: Iterable[str], hash_cache: Optional[HashCache] = None, parent=None):
         super().__init__(parent)
         self._root = root
         self._ignored_dirs = list(ignored_dirs)
         self._cancel_requested = False
         self._large_folder_event = threading.Event()
         self._large_folder_continue = False
+        # Consulté/complété en place par `find_duplicates` (§ demandé
+        # explicitement : « une nouvelle analyse du même dossier ne
+        # recalcule que les fichiers modifiés ») -- exposé publiquement
+        # (`self.hash_cache`) pour que l'appelant le sauvegarde une fois
+        # le thread terminé (`doublons/scan_cache.py::save_hash_cache`,
+        # jamais depuis ce thread lui-même ni depuis `scan.py`).
+        self.hash_cache: HashCache = hash_cache if hash_cache is not None else {}
 
     def cancel(self) -> None:
         """Coopératif, comme les autres runners de ce projet -- débloque
@@ -101,6 +109,7 @@ class DoublonsScanRunner(QThread):
                 on_progress=on_progress,
                 should_cancel=should_cancel,
                 confirm_large_folder=confirm_large_folder,
+                hash_cache=self.hash_cache,
             )
         except OperationCancelled:
             self.cancelled.emit()
@@ -210,3 +219,32 @@ class DoublonsUndoRunner(QThread):
             self.error.emit("DOUBLONS_IO_ERROR", str(exc))
             return
         self.finished_undo.emit(result)
+
+
+class DoublonsResumeRunner(QThread):
+    """« Reprendre la dernière analyse » (§ demandé explicitement :
+    « ne jamais obliger à relancer une analyse ») -- vérifie sur un thread
+    séparé (`doublons/scan_cache.py::verify_scan_cache`, taille/date de
+    modification de chaque fichier référencé, jamais un nouveau hachage)
+    que le résultat déjà en cache est toujours exploitable avant de
+    l'afficher, sans jamais relancer une analyse complète. Peut prendre un
+    moment sur un très gros résultat (des dizaines de milliers de
+    fichiers) -- un simple `os.stat` par fichier reste néanmoins bien plus
+    rapide qu'un nouveau parcours + hachage complet du dossier."""
+
+    finished_resume = Signal(object, int)  # ScanResult nettoyé, nombre d'unités retirées
+    error = Signal(str, str)
+
+    def __init__(self, cached: CachedScan, parent=None):
+        super().__init__(parent)
+        self._cached = cached
+
+    def run(self) -> None:
+        try:
+            result: ScanResult
+            removed: int
+            result, removed = verify_scan_cache(self._cached)
+        except OSError as exc:
+            self.error.emit("DOUBLONS_IO_ERROR", str(exc))
+            return
+        self.finished_resume.emit(result, removed)

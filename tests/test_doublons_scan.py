@@ -7,9 +7,11 @@ vérifier ici, en particulier la règle critique des fichiers liés."""
 from __future__ import annotations
 
 import hashlib
+import os
 
 import pytest
 
+import r36s_studio.doublons.scan as doublons_scan
 from r36s_studio.doublons.scan import OperationCancelled, find_duplicates
 
 
@@ -345,3 +347,75 @@ def test_progress_callback_is_called_for_every_file_seen(tmp_path):
     find_duplicates(str(tmp_path), on_progress=counts.append)
 
     assert counts == [1, 2, 3]
+
+
+# --- Cache des empreintes SHA-256 (signalé : « cache des empreintes SHA-256
+# par (chemin, taille, date de modification) : une nouvelle analyse du même
+# dossier ne recalcule que les fichiers modifiés ») ------------------------
+
+
+def test_hash_cache_is_populated_after_a_first_scan(tmp_path):
+    _touch(tmp_path / "SNES" / "Game (USA).sfc", b"identical-content")
+    _touch(tmp_path / "SNES" / "Game (Europe).sfc", b"identical-content")
+
+    cache: dict = {}
+    find_duplicates(str(tmp_path), hash_cache=cache)
+
+    representative = str(tmp_path / "SNES" / "Game (USA).sfc")
+    assert representative in cache
+    size, mtime, digest = cache[representative]
+    assert digest == hashlib.sha256(b"identical-content").hexdigest()
+    assert size == len(b"identical-content")
+
+
+def test_hash_cache_avoids_rehashing_an_unchanged_representative(tmp_path, monkeypatch):
+    _touch(tmp_path / "SNES" / "Game (USA).sfc", b"identical-content")
+    _touch(tmp_path / "SNES" / "Game (Europe).sfc", b"identical-content")
+
+    cache: dict = {}
+    find_duplicates(str(tmp_path), hash_cache=cache)
+
+    calls = []
+    real_hash_file = doublons_scan._hash_file
+
+    def spying_hash_file(path):
+        calls.append(path)
+        return real_hash_file(path)
+
+    monkeypatch.setattr("r36s_studio.doublons.scan._hash_file", spying_hash_file)
+
+    result = find_duplicates(str(tmp_path), hash_cache=cache)
+
+    assert calls == []  # le représentant n'a pas changé -- pas de nouveau hachage
+    assert len(result.exact_duplicate_groups) == 1
+
+
+def test_hash_cache_rehashes_a_file_whose_content_changed_same_size(tmp_path, monkeypatch):
+    _touch(tmp_path / "SNES" / "Game (USA).sfc", b"content-aaaaaaaaaa")
+    _touch(tmp_path / "SNES" / "Game (Europe).sfc", b"content-aaaaaaaaaa")
+
+    cache: dict = {}
+    find_duplicates(str(tmp_path), hash_cache=cache)
+
+    representative = tmp_path / "SNES" / "Game (USA).sfc"
+    original_mtime = representative.stat().st_mtime
+    representative.write_bytes(b"content-bbbbbbbbbb")  # même taille, contenu différent
+    # `mtime` doit changer pour être détecté -- s'assure que l'horloge du
+    # système de fichiers avance réellement d'un tick avant de la forcer.
+    os.utime(representative, (original_mtime + 5, original_mtime + 5))
+
+    result = find_duplicates(str(tmp_path), hash_cache=cache)
+
+    # Plus identiques -- le groupe de doublons disparaît.
+    assert len(result.exact_duplicate_groups) == 0
+    _, _, digest = cache[str(representative)]
+    assert digest == hashlib.sha256(b"content-bbbbbbbbbb").hexdigest()
+
+
+def test_without_a_hash_cache_behaves_exactly_as_before(tmp_path):
+    _touch(tmp_path / "SNES" / "Game (USA).sfc", b"identical-content")
+    _touch(tmp_path / "SNES" / "Game (Europe).sfc", b"identical-content")
+
+    result = find_duplicates(str(tmp_path))
+
+    assert len(result.exact_duplicate_groups) == 1

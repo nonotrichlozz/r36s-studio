@@ -288,6 +288,21 @@ def _check_disk_space(destination_path: Path, needed_bytes: int) -> None:
         raise InsufficientDiskSpace(str(destination_path), needed_bytes, usage.free)
 
 
+def free_space_at_destination(destination: str) -> Optional[int]:
+    """Octets disponibles au premier ancêtre existant de `destination` --
+    jamais une exception (`None` si indéterminable) : réservé à
+    l'affichage informatif de la fenêtre de confirmation (§ demandé
+    explicitement, « espace libre à destination »), jamais à une décision
+    qui bloquerait quoi que ce soit -- `move_duplicates`/`_check_disk_
+    space` ci-dessus restent seuls habilités à réellement refuser un
+    déplacement faute d'espace, au moment de l'exécuter pour de vrai."""
+    try:
+        ancestor = _nearest_existing_ancestor(Path(destination).resolve())
+        return shutil.disk_usage(ancestor).free
+    except OSError:
+        return None
+
+
 def _unique_destination(dest: Path) -> Path:
     """`dest` existe déjà (un précédent passage a déjà déplacé un fichier
     au même chemin relatif) -- ajoute un suffixe numérique avant

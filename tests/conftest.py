@@ -185,6 +185,27 @@ def _android_log_isolated(request, tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _doublons_scan_cache_isolated(tmp_path, monkeypatch):
+    """Même garde-fou que `_consoles_diverses_log_isolated`/`_android_log_
+    isolated` ci-dessus, pour `doublons/scan_cache.py` (§ demandé
+    explicitement : « sauvegarder le résultat de la dernière analyse sur
+    disque ») -- sans ce repli, tout test qui déclenche `_on_doublons_scan_
+    finished`/`_on_doublons_scan_cancelled` (`gui/main_window.py`) sans
+    mocker explicitement `save_scan_cache`/`save_hash_cache` écrirait pour
+    de vrai dans le dossier de données de l'app sur la machine de dev
+    (`config_dir()`, même incident que celui déjà documenté pour
+    `config.json`, CLAUDE.md §8). Redirige `config_dir` tel qu'importé dans
+    ce module précis vers `tmp_path` -- un test qui a besoin du vrai
+    `config_dir()` (aucun à ce jour) peut toujours le repatcher lui-même
+    dans son propre corps, ce repatch l'emportant pour la durée de son
+    bloc avant que ce garde-fou ne soit restauré à la fermeture."""
+    from r36s_studio.doublons import scan_cache as doublons_scan_cache
+
+    monkeypatch.setattr(doublons_scan_cache, "config_dir", lambda: tmp_path)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_privileged_mount_hook():
     """`partitions/locate.py::_privileged_mount_hook` est un point
     d'extension au niveau module que `MainWindow.__init__` installe sur

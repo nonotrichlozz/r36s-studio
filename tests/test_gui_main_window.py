@@ -952,8 +952,9 @@ def test_find_duplicates_tile_opens_folder_screen_then_scan_shows_results(mock_l
         window._doublons_folder_screen.folder_chosen.emit(str(tmp_path))
 
         mock_runner_class.assert_called_once_with(
-            str(tmp_path), window._app_config.doublons_ignored_folders, parent=window
+            str(tmp_path), window._app_config.doublons_ignored_folders, hash_cache={}, parent=window
         )
+        instance.hash_cache = {}
         callback = instance.finished_scan.connect.call_args[0][0]
         callback(result)
 
@@ -997,9 +998,13 @@ def test_doublons_move_confirmed_starts_move_runner_and_rescans(
         finished_callback(True)
 
         # Relance toujours un scan frais après un déplacement -- reflète
-        # l'état réel du dossier plutôt qu'une mise à jour partielle.
+        # l'état réel du dossier plutôt qu'une mise à jour partielle. Cache
+        # d'empreintes chargé (vide ici, aucune analyse encore sauvegardée
+        # sous ce dossier temporaire isolé, `conftest.py::_doublons_scan_
+        # cache_isolated`) -- § demandé : « une nouvelle analyse du même
+        # dossier ne recalcule que les fichiers modifiés ».
         mock_scan_class.assert_called_once_with(
-            str(tmp_path), window._app_config.doublons_ignored_folders, parent=window
+            str(tmp_path), window._app_config.doublons_ignored_folders, hash_cache={}, parent=window
         )
 
 
@@ -1369,6 +1374,346 @@ def test_doublons_undo_available_reflects_any_known_destination_with_a_journal(
     window._on_doublons_scan_finished(ScanResult())
 
     assert window._doublons_results_screen._undo_button.isEnabled() is True
+
+
+# --- Ergonomie signalée : destination dans la confirmation, jamais de
+# relance forcée, reprise de la dernière analyse, cache d'empreintes ------
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_requested_prefills_confirm_dialog_destination_display(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    """Signalé explicitement : « la fenêtre de confirmation doit afficher
+    la destination en évidence » -- déjà renseignée à l'ouverture, pas
+    seulement après un premier « Changer… »."""
+    from r36s_studio.doublons.scan import Unit
+
+    window = MainWindow()
+    window._doublons_root = str(tmp_path)
+    window._doublons_destination = str(tmp_path / "backup")
+    units = [Unit(tmp_path / "a.7z", [tmp_path / "a.7z"], 10, False)]
+
+    window._doublons_results_screen.move_requested.emit(units)
+
+    assert window._confirm_move_doublons_dialog.destination() == str(tmp_path / "backup")
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_requested_confirm_button_disabled_for_a_refused_destination(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    from r36s_studio.doublons.move import DestinationInsideRootNotAllowed
+    from r36s_studio.doublons.scan import Unit
+
+    window = MainWindow()
+    window._doublons_root = str(tmp_path)
+    window._doublons_destination = str(tmp_path / "inside" / "the" / "analyzed" / "folder")
+    units = [Unit(tmp_path / "a.7z", [tmp_path / "a.7z"], 10, False)]
+
+    with patch(
+        "r36s_studio.gui.main_window.check_destination_allowed",
+        side_effect=DestinationInsideRootNotAllowed(window._doublons_destination, str(tmp_path)),
+    ):
+        window._doublons_results_screen.move_requested.emit(units)
+
+    assert window._confirm_move_doublons_dialog._confirm_button.isEnabled() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_confirm_dialog_change_destination_does_not_relaunch_a_scan(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    """Signalé explicitement : « changer la destination ne relance rien :
+    les résultats restent affichés, la sélection est conservée »."""
+    from r36s_studio.doublons.scan import ExactDuplicateGroup, ScanResult, Unit
+
+    window = MainWindow()
+    root = tmp_path / "root"
+    unit_a = Unit(root / "a.7z", [root / "a.7z"], 10, False)
+    unit_b = Unit(root / "b.7z", [root / "b.7z"], 10, False)
+    window._doublons_root = str(root)
+    result = ScanResult(exact_duplicate_groups=[ExactDuplicateGroup([unit_a, unit_b], sha256="a" * 64)])
+    window._display_doublons_results(result)
+    window._doublons_results_screen.show()
+
+    # Un dossier hors du dossier analysé (`root`) -- toujours accepté par
+    # `check_destination_allowed`, contrairement à un dossier qui se
+    # trouverait à l'intérieur de `root`.
+    new_destination = str(tmp_path / "elsewhere")
+    with patch("r36s_studio.gui.main_window.DoublonsScanRunner") as mock_scan_class, patch(
+        "r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value=new_destination
+    ):
+        window._confirm_move_doublons_dialog._on_change_destination_clicked()
+
+        mock_scan_class.assert_not_called()
+
+    assert window._doublons_destination == new_destination
+    assert window._confirm_move_doublons_dialog.destination() == new_destination
+    # Toujours sur l'écran de résultats, jamais renvoyé au choix du dossier
+    # ou à l'écran de progression -- aucune analyse n'a été relancée.
+    assert window._root_stack.currentWidget() is window._doublons_results_screen
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_confirm_dialog_cancel_returns_to_results_with_selection_intact(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    """Signalé explicitement : « revenir en arrière depuis la confirmation
+    ramène aux résultats, sélection intacte » -- garanti par la simple
+    architecture de superposition non bloquante (`Dialog.open()`), vérifié
+    ici de bout en bout plutôt que supposé."""
+    from PySide6.QtWidgets import QCheckBox
+
+    from r36s_studio.doublons.scan import ExactDuplicateGroup, ScanResult, Unit
+    from r36s_studio.gui.strings import tr
+
+    window = MainWindow()
+    window._doublons_root = str(tmp_path)
+    unit_a = Unit(tmp_path / "a.7z", [tmp_path / "a.7z"], 10, False)
+    unit_b = Unit(tmp_path / "b.7z", [tmp_path / "b.7z"], 10, False)
+    result = ScanResult(exact_duplicate_groups=[ExactDuplicateGroup([unit_a, unit_b], sha256="a" * 64)])
+    window._display_doublons_results(result)
+    window._doublons_results_screen.show()
+
+    checkboxes = [
+        box
+        for box in window._doublons_results_screen._list_container.findChildren(QCheckBox)
+        if box.text() == tr("doublons_move_this_one")
+    ]
+    for box in checkboxes:
+        box.setChecked(True)
+    checked_before = [box.isChecked() for box in checkboxes]
+
+    window._confirm_move_doublons_dialog.open()
+    window._confirm_move_doublons_dialog.close()  # « Annuler »
+
+    assert window._root_stack.currentWidget() is window._doublons_results_screen
+    checked_after = [box.isChecked() for box in checkboxes]
+    assert checked_after == checked_before
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_scan_finished_saves_scan_cache_and_hash_cache(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    from r36s_studio.doublons import scan_cache as doublons_scan_cache
+    from r36s_studio.doublons.scan import ScanResult
+
+    window = MainWindow()
+    window._doublons_root = str(tmp_path)
+
+    with patch.object(doublons_scan_cache, "save_scan_cache") as mock_save_scan, patch.object(
+        doublons_scan_cache, "save_hash_cache"
+    ) as mock_save_hash:
+        window._doublons_scan_runner = MagicMock()
+        window._doublons_scan_runner.hash_cache = {"a": (1, 2.0, "deadbeef")}
+        window._on_doublons_scan_finished(ScanResult())
+
+    mock_save_scan.assert_called_once_with(str(tmp_path), mock_save_scan.call_args[0][1])
+    mock_save_hash.assert_called_once_with({"a": (1, 2.0, "deadbeef")})
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_scan_cancelled_saves_the_partial_hash_cache(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    from r36s_studio.doublons import scan_cache as doublons_scan_cache
+
+    window = MainWindow()
+    window._doublons_root = str(tmp_path)
+    window._doublons_scan_runner = MagicMock()
+    window._doublons_scan_runner.hash_cache = {"a": (1, 2.0, "deadbeef")}
+
+    with patch.object(doublons_scan_cache, "save_hash_cache") as mock_save_hash:
+        window._on_doublons_scan_cancelled()
+
+    mock_save_hash.assert_called_once_with({"a": (1, 2.0, "deadbeef")})
+    assert window._root_stack.currentWidget() is window._doublons_folder_screen
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_doublons_scan_loads_the_hash_cache(mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path):
+    from r36s_studio.doublons import scan_cache as doublons_scan_cache
+
+    window = MainWindow()
+
+    with patch.object(
+        doublons_scan_cache, "load_hash_cache", return_value={"a": (1, 2.0, "deadbeef")}
+    ) as mock_load_hash, patch("r36s_studio.gui.main_window.DoublonsScanRunner") as mock_scan_class:
+        window._start_doublons_scan(str(tmp_path))
+
+    mock_load_hash.assert_called_once()
+    mock_scan_class.assert_called_once_with(
+        str(tmp_path), window._app_config.doublons_ignored_folders, hash_cache={"a": (1, 2.0, "deadbeef")}, parent=window
+    )
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_doublons_tool_refreshes_the_resume_button(mock_list, mock_filter, mock_load, mock_save, qapp):
+    from r36s_studio.doublons.scan_cache import CachedScan
+    from r36s_studio.doublons.scan import ScanResult
+
+    window = MainWindow()
+    cached = CachedScan(
+        root="/mnt/roms", scanned_at="2026-09-21T10:00:00+00:00", result=ScanResult(), file_stats={}
+    )
+
+    with patch(
+        "r36s_studio.gui.main_window.doublons_scan_cache.find_most_recent_scan_cache", return_value=cached
+    ):
+        window._start_doublons_tool()
+
+    assert window._doublons_resume_cache is cached
+    # `isVisible()` ne reflète `setVisible()` qu'une fois la fenêtre
+    # affichée (`window.show()`, jamais appelé ici) -- `isHidden()` reste
+    # fiable sans affichage réel, même piège Qt déjà documenté ailleurs
+    # dans ce fichier.
+    assert window._doublons_folder_screen._resume_frame.isHidden() is False
+    assert "/mnt/roms" in window._doublons_folder_screen._resume_label.text()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_start_doublons_tool_hides_resume_button_when_no_cache(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+
+    with patch("r36s_studio.gui.main_window.doublons_scan_cache.find_most_recent_scan_cache", return_value=None):
+        window._start_doublons_tool()
+
+    assert window._doublons_resume_cache is None
+    assert window._doublons_folder_screen._resume_frame.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_resume_requested_starts_resume_runner(mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path):
+    from r36s_studio.doublons.scan import ScanResult
+    from r36s_studio.doublons.scan_cache import CachedScan
+
+    window = MainWindow()
+    cached = CachedScan(root=str(tmp_path), scanned_at="2026-09-21T10:00:00+00:00", result=ScanResult(), file_stats={})
+    window._doublons_resume_cache = cached
+
+    with patch("r36s_studio.gui.main_window.DoublonsResumeRunner") as mock_resume_class:
+        instance = MagicMock()
+        mock_resume_class.return_value = instance
+        window._on_doublons_resume_requested()
+
+        mock_resume_class.assert_called_once_with(cached, parent=window)
+        instance.start.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_resume_finished_displays_results_and_sets_root(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    from r36s_studio.doublons.scan import ScanResult
+    from r36s_studio.doublons.scan_cache import CachedScan
+
+    window = MainWindow()
+    cached = CachedScan(root=str(tmp_path), scanned_at="2026-09-21T10:00:00+00:00", result=ScanResult(), file_stats={})
+    window._doublons_resume_cache = cached
+
+    window._on_doublons_resume_finished(ScanResult(), 0)
+
+    assert window._doublons_root == str(tmp_path)
+    assert window._root_stack.currentWidget() is window._doublons_results_screen
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.information")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_resume_finished_notifies_when_files_were_removed(
+    mock_list, mock_filter, mock_load, mock_save, mock_information, qapp, tmp_path
+):
+    """Signalé explicitement : « avant de la réutiliser, vérifier
+    rapidement que les fichiers existent encore ... et retirer ceux qui
+    ont changé » -- l'utilisateur doit être informé quand ça s'est produit."""
+    from r36s_studio.doublons.scan import ScanResult
+    from r36s_studio.doublons.scan_cache import CachedScan
+
+    window = MainWindow()
+    cached = CachedScan(root=str(tmp_path), scanned_at="2026-09-21T10:00:00+00:00", result=ScanResult(), file_stats={})
+    window._doublons_resume_cache = cached
+
+    window._on_doublons_resume_finished(ScanResult(), 2)
+
+    mock_information.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_resume_finished_does_not_resave_the_scan_cache(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    """Une reprise ne doit jamais réécrire le cache de résultat déjà sur
+    disque -- seule une analyse fraîche le fait (`_on_doublons_scan_
+    finished`), pour ne jamais écraser `scanned_at`/`file_stats` d'origine
+    par un instantané potentiellement incomplet après élagage."""
+    from r36s_studio.doublons import scan_cache as doublons_scan_cache
+    from r36s_studio.doublons.scan import ScanResult
+    from r36s_studio.doublons.scan_cache import CachedScan
+
+    window = MainWindow()
+    cached = CachedScan(root=str(tmp_path), scanned_at="2026-09-21T10:00:00+00:00", result=ScanResult(), file_stats={})
+    window._doublons_resume_cache = cached
+
+    with patch.object(doublons_scan_cache, "save_scan_cache") as mock_save_scan:
+        window._on_doublons_resume_finished(ScanResult(), 0)
+
+    mock_save_scan.assert_not_called()
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_resume_error_returns_to_folder_screen(
+    mock_list, mock_filter, mock_load, mock_save, mock_warning, qapp
+):
+    window = MainWindow()
+
+    window._on_doublons_resume_error("DOUBLONS_IO_ERROR", "boom")
+
+    assert window._root_stack.currentWidget() is window._doublons_folder_screen
+    mock_warning.assert_called_once()
 
 
 # --- Écran de bienvenue macOS : Accès complet au disque (§3) ---------------

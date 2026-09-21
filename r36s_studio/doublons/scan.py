@@ -43,7 +43,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, MutableMapping, Optional, Set, Tuple
 
 from .extensions import ExtensionKind, classify
 from .linked_files import resolve_manifest
@@ -57,8 +57,20 @@ __all__ = [
     "VersionGroup",
     "ScanResult",
     "OperationCancelled",
+    "HashCacheEntry",
+    "HashCache",
     "find_duplicates",
 ]
+
+# (taille, date de modification, empreinte SHA-256) -- clé : chemin absolu
+# en `str`. Signalé explicitement : « une nouvelle analyse du même dossier
+# ne recalcule que les fichiers modifiés ». Persisté d'une session à
+# l'autre par `doublons/scan_cache.py` (jamais ici -- ce module reste en
+# lecture seule stricte, sans écriture sur disque, § docstring du module) ;
+# `find_duplicates` ne fait que consulter/compléter le dictionnaire fourni
+# par l'appelant, qui décide seul quand le sauvegarder.
+HashCacheEntry = Tuple[int, float, str]
+HashCache = MutableMapping[str, HashCacheEntry]
 
 # Jamais redescendu : un fichier déjà écarté lors d'un scan précédent ne
 # doit jamais réapparaître comme "nouveau doublon" à découvrir (§move.py).
@@ -159,7 +171,31 @@ def _hash_file(path: Path) -> Optional[str]:
     return hasher.hexdigest()
 
 
-def _find_exact_duplicates(units: List[Unit]) -> List[ExactDuplicateGroup]:
+def _hash_file_cached(path: Path, hash_cache: Optional[HashCache]) -> Optional[str]:
+    """Même contrat que `_hash_file`, mais consulte/complète `hash_cache`
+    d'abord -- une entrée n'est réutilisée que si la taille *et* la date
+    de modification actuelles du fichier correspondent exactement à ce qui
+    a été enregistré (§ demandé explicitement) : un fichier remplacé par
+    un autre de même taille mais modifié plus tard n'est jamais confondu
+    avec l'ancien. `hash_cache=None` retombe sur `_hash_file` sans aucune
+    mise en cache, comportement historique (compatibilité)."""
+    if hash_cache is None:
+        return _hash_file(path)
+    key = str(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    cached = hash_cache.get(key)
+    if cached is not None and cached[0] == stat.st_size and cached[1] == stat.st_mtime:
+        return cached[2]
+    digest = _hash_file(path)
+    if digest is not None:
+        hash_cache[key] = (stat.st_size, stat.st_mtime, digest)
+    return digest
+
+
+def _find_exact_duplicates(units: List[Unit], hash_cache: Optional[HashCache] = None) -> List[ExactDuplicateGroup]:
     by_size: Dict[int, List[Unit]] = defaultdict(list)
     for unit in units:
         if not unit.is_linked:
@@ -171,7 +207,7 @@ def _find_exact_duplicates(units: List[Unit]) -> List[ExactDuplicateGroup]:
             continue
         by_hash: Dict[str, List[Unit]] = defaultdict(list)
         for unit in same_size_units:
-            digest = _hash_file(unit.representative)
+            digest = _hash_file_cached(unit.representative, hash_cache)
             if digest is not None:
                 by_hash[digest].append(unit)
         for digest, hash_units in by_hash.items():
@@ -223,6 +259,7 @@ def find_duplicates(
     on_progress: Optional[Callable[[int], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     confirm_large_folder: Optional[Callable[[], bool]] = None,
+    hash_cache: Optional[HashCache] = None,
 ) -> ScanResult:
     """Analyse `root` (dossier déjà accessible, choisi par l'utilisateur --
     PC, carte SD ou disque externe, aucune notion de périphérique ici).
@@ -237,7 +274,16 @@ def find_duplicates(
     `LARGE_FOLDER_FILE_THRESHOLD` -- il doit bloquer jusqu'à obtenir une
     réponse (ex. un `threading.Event.wait()` côté appelant GUI) et
     renvoyer `True` pour continuer, `False` pour annuler ; `None` (par
-    défaut, utilisé par les tests) désactive complètement ce garde-fou."""
+    défaut, utilisé par les tests) désactive complètement ce garde-fou.
+
+    `hash_cache` (§ demandé explicitement : « cache des empreintes SHA-256
+    par (chemin, taille, date de modification) ») -- consulté et complété
+    en place pour chaque fichier hashé pendant l'analyse (palier 1
+    uniquement, seul endroit de ce module qui hache un fichier) ; `None`
+    (par défaut) désactive la mise en cache, comportement historique. La
+    persistance sur disque de ce dictionnaire entre deux lancements de
+    l'application est à la charge de l'appelant (`doublons/scan_cache.py`),
+    jamais de ce module (§ lecture seule stricte, docstring du module)."""
     root_path = Path(root)
     ignored_dirs_lower = frozenset(name.lower() for name in ignored_dirs)
 
@@ -298,7 +344,7 @@ def find_duplicates(
         units.append(Unit(representative=file_path, members=[file_path], total_size_bytes=size, is_linked=False))
 
     return ScanResult(
-        exact_duplicate_groups=_find_exact_duplicates(units),
+        exact_duplicate_groups=_find_exact_duplicates(units, hash_cache),
         version_groups=_find_version_groups(root_path, units),
         excluded=excluded,
         files_scanned=count,

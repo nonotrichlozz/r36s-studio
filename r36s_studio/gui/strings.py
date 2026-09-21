@@ -182,6 +182,19 @@ STRINGS = {
         "Choisis le dossier à analyser -- sur ton ordinateur, une carte SD ou un disque externe."
     ),
     "doublons_folder_no_shortcuts": "Aucune carte ni disque amovible détecté pour l'instant.",
+    # « Reprendre la dernière analyse » (signalé explicitement : « ne
+    # jamais obliger à relancer une analyse ») -- masqué tant qu'aucun
+    # résultat n'est en cache (`DoublonsFolderScreen.set_resume_available`).
+    "doublons_resume_button": "Reprendre la dernière analyse",
+    "doublons_resume_info": "{folder} -- analysé le {date}",
+    # Signalé, après vérification (taille/date de modification) au moment
+    # de la reprise -- affiché seulement si au moins un fichier a changé
+    # ou disparu depuis (§ demandé explicitement : « retirer ceux qui ont
+    # changé »), jamais pour une reprise où rien n'a bougé.
+    "doublons_resume_files_removed_notice": (
+        "{count} fichier(s) retiré(s) des résultats -- modifié(s) ou "
+        "supprimé(s) depuis la dernière analyse."
+    ),
     "doublons_browse_button": "Parcourir…",
     "doublons_options_title": "OPTIONS",
     "doublons_simulation_checkbox": "Simuler sans rien déplacer",
@@ -221,6 +234,13 @@ STRINGS = {
     "doublons_destination_cross_volume_warning": (
         "Destination sur un autre disque : les fichiers seront copiés puis "
         "supprimés de la source (plus lent)."
+    ),
+    # Affiché dans la fenêtre de confirmation (§ demandé explicitement,
+    # « les avertissements associés... espace libre à destination ») --
+    # purement informatif, ne bloque jamais le bouton de validation
+    # (contrairement aux refus structurels de destination, ci-dessous).
+    "doublons_destination_space_warning": (
+        "Espace disponible à destination : {available} -- peut être insuffisant pour ce déplacement."
     ),
     "doublons_simulation_banner": "Mode simulation actif -- rien ne sera déplacé.",
     "doublons_auto_selection_banner": "Sélection automatique : vérifiez avant de déplacer.",

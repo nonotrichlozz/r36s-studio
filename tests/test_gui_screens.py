@@ -1857,6 +1857,115 @@ def test_confirm_move_doublons_dialog_message_simulation(qapp):
     assert dialog._confirm_button.text() == tr("doublons_confirm_button_simulation")
 
 
+def test_confirm_move_doublons_dialog_shows_destination(qapp):
+    dialog = ConfirmMoveDoublonsDialog()
+
+    dialog.set_destination("/mnt/backup/_doublons")
+
+    assert dialog.destination() == "/mnt/backup/_doublons"
+    assert dialog._destination_edit.isReadOnly() is True
+
+
+@patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/mnt/other")
+def test_confirm_move_doublons_dialog_change_button_emits_destination_chosen(mock_dialog, qapp):
+    dialog = ConfirmMoveDoublonsDialog()
+    received = []
+    dialog.destination_chosen.connect(lambda path: received.append(path))
+
+    dialog._on_change_destination_clicked()
+
+    assert received == ["/mnt/other"]
+    mock_dialog.assert_called_once()
+
+
+@patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="")
+def test_confirm_move_doublons_dialog_change_button_emits_nothing_when_cancelled(mock_dialog, qapp):
+    dialog = ConfirmMoveDoublonsDialog()
+    received = []
+    dialog.destination_chosen.connect(lambda path: received.append(path))
+
+    dialog._on_change_destination_clicked()
+
+    assert received == []
+
+
+def test_confirm_move_doublons_dialog_cross_volume_and_space_warning_visibility(qapp):
+    dialog = ConfirmMoveDoublonsDialog()
+    dialog.show()
+
+    dialog.set_cross_volume_warning(True)
+    assert dialog._cross_volume_banner.isVisible() is True
+    dialog.set_cross_volume_warning(False)
+    assert dialog._cross_volume_banner.isVisible() is False
+
+    dialog.set_space_warning(True, available_display=_format_size(1024))
+    assert dialog._space_warning_banner.isVisible() is True
+    assert _format_size(1024) in dialog._space_warning_banner.text()
+    dialog.set_space_warning(False)
+    assert dialog._space_warning_banner.isVisible() is False
+
+
+def test_confirm_move_doublons_dialog_confirm_button_disabled_while_destination_invalid(qapp):
+    """Signalé explicitement : « le bouton de validation reste désactivé
+    tant que la destination n'est pas valide » -- vérifié dans les deux
+    sens, jamais présumé activé par défaut sans preuve."""
+    dialog = ConfirmMoveDoublonsDialog()
+
+    dialog.set_destination_valid(False)
+    assert dialog._confirm_button.isEnabled() is False
+
+    dialog.set_destination_valid(True)
+    assert dialog._confirm_button.isEnabled() is True
+
+
+def test_confirm_move_doublons_dialog_confirm_does_nothing_while_destination_invalid(qapp):
+    dialog = ConfirmMoveDoublonsDialog()
+    received = []
+    dialog.confirmed.connect(lambda: received.append(True))
+    dialog.set_destination_valid(False)
+
+    dialog._on_confirm()
+
+    assert received == []
+
+
+def test_doublons_folder_screen_resume_button_hidden_by_default(qapp):
+    screen = DoublonsFolderScreen()
+
+    assert screen._resume_frame.isVisible() is False
+
+
+def test_doublons_folder_screen_set_resume_available_shows_button_with_info(qapp):
+    screen = DoublonsFolderScreen()
+    screen.show()
+
+    screen.set_resume_available("/mnt/roms", "21/09/2026 10:00")
+
+    assert screen._resume_frame.isVisible() is True
+    assert "/mnt/roms" in screen._resume_label.text()
+    assert "21/09/2026 10:00" in screen._resume_label.text()
+
+
+def test_doublons_folder_screen_set_resume_available_none_hides_the_frame(qapp):
+    screen = DoublonsFolderScreen()
+    screen.show()
+    screen.set_resume_available("/mnt/roms", "21/09/2026 10:00")
+
+    screen.set_resume_available(None, None)
+
+    assert screen._resume_frame.isVisible() is False
+
+
+def test_doublons_folder_screen_resume_button_click_emits_resume_requested(qapp):
+    screen = DoublonsFolderScreen()
+    received = []
+    screen.resume_requested.connect(lambda: received.append(True))
+
+    screen._resume_button.click()
+
+    assert received == [True]
+
+
 def test_confirm_undo_doublons_dialog_confirm_emits_signal(qapp):
     dialog = ConfirmUndoDoublonsDialog()
     received = []

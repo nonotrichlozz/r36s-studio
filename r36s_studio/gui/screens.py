@@ -3658,6 +3658,10 @@ class DoublonsFolderScreen(Screen):
     back_requested = Signal()
     folder_chosen = Signal(str)
     refresh_requested = Signal()
+    # Signalé explicitement : « ne jamais obliger à relancer une analyse » --
+    # affiché seulement quand un résultat en cache existe encore
+    # (`set_resume_available`), jamais présumé disponible par défaut.
+    resume_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3682,6 +3686,25 @@ class DoublonsFolderScreen(Screen):
         hint.setWordWrap(True)
         hint.setProperty("role", "secondary")
         root.addWidget(hint)
+
+        # « Reprendre la dernière analyse » (§ demandé explicitement) --
+        # masqué tant qu'aucun résultat n'est en cache (`set_resume_
+        # available(None, None)`, état initial). Un cadre distinct plutôt
+        # qu'un simple bouton perdu dans la liste : c'est la voie la plus
+        # rapide pour revenir aux résultats, mérite d'être vue en premier.
+        self._resume_frame = QFrame()
+        self._resume_frame.setProperty("role", "row")
+        resume_layout = QVBoxLayout(self._resume_frame)
+        self._resume_label = QLabel()
+        self._resume_label.setProperty("role", "secondary")
+        self._resume_label.setWordWrap(True)
+        resume_layout.addWidget(self._resume_label)
+        self._resume_button = QPushButton(tr("doublons_resume_button"))
+        self._resume_button.setProperty("role", "primary")
+        self._resume_button.clicked.connect(self.resume_requested.emit)
+        resume_layout.addWidget(self._resume_button, 0, Qt.AlignLeft)
+        root.addWidget(self._resume_frame)
+        self._resume_frame.setVisible(False)
 
         # Raccourcis -- un clic navigue directement (pas de bouton
         # Continuer séparé : ce sont des raccourcis, pas une sélection à
@@ -3716,6 +3739,17 @@ class DoublonsFolderScreen(Screen):
         self._ignored_checkboxes: Dict[str, QCheckBox] = {}
 
         root.addStretch()
+
+    def set_resume_available(self, folder_display: Optional[str], date_display: Optional[str]) -> None:
+        """`None` (les deux, toujours ensemble) masque le cadre --
+        aucun résultat en cache, ou son dossier a disparu entre-temps
+        (§ `main_window.py::_refresh_doublons_resume_button`). Le texte
+        est déjà formaté par l'appelant (date lisible, chemin) -- cet
+        écran n'a besoin de rien savoir du format du cache lui-même."""
+        available = folder_display is not None and date_display is not None
+        self._resume_frame.setVisible(available)
+        if available:
+            self._resume_label.setText(tr("doublons_resume_info", folder=folder_display, date=date_display))
 
     def set_simulation_mode(self, enabled: bool) -> None:
         self._simulation_checkbox.setChecked(enabled)
@@ -4303,9 +4337,24 @@ class ConfirmMoveDoublonsDialog(Dialog):
     `_doublons/`, jamais une suppression), un simple bouton de
     confirmation suffit plutôt que la friction d'une case à cocher
     réservée aux actions réellement irréversibles. Texte adapté si le
-    mode simulation est actif (« Simuler le déplacement de... »)."""
+    mode simulation est actif (« Simuler le déplacement de... »).
+
+    Signalé : le champ Destination de l'écran de résultats « passe
+    inaperçu » -- cette fenêtre, le tout dernier geste avant une écriture
+    réelle, affiche désormais la destination en évidence avec son propre
+    bouton « Changer… » et les avertissements associés (autre disque,
+    espace libre), plutôt que de les laisser seulement sur l'écran
+    derrière. Fermer cette fenêtre (Annuler) ne fait rien d'autre que la
+    fermer : l'écran de résultats en dessous n'a jamais été quitté (cette
+    fenêtre est une simple superposition, `Dialog.open()` -- règle §2 du
+    déplacement 2, « revenir en arrière ramène aux résultats, sélection
+    intacte », déjà garanti par cette seule architecture)."""
 
     confirmed = Signal()
+    # Même contrat que `DoublonsResultsScreen.destination_chosen` --
+    # cette fenêtre ouvre elle-même le sélecteur de dossier, la
+    # validation reste à la charge de `main_window.py`.
+    destination_chosen = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -4317,6 +4366,34 @@ class ConfirmMoveDoublonsDialog(Dialog):
         self._message = QLabel()
         self._message.setWordWrap(True)
         layout.addWidget(self._message)
+
+        # Destination en évidence (signalé explicitement) -- même
+        # contrôle en lecture seule + bouton Changer… que l'écran de
+        # résultats, jamais un champ modifiable à la main.
+        destination_row = QHBoxLayout()
+        destination_label = QLabel(tr("doublons_destination_label"))
+        destination_label.setProperty("role", "secondary")
+        destination_row.addWidget(destination_label)
+        self._destination_edit = QLineEdit()
+        self._destination_edit.setReadOnly(True)
+        destination_row.addWidget(self._destination_edit, 1)
+        change_destination_button = QPushButton(tr("doublons_destination_change_button"))
+        change_destination_button.clicked.connect(self._on_change_destination_clicked)
+        destination_row.addWidget(change_destination_button)
+        layout.addLayout(destination_row)
+
+        self._cross_volume_banner = QLabel(tr("doublons_destination_cross_volume_warning"))
+        self._cross_volume_banner.setProperty("role", "warning")
+        self._cross_volume_banner.setWordWrap(True)
+        self._cross_volume_banner.setVisible(False)
+        layout.addWidget(self._cross_volume_banner)
+
+        self._space_warning_banner = QLabel()
+        self._space_warning_banner.setProperty("role", "warning")
+        self._space_warning_banner.setWordWrap(True)
+        self._space_warning_banner.setVisible(False)
+        layout.addWidget(self._space_warning_banner)
+
         layout.addStretch()
 
         buttons = QHBoxLayout()
@@ -4330,7 +4407,12 @@ class ConfirmMoveDoublonsDialog(Dialog):
         buttons.addWidget(self._confirm_button)
         layout.addLayout(buttons)
 
-        self.resize(440, 320)
+        # Le bouton de validation reste désactivé tant que la destination
+        # n'est pas structurellement valide (§ demandé explicitement) --
+        # `main_window.py` l'établit via `set_destination_valid` dès
+        # l'ouverture, avant même que l'utilisateur touche « Changer… ».
+        self._destination_valid = True
+        self.resize(480, 360)
 
     def set_units(self, units: List[Unit], dry_run: bool) -> None:
         total_files = sum(len(unit.members) for unit in units)
@@ -4340,7 +4422,48 @@ class ConfirmMoveDoublonsDialog(Dialog):
         self._message.setText(tr(message_key, count=total_files, size=_format_size(total_bytes)))
         self._confirm_button.setText(tr(button_key))
 
+    def set_destination(self, path: str) -> None:
+        self._destination_edit.setText(path)
+        self._destination_edit.setToolTip(path)
+
+    def destination(self) -> str:
+        return self._destination_edit.text()
+
+    def set_cross_volume_warning(self, cross_volume: bool) -> None:
+        self._cross_volume_banner.setVisible(cross_volume)
+
+    def set_space_warning(self, insufficient: bool, available_display: str = "") -> None:
+        """`insufficient=True` affiche l'espace libre actuellement
+        disponible à la destination (`available_display`, déjà formaté
+        par l'appelant, § `_format_size`) -- purement informatif, ne
+        conditionne jamais `_destination_valid` (contrairement aux
+        refus structurels ci-dessous) : l'espace peut changer entre cette
+        estimation et l'écriture réelle, qui refait de toute façon sa
+        propre vérification définitive (`move.py::_check_disk_space`)."""
+        self._space_warning_banner.setVisible(insufficient)
+        if insufficient:
+            self._space_warning_banner.setText(
+                tr("doublons_destination_space_warning", available=available_display)
+            )
+
+    def set_destination_valid(self, valid: bool) -> None:
+        """Signalé explicitement : « le bouton de validation reste
+        désactivé tant que la destination n'est pas valide » -- `valid`
+        reflète `doublons.move.check_destination_allowed` (dossier à
+        l'intérieur du dossier analysé ailleurs qu'en _doublons, racine
+        d'un disque, lecture seule), jamais l'espace disque (avertissement
+        seulement, ci-dessus)."""
+        self._destination_valid = valid
+        self._confirm_button.setEnabled(valid)
+
+    def _on_change_destination_clicked(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, tr("doublons_destination_change_button"))
+        if path:
+            self.destination_chosen.emit(path)
+
     def _on_confirm(self) -> None:
+        if not self._destination_valid:
+            return
         self.close()
         self.confirmed.emit()
 

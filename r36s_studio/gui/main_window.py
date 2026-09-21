@@ -55,12 +55,14 @@ from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettin
 from r36s_studio.consoles_diverses.strings import friendly_error_message as consoles_diverses_friendly_error_message
 from r36s_studio.detect import detect_workflow_status
 from r36s_studio.devices import Device, list_devices
+from r36s_studio.doublons import scan_cache as doublons_scan_cache
 from r36s_studio.doublons.move import (
     DestinationInsideRootNotAllowed,
     DestinationIsFilesystemRoot,
     DestinationNotWritable,
     check_destination_allowed,
     default_destination as default_doublons_destination,
+    free_space_at_destination,
     has_pending_journal_entries,
     is_cross_volume_destination,
 )
@@ -86,7 +88,7 @@ from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_differ
 from . import elevate
 from . import logs as gui_logs
 from .android_runner import AndroidDetectRunner, AndroidPlatformToolsDownloadRunner, AndroidPlatformToolsSizeRunner
-from .doublons_runner import DoublonsMoveRunner, DoublonsScanRunner, DoublonsUndoRunner
+from .doublons_runner import DoublonsMoveRunner, DoublonsResumeRunner, DoublonsScanRunner, DoublonsUndoRunner
 from .partition_runner import (
     IdentifyRunner,
     PartitionJobRunner,
@@ -576,6 +578,14 @@ class MainWindow(QMainWindow):
         self._doublons_scan_runner: Optional[DoublonsScanRunner] = None
         self._doublons_move_runner: Optional[DoublonsMoveRunner] = None
         self._doublons_undo_runner: Optional[DoublonsUndoRunner] = None
+        self._doublons_resume_runner: Optional[DoublonsResumeRunner] = None
+        # Dernier résultat en cache trouvé (§ demandé explicitement :
+        # « ne jamais obliger à relancer une analyse ») -- rafraîchi à
+        # chaque ouverture de l'écran de choix du dossier
+        # (`_refresh_doublons_resume_button`), consommé par `_on_doublons_
+        # resume_requested` sans jamais relire le disque une seconde fois
+        # entre l'affichage du bouton et son clic.
+        self._doublons_resume_cache: Optional[doublons_scan_cache.CachedScan] = None
         # Dossier sur lequel le scan en cours/le dernier scan a porté --
         # nécessaire pour relancer un déplacement puis un nouveau scan
         # sans redemander le dossier à chaque fois pendant cette session
@@ -707,6 +717,7 @@ class MainWindow(QMainWindow):
         self._doublons_folder_screen.back_requested.connect(self._show_startup_screen)
         self._doublons_folder_screen.refresh_requested.connect(self._refresh_doublons_shortcuts)
         self._doublons_folder_screen.folder_chosen.connect(self._on_doublons_folder_chosen)
+        self._doublons_folder_screen.resume_requested.connect(self._on_doublons_resume_requested)
         self._doublons_risk_confirm_dialog.confirmed.connect(self._on_doublons_risk_confirmed)
         self._doublons_large_folder_dialog.confirmed.connect(self._on_doublons_large_folder_confirmed)
         self._doublons_large_folder_dialog.cancelled.connect(self._on_doublons_large_folder_cancelled)
@@ -718,6 +729,7 @@ class MainWindow(QMainWindow):
         self._doublons_results_screen.destination_chosen.connect(self._on_doublons_destination_chosen)
         self._doublons_move_progress_screen.cancel_requested.connect(self._on_doublons_move_cancel_requested)
         self._confirm_move_doublons_dialog.confirmed.connect(self._on_doublons_move_confirmed)
+        self._confirm_move_doublons_dialog.destination_chosen.connect(self._on_doublons_confirm_dialog_destination_chosen)
         self._confirm_undo_doublons_dialog.confirmed.connect(self._on_doublons_undo_confirmed)
 
         self._wizard_panel.continue_requested.connect(self._on_wizard_continue)
@@ -2043,9 +2055,40 @@ class MainWindow(QMainWindow):
         l'ancien flux carte-SD-uniquement) -- outil autonome : ouvre le
         choix du dossier plutôt qu'un choix de carte."""
         self._refresh_doublons_shortcuts()
+        self._refresh_doublons_resume_button()
         self._doublons_folder_screen.set_simulation_mode(self._app_config.doublons_simulation_mode)
         self._doublons_folder_screen.set_ignored_folders(list(self._app_config.doublons_ignored_folders))
         self._root_stack.setCurrentWidget(self._doublons_folder_screen)
+
+    def _refresh_doublons_resume_button(self) -> None:
+        """Signalé explicitement : « ne jamais obliger à relancer une
+        analyse » -- cherche la dernière analyse mise en cache, tous
+        dossiers confondus (`find_most_recent_scan_cache`, une seule
+        proposition, pas une par raccourci), et la garde en attente
+        (`_doublons_resume_cache`) pour que le clic sur le bouton n'ait
+        plus qu'à la consommer sans relire le disque une seconde fois."""
+        cached = doublons_scan_cache.find_most_recent_scan_cache()
+        self._doublons_resume_cache = cached
+        if cached is None:
+            self._doublons_folder_screen.set_resume_available(None, None)
+            return
+        self._doublons_folder_screen.set_resume_available(cached.root, self._format_doublons_cache_date(cached.scanned_at))
+
+    @staticmethod
+    def _format_doublons_cache_date(iso: str) -> str:
+        """`scanned_at` est enregistré en UTC ISO (`scan_cache.py`) --
+        converti vers l'heure locale pour l'affichage, jamais montré tel
+        quel (un horodatage UTC brut est incompréhensible pour un
+        néophyte, §5 vocabulaire). Repli sur la chaîne brute si le format
+        s'avère un jour différent -- jamais une exception qui empêcherait
+        d'afficher le bouton."""
+        try:
+            parsed = datetime.fromisoformat(iso)
+        except ValueError:
+            return iso
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone().replace(tzinfo=None)
+        return f"{parsed:%d/%m/%Y %H:%M}"
 
     def _refresh_doublons_shortcuts(self) -> None:
         """Raccourcis cliquables vers les cartes/disques amovibles
@@ -2101,7 +2144,10 @@ class MainWindow(QMainWindow):
         self._doublons_scan_progress_screen.set_files_scanned(0)
         self._root_stack.setCurrentWidget(self._doublons_scan_progress_screen)
         self._doublons_scan_runner = DoublonsScanRunner(
-            path, self._app_config.doublons_ignored_folders, parent=self
+            path,
+            self._app_config.doublons_ignored_folders,
+            hash_cache=doublons_scan_cache.load_hash_cache(),
+            parent=self,
         )
         self._doublons_scan_runner.progress.connect(self._doublons_scan_progress_screen.set_files_scanned)
         self._doublons_scan_runner.large_folder_confirmation_needed.connect(
@@ -2137,7 +2183,31 @@ class MainWindow(QMainWindow):
         self._doublons_scan_runner = None
 
     def _on_doublons_scan_finished(self, result) -> None:
+        # Lu avant `_end_doublons_scan()` (qui remet `_doublons_scan_runner`
+        # à `None`) -- § demandé explicitement : « cache des empreintes
+        # SHA-256 ». Sauvegarde best-effort : un échec d'écriture (carte
+        # débranchée, dossier de données inaccessible) ne doit jamais faire
+        # échouer l'affichage d'un résultat par ailleurs déjà obtenu.
+        hash_cache = self._doublons_scan_runner.hash_cache if self._doublons_scan_runner is not None else None
         self._end_doublons_scan()
+        if self._doublons_root is not None:
+            try:
+                doublons_scan_cache.save_scan_cache(self._doublons_root, result)
+            except OSError:
+                pass
+        if hash_cache is not None:
+            try:
+                doublons_scan_cache.save_hash_cache(hash_cache)
+            except OSError:
+                pass
+        self._display_doublons_results(result)
+
+    def _display_doublons_results(self, result) -> None:
+        """Affiche `result` sur l'écran de résultats -- partagé entre une
+        analyse fraîche (`_on_doublons_scan_finished`, qui sauvegarde
+        d'abord le cache) et une reprise (`_on_doublons_resume_finished`,
+        qui ne resauvegarde jamais le cache déjà sur disque, § demandé :
+        « ne jamais obliger à relancer une analyse »)."""
         self._doublons_scan_result = result
         self._doublons_results_screen.set_simulation_mode(self._app_config.doublons_simulation_mode)
         if self._doublons_root is not None:
@@ -2214,7 +2284,50 @@ class MainWindow(QMainWindow):
         self._update_doublons_cross_volume_warning()
 
     def _on_doublons_scan_cancelled(self) -> None:
+        # Les empreintes déjà calculées avant l'annulation restent utiles à
+        # la prochaine analyse -- sauvegardées ici aussi, même best-effort
+        # qu'une analyse menée à son terme (`_on_doublons_scan_finished`).
+        hash_cache = self._doublons_scan_runner.hash_cache if self._doublons_scan_runner is not None else None
         self._end_doublons_scan()
+        if hash_cache is not None:
+            try:
+                doublons_scan_cache.save_hash_cache(hash_cache)
+            except OSError:
+                pass
+        self._root_stack.setCurrentWidget(self._doublons_folder_screen)
+
+    def _on_doublons_resume_requested(self) -> None:
+        if self._doublons_resume_cache is None:
+            return
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        self._doublons_resume_runner = DoublonsResumeRunner(self._doublons_resume_cache, parent=self)
+        self._doublons_resume_runner.finished_resume.connect(self._on_doublons_resume_finished)
+        self._doublons_resume_runner.error.connect(self._on_doublons_resume_error)
+        self._doublons_resume_runner.start()
+
+    def _end_doublons_resume(self) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        self._doublons_resume_runner = None
+
+    def _on_doublons_resume_finished(self, result, removed: int) -> None:
+        cached = self._doublons_resume_cache
+        self._end_doublons_resume()
+        if cached is None:
+            return
+        self._doublons_root = cached.root
+        if removed > 0:
+            QMessageBox.information(
+                self, tr("app_title"), tr("doublons_resume_files_removed_notice", count=removed)
+            )
+        self._display_doublons_results(result)
+
+    def _on_doublons_resume_error(self, code: str, msg: str) -> None:
+        self._end_doublons_resume()
+        self._last_error_code = code
+        self._last_error_msg = msg
+        QMessageBox.warning(self, tr("app_title"), friendly_error_message(code))
         self._root_stack.setCurrentWidget(self._doublons_folder_screen)
 
     def _on_doublons_scan_error(self, code: str, msg: str) -> None:
@@ -2227,7 +2340,45 @@ class MainWindow(QMainWindow):
     def _on_doublons_move_requested(self, units: List[Unit]) -> None:
         self._pending_doublons_units = units
         self._confirm_move_doublons_dialog.set_units(units, self._app_config.doublons_simulation_mode)
+        self._update_doublons_confirm_dialog_destination_display()
         self._confirm_move_doublons_dialog.open()
+
+    def _update_doublons_confirm_dialog_destination_display(self) -> None:
+        """Signalé explicitement : « la fenêtre de confirmation doit
+        afficher la destination en évidence... avec les avertissements
+        associés (autre disque, espace libre à destination) ». Réutilise
+        les mêmes règles que l'écran de résultats (`check_destination_
+        allowed`/`is_cross_volume_destination`), jamais une seconde
+        logique parallèle -- seule la présentation diffère (une fenêtre de
+        confirmation plutôt qu'un bandeau permanent)."""
+        if self._doublons_root is None or self._doublons_destination is None:
+            return
+        destination = self._doublons_destination
+        self._confirm_move_doublons_dialog.set_destination(destination)
+        self._confirm_move_doublons_dialog.set_cross_volume_warning(
+            is_cross_volume_destination(self._doublons_root, destination)
+        )
+        valid = True
+        try:
+            check_destination_allowed(self._doublons_root, destination)
+        except (DestinationInsideRootNotAllowed, DestinationIsFilesystemRoot, DestinationNotWritable):
+            valid = False
+        self._confirm_move_doublons_dialog.set_destination_valid(valid)
+        total_bytes = sum(unit.total_size_bytes for unit in self._pending_doublons_units)
+        free_bytes = free_space_at_destination(destination)
+        insufficient = free_bytes is not None and free_bytes < total_bytes
+        self._confirm_move_doublons_dialog.set_space_warning(
+            insufficient, _format_size(free_bytes) if free_bytes is not None else ""
+        )
+
+    def _on_doublons_confirm_dialog_destination_chosen(self, path: str) -> None:
+        """« Changer… » directement dans la fenêtre de confirmation --
+        réutilise `_on_doublons_destination_chosen` tel quel (mêmes refus,
+        même mémorisation) puis rafraîchit l'affichage de cette fenêtre
+        précise, qui reste ouverte (§ demandé : « ne jamais obliger à
+        relancer une analyse » -- changer la destination ne relance rien)."""
+        self._on_doublons_destination_chosen(path)
+        self._update_doublons_confirm_dialog_destination_display()
 
     def _on_doublons_move_confirmed(self) -> None:
         if self._doublons_root is None or not self._pending_doublons_units:

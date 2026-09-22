@@ -22,7 +22,7 @@ fichier séparé de `partition_runner.py` (jamais une dépendance vers
 from __future__ import annotations
 
 import threading
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import QThread, Signal
 
@@ -32,8 +32,11 @@ from r36s_studio.doublons.move import (
     DestinationIsFilesystemRoot,
     DestinationNotWritable,
     DuplicatesOutsideRoot,
+    FatFileSizeLimitExceeded,
     InsufficientDiskSpace,
     MoveCancelled,
+    MoveFileFailed,
+    PartialMoveFailure,
     move_duplicates,
 )
 from r36s_studio.doublons.scan import HashCache, OperationCancelled, ScanResult, Unit, find_duplicates
@@ -125,11 +128,18 @@ class DoublonsMoveRunner(QThread):
     """Écarte les unités choisies dans l'écran de résultats vers
     `_doublons/` (`dry_run` -- § garde-fou 1, mode simulation). Signal
     `progress` distinct de `PartitionJobRunner` (octets/débit) : compte
-    des fichiers, généralement peu nombreux."""
+    des fichiers, généralement peu nombreux.
+
+    `file_error_confirmation_needed` (§ demandé explicitement, point 4 :
+    « proposer de continuer en ignorant ce fichier ») bloque le thread de
+    déplacement jusqu'à ce que `resume_after_file_error_confirmation`
+    soit appelée depuis le thread GUI -- même mécanisme coopératif que
+    `DoublonsScanRunner.large_folder_confirmation_needed`."""
 
     progress = Signal(int, int)  # fait, total
     error = Signal(str, str)
     finished_move = Signal(bool)
+    file_error_confirmation_needed = Signal(object)  # MoveFileFailed
 
     def __init__(self, root: str, units: List[Unit], dry_run: bool, destination: Optional[str] = None, parent=None):
         super().__init__(parent)
@@ -141,9 +151,29 @@ class DoublonsMoveRunner(QThread):
         # choisir l'emplacement du dossier de destination ».
         self._destination = destination
         self._cancel_requested = False
+        self._file_error_event = threading.Event()
+        self._file_error_skip = False
+        # Exposés publiquement (même principe que `DoublonsScanRunner.
+        # hash_cache`) pour que l'appelant, après coup, retire du résultat
+        # affiché ce qui a réellement bougé sans jamais relancer une
+        # analyse complète (§ demandé explicitement, bug corrigé) et
+        # construise un message précis (fichier, étape, raison) plutôt
+        # qu'un message générique (§ demandé, point 3).
+        self.moved_units: List[Unit] = []
+        self.skipped: List[Tuple[Unit, MoveFileFailed]] = []
+        self.last_file_error: Optional[MoveFileFailed] = None
 
     def cancel(self) -> None:
+        """Coopératif -- débloque aussi une éventuelle pause en attente de
+        confirmation d'erreur, pour qu'Annuler reste toujours immédiat
+        même à ce moment précis (même principe que `DoublonsScanRunner.
+        cancel` pour la confirmation « dossier volumineux »)."""
         self._cancel_requested = True
+        self._file_error_event.set()
+
+    def resume_after_file_error_confirmation(self, skip: bool) -> None:
+        self._file_error_skip = skip
+        self._file_error_event.set()
 
     def run(self) -> None:
         def on_progress(done: int, total: int) -> None:
@@ -151,6 +181,12 @@ class DoublonsMoveRunner(QThread):
 
         def should_cancel() -> bool:
             return self._cancel_requested
+
+        def on_file_error(exc: MoveFileFailed) -> bool:
+            self._file_error_event.clear()
+            self.file_error_confirmation_needed.emit(exc)
+            self._file_error_event.wait()
+            return self._file_error_skip
 
         try:
             move_duplicates(
@@ -160,8 +196,10 @@ class DoublonsMoveRunner(QThread):
                 on_progress=on_progress,
                 should_cancel=should_cancel,
                 destination=self._destination,
+                on_file_error=on_file_error,
             )
         except MoveCancelled as exc:
+            self.moved_units = getattr(exc, "moved_units", [])
             self.error.emit("CANCELLED", str(exc))
             self.finished_move.emit(False)
             return
@@ -181,7 +219,30 @@ class DoublonsMoveRunner(QThread):
             self.error.emit("DESTINATION_FILESYSTEM_ROOT", str(exc))
             self.finished_move.emit(False)
             return
+        except FatFileSizeLimitExceeded as exc:
+            # Refusé avant tout déplacement réel (§ demandé explicitement,
+            # point 6) -- `moved_units` reste vide, rien n'a bougé.
+            self.error.emit("FAT_FILE_SIZE_LIMIT", str(exc))
+            self.finished_move.emit(False)
+            return
+        except PartialMoveFailure as exc:
+            # § demandé, point 4 : au moins un fichier a été ignoré après
+            # confirmation -- pas un abandon complet, mais pas un succès
+            # total non plus, même traitement d'affichage que les autres
+            # interruptions (jamais de nouvelle analyse).
+            self.moved_units = exc.moved_units
+            self.skipped = exc.skipped
+            self.error.emit("PARTIAL_MOVE_COMPLETED", str(exc))
+            self.finished_move.emit(False)
+            return
+        except MoveFileFailed as exc:
+            self.moved_units = getattr(exc, "moved_units", [])
+            self.last_file_error = exc
+            self.error.emit("MOVE_FILE_FAILED", str(exc))
+            self.finished_move.emit(False)
+            return
         except CopyVerificationFailed as exc:
+            self.moved_units = getattr(exc, "moved_units", [])
             self.error.emit("COPY_VERIFICATION_FAILED", str(exc))
             self.finished_move.emit(False)
             return
@@ -190,6 +251,7 @@ class DoublonsMoveRunner(QThread):
             self.finished_move.emit(False)
             return
         except OSError as exc:
+            self.moved_units = getattr(exc, "moved_units", [])
             self.error.emit("DOUBLONS_IO_ERROR", str(exc))
             self.finished_move.emit(False)
             return

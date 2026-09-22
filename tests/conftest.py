@@ -185,6 +185,19 @@ def _android_log_isolated(request, tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _doublons_log_isolated(tmp_path, monkeypatch):
+    """Même garde-fou que `_consoles_diverses_log_isolated`/`_android_log_
+    isolated` ci-dessus, pour `gui/logs.py::doublons_log_path` (signalé :
+    échec réel de déplacement, journalisation ajoutée dans `doublons/
+    move.py`) -- redirige vers un fichier temporaire pour tous les tests,
+    jamais le vrai journal de la machine de développement."""
+    from r36s_studio.gui import logs as gui_logs
+
+    monkeypatch.setattr(gui_logs, "doublons_log_path", lambda: tmp_path / "doublons.log")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _doublons_scan_cache_isolated(tmp_path, monkeypatch):
     """Même garde-fou que `_consoles_diverses_log_isolated`/`_android_log_
     isolated` ci-dessus, pour `doublons/scan_cache.py` (§ demandé

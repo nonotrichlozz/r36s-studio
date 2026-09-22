@@ -242,6 +242,12 @@ STRINGS = {
     "doublons_destination_space_warning": (
         "Espace disponible à destination : {available} -- peut être insuffisant pour ce déplacement."
     ),
+    # § demandé explicitement, point 6 : annoncé avant de commencer,
+    # jamais découvert en cours de route sur un fichier parmi d'autres.
+    "doublons_destination_fat_warning": (
+        "La destination est formatée en FAT, qui ne peut pas contenir de fichier de plus de 4 Go -- "
+        "{count} fichier(s) sélectionné(s) dépassent cette taille et ne pourront pas être déplacés."
+    ),
     "doublons_simulation_banner": "Mode simulation actif -- rien ne sera déplacé.",
     "doublons_auto_selection_banner": "Sélection automatique : vérifiez avant de déplacer.",
     "doublons_select_all_button": "Tout cocher",
@@ -280,6 +286,29 @@ STRINGS = {
         "Tous les fichiers déplacés dans _doublons/ seront remis à leur emplacement d'origine."
     ),
     "doublons_undo_confirm_button": "Tout annuler",
+    # Échec réel d'un fichier précis en cours de déplacement (§ demandé
+    # explicitement, points 3 et 4) -- fenêtre de confirmation dédiée
+    # (réutilise `DoublonsRiskConfirmDialog`, `set_title`), boutons «
+    # Continuer »/« Annuler » déjà génériques de cette même fenêtre :
+    # « Continuer » ignore ce fichier et poursuit, « Annuler » arrête le
+    # lot entier (ce qui a déjà été déplacé le reste, jamais annulé).
+    "doublons_file_error_title": "Impossible de déplacer ce fichier",
+    "doublons_file_error_message": "{path}\n\n{reason}\n\nIgnorer ce fichier et continuer avec les suivants ?",
+    "doublons_file_error_message_copy_succeeded": (
+        "{path}\n\nLa copie a réussi, mais l'original n'a pas pu être supprimé : {reason}\n\n"
+        "Ignorer ce fichier et continuer avec les suivants ?"
+    ),
+    # Raisons traduites (`move.py::REASON_*`, § demandé point 3) -- jamais
+    # le message brut de l'exception, réservé au journal (§5 vocabulaire).
+    "doublons_move_reason_access_denied": "accès refusé.",
+    "doublons_move_reason_read_only": "la destination est protégée en écriture (carte ou disque en lecture seule).",
+    "doublons_move_reason_path_too_long": "le chemin est trop long.",
+    "doublons_move_reason_drive_removed": "le disque semble avoir été débranché ou n'est plus accessible.",
+    "doublons_move_reason_insufficient_space": "espace insuffisant sur le disque de destination.",
+    "doublons_move_reason_unknown": "raison inconnue.",
+    "doublons_partial_move_completed": (
+        "{moved} fichier(s) déplacé(s), {skipped} ignoré(s) après échec -- voir le journal pour le détail."
+    ),
     # Sauvegarde système lancée depuis l'accueil assisté (§4.3) : reste
     # entièrement dans l'habillage assisté (WizardStepPanel), jamais
     # l'écran expert -- correctif d'un défaut de parcours signalé (bascule
@@ -737,6 +766,17 @@ STRINGS = {
     "error_copy_verification_failed": (
         "La copie vers l'autre disque n'a pas pu être vérifiée -- le fichier d'origine n'a pas été touché."
     ),
+    # Repli générique si jamais `doublons_move_file_error_message`
+    # n'était pas utilisé pour construire le message précis (§ demandé
+    # explicitement, point 3) -- ne devrait normalement jamais s'afficher
+    # tel quel, `_on_doublons_move_finished` (main_window.py) préfère
+    # toujours le message riche quand un `MoveFileFailed` est disponible.
+    "error_move_file_failed": "Le déplacement d'un fichier a échoué. Voir le journal de bord pour le détail.",
+    "error_partial_move_completed": "Le déplacement s'est terminé avec au moins un fichier ignoré après échec.",
+    "error_fat_file_size_limit": (
+        "Le disque de destination est formaté en FAT, qui ne peut pas contenir de fichier de plus de 4 Go -- "
+        "au moins un fichier sélectionné dépasse cette taille."
+    ),
     "error_output_exists": "Un fichier du même nom existe déjà à cet emplacement. Choisis un autre nom ou un autre dossier.",
     "error_image_not_found": "Le fichier image choisi est introuvable. Il a peut-être été déplacé ou supprimé.",
     "error_io_error": "Une erreur de lecture ou d'écriture est survenue. Vérifie que la carte est toujours branchée.",
@@ -913,6 +953,9 @@ _ERROR_MESSAGE_KEYS = {
     "DESTINATION_INSIDE_ROOT": "error_destination_inside_root",
     "DESTINATION_FILESYSTEM_ROOT": "error_destination_filesystem_root",
     "COPY_VERIFICATION_FAILED": "error_copy_verification_failed",
+    "MOVE_FILE_FAILED": "error_move_file_failed",
+    "PARTIAL_MOVE_COMPLETED": "error_partial_move_completed",
+    "FAT_FILE_SIZE_LIMIT": "error_fat_file_size_limit",
 }
 
 
@@ -943,3 +986,39 @@ def error_log_detail(code: Optional[str], msg: Optional[str]) -> str:
     if code and code not in _ERROR_MESSAGE_KEYS:
         return f"{code} : {msg}" if msg else code
     return msg
+
+
+# code de raison (`doublons/move.py::REASON_*`) -> clé de message traduit
+_DOUBLONS_MOVE_REASON_KEYS = {
+    "access_denied": "doublons_move_reason_access_denied",
+    "read_only": "doublons_move_reason_read_only",
+    "path_too_long": "doublons_move_reason_path_too_long",
+    "drive_removed": "doublons_move_reason_drive_removed",
+    "insufficient_space": "doublons_move_reason_insufficient_space",
+    "unknown": "doublons_move_reason_unknown",
+}
+
+
+def doublons_move_file_error_message(exc) -> str:
+    """Message précis pour un échec réel de déplacement d'un fichier
+    (§ demandé explicitement, point 3 : « afficher... le fichier en cause
+    et la raison traduite... si la copie a réussi mais pas la suppression
+    de l'original, le dire explicitement ») -- `exc` : un `doublons.move.
+    MoveFileFailed` (type non importé ici, seulement ses attributs
+    `path`/`reason`/`copy_succeeded` lus par duck-typing, pour ne pas
+    faire dépendre ce module bas niveau de `doublons/`). Le message brut
+    de l'exception (`exc.detail`) n'apparaît jamais ici -- déjà
+    journalisé séparément (`doublons.log`, §5 vocabulaire, jamais de
+    jargon dans l'interface). Utilisée à la fois pour la fenêtre « ignorer
+    et continuer » (point 4) et pour le message final si l'utilisateur a
+    choisi d'arrêter."""
+    reason = tr(_DOUBLONS_MOVE_REASON_KEYS.get(exc.reason, "doublons_move_reason_unknown"))
+    key = "doublons_file_error_message_copy_succeeded" if exc.copy_succeeded else "doublons_file_error_message"
+    return tr(key, path=exc.path, reason=reason)
+
+
+def doublons_partial_move_message(moved: int, skipped: int) -> str:
+    """§ demandé explicitement, point 4 : le lot s'est terminé après
+    qu'au moins un fichier a été ignoré -- un résumé plutôt qu'un message
+    par fichier ignoré (déjà journalisé individuellement, `doublons.log`)."""
+    return tr("doublons_partial_move_completed", moved=moved, skipped=skipped)

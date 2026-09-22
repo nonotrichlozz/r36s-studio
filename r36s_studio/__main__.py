@@ -87,6 +87,7 @@ from pathlib import Path
 from typing import List, Optional, TextIO
 
 from r36s_studio.devices import Device, list_devices
+from r36s_studio.doublons.journal_check import verify_journal
 from r36s_studio.identify import identify_from_boot_directory
 from r36s_studio.imaging import (
     DEFAULT_RESET_LABEL,
@@ -953,6 +954,48 @@ def cmd_identify(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_doublons_verify_journal(args: argparse.Namespace) -> int:
+    """Signalé explicitement : « donne-moi une commande pour comparer le
+    journal avec ce qui existe réellement à la source et à destination,
+    pour vérifier qu'aucun fichier n'a été perdu » -- lecture seule,
+    aucun périphérique, aucune élévation (`doublons/journal_check.py`,
+    même principe d'autonomie que le reste du package)."""
+    report = verify_journal(args.destination)
+
+    if not report.entries:
+        print(f"Aucune entrée de journal trouvée dans « {report.destination} ».")
+        return 0
+
+    counts = {"MOVED": 0, "RESTORED": 0, "LOST": 0, "DUPLICATED": 0}
+    for entry in report.entries:
+        counts[entry.status] += 1
+
+    print(f"Journal de « {report.destination} » : {len(report.entries)} entrée(s).")
+    print(f"  Déplacés (normal)      : {counts['MOVED']}")
+    print(f"  Restaurés (annulation) : {counts['RESTORED']}")
+    print(f"  Perdus                 : {counts['LOST']}")
+    print(f"  En double (source+dest): {counts['DUPLICATED']}")
+
+    if report.lost:
+        print("\nFichiers perdus (absents à la fois de la source et de la destination) :")
+        for entry in report.lost:
+            print(f"  - source      : {entry.source}")
+            print(f"    destination : {entry.destination}")
+            print(f"    déplacé le  : {entry.moved_at}")
+
+    if report.duplicated:
+        print("\nFichiers présents des deux côtés (source ET destination, à nettoyer à la main) :")
+        for entry in report.duplicated:
+            print(f"  - {entry.source}")
+            print(f"    {entry.destination}")
+
+    if report.ok:
+        print("\nAucun fichier perdu.")
+        return 0
+    print(f"\n{len(report.lost)} fichier(s) perdu(s) -- voir la liste ci-dessus.")
+    return 1
+
+
 def cmd_eject(args: argparse.Namespace) -> int:
     """Bug corrigé, confirmé sur du vrai matériel : sur Windows, ouvrir
     `\\\\.\\PhysicalDriveN` pour `IOCTL_STORAGE_EJECT_MEDIA` (`partitions/
@@ -1224,6 +1267,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Dossier contenant des .dtb à analyser (BOOT déjà extrait, ou fourni par un autre utilisateur)",
     )
     identify_parser.set_defaults(func=cmd_identify)
+
+    doublons_verify_journal_parser = subparsers.add_parser(
+        "doublons-verify-journal",
+        help="Compare le journal d'un déplacement de doublons à l'état réel du disque (source/destination)",
+    )
+    doublons_verify_journal_parser.add_argument(
+        "--destination",
+        required=True,
+        help="Dossier de destination du déplacement (celui qui contient journal.json)",
+    )
+    doublons_verify_journal_parser.set_defaults(func=cmd_doublons_verify_journal)
 
     eject_parser = subparsers.add_parser(
         "eject", help="Démonte toutes les partitions de la carte et l'éjecte"

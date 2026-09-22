@@ -71,3 +71,16 @@ def android_log_path() -> Path:
     session à l'autre plutôt que de deviner. Ajouté en continu, comme
     `consoles_diverses_log_path` -- jamais écrasé."""
     return log_dir() / "android.log"
+
+
+def doublons_log_path() -> Path:
+    """Journal de l'outil « Doublons de jeux » (`doublons/move.py`) --
+    signalé explicitement : échec réel de déplacement vers un disque
+    externe, message générique affiché sans aucun détail exploitable.
+    Consigne l'exception exacte, l'étape en cause (copie, vérification,
+    suppression de la source) et le chemin complet du fichier -- jamais
+    affiché à l'écran (§5 vocabulaire, jamais de jargon), ce fichier est
+    le seul endroit où le détail technique atterrit. Ajouté en continu,
+    comme `consoles_diverses_log_path`/`android_log_path` -- jamais
+    écrasé."""
+    return log_dir() / "doublons.log"

@@ -3894,9 +3894,9 @@ class DoublonsRiskConfirmDialog(Dialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        title = QLabel(tr("doublons_risk_title"))
-        title.setProperty("role", "title")
-        layout.addWidget(title)
+        self._title_label = QLabel(tr("doublons_risk_title"))
+        self._title_label.setProperty("role", "title")
+        layout.addWidget(self._title_label)
         self._message = QLabel()
         self._message.setWordWrap(True)
         layout.addWidget(self._message)
@@ -3921,6 +3921,14 @@ class DoublonsRiskConfirmDialog(Dialog):
 
     def set_message(self, message: str) -> None:
         self._message.setText(message)
+
+    def set_title(self, title: str) -> None:
+        """Troisième réutilisation de cette fenêtre (racine de disque,
+        dossier utilisateur entier, dossier volumineux -- toutes trois au
+        titre par défaut) : « ignorer ce fichier et continuer » (§ demandé
+        explicitement, point 4) a besoin d'un titre différent, ce
+        déplacement n'ayant rien à voir avec une analyse à risque."""
+        self._title_label.setText(title)
 
     def _on_confirm(self) -> None:
         self.close()
@@ -4082,6 +4090,9 @@ class DoublonsResultsScreen(Screen):
         scroll.setWidget(self._list_container)
         root.addWidget(scroll, 1)
 
+        self._scan_result: ScanResult = ScanResult()
+        self._macos_move_blocked = False
+
     def set_simulation_mode(self, enabled: bool) -> None:
         self._simulation_banner.setVisible(enabled)
 
@@ -4107,7 +4118,13 @@ class DoublonsResultsScreen(Screen):
         """Reconstruit entièrement la liste -- appelé après chaque scan,
         y compris un nouveau scan relancé après un déplacement réussi
         (reflète toujours l'état réel du dossier, jamais une mise à jour
-        partielle de l'affichage précédent)."""
+        partielle de l'affichage précédent). Mémorisé (`self._scan_result`/
+        `self._macos_move_blocked`) pour que `remove_units` ci-dessous
+        puisse reconstruire un résultat filtré sans que l'appelant n'ait à
+        le refournir -- lui-même ne rebâtit jamais silencieusement les
+        cases à cocher, § juste en dessous."""
+        self._scan_result = scan_result
+        self._macos_move_blocked = macos_move_blocked
         while self._list_layout.count() > 1:
             item = self._list_layout.takeAt(0)
             widget = item.widget()
@@ -4159,6 +4176,59 @@ class DoublonsResultsScreen(Screen):
             insert_at += 1
 
         self._update_selection_summary()
+
+    def remove_units(self, moved_units: List[Unit]) -> None:
+        """Retire les unités déjà déplacées avec succès du résultat
+        affiché -- § bug corrigé, signalé explicitement : après une
+        erreur de déplacement, l'app relançait l'analyse complète au lieu
+        de revenir aux résultats « en retirant les fichiers déjà déplacés
+        avec succès », sélection intacte pour le reste. Reconstruit la
+        liste comme `set_results` (aucune API incrémentale plus fine
+        n'existe pour retirer une seule unité d'un groupe déjà affiché),
+        mais réapplique l'état de chaque case déjà cochée par
+        l'utilisateur -- identifiée par identité d'objet (`id(unit)`, les
+        `Unit` restantes sont exactement les mêmes instances qu'avant,
+        jamais des copies) plutôt que par valeur, pour ne jamais confondre
+        deux fichiers de même taille/contenu."""
+        if not moved_units:
+            return
+        moved_ids = {id(unit) for unit in moved_units}
+        previous_checked = {id(unit): checkbox.isChecked() for checkbox, unit in self._all_checkboxes.items()}
+
+        def _prune(units: List[Unit]) -> List[Unit]:
+            return [unit for unit in units if id(unit) not in moved_ids]
+
+        exact_groups: List[ExactDuplicateGroup] = []
+        for group in self._scan_result.exact_duplicate_groups:
+            remaining = _prune(group.units)
+            if len(remaining) >= 2:
+                exact_groups.append(ExactDuplicateGroup(units=remaining, sha256=group.sha256))
+
+        version_groups: List[VersionGroup] = []
+        for group in self._scan_result.version_groups:
+            remaining = _prune(group.units)
+            if len(remaining) >= 2:
+                suggested = group.suggested_keep if group.suggested_keep in remaining else remaining[0]
+                version_groups.append(
+                    VersionGroup(
+                        system_folder=group.system_folder,
+                        normalized_title=group.normalized_title,
+                        units=remaining,
+                        suggested_keep=suggested,
+                    )
+                )
+
+        new_result = ScanResult(
+            exact_duplicate_groups=exact_groups,
+            version_groups=version_groups,
+            excluded=self._scan_result.excluded,
+            files_scanned=self._scan_result.files_scanned,
+        )
+        self.set_results(new_result, self._macos_move_blocked)
+        for checkbox, unit in self._all_checkboxes.items():
+            previous = previous_checked.get(id(unit))
+            if previous is not None:
+                checkbox.setChecked(previous)
 
     def _update_selection_summary(self) -> None:
         selected = [unit for checkbox, unit in self._all_checkboxes.items() if checkbox.isChecked()]
@@ -4394,6 +4464,17 @@ class ConfirmMoveDoublonsDialog(Dialog):
         self._space_warning_banner.setVisible(False)
         layout.addWidget(self._space_warning_banner)
 
+        # § demandé explicitement, point 6 : annoncé ici, avant même de
+        # cliquer sur le bouton de validation -- jamais découvert en
+        # cours de route sur un fichier parmi d'autres (`move_duplicates`
+        # refuse pour de vrai le lot entier dans ce cas, § autorité
+        # réelle déjà appliquée ailleurs dans ce projet).
+        self._fat_warning_banner = QLabel()
+        self._fat_warning_banner.setProperty("role", "warning")
+        self._fat_warning_banner.setWordWrap(True)
+        self._fat_warning_banner.setVisible(False)
+        layout.addWidget(self._fat_warning_banner)
+
         layout.addStretch()
 
         buttons = QHBoxLayout()
@@ -4445,6 +4526,18 @@ class ConfirmMoveDoublonsDialog(Dialog):
             self._space_warning_banner.setText(
                 tr("doublons_destination_space_warning", available=available_display)
             )
+
+    def set_fat_warning(self, oversized_count: int) -> None:
+        """`oversized_count > 0` : au moins un fichier sélectionné dépasse
+        la limite FAT (4 Gio) et la destination est identifiée comme FAT
+        (§ demandé explicitement, point 6) -- purement informatif, comme
+        `set_space_warning` : ne conditionne jamais `_destination_valid`,
+        `move_duplicates` refuse le lot entier pour de vrai au moment de
+        l'exécuter (`FatFileSizeLimitExceeded`), c'est cette vérification-là
+        qui fait réellement autorité."""
+        self._fat_warning_banner.setVisible(oversized_count > 0)
+        if oversized_count > 0:
+            self._fat_warning_banner.setText(tr("doublons_destination_fat_warning", count=oversized_count))
 
     def set_destination_valid(self, valid: bool) -> None:
         """Signalé explicitement : « le bouton de validation reste

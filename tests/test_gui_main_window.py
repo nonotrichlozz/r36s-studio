@@ -1716,6 +1716,250 @@ def test_doublons_resume_error_returns_to_folder_screen(
     mock_warning.assert_called_once()
 
 
+# --- Échec réel de déplacement, signalé explicitement : ne jamais relancer
+# l'analyse, retirer les fichiers déjà déplacés, message précis, proposer
+# d'ignorer et continuer ----------------------------------------------------
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_error_never_relaunches_a_scan_and_removes_moved_units(
+    mock_list, mock_filter, mock_load, mock_save, mock_warning, qapp, tmp_path
+):
+    """§ bug corrigé, signalé explicitement : « après une erreur de
+    déplacement de doublons... l'app a relancé l'analyse de la carte de
+    128 Go » -- ne doit plus jamais se reproduire."""
+    from r36s_studio.doublons.move import MoveFileFailed
+    from r36s_studio.doublons.scan import ExactDuplicateGroup, ScanResult, Unit
+
+    window = MainWindow()
+    root = tmp_path / "root"
+    unit_a = Unit(root / "A.zip", [root / "A.zip"], 10, False)
+    unit_b = Unit(root / "B.zip", [root / "B.zip"], 10, False)
+    window._doublons_root = str(root)
+    window._display_doublons_results(
+        ScanResult(exact_duplicate_groups=[ExactDuplicateGroup([unit_a, unit_b], sha256="a" * 64)])
+    )
+
+    with patch("r36s_studio.gui.main_window.DoublonsScanRunner") as mock_scan_class:
+        window._doublons_move_runner = MagicMock()
+        window._doublons_move_runner.moved_units = [unit_a]
+        window._doublons_move_runner.last_file_error = MoveFileFailed(
+            str(unit_b.representative), "copy", "access_denied", "brut"
+        )
+        window._doublons_move_runner.skipped = []
+        window._on_doublons_move_error("MOVE_FILE_FAILED", "brut")
+        window._on_doublons_move_finished(False)
+
+        mock_scan_class.assert_not_called()
+
+    assert window._root_stack.currentWidget() is window._doublons_results_screen
+    assert unit_a not in window._doublons_results_screen._all_checkboxes.values()
+    mock_warning.assert_called_once()
+    # Le message affiché doit être le message riche (fichier + raison
+    # traduite), pas le message générique historique.
+    shown_message = mock_warning.call_args[0][2]
+    assert str(unit_b.representative) in shown_message
+    assert "Une erreur de lecture ou d'écriture est survenue" not in shown_message
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_error_keeps_selection_of_units_not_moved(
+    mock_list, mock_filter, mock_load, mock_save, mock_warning, qapp, tmp_path
+):
+    """§ demandé explicitement : « sélection intacte » pour ce qui n'a
+    pas bougé."""
+    from PySide6.QtWidgets import QCheckBox
+
+    from r36s_studio.doublons.scan import ExactDuplicateGroup, ScanResult, Unit
+
+    window = MainWindow()
+    root = tmp_path / "root"
+    unit_a = Unit(root / "A.zip", [root / "A.zip"], 10, False)
+    unit_b = Unit(root / "B.zip", [root / "B.zip"], 10, False)
+    unit_c = Unit(root / "C.zip", [root / "C.zip"], 10, False)
+    window._doublons_root = str(root)
+    window._display_doublons_results(
+        ScanResult(exact_duplicate_groups=[ExactDuplicateGroup([unit_a, unit_b, unit_c], sha256="a" * 64)])
+    )
+    checkbox_for_c = [
+        box for box, unit in window._doublons_results_screen._all_checkboxes.items() if unit is unit_c
+    ][0]
+    checkbox_for_c.setChecked(False)
+
+    window._doublons_move_runner = MagicMock()
+    window._doublons_move_runner.moved_units = [unit_a]
+    window._doublons_move_runner.last_file_error = None
+    window._doublons_move_runner.skipped = []
+    window._on_doublons_move_error("DOUBLONS_IO_ERROR", "brut")
+    window._on_doublons_move_finished(False)
+
+    checkbox_for_c_after = [
+        box for box, unit in window._doublons_results_screen._all_checkboxes.items() if unit is unit_c
+    ][0]
+    assert checkbox_for_c_after.isChecked() is False
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_partial_move_completed_shows_a_summary_message(
+    mock_list, mock_filter, mock_load, mock_save, mock_warning, qapp, tmp_path
+):
+    """§ demandé explicitement, point 4 : au moins un fichier ignoré après
+    confirmation -- résumé plutôt qu'un message par fichier."""
+    from r36s_studio.doublons.move import MoveFileFailed
+    from r36s_studio.doublons.scan import ScanResult, Unit
+
+    window = MainWindow()
+    root = tmp_path / "root"
+    unit_a = Unit(root / "A.zip", [root / "A.zip"], 10, False)
+    unit_b = Unit(root / "B.zip", [root / "B.zip"], 10, False)
+    window._doublons_root = str(root)
+    window._display_doublons_results(ScanResult())
+
+    window._doublons_move_runner = MagicMock()
+    window._doublons_move_runner.moved_units = [unit_a]
+    window._doublons_move_runner.last_file_error = None
+    window._doublons_move_runner.skipped = [(unit_b, MoveFileFailed(str(unit_b.representative), "copy", "access_denied", "x"))]
+    window._on_doublons_move_error("PARTIAL_MOVE_COMPLETED", "1 fichier(s) déplacé(s), 1 ignoré(s) après échec.")
+    window._on_doublons_move_finished(False)
+
+    shown_message = mock_warning.call_args[0][2]
+    assert "1" in shown_message
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_file_error_confirmation_opens_dialog_with_message(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    """§ demandé explicitement, point 4 : « proposer de continuer en
+    ignorant ce fichier »."""
+    from r36s_studio.doublons.move import MoveFileFailed
+
+    window = MainWindow()
+    exc = MoveFileFailed(str(tmp_path / "Game.zip"), "delete_source", "access_denied", "brut", copy_succeeded=True)
+
+    window._on_doublons_move_file_error_confirmation_needed(exc)
+
+    assert window._doublons_file_error_dialog.isHidden() is False
+    assert str(tmp_path / "Game.zip") in window._doublons_file_error_dialog._message.text()
+    # « Copie réussie » doit être dit explicitement (§ demandé).
+    assert "copie a réussi" in window._doublons_file_error_dialog._message.text().lower()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_file_error_confirmed_resumes_with_skip_true(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+    window._doublons_move_runner = MagicMock()
+
+    window._on_doublons_move_file_error_confirmed()
+
+    window._doublons_move_runner.resume_after_file_error_confirmation.assert_called_once_with(True)
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_file_error_cancelled_resumes_with_skip_false(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    window = MainWindow()
+    window._doublons_move_runner = MagicMock()
+
+    window._on_doublons_move_file_error_cancelled()
+
+    window._doublons_move_runner.resume_after_file_error_confirmation.assert_called_once_with(False)
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_confirmed_wires_file_error_confirmation_signal(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    from r36s_studio.doublons.scan import Unit
+
+    window = MainWindow()
+    window._doublons_root = str(tmp_path)
+    units = [Unit(tmp_path / "a.7z", [tmp_path / "a.7z"], 10, False)]
+
+    with patch("r36s_studio.gui.main_window.DoublonsMoveRunner") as mock_move_class:
+        move_instance = MagicMock()
+        mock_move_class.return_value = move_instance
+        window._doublons_results_screen.move_requested.emit(units)
+        window._confirm_move_doublons_dialog.confirmed.emit()
+
+        move_instance.file_error_confirmation_needed.connect.assert_called_once_with(
+            window._on_doublons_move_file_error_confirmation_needed
+        )
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_requested_shows_fat_warning_when_destination_is_fat_and_a_file_is_oversized(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    """§ demandé explicitement, point 6 : annoncé avant de commencer."""
+    from r36s_studio.doublons.scan import Unit
+
+    window = MainWindow()
+    window._doublons_root = str(tmp_path)
+    window._doublons_destination = str(tmp_path / "backup")
+    big_unit = Unit(tmp_path / "Big.zip", [tmp_path / "Big.zip"], 2**32 + 1, False)
+    units = [big_unit]
+
+    with patch(
+        "r36s_studio.gui.main_window.destination_filesystem_kind", return_value="FAT32"
+    ), patch(
+        "r36s_studio.gui.main_window.fat_oversized_members", return_value=[(big_unit, big_unit.representative, 2**32 + 1)]
+    ):
+        window._doublons_results_screen.move_requested.emit(units)
+
+    assert window._confirm_move_doublons_dialog._fat_warning_banner.isHidden() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_doublons_move_requested_hides_fat_warning_when_destination_is_not_fat(
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path
+):
+    from r36s_studio.doublons.scan import Unit
+
+    window = MainWindow()
+    window._doublons_root = str(tmp_path)
+    window._doublons_destination = str(tmp_path / "backup")
+    units = [Unit(tmp_path / "Game.zip", [tmp_path / "Game.zip"], 10, False)]
+
+    with patch("r36s_studio.gui.main_window.destination_filesystem_kind", return_value="NTFS"):
+        window._doublons_results_screen.move_requested.emit(units)
+
+    assert window._confirm_move_doublons_dialog._fat_warning_banner.isHidden() is True
+
+
 # --- Écran de bienvenue macOS : Accès complet au disque (§3) ---------------
 # `elevate.has_full_disk_access` est forcée à `True` par l'autofixture
 # `_default_full_disk_access_granted` (tests/conftest.py) sauf ici, où

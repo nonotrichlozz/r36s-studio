@@ -62,9 +62,12 @@ from r36s_studio.doublons.move import (
     DestinationNotWritable,
     check_destination_allowed,
     default_destination as default_doublons_destination,
+    destination_filesystem_kind,
+    fat_oversized_members,
     free_space_at_destination,
     has_pending_journal_entries,
     is_cross_volume_destination,
+    is_fat_filesystem,
 )
 from r36s_studio.doublons.report import build_report
 from r36s_studio.doublons.safety import is_filesystem_root, is_whole_user_folder
@@ -132,7 +135,13 @@ from .screens import (
     _format_size,
     build_console_stage,
 )
-from .strings import error_log_detail, friendly_error_message, tr
+from .strings import (
+    doublons_move_file_error_message,
+    doublons_partial_move_message,
+    error_log_detail,
+    friendly_error_message,
+    tr,
+)
 from .wizard_flow import WizardFlow, WizardJob
 from .worker_runner import WorkerRunner
 
@@ -573,12 +582,26 @@ class MainWindow(QMainWindow):
         # câblée seulement ici).
         self._doublons_risk_confirm_dialog = DoublonsRiskConfirmDialog(self)
         self._doublons_large_folder_dialog = DoublonsRiskConfirmDialog(self)
+        # Troisième réutilisation de cette même fenêtre (§ demandé
+        # explicitement, point 4 : « proposer de continuer en ignorant ce
+        # fichier ») -- titre propre (`set_title`), jamais celui par
+        # défaut pensé pour une analyse à risque.
+        self._doublons_file_error_dialog = DoublonsRiskConfirmDialog(self)
         self._confirm_move_doublons_dialog = ConfirmMoveDoublonsDialog(self)
         self._confirm_undo_doublons_dialog = ConfirmUndoDoublonsDialog(self)
         self._doublons_scan_runner: Optional[DoublonsScanRunner] = None
         self._doublons_move_runner: Optional[DoublonsMoveRunner] = None
         self._doublons_undo_runner: Optional[DoublonsUndoRunner] = None
         self._doublons_resume_runner: Optional[DoublonsResumeRunner] = None
+        # Détails du dernier échec de déplacement (§ demandé explicitement,
+        # points 1/3/4) -- lus dans `_on_doublons_move_error` (avant que
+        # `_on_doublons_move_finished` ne remette `_doublons_move_runner`
+        # à `None`), consommés dans `_on_doublons_move_finished` pour
+        # retirer du résultat affiché ce qui a réellement bougé sans
+        # jamais relancer une analyse, et construire un message précis.
+        self._doublons_move_error_moved_units: List[Unit] = []
+        self._doublons_move_error_file_failure = None
+        self._doublons_move_error_skipped_count = 0
         # Dernier résultat en cache trouvé (§ demandé explicitement :
         # « ne jamais obliger à relancer une analyse ») -- rafraîchi à
         # chaque ouverture de l'écran de choix du dossier
@@ -721,6 +744,8 @@ class MainWindow(QMainWindow):
         self._doublons_risk_confirm_dialog.confirmed.connect(self._on_doublons_risk_confirmed)
         self._doublons_large_folder_dialog.confirmed.connect(self._on_doublons_large_folder_confirmed)
         self._doublons_large_folder_dialog.cancelled.connect(self._on_doublons_large_folder_cancelled)
+        self._doublons_file_error_dialog.confirmed.connect(self._on_doublons_move_file_error_confirmed)
+        self._doublons_file_error_dialog.cancelled.connect(self._on_doublons_move_file_error_cancelled)
         self._doublons_scan_progress_screen.cancel_requested.connect(self._on_doublons_scan_cancel_requested)
         self._doublons_results_screen.back_requested.connect(self._show_startup_screen)
         self._doublons_results_screen.move_requested.connect(self._on_doublons_move_requested)
@@ -2370,6 +2395,15 @@ class MainWindow(QMainWindow):
         self._confirm_move_doublons_dialog.set_space_warning(
             insufficient, _format_size(free_bytes) if free_bytes is not None else ""
         )
+        # § demandé explicitement, point 6 : annoncé ici, avant même la
+        # validation -- `move_duplicates` refuse pour de vrai le lot
+        # entier au moment de l'exécuter si la destination est
+        # positivement FAT (autorité réelle), ceci reste purement
+        # informatif, comme l'avertissement d'espace ci-dessus.
+        oversized_count = 0
+        if is_fat_filesystem(destination_filesystem_kind(destination)):
+            oversized_count = len(fat_oversized_members(self._pending_doublons_units))
+        self._confirm_move_doublons_dialog.set_fat_warning(oversized_count)
 
     def _on_doublons_confirm_dialog_destination_chosen(self, path: str) -> None:
         """« Changer… » directement dans la fenêtre de confirmation --
@@ -2409,30 +2443,95 @@ class MainWindow(QMainWindow):
         self._doublons_move_runner.progress.connect(self._doublons_move_progress_screen.set_progress)
         self._doublons_move_runner.error.connect(self._on_doublons_move_error)
         self._doublons_move_runner.finished_move.connect(self._on_doublons_move_finished)
+        self._doublons_move_runner.file_error_confirmation_needed.connect(
+            self._on_doublons_move_file_error_confirmation_needed
+        )
         self._doublons_move_runner.start()
 
     def _on_doublons_move_cancel_requested(self) -> None:
         if self._doublons_move_runner is not None:
             self._doublons_move_runner.cancel()
 
+    def _on_doublons_move_file_error_confirmation_needed(self, exc) -> None:
+        """§ demandé explicitement, point 4 : « proposer de continuer en
+        ignorant ce fichier » -- même fenêtre que les analyses à risque
+        (`DoublonsRiskConfirmDialog`), titre propre, message construit à
+        partir du `MoveFileFailed` (fichier en cause, raison traduite,
+        « copie réussie » explicite si seule la suppression de l'original
+        a échoué, § point 3)."""
+        self._doublons_file_error_dialog.set_title(tr("doublons_file_error_title"))
+        self._doublons_file_error_dialog.set_message(doublons_move_file_error_message(exc))
+        self._doublons_file_error_dialog.open()
+
+    def _on_doublons_move_file_error_confirmed(self) -> None:
+        """« Continuer » -- ignore ce fichier précis et poursuit avec les
+        suivants ; ce qui a déjà été déplacé le reste, jamais annulé."""
+        if self._doublons_move_runner is not None:
+            self._doublons_move_runner.resume_after_file_error_confirmation(True)
+
+    def _on_doublons_move_file_error_cancelled(self) -> None:
+        """« Annuler » -- arrête le lot entier à partir de ce fichier."""
+        if self._doublons_move_runner is not None:
+            self._doublons_move_runner.resume_after_file_error_confirmation(False)
+
     def _on_doublons_move_error(self, code: str, msg: str) -> None:
+        # Lu ici, avant que `_on_doublons_move_finished` ne remette
+        # `_doublons_move_runner` à `None` -- § bug corrigé, signalé
+        # explicitement : ce que le worker sait déjà (ce qui a réellement
+        # bougé, quel fichier précis a échoué) doit servir à afficher un
+        # résultat précis, jamais relancer une analyse complète à la
+        # place.
         self._last_error_code = code
         self._last_error_msg = msg
+        runner = self._doublons_move_runner
+        if runner is not None:
+            self._doublons_move_error_moved_units = list(runner.moved_units)
+            self._doublons_move_error_file_failure = runner.last_file_error
+            self._doublons_move_error_skipped_count = len(runner.skipped)
+        else:
+            self._doublons_move_error_moved_units = []
+            self._doublons_move_error_file_failure = None
+            self._doublons_move_error_skipped_count = 0
 
     def _on_doublons_move_finished(self, ok: bool) -> None:
         self._doublons_move_runner = None
         self._pending_doublons_units = []
-        if not ok:
-            friendly = friendly_error_message(self._last_error_code or "")
-            QMessageBox.warning(self, tr("app_title"), friendly)
-        # Relance toujours un scan frais après (succès, échec partiel ou
-        # annulation) -- reflète l'état réel du dossier plutôt qu'une mise
-        # à jour partielle de l'affichage précédent, même principe que
-        # l'ancien flux carte SD. Ce qui a déjà été déplacé avant une
-        # annulation reste dans le journal (move.py, écriture au fil de
-        # l'eau) -- restaurable via « Tout annuler », jamais perdu.
-        if self._doublons_root is not None:
-            self._start_doublons_scan(self._doublons_root)
+        if ok:
+            # Succès complet -- relance un scan frais, reflète l'état réel
+            # du dossier plutôt qu'une mise à jour partielle de
+            # l'affichage précédent (comportement inchangé).
+            if self._doublons_root is not None:
+                self._start_doublons_scan(self._doublons_root)
+            return
+
+        # § bug corrigé, signalé explicitement : « après une erreur de
+        # déplacement, ne jamais relancer l'analyse. Revenir aux
+        # résultats, sélection intacte, en retirant les fichiers déjà
+        # déplacés avec succès. » -- s'applique à toute interruption
+        # (annulation, échec système, vérification ratée), pas seulement
+        # un échec système précis : ce qui a déjà été déplacé reste de
+        # toute façon dans le journal (`move.py`, écriture au fil de
+        # l'eau), restaurable via « Tout annuler », jamais perdu, et une
+        # nouvelle analyse d'une carte de 128 Go serait de toute façon
+        # bien plus lente qu'un simple retrait des unités déjà déplacées.
+        moved_units = self._doublons_move_error_moved_units
+        file_failure = self._doublons_move_error_file_failure
+        skipped_count = self._doublons_move_error_skipped_count
+        self._doublons_move_error_moved_units = []
+        self._doublons_move_error_file_failure = None
+        self._doublons_move_error_skipped_count = 0
+
+        if moved_units:
+            self._doublons_results_screen.remove_units(moved_units)
+
+        if self._last_error_code == "PARTIAL_MOVE_COMPLETED":
+            message = doublons_partial_move_message(len(moved_units), skipped_count)
+        elif file_failure is not None:
+            message = doublons_move_file_error_message(file_failure)
+        else:
+            message = friendly_error_message(self._last_error_code or "")
+        QMessageBox.warning(self, tr("app_title"), message)
+        self._root_stack.setCurrentWidget(self._doublons_results_screen)
 
     def _on_doublons_export_requested(self) -> None:
         if self._doublons_scan_result is None or self._doublons_root is None:

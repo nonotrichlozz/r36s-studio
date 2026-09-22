@@ -76,13 +76,18 @@ réellement été déplacé, exploitable par `undo.undo_all`."""
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
+import platform
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
+
+from r36s_studio.gui import logs as gui_logs
 
 from .safety import is_filesystem_root
 from .scan import DUPLICATES_DIR_NAME, Unit
@@ -97,19 +102,37 @@ __all__ = [
     "DestinationIsFilesystemRoot",
     "CopyVerificationFailed",
     "DuplicatesOutsideRoot",
+    "MoveFileFailed",
+    "PartialMoveFailure",
+    "FatFileSizeLimitExceeded",
     "default_destination",
     "check_destination_allowed",
     "is_cross_volume_destination",
     "move_duplicates",
     "has_pending_journal_entries",
+    "free_space_at_destination",
+    "fat_oversized_members",
+    "is_fat_filesystem",
+    "destination_filesystem_kind",
 ]
 
 JOURNAL_FILENAME = "journal.json"
 
 MoveProgressCallback = Callable[[int, int], None]  # (fait, total)
+# Un fichier en cause, l'étape (copie/vérification/suppression source) --
+# `bool` renvoyé indique si l'utilisateur choisit d'ignorer ce fichier et
+# de continuer (`True`) ou d'arrêter le lot entier (`False`/callback
+# absent), § demandé explicitement : « proposer de continuer en ignorant
+# ce fichier ».
+MoveFileErrorCallback = Callable[["MoveFileFailed"], bool]
 
 _PROBE_FILENAME = ".r36s_studio_doublons_write_test"
 _PARTIAL_SUFFIX = ".r36s_studio_doublons_partial"
+# Limite réelle d'un fichier unique sur FAT12/16/32 (champ de taille sur
+# 32 bits, 2**32 - 1 octets) -- la même limite s'applique aux trois
+# variantes, pas seulement FAT32 (§ demandé explicitement, point 6).
+FAT_MAX_FILE_SIZE_BYTES = 2**32 - 1
+_FAT_FILESYSTEM_NAMES = {"fat", "fat12", "fat16", "fat32", "vfat", "msdos", "msdosfs"}
 
 
 class MoveCancelled(Exception):
@@ -166,6 +189,166 @@ class DuplicatesOutsideRoot(Exception):
         self.root = root
 
 
+# Raisons traduites d'un échec système (§ demandé explicitement, point 3 :
+# « afficher... la raison traduite »). `REASON_UNKNOWN` reste un repli
+# honnête plutôt qu'une fausse précision quand l'erreur ne correspond à
+# aucun cas reconnu.
+REASON_ACCESS_DENIED = "access_denied"
+REASON_READ_ONLY = "read_only"
+REASON_PATH_TOO_LONG = "path_too_long"
+REASON_DRIVE_REMOVED = "drive_removed"
+REASON_INSUFFICIENT_SPACE = "insufficient_space"
+REASON_UNKNOWN = "unknown"
+
+
+class MoveFileFailed(Exception):
+    """Échec système réel (accès refusé, disque retiré, espace
+    insuffisant...) survenu à une étape précise du déplacement d'un
+    fichier précis -- distincte de `CopyVerificationFailed` (le contenu
+    copié ne correspond pas à la source, jamais une erreur système).
+    Porte tout ce qu'il faut pour un message précis côté GUI (§ demandé
+    explicitement, point 3) plutôt qu'un message générique : le fichier
+    en cause, l'étape (`step` : `"copy"`, `"verify"`, `"delete_source"`,
+    ou `"rename"` pour un déplacement même disque), la raison traduite
+    (`reason`, une des constantes `REASON_*` ci-dessus), le message brut
+    de l'exception d'origine (`detail`, jamais affiché directement --
+    réservé au journal, §5 vocabulaire), et `copy_succeeded` : vrai
+    uniquement quand l'échec porte sur la suppression de l'original alors
+    que la copie vérifiée est déjà en place à destination (« le dire
+    explicitement », § demandé)."""
+
+    def __init__(self, path: str, step: str, reason: str, detail: str, copy_succeeded: bool = False):
+        super().__init__(f"Échec ({step}) sur « {path} » : {detail}")
+        self.path = path
+        self.step = step
+        self.reason = reason
+        self.detail = detail
+        self.copy_succeeded = copy_succeeded
+        # Renseigné par `move_duplicates` au moment de la propagation --
+        # les `Unit` déjà entièrement déplacées avant cet échec, pour que
+        # l'appelant retire du résultat affiché ce qui a réellement
+        # bougé sans jamais relancer une analyse complète (§ demandé
+        # explicitement, bug corrigé).
+        self.moved_units: List[Unit] = []
+
+
+class PartialMoveFailure(Exception):
+    """Le lot s'est terminé après que l'utilisateur a choisi d'ignorer au
+    moins un fichier en échec (§ demandé, point 4 : « proposer de
+    continuer en ignorant ce fichier ») -- pas un abandon complet, mais
+    pas un succès total non plus : porte les unités réellement déplacées
+    et celles ignorées (avec leur raison), pour le même traitement
+    d'affichage qu'un abandon complet (jamais de nouvelle analyse,
+    sélection intacte pour ce qui n'a pas bougé)."""
+
+    def __init__(self, moved_units: List[Unit], skipped: List[Tuple[Unit, "MoveFileFailed"]], moved_count: int):
+        super().__init__(f"{moved_count} fichier(s) déplacé(s), {len(skipped)} ignoré(s) après échec.")
+        self.moved_units = moved_units
+        self.skipped = skipped
+        self.moved_count = moved_count
+
+
+class FatFileSizeLimitExceeded(Exception):
+    """Un ou plusieurs fichiers à déplacer dépassent la limite FAT (4 Gio
+    par fichier, `FAT_MAX_FILE_SIZE_BYTES`) et la destination est
+    positivement identifiée comme FAT -- annoncé *avant* de commencer
+    (§ demandé explicitement, point 6), jamais découvert en cours de
+    route sur un fichier parmi d'autres."""
+
+    def __init__(self, oversized: List[Tuple[Unit, Path, int]]):
+        names = ", ".join(str(path) for _unit, path, _size in oversized)
+        super().__init__(f"Dépasse la limite FAT (4 Gio) : {names}.")
+        self.oversized = oversized
+
+
+def _classify_os_error(exc: OSError) -> str:
+    """Traduit une `OSError` brute en raison reconnaissable (§ demandé,
+    point 3) -- `winerror` (Windows uniquement, absent ailleurs) consulté
+    en complément d'`errno`, jamais à sa place : les deux mondes
+    n'exposent pas toujours la même information pour la même situation
+    réelle. Un cas non reconnu retombe sur `REASON_UNKNOWN` plutôt qu'une
+    fausse correspondance -- jamais deviné."""
+    winerror = getattr(exc, "winerror", None)
+    if exc.errno == errno.ENOSPC or winerror == 112:  # ERROR_DISK_FULL
+        return REASON_INSUFFICIENT_SPACE
+    if exc.errno == errno.ENAMETOOLONG or winerror == 206:  # ERROR_FILENAME_EXCED_RANGE
+        return REASON_PATH_TOO_LONG
+    if exc.errno == errno.EROFS:
+        return REASON_READ_ONLY
+    if exc.errno in (errno.EACCES, errno.EPERM) or winerror == 5:  # ERROR_ACCESS_DENIED
+        return REASON_ACCESS_DENIED
+    if exc.errno in (errno.EIO, errno.ENODEV, errno.ENXIO) or winerror in (21, 1117):  # ERROR_NOT_READY/IO_DEVICE
+        return REASON_DRIVE_REMOVED
+    return REASON_UNKNOWN
+
+
+_LONG_PATH_PREFIX = "\\\\?\\"
+_LONG_PATH_UNC_PREFIX = "\\\\?\\UNC\\"
+
+
+def _long_path_str(path: Path) -> str:
+    """Windows uniquement : forme absolue préfixée `\\\\?\\` (accès
+    étendu, contourne la limite historique MAX_PATH de 260 caractères) --
+    utilisée pour *tous* les appels bas niveau de ce module (§ demandé
+    explicitement, point 5 : « gérer les chemins longs... préfixe
+    \\\\?\\ »), pas seulement en réaction à un échec déjà survenu -- un
+    chemin de jeu R36S dépasse facilement cette limite (dossiers de
+    système imbriqués, noms de ROM longs avec tags de région). Sans effet
+    sur macOS/Linux, qui n'ont pas cette limite. Un chemin UNC
+    (`\\\\serveur\\partage\\...`) prend le préfixe dédié `\\\\?\\UNC\\` --
+    la spec Windows ne permet pas de préfixer un UNC avec le préfixe
+    simple."""
+    if platform.system() != "Windows":
+        return str(path)
+    resolved = str(path.resolve())
+    if resolved.startswith(_LONG_PATH_PREFIX):
+        return resolved
+    if resolved.startswith("\\\\"):
+        return _LONG_PATH_UNC_PREFIX + resolved[2:]
+    return _LONG_PATH_PREFIX + resolved
+
+
+def _path_exists_long(path: Path) -> bool:
+    """Équivalent de `Path.exists()`, mais via la forme longue Windows --
+    `Path.exists()` seule reste sujette à la même limite MAX_PATH que les
+    autres appels bas niveau de ce module."""
+    try:
+        os.stat(_long_path_str(path))
+        return True
+    except OSError:
+        return False
+
+
+def _log_move_file_failure(exc: MoveFileFailed) -> None:
+    """Consigne l'échec dans `doublons.log` (`gui/logs.py::
+    doublons_log_path`, § demandé explicitement, point 2 : « journaliser
+    l'exception exacte, l'étape... et le chemin complet du fichier ») --
+    best-effort, un journal inaccessible ne doit jamais masquer l'échec
+    réel déjà en cours de propagation. Appelé pour *toute* occurrence,
+    que l'utilisateur choisisse ensuite d'ignorer ce fichier et de
+    continuer, ou que ça interrompe le lot entier."""
+    try:
+        chemin = gui_logs.doublons_log_path()
+        horodatage = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        ligne = (
+            f"{horodatage} étape={exc.step} raison={exc.reason} "
+            f"copie_reussie={exc.copy_succeeded} chemin={exc.path} : {exc.detail}\n"
+        )
+        with open(chemin, "a", encoding="utf-8") as fichier:
+            fichier.write(ligne)
+    except OSError:
+        pass
+
+
+def _fail_move_step(path: Path, step: str, exc: OSError, copy_succeeded: bool = False) -> None:
+    """Construit, journalise puis lève `MoveFileFailed` -- point de
+    passage unique pour ne jamais oublier de journaliser un de ces trois
+    cas (copie, vérification, suppression de la source)."""
+    failure = MoveFileFailed(str(path), step, _classify_os_error(exc), str(exc), copy_succeeded=copy_succeeded)
+    _log_move_file_failure(failure)
+    raise failure from exc
+
+
 def _nearest_existing_ancestor(path: Path) -> Path:
     """`path` peut ne pas encore exister (destination jamais créée) -- le
     premier ancêtre déjà présent sur le disque est le seul endroit où une
@@ -174,7 +357,7 @@ def _nearest_existing_ancestor(path: Path) -> Path:
     fichiers (`parent == path` : condition d'arrêt, cas extrême d'un
     chemin déjà entièrement absent jusqu'à la racine)."""
     current = path
-    while not current.exists():
+    while not _path_exists_long(current):
         parent = current.parent
         if parent == current:
             break
@@ -192,14 +375,15 @@ def _probe_writable(directory: Path) -> None:
     d'effet de bord de création de dossiers tant que l'utilisateur n'a
     rien confirmé."""
     probe = directory / _PROBE_FILENAME
+    probe_str = _long_path_str(probe)
     try:
-        with open(probe, "wb") as handle:
+        with open(probe_str, "wb") as handle:
             handle.write(b"\0")
     except OSError as exc:
         raise DestinationNotWritable(str(directory), str(exc)) from exc
     finally:
         try:
-            probe.unlink()
+            os.unlink(probe_str)
         except OSError:
             pass
 
@@ -210,7 +394,7 @@ def _check_writable(directory: Path) -> None:
     qui a de toute façon besoin que ce dossier existe pour y écrire des
     fichiers juste après."""
     try:
-        directory.mkdir(parents=True, exist_ok=True)
+        os.makedirs(_long_path_str(directory), exist_ok=True)
     except OSError as exc:
         raise DestinationNotWritable(str(directory), str(exc)) from exc
     _probe_writable(directory)
@@ -307,12 +491,12 @@ def _unique_destination(dest: Path) -> Path:
     """`dest` existe déjà (un précédent passage a déjà déplacé un fichier
     au même chemin relatif) -- ajoute un suffixe numérique avant
     l'extension plutôt que d'écraser silencieusement."""
-    if not dest.exists():
+    if not _path_exists_long(dest):
         return dest
     counter = 2
     while True:
         candidate = dest.with_name(f"{dest.stem}_{counter}{dest.suffix}")
-        if not candidate.exists():
+        if not _path_exists_long(candidate):
             return candidate
         counter += 1
 
@@ -320,7 +504,7 @@ def _unique_destination(dest: Path) -> Path:
 def _hash_file(path: Path) -> Optional[str]:
     hasher = hashlib.sha256()
     try:
-        with open(path, "rb") as handle:
+        with open(_long_path_str(path), "rb") as handle:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 hasher.update(chunk)
     except OSError:
@@ -328,38 +512,82 @@ def _hash_file(path: Path) -> Optional[str]:
     return hasher.hexdigest()
 
 
+def _cleanup_partial(temp_destination: Path) -> None:
+    """Jamais un fichier temporaire orphelin après un échec -- source
+    toujours intacte à ce stade, rien n'a encore été supprimé."""
+    try:
+        os.unlink(_long_path_str(temp_destination))
+    except OSError:
+        pass
+
+
 def _move_one_file(member: Path, destination: Path, expected_sha256: Optional[str], cross_volume: bool) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    """Trois étapes distinctes côté disque différent (copie, vérification,
+    suppression de la source, § demandé explicitement point 3 -- chacune
+    journalisée/traduite séparément via `_fail_move_step` en cas
+    d'échec) : copie vers un nom temporaire, vérifie, renomme
+    atomiquement, *puis seulement* supprime la source."""
+    member_str = _long_path_str(member)
+    destination_str = _long_path_str(destination)
+    try:
+        os.makedirs(_long_path_str(destination.parent), exist_ok=True)
+    except OSError as exc:
+        _fail_move_step(member, "copy", exc)
+
     if not cross_volume:
-        shutil.move(str(member), str(destination))
+        try:
+            shutil.move(member_str, destination_str)
+        except OSError as exc:
+            _fail_move_step(member, "rename", exc)
         return
 
-    # Disque différent (signalé, point 2) : copie vers un nom temporaire,
-    # vérifie, renomme atomiquement, *puis seulement* supprime la source.
     temp_destination = destination.with_name(destination.name + _PARTIAL_SUFFIX)
+    temp_destination_str = _long_path_str(temp_destination)
     try:
-        shutil.copy2(str(member), str(temp_destination))
-        source_size = member.stat().st_size
-        copied_size = temp_destination.stat().st_size
-        if copied_size != source_size:
-            raise CopyVerificationFailed(str(member), f"taille différente après copie ({copied_size} != {source_size})")
-        if expected_sha256 is not None:
-            digest = _hash_file(temp_destination)
-            if digest != expected_sha256:
-                raise CopyVerificationFailed(str(member), "SHA-256 différent après copie")
-        os.replace(str(temp_destination), str(destination))
-    except BaseException:
-        # Jamais un fichier temporaire orphelin après un échec -- source
-        # toujours intacte à ce stade, rien n'a encore été supprimé.
-        try:
-            temp_destination.unlink()
-        except OSError:
-            pass
-        raise
+        shutil.copyfile(member_str, temp_destination_str)
+    except OSError as exc:
+        _cleanup_partial(temp_destination)
+        _fail_move_step(member, "copy", exc)
+
+    try:
+        shutil.copystat(member_str, temp_destination_str)
+    except OSError:
+        # § demandé explicitement, point 5 : ignorer un échec de copie
+        # des métadonnées (dates, permissions) -- FAT/exFAT ne les
+        # supportent pas toutes, et ça ne concerne jamais le contenu déjà
+        # copié (vérifié séparément juste après).
+        pass
+
+    try:
+        source_size = os.stat(member_str).st_size
+        copied_size = os.stat(temp_destination_str).st_size
+    except OSError as exc:
+        _cleanup_partial(temp_destination)
+        _fail_move_step(member, "verify", exc)
+    if copied_size != source_size:
+        _cleanup_partial(temp_destination)
+        raise CopyVerificationFailed(str(member), f"taille différente après copie ({copied_size} != {source_size})")
+    if expected_sha256 is not None:
+        digest = _hash_file(temp_destination)
+        if digest != expected_sha256:
+            _cleanup_partial(temp_destination)
+            raise CopyVerificationFailed(str(member), "SHA-256 différent après copie")
+
+    try:
+        os.replace(temp_destination_str, destination_str)
+    except OSError as exc:
+        _cleanup_partial(temp_destination)
+        _fail_move_step(member, "copy", exc)
 
     # La copie vérifiée est déjà en place sous son nom final -- seulement
-    # maintenant la source peut être retirée sans jamais rien perdre.
-    member.unlink()
+    # maintenant la source peut être retirée. Un échec ici ne perd jamais
+    # rien (`copy_succeeded=True`, § demandé explicitement : « le dire
+    # explicitement ») -- surtout ne pas supprimer la copie déjà vérifiée
+    # pour "annuler" cet échec, ça perdrait un fichier pour de vrai.
+    try:
+        os.unlink(member_str)
+    except OSError as exc:
+        _fail_move_step(member, "delete_source", exc, copy_succeeded=True)
 
 
 def _read_journal(journal_path: Path) -> List[dict]:
@@ -390,6 +618,117 @@ def _append_journal_entry(journal_path: Path, source: str, destination: str) -> 
     _write_journal(journal_path, entries)
 
 
+def is_fat_filesystem(kind: Optional[str]) -> bool:
+    """`kind` : chaîne brute rendue par `destination_filesystem_kind`
+    (`"FAT32"`, `"vfat"`, `"msdos"`...) -- normalisée (casse, espaces)
+    avant comparaison à l'ensemble des noms connus pour une famille FAT
+    (FAT12/16/32, indifféremment -- la limite de 4 Gio par fichier leur
+    est commune, § demandé explicitement point 6). `None`/inconnu :
+    jamais affirmé FAT sans preuve positive."""
+    if kind is None:
+        return False
+    return kind.strip().lower() in _FAT_FILESYSTEM_NAMES
+
+
+def _windows_volume_filesystem(root: str) -> Optional[str]:
+    """`root` : racine de volume Windows (`"D:\\\\"`) -- `GetVolumeInformationW`
+    (API native, aucun sous-processus) rend directement le nom du système
+    de fichiers (`"NTFS"`, `"FAT32"`, `"exFAT"`...). Fonction séparée du
+    dispatcher ci-dessous pour rester substituable en test (mêmes
+    principes que le point d'injection `opener` de `consoles_diverses/
+    client.py` -- `ctypes` n'est pas mockable directement)."""
+    import ctypes
+
+    fs_name_buffer = ctypes.create_unicode_buffer(261)
+    ok = ctypes.windll.kernel32.GetVolumeInformationW(  # type: ignore[attr-defined]
+        ctypes.c_wchar_p(root), None, 0, None, None, None, fs_name_buffer, len(fs_name_buffer)
+    )
+    if not ok:
+        return None
+    return fs_name_buffer.value or None
+
+
+def _posix_mount_filesystem(target: str) -> Optional[str]:
+    """macOS/Linux : interroge `mount` (déjà présent nativement sur les
+    deux, aucune dépendance supplémentaire) et retient le système de
+    fichiers du point de montage correspondant le plus précisément à
+    `target` -- le plus long préfixe qui matche, comme pour tout choix de
+    point de montage le plus spécifique. `None` si `mount` échoue ou si
+    aucune ligne ne correspond -- jamais une exception, jamais une
+    supposition. Best-effort : non vérifié sur du vrai matériel macOS/
+    Linux à ce jour (même réserve honnête que le reste de ce document
+    pour les sondes spécifiques à une plateforme non testée ici)."""
+    try:
+        result = subprocess.run(["mount"], capture_output=True, text=True, timeout=5, check=False)
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+
+    best_match: Optional[str] = None
+    best_len = -1
+    for line in result.stdout.splitlines():
+        if " on " not in line:
+            continue
+        _source, _, rest = line.partition(" on ")
+        mountpoint, _, remainder = rest.partition(" ")
+        if not (target == mountpoint or target.startswith(mountpoint.rstrip("/") + "/")):
+            continue
+        if len(mountpoint) <= best_len:
+            continue
+        fstype: Optional[str] = None
+        remainder = remainder.strip()
+        if remainder.startswith("("):
+            fstype = remainder.strip("()").split(",")[0].strip()
+        elif remainder.startswith("type "):
+            fstype = remainder[len("type "):].split(" ")[0]
+        if fstype:
+            best_match = fstype
+            best_len = len(mountpoint)
+    return best_match
+
+
+def destination_filesystem_kind(path: str) -> Optional[str]:
+    """Système de fichiers du volume contenant `path` -- utilisé
+    uniquement pour détecter une limite FAT (§ demandé explicitement,
+    point 6) avant de commencer un déplacement, jamais pour une autre
+    décision. `None` si indéterminable (jamais une exception) : dans ce
+    cas, l'avertissement FAT est simplement omis plutôt que de bloquer un
+    déplacement sur une plateforme où cette sonde échoue."""
+    ancestor = _nearest_existing_ancestor(Path(path).resolve())
+    try:
+        if platform.system() == "Windows":
+            drive = os.path.splitdrive(str(ancestor))[0]
+            if not drive:
+                return None
+            return _windows_volume_filesystem(drive + "\\")
+        return _posix_mount_filesystem(str(ancestor))
+    except OSError:
+        return None
+
+
+def fat_oversized_members(units: List[Unit]) -> List[Tuple[Unit, Path, int]]:
+    """Fichiers réellement au-dessus de la limite FAT (§ demandé
+    explicitement, point 6) parmi les membres de `units` -- taille lue en
+    direct (`os.stat`, jamais `Unit.total_size_bytes`, qui est la *somme*
+    des membres d'une unité liée, pas la taille d'un seul fichier -- la
+    limite FAT s'applique fichier par fichier). Pure : ne dépend jamais du
+    système de fichiers réel de la destination, laissé à l'appelant
+    (`is_fat_filesystem`/`destination_filesystem_kind`) -- ne sert donc à
+    rien seule, mais reste testable sans dépendre d'une vraie sonde
+    système."""
+    oversized: List[Tuple[Unit, Path, int]] = []
+    for unit in units:
+        for member in unit.members:
+            try:
+                size = os.stat(_long_path_str(member)).st_size
+            except OSError:
+                continue
+            if size > FAT_MAX_FILE_SIZE_BYTES:
+                oversized.append((unit, member, size))
+    return oversized
+
+
 def move_duplicates(
     root: str,
     units: List[Unit],
@@ -397,6 +736,7 @@ def move_duplicates(
     on_progress: Optional[MoveProgressCallback] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
     destination: Optional[str] = None,
+    on_file_error: Optional[MoveFileErrorCallback] = None,
 ) -> int:
     """Déplace les fichiers de `units` (déjà exclues du/des fichier(s)
     gardé(s) -- construit ainsi par l'appelant, l'écran de résultats) vers
@@ -404,7 +744,20 @@ def move_duplicates(
     jamais un membre isolé d'un groupe lié). `destination=None` retombe
     sur `default_destination(root)` (`root/_doublons`, comportement
     historique). Retourne le nombre de fichiers déplacés (ou qui
-    l'auraient été, en simulation)."""
+    l'auraient été, en simulation).
+
+    `on_file_error` (§ demandé explicitement, point 4 : « proposer de
+    continuer en ignorant ce fichier ») : appelé avec le `MoveFileFailed`
+    en cause dès qu'une étape échoue pour un fichier précis -- un retour
+    `True` ignore le reste de l'unité en cours (ses membres déjà déplacés
+    le restent, jamais annulés) et poursuit avec la suivante ; `False`
+    (ou callback absent) relève l'exception, comme avant ce paramètre.
+    Toute interruption (annulation, échec non ignoré, vérification de
+    contenu ratée) porte désormais un attribut `moved_units` : les
+    `Unit` déjà entièrement déplacées avant l'interruption -- pour que
+    l'appelant ne relance jamais une analyse complète après une erreur,
+    en retirant seulement ce qui a réellement bougé (§ demandé
+    explicitement, bug corrigé)."""
     root_path = Path(root).resolve()
     destination_path = Path(destination).resolve() if destination is not None else root_path / DUPLICATES_DIR_NAME
 
@@ -434,20 +787,51 @@ def move_duplicates(
     _check_writable(destination_path)
     _check_disk_space(destination_path, total_bytes)
 
+    # § demandé explicitement, point 6 : annoncé *avant* de commencer,
+    # jamais découvert en cours de route sur un fichier parmi d'autres --
+    # `destination_filesystem_kind` best-effort (`None` : sonde
+    # indéterminable, jamais bloquant dans ce cas).
+    if is_fat_filesystem(destination_filesystem_kind(str(destination_path))):
+        oversized = fat_oversized_members(units)
+        if oversized:
+            raise FatFileSizeLimitExceeded(oversized)
+
     journal_path = destination_path / JOURNAL_FILENAME
     done = 0
-    for unit in units:
-        if should_cancel is not None and should_cancel():
-            raise MoveCancelled(done)
-        for member in unit.members:
-            relative = member.resolve().relative_to(root_path)
-            final_destination = _unique_destination(destination_path / relative)
-            expected_sha256 = unit.known_sha256 if member == unit.representative else None
-            _move_one_file(member, final_destination, expected_sha256, cross_volume)
-            _append_journal_entry(journal_path, str(member), str(final_destination))
-            done += 1
-            if on_progress is not None:
-                on_progress(done, total)
+    moved_units: List[Unit] = []
+    skipped: List[Tuple[Unit, MoveFileFailed]] = []
+    try:
+        for unit in units:
+            if should_cancel is not None and should_cancel():
+                raise MoveCancelled(done)
+            try:
+                for member in unit.members:
+                    relative = member.resolve().relative_to(root_path)
+                    final_destination = _unique_destination(destination_path / relative)
+                    expected_sha256 = unit.known_sha256 if member == unit.representative else None
+                    _move_one_file(member, final_destination, expected_sha256, cross_volume)
+                    _append_journal_entry(journal_path, str(member), str(final_destination))
+                    done += 1
+                    if on_progress is not None:
+                        on_progress(done, total)
+            except MoveFileFailed as exc:
+                if on_file_error is not None and on_file_error(exc):
+                    skipped.append((unit, exc))
+                    continue
+                raise
+            else:
+                moved_units.append(unit)
+    except BaseException as exc:
+        # Attaché à *toute* interruption (annulation, échec système non
+        # ignoré, échec de vérification de contenu) -- pas seulement
+        # `MoveFileFailed` : quelle que soit la cause exacte, l'appelant
+        # doit toujours pouvoir retirer ce qui a réellement bougé sans
+        # relancer une analyse complète.
+        setattr(exc, "moved_units", moved_units)
+        raise
+
+    if skipped:
+        raise PartialMoveFailure(moved_units, skipped, done)
     return done
 
 

@@ -8,9 +8,23 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from r36s_studio.doublons.move import move_duplicates
 from r36s_studio.doublons.scan import Unit
 from r36s_studio.doublons.undo import undo_all
+
+
+@pytest.fixture(autouse=True)
+def _no_fat_check_by_default(monkeypatch):
+    """Même garde-fou que `tests/test_doublons_move.py::_no_fat_check_by_
+    default` -- `move_duplicates` sonde désormais le système de fichiers
+    de la destination avant tout déplacement réel (§ demandé
+    explicitement, point 6), ce qui invoquerait `mount` en sous-processus
+    sur une machine non-Windows (refusé sans mock par le garde-fou global
+    `tests/conftest.py::_forbid_real_subprocess`)."""
+    monkeypatch.setattr("r36s_studio.doublons.move.destination_filesystem_kind", lambda path: None)
+    yield
 
 
 def _touch(path, content=b"x"):

@@ -1486,6 +1486,17 @@ def test_doublons_risk_confirm_dialog_cancel_emits_cancelled(qapp):
     assert received == [True]
 
 
+def test_doublons_risk_confirm_dialog_set_title_overrides_default(qapp):
+    """Troisième réutilisation de cette fenêtre (§ demandé explicitement,
+    point 4 : « ignorer ce fichier et continuer ») -- le titre par défaut
+    (analyse à risque) ne convient plus, doit rester remplaçable."""
+    dialog = DoublonsRiskConfirmDialog()
+
+    dialog.set_title(tr("doublons_file_error_title"))
+
+    assert dialog._title_label.text() == tr("doublons_file_error_title")
+
+
 def test_doublons_results_screen_shows_empty_state_without_groups(qapp):
     screen = DoublonsResultsScreen()
     screen.show()
@@ -1840,6 +1851,78 @@ def test_doublons_results_screen_selection_summary_resets_on_new_results(qapp):
     assert screen._selection_label.text() == tr("doublons_selection_summary", count=0, size=_format_size(0))
 
 
+def test_doublons_results_screen_remove_units_drops_a_moved_unit_from_its_group(qapp):
+    """§ bug corrigé, signalé explicitement : après une erreur de
+    déplacement, ne jamais relancer l'analyse -- retirer seulement ce qui
+    a réellement bougé. Groupe de trois pour que le groupe survive
+    (moins de deux disparaîtrait entièrement, cas couvert séparément
+    ci-dessous)."""
+    group = ExactDuplicateGroup(
+        units=[
+            _make_unit("/EASYROMS/SNES/Aladdin.zip", 100),
+            _make_unit("/EASYROMS/SNES/Aladdin.7z", 100),
+            _make_unit("/EASYROMS/SNES/Aladdin.bin", 100),
+        ],
+        sha256="a" * 64,
+    )
+    moved_unit = group.units[0]
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(exact_duplicate_groups=[group]))
+
+    screen.remove_units([moved_unit])
+
+    assert moved_unit not in screen._all_checkboxes.values()
+    assert len(screen._all_checkboxes) == 2
+
+
+def test_doublons_results_screen_remove_units_drops_the_whole_group_below_two_units(qapp):
+    """Un groupe de deux (le cas le plus courant, palier 1) n'est plus un
+    doublon dès qu'une seule unité est retirée -- le groupe entier
+    disparaît, jamais une case orpheline affichée seule."""
+    group = _make_exact_group()
+    moved_unit = group.units[0]
+    screen = DoublonsResultsScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.set_results(ScanResult(exact_duplicate_groups=[group]))
+
+    screen.remove_units([moved_unit])
+
+    assert screen._empty_label.isVisible() is True
+    assert len(screen._all_checkboxes) == 0
+
+
+def test_doublons_results_screen_remove_units_preserves_the_checked_state_of_the_rest(qapp):
+    """§ demandé explicitement : « sélection intacte » pour ce qui n'a
+    pas bougé -- un groupe de trois où une seule unité a été déplacée."""
+    from PySide6.QtWidgets import QCheckBox
+
+    third_unit = _make_unit("/EASYROMS/SNES/Aladdin.bin", 100)
+    group = ExactDuplicateGroup(units=[_make_unit("/EASYROMS/SNES/Aladdin.zip", 100), third_unit, _make_unit("/EASYROMS/SNES/Aladdin.7z", 100)], sha256="a" * 64)
+    moved_unit = group.units[0]
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(exact_duplicate_groups=[group]))
+
+    # Décoche explicitement l'unité qui va rester, pour vérifier que son
+    # état -- même non conforme à la présélection par défaut -- survit.
+    checkbox_for_third = [box for box, unit in screen._all_checkboxes.items() if unit is third_unit][0]
+    checkbox_for_third.setChecked(False)
+
+    screen.remove_units([moved_unit])
+
+    checkbox_after = [box for box, unit in screen._all_checkboxes.items() if unit is third_unit][0]
+    assert checkbox_after.isChecked() is False
+
+
+def test_doublons_results_screen_remove_units_does_nothing_when_list_is_empty(qapp):
+    group = _make_exact_group()
+    screen = DoublonsResultsScreen()
+    screen.set_results(ScanResult(exact_duplicate_groups=[group]))
+
+    screen.remove_units([])
+
+    assert len(screen._all_checkboxes) == 2
+
+
 def test_confirm_move_doublons_dialog_message_normal(qapp):
     dialog = ConfirmMoveDoublonsDialog()
 
@@ -1927,6 +2010,22 @@ def test_confirm_move_doublons_dialog_confirm_does_nothing_while_destination_inv
     dialog._on_confirm()
 
     assert received == []
+
+
+def test_confirm_move_doublons_dialog_fat_warning_visibility_and_text(qapp):
+    """§ demandé explicitement, point 6 : annoncé avant de commencer --
+    purement informatif, ne touche jamais au bouton de validation
+    (contrairement aux refus structurels de destination)."""
+    dialog = ConfirmMoveDoublonsDialog()
+    dialog.show()
+
+    dialog.set_fat_warning(2)
+    assert dialog._fat_warning_banner.isVisible() is True
+    assert "2" in dialog._fat_warning_banner.text()
+    assert dialog._confirm_button.isEnabled() is True
+
+    dialog.set_fat_warning(0)
+    assert dialog._fat_warning_banner.isVisible() is False
 
 
 def test_doublons_folder_screen_resume_button_hidden_by_default(qapp):

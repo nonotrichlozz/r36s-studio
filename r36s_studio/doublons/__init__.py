@@ -23,6 +23,7 @@ disque externe), jamais un accès brut à un périphérique -- aucune
 from __future__ import annotations
 
 from .extensions import ROM_EXTENSIONS, ExtensionKind, classify
+from .journal_check import JournalCheckEntry, JournalCheckReport, verify_journal
 from .linked_files import LinkedResolution, resolve_manifest
 from .move import (
     CopyVerificationFailed,
@@ -30,14 +31,20 @@ from .move import (
     DestinationIsFilesystemRoot,
     DestinationNotWritable,
     DuplicatesOutsideRoot,
+    FatFileSizeLimitExceeded,
     InsufficientDiskSpace,
     MoveCancelled,
+    MoveFileFailed,
     MoveProgressCallback,
+    PartialMoveFailure,
     check_destination_allowed,
     default_destination,
+    destination_filesystem_kind,
+    fat_oversized_members,
     free_space_at_destination,
     has_pending_journal_entries,
     is_cross_volume_destination,
+    is_fat_filesystem,
     move_duplicates,
 )
 from .normalize import extract_tags, normalize_title, priority_score, region_rank, revision_score
@@ -111,14 +118,23 @@ __all__ = [
     "DestinationIsFilesystemRoot",
     "CopyVerificationFailed",
     "DuplicatesOutsideRoot",
+    "MoveFileFailed",
+    "PartialMoveFailure",
+    "FatFileSizeLimitExceeded",
     "default_destination",
     "check_destination_allowed",
     "is_cross_volume_destination",
     "free_space_at_destination",
+    "fat_oversized_members",
+    "is_fat_filesystem",
+    "destination_filesystem_kind",
     "move_duplicates",
     "has_pending_journal_entries",
     "UndoConflict",
     "UndoResult",
     "undo_all",
     "build_report",
+    "JournalCheckEntry",
+    "JournalCheckReport",
+    "verify_journal",
 ]

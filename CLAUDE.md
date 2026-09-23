@@ -2342,6 +2342,26 @@ volontairement sans avis sur le choix du numéro de version et le moment
 de créer ce premier tag -- décision de diffusion, pas une question
 technique.
 
+⚠️ **Bug corrigé, constaté en lançant réellement le binaire Windows : il
+plantait dès le double-clic** (`FileNotFoundError` sur
+`doublons/data/extensions.json`, lu à l'import de `doublons/extensions.py`,
+lui-même importé par `__main__.py`). Le fichier n'était déclaré dans aucun
+des trois spec -- invisible pour la suite de tests, qui tourne depuis les
+sources. Ajouté aux trois spec (sans condition `.exists()` : obligatoire,
+son absence fait échouer la construction plutôt que le binaire), et
+`tests/test_packaging_specs.py` vérifie désormais que tout fichier non-Python
+du paquet est déclaré dans chaque spec.
+
+**Écran de démarrage** (`gui/app.py::_build_splash`) : `MainWindow` détecte
+la carte de façon synchrone dans son constructeur -- mesuré à ~25 s sur une
+vraie machine Windows avant l'apparition de la moindre fenêtre (PowerShell
+`Get-Disk`/`Get-Partition` lents sur cette machine). Un `QSplashScreen`
+(« Démarrage… recherche de ta carte SD ») s'affiche désormais ~5 s après le
+double-clic (temps de chargement de Python/Qt), avant la construction de
+`MainWindow`, sans en changer l'ordre d'initialisation. Idée future : sortir
+cette détection initiale du thread principal pour afficher l'accueil
+immédiatement.
+
 Aucune icône configurée côté Windows (`icon=None`, comme macOS/Linux) --
 à ajouter avant une vraie diffusion, pas bloquant pour cette
 vérification.

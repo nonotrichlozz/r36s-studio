@@ -29,6 +29,7 @@ from typing import Optional
 
 STRINGS = {
     "app_title": "R36S Studio",
+    "splash_starting": "Démarrage… recherche de ta carte SD",
     # Accueil -- six étapes chronologiques fixes du workflow à deux cartes
     # (§4.5), toujours toutes visibles et cliquables, plus la sauvegarde
     # complète (opération de sécurité, en dehors des six étapes).

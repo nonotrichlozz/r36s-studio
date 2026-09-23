@@ -78,6 +78,18 @@ EXTRA_DATAS += [
     (str(ANDROID_DATA_DIR / name), "android/data") for name in ("emulateurs.json",) if (ANDROID_DATA_DIR / name).exists()
 ]
 
+# Liste des extensions de ROM (doublons/extensions.py) -- contrairement aux
+# fichiers ci-dessus, *obligatoire* : lue a l'import du module, lui-meme
+# importe par __main__.py au demarrage. Son absence faisait planter le
+# binaire des le double-clic (FileNotFoundError). Jamais conditionnee a
+# `.exists()` : un fichier manquant doit faire echouer la construction,
+# pas produire un binaire qui plante. Destination alignee sur
+# `Path(__file__).parent / "data"` (sys._MEIPASS/r36s_studio/doublons/data).
+DOUBLONS_DATA_FILE = PROJECT_ROOT / "r36s_studio" / "doublons" / "data" / "extensions.json"
+if not DOUBLONS_DATA_FILE.exists():
+    raise SystemExit(f"Fichier de donnees obligatoire introuvable : {DOUBLONS_DATA_FILE}")
+EXTRA_DATAS.append((str(DOUBLONS_DATA_FILE), "r36s_studio/doublons/data"))
+
 # `keyring` (consoles_diverses/settings_store.py) : aucun `hiddenimports`
 # manuel nécessaire ici -- PyInstaller fournit son propre hook officiel
 # (`hook-keyring.py`, `collect_submodules('keyring.backends')` +

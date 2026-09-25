@@ -4186,6 +4186,10 @@ def test_wizard_poll_stall_diagnostic_does_not_fire_after_a_legitimate_pause_for
     de secondes alors qu'il ne s'agit que du comportement voulu."""
     window = MainWindow()
     window._assisted_landing.prepare_requested.emit()  # DETECT_SOURCE, pose un premier horodatage
+    # Cet horodatage vient du vrai `time.monotonic()` : sur un runner Linux
+    # fraîchement démarré (~79 s), le sondage simulé à t=100 y voyait un
+    # arrêt de 21 s. Même remise à zéro que les autres tests du chien de garde.
+    window._wizard_last_poll_monotonic = None
 
     with patch("r36s_studio.gui.main_window.time.monotonic", return_value=100.0):
         window._on_wizard_poll()  # dernier sondage avant la pause de la sauvegarde

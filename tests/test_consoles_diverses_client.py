@@ -270,10 +270,13 @@ def test_rechercher_console_logs_licence_diagnostic_without_the_key_itself(tmp_p
             rechercher_console("ref", "http://localhost:8787", " cle-secrete \n", opener=opener)
 
     contenu = log_path.read_text(encoding="utf-8")
+    # Clé extraite dans une variable : un antislash dans l'expression d'une
+    # f-string n'est accepté qu'à partir de Python 3.12 (la CI tourne en 3.11).
+    cle = " cle-secrete \n"
     assert "cle-secrete" not in contenu
-    assert f"longueur={len(' cle-secrete \n')}" in contenu
+    assert f"longueur={len(cle)}" in contenu
     assert "espace_parasite=True" in contenu
-    assert f"sha256_envoyee={client_module._hash_prefix(' cle-secrete \n')}" in contenu
+    assert f"sha256_envoyee={client_module._hash_prefix(cle)}" in contenu
     assert code in contenu
 
 

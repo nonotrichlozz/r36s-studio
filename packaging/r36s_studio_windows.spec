@@ -77,6 +77,14 @@ if not DOUBLONS_DATA_FILE.exists():
     raise SystemExit(f"Fichier de donnees obligatoire introuvable : {DOUBLONS_DATA_FILE}")
 EXTRA_DATAS.append((str(DOUBLONS_DATA_FILE), "r36s_studio/doublons/data"))
 
+# Tables du tri (tri/tables.py, docs/tri-roms.md) -- lues a l'ouverture de
+# l'ecran « Ranger mes jeux ». Obligatoires, meme regle que ci-dessus.
+for _tri_name in ("systems.json", "firmware_folders.json"):
+    _tri_file = PROJECT_ROOT / "r36s_studio" / "tri" / "data" / _tri_name
+    if not _tri_file.exists():
+        raise SystemExit(f"Fichier de donnees obligatoire introuvable : {_tri_file}")
+    EXTRA_DATAS.append((str(_tri_file), "r36s_studio/tri/data"))
+
 # `keyring` (consoles_diverses/settings_store.py) : aucun `hiddenimports`
 # manuel nécessaire ici -- PyInstaller fournit son propre hook officiel
 # (`hook-keyring.py`, `collect_submodules('keyring.backends')` +

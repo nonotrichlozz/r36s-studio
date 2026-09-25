@@ -1,0 +1,26 @@
+{
+ "_comment": "Phase 1 : cartouches dont l'extension n'appartient qu'a un seul systeme. signature : controle d'en-tete applique a l'extension (null = aucune signature universelle, extension seule). Voir docs/tri-roms.md.",
+ "systems": {
+  "nes": {"label": "NES", "extensions": {".nes": "ines"}},
+  "fds": {"label": "Famicom Disk System", "extensions": {".fds": "fds"}},
+  "snes": {"label": "Super Nintendo", "extensions": {".sfc": null, ".smc": null}},
+  "gb": {"label": "Game Boy", "extensions": {".gb": "gb_logo"}},
+  "gbc": {"label": "Game Boy Color", "extensions": {".gbc": "gb_logo"}},
+  "gba": {"label": "Game Boy Advance", "extensions": {".gba": "gba_header"}},
+  "n64": {"label": "Nintendo 64", "extensions": {".n64": "n64", ".z64": "n64", ".v64": "n64"}},
+  "megadrive": {"label": "Mega Drive", "extensions": {".md": "megadrive", ".gen": "megadrive", ".smd": "smd_interleaved"}},
+  "mastersystem": {"label": "Master System", "extensions": {".sms": null}},
+  "gamegear": {"label": "Game Gear", "extensions": {".gg": null}},
+  "sega32x": {"label": "Sega 32X", "extensions": {".32x": "sega_header"}},
+  "pcengine": {"label": "PC Engine", "extensions": {".pce": null}},
+  "ngp": {"label": "Neo Geo Pocket", "extensions": {".ngp": "snk"}},
+  "ngpc": {"label": "Neo Geo Pocket Color", "extensions": {".ngc": "snk"}},
+  "wonderswan": {"label": "WonderSwan", "extensions": {".ws": null}},
+  "wonderswancolor": {"label": "WonderSwan Color", "extensions": {".wsc": null}},
+  "atari2600": {"label": "Atari 2600", "extensions": {".a26": null}},
+  "atari7800": {"label": "Atari 7800", "extensions": {".a78": "atari7800"}},
+  "atarilynx": {"label": "Atari Lynx", "extensions": {".lnx": "lynx"}},
+  "virtualboy": {"label": "Virtual Boy", "extensions": {".vb": null}},
+  "colecovision": {"label": "ColecoVision", "extensions": {".col": "coleco"}}
+ }
+}

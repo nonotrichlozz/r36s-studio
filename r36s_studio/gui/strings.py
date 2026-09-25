@@ -911,6 +911,98 @@ STRINGS = {
     "android_uncheck_all_button": "Tout décocher",
     "android_checked_counter": "{checked}/{total} cochés",
     "android_raw_output_title": "Sortie technique (adb)",
+    # Outil « Ranger mes jeux » (docs/tri-roms.md) -- répartit un dossier
+    # de jeux mélangés dans un dossier par console, nommé comme le système
+    # choisi l'attend. Risque principal : un nom de dossier faux, et la
+    # console n'affiche rien -- d'où l'indication, pour chaque système,
+    # de la façon dont ses noms ont été vérifiés.
+    "assisted_tile_sort_games": "Ranger mes jeux",
+    "tri_title": "Ranger mes jeux",
+    "tri_hint": (
+        "Choisis un dossier où tes jeux sont mélangés. Chaque jeu sera rangé dans le dossier "
+        "de sa console, avec le nom que le système de ta console attend. Rien n'est supprimé, "
+        "et tu verras tout avant de confirmer."
+    ),
+    "tri_firmware_label": "Système de ta console :",
+    "tri_firmware_treefrogui": "TreeFrogUI (SF3000, SF2000…)",
+    "tri_firmware_verified": "Noms de dossiers vérifiés sur une vraie carte.",
+    "tri_firmware_unverified": (
+        "Noms de dossiers relevés dans la configuration officielle de ce système, "
+        "pas encore vérifiés sur une vraie carte."
+    ),
+    "tri_choose_folder_button": "Choisir le dossier…",
+    "tri_scan_title": "Analyse de tes jeux",
+    "tri_scan_count": "{count} fichier(s) examiné(s)",
+    "tri_cancel_button": "Annuler",
+    "tri_back_button": "Retour",
+    "tri_preview_title": "Voici ce qui va se passer",
+    "tri_preview_summary": (
+        "{sorted} jeu(x) rangé(s) dans {folders} dossier(s), "
+        "{unidentified} fichier(s) mis de côté dans « _non_identifies »."
+    ),
+    "tri_preview_nothing": "Rien à ranger dans ce dossier : tout est déjà en place.",
+    "tri_preview_risk": (
+        "Vérifie les noms de dossiers ci-dessous : si un nom ne correspond pas à ce que "
+        "ta console attend, elle n'affichera aucun jeu de ce dossier."
+    ),
+    "tri_group_folder": "{folder} — {count} jeu(x), {size}",
+    "tri_group_unidentified": "_non_identifies — {count} élément(s) mis de côté",
+    "tri_group_left_in_place": "Laissés à leur place — {count} jeu(x)",
+    "tri_group_kept_folders": "Dossiers déjà rangés, non touchés — {count}",
+    "tri_case_warning": (
+        "Le dossier « {found} » existe déjà, mais le système de ta console attend « {expected} » "
+        "(majuscules et minuscules comptent). Renomme-le d'abord : les jeux de cette console "
+        "sont laissés à leur place."
+    ),
+    "tri_item_with_reason": "{name} — {reason}",
+    "tri_sort_button": "Ranger",
+    "tri_confirm_title": "Confirmer le rangement",
+    "tri_confirm_message": (
+        "{count} fichier(s) vont être déplacés dans « {root} ». Rien ne sera supprimé, "
+        "et tu pourras tout remettre en place avec « Annuler le rangement »."
+    ),
+    "tri_confirm_button": "Confirmer",
+    "tri_move_title": "Rangement en cours",
+    "tri_move_count": "{done} / {total} fichier(s)",
+    "tri_result_title": "Rangement terminé",
+    "tri_result_cancelled_title": "Rangement interrompu",
+    "tri_result_moved": "{count} fichier(s) déplacé(s).",
+    "tri_result_failures": "{count} fichier(s) n'ont pas pu être déplacés (voir la liste ci-dessous).",
+    "tri_result_aborted": (
+        "Le rangement s'est arrêté après plusieurs échecs de suite. La carte ou le disque "
+        "a peut-être été retiré."
+    ),
+    "tri_result_skipped_existing": (
+        "{count} élément(s) laissé(s) à leur place : un fichier du même nom est déjà dans « _non_identifies »."
+    ),
+    "tri_result_missing": "{count} fichier(s) avaient disparu depuis l'aperçu.",
+    "tri_undo_button": "Annuler le rangement",
+    "tri_undo_previous_button": "Annuler le rangement précédent de ce dossier",
+    "tri_undo_done": "{count} fichier(s) remis à leur place.",
+    "tri_undo_conflicts": "{count} fichier(s) n'ont pas pu être remis en place (un fichier occupe déjà leur place d'origine, ou ils ont été déplacés depuis).",
+    "tri_done_button": "Terminé",
+    "tri_error_root_filesystem_root": "Choisis un dossier plus précis que la racine d'un disque.",
+    "tri_error_root_user_folder": "Choisis un dossier plus précis que ton dossier personnel entier.",
+    "tri_error_root_system_folder": (
+        "Ce dossier porte déjà le nom d'une console : choisis le dossier qui le contient."
+    ),
+    "tri_error_too_many_files": "Ce dossier contient trop de fichiers. Choisis un dossier plus précis.",
+    "tri_error_not_writable": "Impossible d'écrire dans ce dossier (lecture seule ou accès refusé).",
+    "tri_error_io_error": "Impossible de lire ou d'écrire dans ce dossier.",
+    # Motifs (clés de `tri/identify.py`/`tri/plan.py`)
+    "tri_reason_header_mismatch": "le contenu ne correspond pas à son extension",
+    "tri_reason_bin_unknown": "fichier .bin dont la console n'a pas pu être déterminée",
+    "tri_reason_disc_image": "image de disque : console non déterminée automatiquement",
+    "tri_reason_disc_image_missing_files": "image de disque incomplète (fichier manquant : {detail})",
+    "tri_reason_archive_7z": "archive .7z : contenu non examiné",
+    "tri_reason_zip_multiple": "archive contenant plusieurs fichiers (jeu d'arcade ?)",
+    "tri_reason_zip_empty": "archive sans jeu",
+    "tri_reason_zip_unreadable": "archive illisible ou protégée",
+    "tri_reason_unknown_extension": "type de fichier non reconnu",
+    "tri_reason_unreadable": "fichier illisible",
+    "tri_reason_system_not_supported": "console {system} : non prise en charge par ce système",
+    "tri_reason_extension_not_accepted": "ce système n'affiche pas les fichiers {detail} pour cette console",
+    "tri_reason_folder_case_conflict": "le dossier attendu « {detail} » existe déjà, écrit autrement",
 }
 
 

@@ -896,7 +896,7 @@ def test_full_disk_access_screen_set_still_not_detected_shows_label(qapp):
 
 
 # Ordre de `_ASSISTED_TILE_SPECS` (screens.py) -- index dans `_all_tiles`
-# pour chacun des 9 signaux, tuile 1 (Préparer) en premier. « Rechercher
+# pour chacun des 10 signaux, tuile 1 (Préparer) en premier. « Rechercher
 # ma console »/« Consoles diverses » fusionnées en « Identifier ma
 # console » (§5, correctif visuel) -- plus de signal séparé pour cette
 # dernière, l'accès au catalogue passe par `IdentifyResultDialog.
@@ -911,21 +911,23 @@ _ASSISTED_TILE_SIGNAL_INDEX = {
     "flash_requested": 3,
     "copy_games_requested": 4,
     "find_duplicates_requested": 5,
-    "eject_requested": 6,
-    "reset_card_requested": 7,
-    "help_requested": 8,
+    "sort_games_requested": 6,
+    "eject_requested": 7,
+    "reset_card_requested": 8,
+    "help_requested": 9,
 }
 
 
-def test_assisted_landing_screen_has_nine_tiles(qapp):
+def test_assisted_landing_screen_has_ten_tiles(qapp):
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
-    # 9 tuiles ordinaires + la tuile « Console Android » (android/, étape
-    # 1, toujours visible) + la tuile personnelle « Web », toujours
-    # construite mais cachée par défaut (config.py::personal_web_url,
-    # jamais visible sans MainWindow.set_web_tile_visible(True)).
-    assert len(screen._all_tiles) == 11
+    # 10 tuiles ordinaires (dont « Ranger mes jeux », docs/tri-roms.md) +
+    # la tuile « Console Android » (android/, étape 1, toujours visible) +
+    # la tuile personnelle « Web », toujours construite mais cachée par
+    # défaut (config.py::personal_web_url, jamais visible sans
+    # MainWindow.set_web_tile_visible(True)).
+    assert len(screen._all_tiles) == 12
     assert screen._web_tile.isHidden() is True
 
 
@@ -1174,7 +1176,7 @@ def test_assisted_landing_screen_reset_card_tile_has_destructive_role(qapp):
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
-    assert screen._all_tiles[7].property("role") == "tileDestructive"
+    assert screen._all_tiles[_ASSISTED_TILE_SIGNAL_INDEX["reset_card_requested"]].property("role") == "tileDestructive"
 
 
 def test_assisted_landing_screen_set_busy_disables_all_tiles_and_expert_button(qapp):

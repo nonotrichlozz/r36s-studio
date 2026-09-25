@@ -142,6 +142,7 @@ from .strings import (
     friendly_error_message,
     tr,
 )
+from .tri_screen import TriScreen
 from .wizard_flow import WizardFlow, WizardJob
 from .worker_runner import WorkerRunner
 
@@ -513,6 +514,9 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError) as exc:
             print(f"[Android] Catalogue d'émulateurs indisponible : {exc}", file=sys.stderr)
         self._android_detect_runner: Optional[AndroidDetectRunner] = None
+        # Outil « Ranger mes jeux » (docs/tri-roms.md) -- écran autonome qui
+        # gère lui-même ses pages et ses threads : un seul point d'entrée ici.
+        self._tri_screen = TriScreen()
         self._android_download_runner: Optional[AndroidPlatformToolsDownloadRunner] = None
         self._android_search_runner: Optional[ConsoleSearchRunner] = None
         # URL de la dernière recherche lancée depuis cet écran -- retenue
@@ -539,6 +543,7 @@ class MainWindow(QMainWindow):
         self._root_stack.addWidget(self._doublons_scan_progress_screen)
         self._root_stack.addWidget(self._doublons_results_screen)
         self._root_stack.addWidget(self._doublons_move_progress_screen)
+        self._root_stack.addWidget(self._tri_screen)
         self.setCentralWidget(self._root_stack)
 
         # Fenêtres modales (§5, refonte navigation) : construites une fois,
@@ -717,6 +722,8 @@ class MainWindow(QMainWindow):
         self._assisted_landing.flash_requested.connect(lambda: self._start_assisted_ad_hoc_job("flash"))
         self._assisted_landing.copy_games_requested.connect(lambda: self._start_assisted_ad_hoc_job("copy_games"))
         self._assisted_landing.find_duplicates_requested.connect(self._start_doublons_tool)
+        self._assisted_landing.sort_games_requested.connect(self._open_tri_screen)
+        self._tri_screen.back_requested.connect(self._show_startup_screen)
         self._assisted_landing.android_requested.connect(self._open_android_screen)
         self._assisted_landing.web_requested.connect(self._on_web_requested)
         self._assisted_landing.eject_requested.connect(lambda: self._start_assisted_ad_hoc_job("eject"))
@@ -2610,6 +2617,13 @@ class MainWindow(QMainWindow):
     # ci-dessus) : ces méthodes ne font qu'orchestrer les threads dédiés
     # (`android_runner.py`) et traduire leurs résultats pour `AndroidScreen`,
     # qui ne connaît elle-même ni adb ni le réseau. ----------------------
+
+    def _open_tri_screen(self) -> None:
+        """Tuile « Ranger mes jeux » (docs/tri-roms.md). Le firmware choisi
+        pour le flash est proposé comme cible, toujours remplaçable."""
+        self._tri_screen.set_default_firmware(self._app_config.firmware)
+        self._tri_screen.show_choose_page()
+        self._root_stack.setCurrentWidget(self._tri_screen)
 
     def _open_android_screen(self) -> None:
         self._root_stack.setCurrentWidget(self._android_screen)

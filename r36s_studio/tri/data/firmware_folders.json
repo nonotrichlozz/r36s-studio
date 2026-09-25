@@ -1,0 +1,731 @@
+{
+ "_comment": "Genere depuis les fichiers officiels de chaque firmware -- voir docs/tri-roms.md. extensions=null : liste non connue, aucun controle.",
+ "firmwares": {
+  "arkos": {
+   "source": "https://github.com/southoz/dArkOSRE-R36/blob/26820cdbc630/files/ROOTFS/etc/emulationstation/es_systems.cfg",
+   "source_date": "2026-03-10",
+   "verified_on_hardware": false,
+   "systems": {
+    "nes": {
+     "folder": "nes",
+     "extensions": [
+      ".7z",
+      ".nes",
+      ".zip"
+     ]
+    },
+    "snes": {
+     "folder": "snes",
+     "extensions": [
+      ".7z",
+      ".fig",
+      ".sfc",
+      ".smc",
+      ".zip"
+     ]
+    },
+    "gb": {
+     "folder": "gb",
+     "extensions": [
+      ".7z",
+      ".dmg",
+      ".gb",
+      ".gbc",
+      ".zip"
+     ]
+    },
+    "gbc": {
+     "folder": "gbc",
+     "extensions": [
+      ".7z",
+      ".dmg",
+      ".gb",
+      ".gbc",
+      ".zip"
+     ]
+    },
+    "gba": {
+     "folder": "gba",
+     "extensions": [
+      ".7z",
+      ".gb",
+      ".gba",
+      ".gbc",
+      ".zip"
+     ]
+    },
+    "n64": {
+     "folder": "n64",
+     "extensions": [
+      ".7z",
+      ".n64",
+      ".v64",
+      ".z64",
+      ".zip"
+     ]
+    },
+    "megadrive": {
+     "folder": "megadrive",
+     "extensions": [
+      ".68k",
+      ".7z",
+      ".bin",
+      ".chd",
+      ".cue",
+      ".gen",
+      ".gg",
+      ".iso",
+      ".md",
+      ".mdx",
+      ".sg",
+      ".sgd",
+      ".smd",
+      ".sms",
+      ".zip"
+     ]
+    },
+    "mastersystem": {
+     "folder": "mastersystem",
+     "extensions": [
+      ".68k",
+      ".7z",
+      ".bin",
+      ".chd",
+      ".cue",
+      ".gen",
+      ".gg",
+      ".iso",
+      ".md",
+      ".mdx",
+      ".sg",
+      ".sgd",
+      ".smd",
+      ".sms",
+      ".zip"
+     ]
+    },
+    "gamegear": {
+     "folder": "gamegear",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".gg",
+      ".zip"
+     ]
+    },
+    "sega32x": {
+     "folder": "sega32x",
+     "extensions": [
+      ".32x",
+      ".68k",
+      ".7z",
+      ".bin",
+      ".chd",
+      ".cue",
+      ".gen",
+      ".iso",
+      ".md",
+      ".smd",
+      ".sms",
+      ".zip"
+     ]
+    },
+    "pcengine": {
+     "folder": "pcengine",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".pce",
+      ".zip"
+     ]
+    },
+    "ngp": {
+     "folder": "ngp",
+     "extensions": [
+      ".7z",
+      ".ngc",
+      ".ngp",
+      ".zip"
+     ]
+    },
+    "ngpc": {
+     "folder": "ngpc",
+     "extensions": [
+      ".7z",
+      ".ngc",
+      ".ngp",
+      ".zip"
+     ]
+    },
+    "wonderswan": {
+     "folder": "wonderswan",
+     "extensions": [
+      ".7z",
+      ".pc2",
+      ".ws",
+      ".wsc",
+      ".zip"
+     ]
+    },
+    "wonderswancolor": {
+     "folder": "wonderswancolor",
+     "extensions": [
+      ".7z",
+      ".pc2",
+      ".ws",
+      ".wsc",
+      ".zip"
+     ]
+    },
+    "atari2600": {
+     "folder": "atari2600",
+     "extensions": [
+      ".7z",
+      ".a26",
+      ".bin",
+      ".zip"
+     ]
+    },
+    "atari7800": {
+     "folder": "atari7800",
+     "extensions": [
+      ".7z",
+      ".a78",
+      ".zip"
+     ]
+    },
+    "atarilynx": {
+     "folder": "atarilynx",
+     "extensions": [
+      ".7z",
+      ".lnx",
+      ".zip"
+     ]
+    },
+    "virtualboy": {
+     "folder": "virtualboy",
+     "extensions": [
+      ".7z",
+      ".vb",
+      ".vboy",
+      ".zip"
+     ]
+    },
+    "colecovision": {
+     "folder": "coleco",
+     "extensions": [
+      ".7z",
+      ".cas",
+      ".col",
+      ".dsk",
+      ".m3u",
+      ".mx1",
+      ".mx2",
+      ".ri",
+      ".rom",
+      ".sc",
+      ".sg",
+      ".zip"
+     ]
+    }
+   }
+  },
+  "rocknix": {
+   "source": "https://github.com/ROCKNIX/distribution/tree/31d4f58d390a/config/emulators (SYSTEM_PATH, SYSTEM_EXTENSION)",
+   "source_date": "2026-07-11",
+   "verified_on_hardware": false,
+   "systems": {
+    "nes": {
+     "folder": "nes",
+     "extensions": [
+      ".7z",
+      ".nes",
+      ".unf",
+      ".unif",
+      ".zip"
+     ]
+    },
+    "fds": {
+     "folder": "fds",
+     "extensions": [
+      ".7z",
+      ".fds",
+      ".zip"
+     ]
+    },
+    "snes": {
+     "folder": "snes",
+     "extensions": [
+      ".7z",
+      ".fig",
+      ".sfc",
+      ".smc",
+      ".swc",
+      ".zip"
+     ]
+    },
+    "gb": {
+     "folder": "gb",
+     "extensions": [
+      ".7z",
+      ".gb",
+      ".gbc",
+      ".zip"
+     ]
+    },
+    "gbc": {
+     "folder": "gbc",
+     "extensions": [
+      ".7z",
+      ".gb",
+      ".gbc",
+      ".zip"
+     ]
+    },
+    "gba": {
+     "folder": "gba",
+     "extensions": [
+      ".7z",
+      ".gba",
+      ".zip"
+     ]
+    },
+    "n64": {
+     "folder": "n64",
+     "extensions": [
+      ".7z",
+      ".n64",
+      ".v64",
+      ".z64",
+      ".zip"
+     ]
+    },
+    "megadrive": {
+     "folder": "megadrive",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".gen",
+      ".md",
+      ".sg",
+      ".smd",
+      ".zip"
+     ]
+    },
+    "mastersystem": {
+     "folder": "mastersystem",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".sms",
+      ".zip"
+     ]
+    },
+    "gamegear": {
+     "folder": "gamegear",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".gg",
+      ".zip"
+     ]
+    },
+    "sega32x": {
+     "folder": "sega32x",
+     "extensions": [
+      ".32x",
+      ".7z",
+      ".bin",
+      ".md",
+      ".smd",
+      ".zip"
+     ]
+    },
+    "pcengine": {
+     "folder": "pcengine",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".pce",
+      ".zip"
+     ]
+    },
+    "ngp": {
+     "folder": "ngp",
+     "extensions": [
+      ".7z",
+      ".ngc",
+      ".ngp",
+      ".zip"
+     ]
+    },
+    "ngpc": {
+     "folder": "ngpc",
+     "extensions": [
+      ".7z",
+      ".ngc",
+      ".ngp",
+      ".zip"
+     ]
+    },
+    "wonderswan": {
+     "folder": "wonderswan",
+     "extensions": [
+      ".7z",
+      ".ws",
+      ".wsc",
+      ".zip"
+     ]
+    },
+    "wonderswancolor": {
+     "folder": "wonderswancolor",
+     "extensions": [
+      ".7z",
+      ".ws",
+      ".wsc",
+      ".zip"
+     ]
+    },
+    "atari2600": {
+     "folder": "atari2600",
+     "extensions": [
+      ".7z",
+      ".a26",
+      ".bin",
+      ".zip"
+     ]
+    },
+    "atari7800": {
+     "folder": "atari7800",
+     "extensions": [
+      ".7z",
+      ".a78",
+      ".bin",
+      ".zip"
+     ]
+    },
+    "atarilynx": {
+     "folder": "atarilynx",
+     "extensions": [
+      ".7z",
+      ".lnx",
+      ".lyx",
+      ".o",
+      ".zip"
+     ]
+    },
+    "virtualboy": {
+     "folder": "virtualboy",
+     "extensions": [
+      ".7z",
+      ".vb",
+      ".zip"
+     ]
+    },
+    "colecovision": {
+     "folder": "coleco",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".col",
+      ".rom",
+      ".zip"
+     ]
+    }
+   }
+  },
+  "emuelec": {
+   "source": "https://github.com/EmuELEC/EmuELEC/blob/9909590417bc/packages/sx05re/emuelec-emulationstation/config/es_systems.json",
+   "source_date": "2026-09-17",
+   "verified_on_hardware": false,
+   "systems": {
+    "nes": {
+     "folder": "nes",
+     "extensions": [
+      ".7z",
+      ".nes",
+      ".nesm",
+      ".unf",
+      ".unif",
+      ".zip"
+     ]
+    },
+    "fds": {
+     "folder": "fds",
+     "extensions": [
+      ".7z",
+      ".fds",
+      ".zip"
+     ]
+    },
+    "snes": {
+     "folder": "snes",
+     "extensions": [
+      ".7z",
+      ".bs",
+      ".bsx",
+      ".dx2",
+      ".fig",
+      ".gd3",
+      ".gd7",
+      ".sfc",
+      ".smc",
+      ".st",
+      ".swc",
+      ".zip"
+     ]
+    },
+    "gb": {
+     "folder": "gb",
+     "extensions": [
+      ".7z",
+      ".gb",
+      ".zip"
+     ]
+    },
+    "gbc": {
+     "folder": "gbc",
+     "extensions": [
+      ".7z",
+      ".gb",
+      ".gbc",
+      ".zip"
+     ]
+    },
+    "gba": {
+     "folder": "gba",
+     "extensions": [
+      ".7z",
+      ".gba",
+      ".zip"
+     ]
+    },
+    "n64": {
+     "folder": "n64",
+     "extensions": [
+      ".7z",
+      ".n64",
+      ".v64",
+      ".z64",
+      ".zip"
+     ]
+    },
+    "megadrive": {
+     "folder": "megadrive",
+     "extensions": [
+      ".68k",
+      ".7z",
+      ".bin",
+      ".gen",
+      ".md",
+      ".sg",
+      ".sgd",
+      ".smd",
+      ".zip"
+     ]
+    },
+    "mastersystem": {
+     "folder": "mastersystem",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".sms",
+      ".zip"
+     ]
+    },
+    "gamegear": {
+     "folder": "gamegear",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".gg",
+      ".zip"
+     ]
+    },
+    "sega32x": {
+     "folder": "sega32x",
+     "extensions": [
+      ".32x",
+      ".7z",
+      ".bin",
+      ".md",
+      ".smd",
+      ".zip"
+     ]
+    },
+    "pcengine": {
+     "folder": "pcengine",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".pce",
+      ".zip"
+     ]
+    },
+    "ngp": {
+     "folder": "ngp",
+     "extensions": [
+      ".7z",
+      ".ngp",
+      ".zip"
+     ]
+    },
+    "ngpc": {
+     "folder": "ngpc",
+     "extensions": [
+      ".7z",
+      ".ngc",
+      ".zip"
+     ]
+    },
+    "wonderswan": {
+     "folder": "wonderswan",
+     "extensions": [
+      ".7z",
+      ".ws",
+      ".zip"
+     ]
+    },
+    "wonderswancolor": {
+     "folder": "wonderswancolor",
+     "extensions": [
+      ".7z",
+      ".wsc",
+      ".zip"
+     ]
+    },
+    "atari2600": {
+     "folder": "atari2600",
+     "extensions": [
+      ".7z",
+      ".a26",
+      ".bin",
+      ".zip"
+     ]
+    },
+    "atari7800": {
+     "folder": "atari7800",
+     "extensions": [
+      ".7z",
+      ".a78",
+      ".bin",
+      ".zip"
+     ]
+    },
+    "atarilynx": {
+     "folder": "atarilynx",
+     "extensions": [
+      ".7z",
+      ".lnx",
+      ".zip"
+     ]
+    },
+    "virtualboy": {
+     "folder": "virtualboy",
+     "extensions": [
+      ".7z",
+      ".vb",
+      ".zip"
+     ]
+    },
+    "colecovision": {
+     "folder": "coleco",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".col",
+      ".rom",
+      ".zip"
+     ]
+    }
+   }
+  },
+  "treefrogui": {
+   "source": "Carte SF3000 HD reelle (D:\roms) + docs/cores.md present sur la carte",
+   "source_date": "2026-09-25",
+   "verified_on_hardware": true,
+   "systems": {
+    "nes": {
+     "folder": "nes",
+     "extensions": null
+    },
+    "fds": {
+     "folder": "fds",
+     "extensions": null
+    },
+    "snes": {
+     "folder": "snes",
+     "extensions": null
+    },
+    "gb": {
+     "folder": "gb",
+     "extensions": null
+    },
+    "gbc": {
+     "folder": "gb",
+     "extensions": null
+    },
+    "gba": {
+     "folder": "gba",
+     "extensions": null
+    },
+    "megadrive": {
+     "folder": "sega",
+     "extensions": null
+    },
+    "mastersystem": {
+     "folder": "sega",
+     "extensions": null
+    },
+    "gamegear": {
+     "folder": "gg",
+     "extensions": null
+    },
+    "sega32x": {
+     "folder": "32x",
+     "extensions": null
+    },
+    "pcengine": {
+     "folder": "pce",
+     "extensions": null
+    },
+    "ngp": {
+     "folder": "ngpc",
+     "extensions": null
+    },
+    "ngpc": {
+     "folder": "ngpc",
+     "extensions": null
+    },
+    "wonderswan": {
+     "folder": "wswan",
+     "extensions": null
+    },
+    "wonderswancolor": {
+     "folder": "wswan",
+     "extensions": null
+    },
+    "atari2600": {
+     "folder": "a26",
+     "extensions": null
+    },
+    "atari7800": {
+     "folder": "a78",
+     "extensions": null
+    },
+    "atarilynx": {
+     "folder": "lnx",
+     "extensions": null
+    },
+    "virtualboy": {
+     "folder": "vb",
+     "extensions": null
+    },
+    "colecovision": {
+     "folder": "col",
+     "extensions": null
+    }
+   }
+  }
+ }
+}

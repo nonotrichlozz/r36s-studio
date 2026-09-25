@@ -331,6 +331,23 @@ def _tile_icon_duplicates(painter: QPainter, rect: QRect, color: QColor) -> None
     painter.drawRoundedRect(front, round(2 * s), round(2 * s))
 
 
+def _tile_icon_sort(painter: QPainter, rect: QRect, color: QColor) -> None:
+    """« Ranger mes jeux » (docs/tri-roms.md) : trois rayonnages empilés,
+    chacun avec un jeu rangé -- un dossier par console."""
+    s = _icon_scale(rect)
+    painter.setPen(_icon_pen(color, rect))
+    painter.setBrush(Qt.NoBrush)
+    left = rect.left() + round(2 * s)
+    right = rect.right() - round(2 * s)
+    shelf_height = round(6 * s)
+    top = rect.top() + round(3 * s)
+    for index in range(3):
+        y = top + index * (shelf_height + round(2 * s))
+        painter.drawLine(left, y + shelf_height, right, y + shelf_height)
+        box_left = left + round((2 + 5 * index) * s)
+        painter.drawRect(box_left, y + round(1 * s), round(4 * s), shelf_height - round(1 * s))
+
+
 def _tile_icon_inject_boot(painter: QPainter, rect: QRect, color: QColor) -> None:
     s = _icon_scale(rect)
     painter.setPen(_icon_pen(color, rect))
@@ -432,6 +449,7 @@ _TILE_ICON_PAINTERS = {
     "flash": _tile_icon_flash,
     "copy_games": _tile_icon_copy_games,
     "duplicates": _tile_icon_duplicates,
+    "sort": _tile_icon_sort,
     "inject_boot": _tile_icon_inject_boot,
     "eject": _tile_icon_eject,
     "android": _tile_icon_android,
@@ -2473,6 +2491,9 @@ _ASSISTED_TILE_SPECS = [
     # autonome (n'importe quel dossier -- PC, carte SD ou disque externe,
     # docs/doublons.md), plus de rapport avec la carte détectée.
     ("duplicates", "assisted_tile_find_duplicates", "tile", "find_duplicates_requested", None, 1),
+    # « Ranger mes jeux » (docs/tri-roms.md) -- à côté du dédoublonnage,
+    # même nature : outil autonome sur un dossier, sans badge de statut.
+    ("sort", "assisted_tile_sort_games", "tile", "sort_games_requested", None, 1),
     ("eject", "assisted_tile_eject", "tile", "eject_requested", EJECT, 1),
     ("reset_card", "assisted_tile_reset_card", "tileDestructive", "reset_card_requested", None, 1),
     ("help", "assisted_tile_help", "tile", "help_requested", None, 1),
@@ -2568,6 +2589,7 @@ class AssistedLandingScreen(Screen):
     flash_requested = Signal()
     copy_games_requested = Signal()
     find_duplicates_requested = Signal()
+    sort_games_requested = Signal()
     eject_requested = Signal()
     reset_card_requested = Signal()
     help_requested = Signal()

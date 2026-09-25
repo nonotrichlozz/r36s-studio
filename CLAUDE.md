@@ -99,6 +99,7 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 | `android/` (ADB) | `docs/android-adb.md` |
 | `consoles_diverses/` | `r36s_studio/consoles_diverses/CLAUDE.md`, `docs/consoles-diverses-design.md`, `docs/consoles-diverses-recherche.md` |
 | `doublons/` | `docs/doublons.md`, `docs/doublons-selection.md` |
+| `tri/`, `gui/tri_screen.py` (Ranger mes jeux, tables de dossiers par firmware) | `docs/tri-roms.md` |
 
 **Garde-fou `safety/` (toujours applicable)** — un périphérique est **refusé**
 (absent de la liste, pas seulement grisé) si : `is_system` ou contient la

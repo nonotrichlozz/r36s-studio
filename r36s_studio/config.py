@@ -47,11 +47,9 @@ _VALID_UI_MODES = {"assisted", "expert"}
 # principe de repli silencieux sur la valeur par défaut. Dérivé du
 # catalogue (`identify/firmware_catalog.py`) plutôt qu'un second ensemble
 # à resynchroniser à la main à chaque ajout d'entrée. ROCKNIX plutôt
-# qu'ArkOS par défaut : ArkOS est désormais archivé (§4.6) -- un vrai
-# changement de comportement pour toute installation qui n'a jamais
-# choisi explicitement de firmware, volontaire ici plutôt que de
-# continuer à proposer par défaut un firmware qu'on affiche par ailleurs
-# comme archivé.
+# qu'ArkOS par défaut : c'est le seul firmware téléchargeable
+# automatiquement (identify/rocknix.py) -- dArkOS, maintenu, n'attache
+# aucune image à ses releases GitHub (§4.6).
 DEFAULT_FIRMWARE = "rocknix"
 _VALID_FIRMWARES = set(FIRMWARE_BY_ID)
 

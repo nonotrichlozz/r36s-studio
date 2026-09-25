@@ -26,8 +26,10 @@ def test_every_entry_has_a_valid_status():
         assert entry.status in ("maintained", "archived", "experimental")
 
 
-def test_arkos_is_archived():
-    assert FIRMWARE_BY_ID["arkos"].status == "archived"
+def test_arkos_is_maintained():
+    # L'entrée pointe vers dArkOS (southoz/dArkOSRE-R36), maintenu -- seul
+    # le projet ArkOS d'origine est archivé.
+    assert FIRMWARE_BY_ID["arkos"].status == "maintained"
 
 
 def test_every_title_and_desc_key_resolves():

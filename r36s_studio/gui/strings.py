@@ -162,7 +162,9 @@ STRINGS = {
     "identify_result_catalog_button": "Voir le catalogue des consoles",
     "identify_result_clone_warning": (
         "Cette carte semble être une console clone (matériel différent d'une R36S/R35S standard). "
-        "ArkOS et ROCKNIX ne démarrent généralement pas dessus -- EmuELEC, lui, fonctionne."
+        "Les systèmes prévus pour la R36S standard peuvent ne pas démarrer dessus. "
+        "dArkOS et EmuELEC annoncent prendre en charge ces consoles ; "
+        "EmuELEC a été vérifié sur une vraie console clone."
     ),
     "identify_failed_mount_failed": (
         "Impossible de lire le système de la carte. Débranche-la et rebranche-la, puis réessaie."
@@ -464,17 +466,19 @@ STRINGS = {
     "firmware_status_experimental": "Expérimental",
     "file_firmware_arkos_title": "ArkOS / dArkOS",
     "file_firmware_arkos_desc": (
-        "Figée depuis fin 2025 : aucune mise à jour officielle. La version "
-        "communautaire pour R36S (dArkOS) reste installable."
+        "Le système de référence pour la R36S, qui annonce aussi prendre en "
+        "charge de nombreuses consoles clones. Mis à jour par la communauté (dArkOS)."
     ),
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
-    # EmuELEC (§4.6) -- consoles clones uniquement : ArkOS et ROCKNIX
-    # standard ne démarrent pas sur ce matériel (identify/__init__.py::
-    # CLONE_DTB_FILENAMES). Pas de correspondance d'assets par SoC
-    # vérifiée à ce jour pour la R36S/RK3326, contrairement à ROCKNIX.
+    # EmuELEC (§4.6) -- seul fait vérifié : il démarre sur un clone réel
+    # (identify/__init__.py::CLONE_DTB_FILENAMES). L'ancienne mention
+    # « ArkOS et ROCKNIX n'y démarrent pas » est retirée : dArkOS prend en
+    # charge de nombreux clones (README de southoz/dArkOSRE-R36, vérifié
+    # le 2026-09-25). Pas de correspondance d'assets par SoC vérifiée à ce
+    # jour pour la R36S/RK3326, contrairement à ROCKNIX.
     "file_firmware_emuelec_title": "EmuELEC",
-    "file_firmware_emuelec_desc": "Pour les consoles clones : ArkOS et ROCKNIX n'y démarrent pas.",
+    "file_firmware_emuelec_desc": "Une autre option pour les consoles clones, déjà testée avec succès sur l'une d'elles.",
     # AmberELEC/MinUI/R36Droid/andr36oid (§4.6) -- ajoutés au catalogue
     # sans compatibilité R36S officiellement confirmée par leur projet
     # (vérifié sur leurs pages de releases avant l'ajout) : descriptions

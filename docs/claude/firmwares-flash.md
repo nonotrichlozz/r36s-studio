@@ -43,7 +43,7 @@ ce code avant l'élargissement : le bouton « Voir les versions
 disponibles » retombait déjà silencieusement sur l'URL ArkOS pour tout
 firmware non reconnu — corrigé au passage, `main_window.py::
 _on_releases_requested` n'ouvre plus rien pour un id absent du
-catalogue). Sept entrées : **ArkOS / dArkOS** (archivé), **ROCKNIX**
+catalogue). Sept entrées : **ArkOS / dArkOS** (maintenu), **ROCKNIX**
 (maintenu), **EmuELEC** (expérimental, consoles clones), **AmberELEC**,
 **MinUI**, **R36Droid** et **andr36oid** (ces quatre derniers
 expérimentaux — voir plus bas). Chaque entrée affiche une pastille de
@@ -52,16 +52,19 @@ les couleurs vert/gris-bleu/orange déjà en place pour les pastilles
 d'étape — une seule couleur d'accent, §5). Le choix est mémorisé d'un
 lancement à l'autre (`config.py::AppConfig.firmware`, `_VALID_FIRMWARES`
 dérivé du catalogue plutôt qu'un second ensemble à resynchroniser à la
-main). Défaut : **ROCKNIX** (`DEFAULT_FIRMWARE`), pas ArkOS — un vrai
-changement de comportement pour toute installation qui n'a jamais
-choisi explicitement de firmware, volontaire puisqu'ArkOS est désormais
-archivé (ci-dessous) et ROCKNIX la seule entrée maintenue.
+main). Défaut : **ROCKNIX** (`DEFAULT_FIRMWARE`), pas ArkOS — seul firmware
+téléchargeable automatiquement (dArkOS n'attache aucune image à ses
+releases, ci-dessous).
 
-**ArkOS archivé** : le projet officiel est figé en lecture seule
-depuis décembre 2025 ; la version communautaire pour R36S (dArkOS,
-`southoz/dArkOSRE-R36`) reste installable et est celle vers laquelle
-pointe déjà le bouton de téléchargement — reste choisissable, jamais
-retiré du catalogue, seul son statut affiché change.
+**dArkOS maintenu, ArkOS d'origine archivé** : seul le projet ArkOS
+officiel est figé en lecture seule depuis décembre 2025. L'entrée
+pointe vers la version communautaire (dArkOS, `southoz/dArkOSRE-R36`),
+vérifiée sur l'API GitHub le 2026-09-25 : non archivée, ~640 étoiles,
+dernière release `dArkOSRE-R36(03082026)` publiée le 2026-03-10 (tag au
+format **MMJJAAAA** : 8 mars, pas 3 août), dernier commit le 2026-05-01,
+R36S et clones (G80CA, R36 Max/Ultra/Plus, V20) en cours d'ajout —
+statut « maintenu » (ancien statut « archivé » : erreur, il décrivait
+le projet d'origine, pas celui vers lequel pointe l'entrée).
 
 **Nouvelles entrées (phase 10), toutes en lien manuel comme ArkOS —
 aucune n'a de téléchargement automatique.** Vérifié individuellement
@@ -87,7 +90,8 @@ Les deux dépôts ne se prêtent pas au même traitement, ce qui explique la
 dissymétrie entre les deux options :
 - **dArkOS** (`identify/releases.py`) : les images ne sont pas hébergées
   sur GitHub (elles renvoient vers Mega, Google Drive, OneDrive, un
-  torrent) — comportement inchangé, le bouton se contente d'ouvrir
+  torrent) — revérifié le 2026-09-25 sur les six dernières releases :
+  aucun asset attaché, seul le `.torrent` est dans le dépôt. Comportement inchangé, le bouton se contente d'ouvrir
   `https://github.com/southoz/dArkOSRE-R36/releases` dans le navigateur,
   l'utilisateur télécharge et choisit le fichier lui-même.
 - **ROCKNIX** (`identify/rocknix.py`) : le dépôt
@@ -143,8 +147,12 @@ conséquence** :
 
 **Consoles clones et EmuELEC (phase 9), critère validé par l'outil
 officiel ArkOS.** Certaines cartes vendues comme R36S sont en réalité
-des clones (matériel RK3326 différent) sur lesquels les images ArkOS et
-ROCKNIX standard ne démarrent pas — EmuELEC, lui, fonctionne (structure
+des clones (matériel RK3326 différent) sur lesquels les images prévues
+pour la R36S standard peuvent ne pas démarrer. dArkOS et EmuELEC
+annoncent prendre en charge ces consoles ; **seul EmuELEC est vérifié**
+sur un clone réel (dArkOS jamais testé sur clone, messages GUI/CLI
+volontairement neutres depuis le 2026-09-25 — ils recommandaient
+EmuELEC seul en affirmant qu'ArkOS ne démarrait pas) (structure
 relevée sur du vrai matériel : partition de démarrage FAT32 étiquetée
 EMUELEC de 1,1 Go contenant `KERNEL`/`SYSTEM`/`boot.ini`/`extlinux/`,
 partition Linux de 5,4 Go, partition de jeux en FAT32 de 25,5 Go — donc

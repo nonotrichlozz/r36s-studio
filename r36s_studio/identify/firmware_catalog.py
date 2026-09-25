@@ -85,16 +85,20 @@ class FirmwareEntry:
     releases_url: Optional[str] = None
 
 
-# ArkOS : archivé en lecture seule depuis décembre 2025 (le dépôt
-# communautaire southoz/dArkOSRE-R36 reste la version installable pour
-# R36S depuis juin 2026, ci-dessus) -- reste choisissable, jamais retiré
-# du catalogue, seul son statut change.
+# ArkOS : seul le projet d'origine est archivé (lecture seule depuis
+# décembre 2025). L'entrée pointe vers dArkOS (southoz/dArkOSRE-R36),
+# vérifié sur l'API GitHub le 2026-09-25 : non archivé, dernière release
+# `dArkOSRE-R36(03082026)` publiée le 2026-03-10 (tag au format
+# MMJJAAAA, soit le 8 mars et non le 3 août), dernier commit le
+# 2026-05-01, R36S et clones G80CA/R36 Max/Ultra en cours d'ajout --
+# d'où « maintenu ». Toujours en lien manuel : aucune image attachée aux
+# releases (Mega, Google Drive, OneDrive, torrent).
 FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
     FirmwareEntry(
         "arkos",
         "file_firmware_arkos_title",
         "file_firmware_arkos_desc",
-        status="archived",
+        status="maintained",
         releases_url=DARKOS_R36S_RELEASES_URL,
     ),
     FirmwareEntry(

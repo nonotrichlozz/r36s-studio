@@ -939,7 +939,9 @@ def cmd_identify(args: argparse.Namespace) -> int:
 
     if result.is_clone:
         print("Console clone détectée (nom de .dtb, critère validé par l'outil officiel ArkOS) : "
-              "ArkOS et ROCKNIX standard ne démarrent pas sur ce matériel, EmuELEC est recommandé.")
+              "les systèmes prévus pour la R36S standard peuvent ne pas démarrer sur ce matériel ; "
+              "dArkOS et EmuELEC annoncent prendre en charge ces consoles, "
+              "EmuELEC a été vérifié sur un clone réel.")
 
     if result.info is not None:
         print(f"Carte identifiée : {result.info.board_compatible}")

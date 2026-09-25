@@ -598,3 +598,46 @@ nouveau minuteur, défensivement.
 
 ---
 
+---
+
+## Ajouté lors du découpage de CLAUDE.md (2026-09-25)
+
+> Récits déplacés tels quels depuis l'ancien `CLAUDE.md` (commit `930f3c9`). Les renvois « §N » désignent ses sections.
+
+⚠️ **Bug corrigé, signalé par un utilisateur : l'estimation échouait
+avec `[Errno 13] Permission denied: '/dev/disk2'`.** Cause :
+`SystemBackupEstimateRunner` tournait sur un `QThread` ordinaire, sans
+élévation (§3 — seul le worker l'a), et appelait `compute_system_
+boundary`, qui ouvre le périphérique brut (`open(device_path, "rb")`)
+pour lire la table de partitions exacte — nécessaire à la copie réelle,
+mais pas à une simple estimation.
+
+⚠️ **Bug corrigé, confirmé en relisant le code après le rapport
+ci-dessus : le Continuer du vrai parcours guidé pouvait afficher la
+fenêtre Confirmation avec la mauvaise carte, court-circuitant la
+vérification d'empreinte (§5, § pré-vol n°3).** Rapporté comme : image
+système extraite d'une carte de 128 Go, carte cible de 32 Go insérée,
+message de confirmation annonçant pourtant la perte des données de la
+carte de 128 Go. Cause réelle : `_on_wizard_continue`
+(`gui/main_window.py`) vérifie en tout premier `self._prepare_card_
+candidate` (`Optional[Device]`, propre au parcours ponctuel « Préparer
+une carte avec cette sauvegarde », §4.3) pour décider si le clic
+concerne ce parcours ad-hoc plutôt que le vrai parcours guidé --
+mais `_start_wizard()` ne réinitialisait jamais ce champ (ni
+`_assisted_ad_hoc_active`, ni `_prepare_card_poll_timer`) au démarrage
+du vrai parcours. Un passage antérieur par le parcours ad-hoc laissant
+une carte candidate détectée sans retour explicite à l'accueil (les
+deux seuls chemins qui réinitialisaient déjà ce champ, `_cancel_wizard`
+et `_on_assisted_ad_hoc_return_home`) laissait donc `_prepare_card_
+candidate` non `None` pour toute la suite de la session -- y compris
+pendant un vrai parcours de clonage démarré ensuite. Le Continuer de
+l'étape 3 (détection de la carte cible, qui active ce même bouton une
+fois une carte trouvée -- comme l'étape 1) se retrouvait alors détourné
+vers `_proceed_to_flash_confirmation()` avec la carte candidate
+périmée, **sans jamais passer par `_enter_wizard_restore_image_step`**
+-- ni son affectation `self._mode = "flash"`, ni sa vérification de
+taille de destination (`estimate_total_bytes`, § pré-vol n°2) : les
+deux étaient simplement absentes de ce chemin détourné, pas en défaut
+elles-mêmes (vérifié séparément : `estimate_total_bytes` sur un `.img`
+brut renvoie bien `os.path.getsize()` du fichier, jamais une taille de
+périphérique).

@@ -548,3 +548,37 @@ combine les trois requêtes en une seule invocation PowerShell (un objet
 fois par sondage plutôt que trois. `_build` accepte désormais directement
 les objets déjà désérialisés (`combined.get("Disks")`, etc.) plutôt que des
 chaînes JSON brutes.
+
+---
+
+## Ajouté lors du découpage de CLAUDE.md (2026-09-25)
+
+> Récits déplacés tels quels depuis l'ancien `CLAUDE.md` (commit `930f3c9`). Les renvois « §N » désignent ses sections.
+
+⚠️ **Bug corrigé sur du vrai matériel** : cette détection ne se déclenchait
+pas — `copy-games` échouait avec `[Errno 30] Read-only file system` au lieu
+du refus explicite. Cause : `diskutil info -plist` ne renvoie pas
+systématiquement la chaîne exacte `ntfs` pour `FilesystemType` (variante de
+casse, ou nom de type de partition `Windows_NTFS`), et la comparaison
+stricte `== "ntfs"` échouait silencieusement. `_macos_filesystem` normalise
+désormais toute variante contenant `ntfs` (`FilesystemType` et `Content`,
+insensible à la casse) vers la valeur canonique `"ntfs"`. En complément,
+`partitions/copy.py` vérifie maintenant l'inscriptibilité réelle du point
+de montage (écriture d'un fichier sonde) *avant* toute copie, quel que
+soit l'OS ou le système de fichiers — filet de sécurité générique pour
+tout futur cas de détection erronée, pas seulement celui-ci.
+
+⚠️ **Bug corrigé, confirmé sur du vrai matériel : « carte défaillante »
+affiché à tort à l'étape 2 (identification) sous Windows.** Rapporté sur
+un ThinkPad avec lecteur SD Realtek intégré : le journal montrait
+`PartitionNotMounted` (« délai dépassé ») pour `BOOT`, alors que
+`Get-Volume` confirme que la partition (FAT32, 115 Mo) existe et est
+parfaitement lisible — elle n'a simplement pas de lettre de lecteur.
+Cause de fond : contrairement à macOS/Linux, où `locate_mounted` retente
+activement un montage (`_mount_macos`/`_mount_linux`) avant d'abandonner,
+Windows n'a *aucune* tentative active dans la boucle — `_list_windows`
+attend passivement qu'une lettre apparaisse, ce qui n'arrive jamais pour
+une partition que Windows ne juge pas devoir monter spontanément (rien à
+voir avec un défaut matériel). Le message `MOUNT_FAILED` (« carte
+défaillante, courant sur les cartes fournies avec la console »),
+initialement pensé pour ce cas macOS/Linux, était donc trompeur ici.

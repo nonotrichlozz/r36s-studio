@@ -383,3 +383,157 @@ durait -- exactement le symptôme rapporté (« constate sans corriger »).
   le cycle de vie du sondage visible dans le journal sans avoir à
   instrumenter le code à chaque doute (même principe que la ligne de
   commande complète journalisée pour tout worker élevé, §4.3).
+
+---
+
+## Ajouté lors du découpage de CLAUDE.md (2026-09-25)
+
+> Récits déplacés tels quels depuis l'ancien `CLAUDE.md` (commit `930f3c9`). Les renvois « §N » désignent ses sections.
+
+⚠️ **Bug corrigé au passage : l'échec final s'affichait comme « Une
+erreur est survenue. », message générique inutile pour diagnostiquer
+quoi que ce soit après coup.** Cause : six codes d'erreur réellement
+émis par le worker élevé (`__main__.py::emit_error`) --
+`OUTPUT_EXISTS`, `IMAGE_NOT_FOUND`, `IO_ERROR`, `UNSUPPORTED_OS`,
+`CONFIRMATION_REFUSED`, `INVALID_ARGS` -- n'avaient jamais été ajoutés à
+`gui/strings.py::_ERROR_MESSAGE_KEYS`, retombant systématiquement sur
+`error_generic` au lieu d'un message précis. `IO_ERROR` en particulier
+est le repli générique de la quasi-totalité des commandes CLI pour une
+erreur disque/E-S imprévue (carte débranchée en cours de copie,
+permission refusée...) -- le plus susceptible d'apparaître en usage
+réel de tous les codes qui manquaient, et une explication plausible du
+message générique vu pendant ce même test (le clic détourné ci-dessus
+relance `backup`/`backup_system` sur un fichier de sortie déjà créé par
+l'étape précédente, ce qui échoue côté CLI avec `OUTPUT_EXISTS`).
+
+⚠️ **Correction de conception, en deux temps : le terminal
+d'activité disque en temps réel de l'écran de la console a été retiré
+à tort, puis rétabli une fois la vraie cause du ralentissement
+identifiée.** Ajouté pour afficher, en direct sur l'écran de
+`console.png`, une ligne par événement de progression réel (offset
+hexadécimal, taille de bloc, débit) -- `ConsoleTerminalOverlay`
+(`gui/screens.py`), alimentée par `MainWindow._on_progress`. Une
+sauvegarde système mesurée à ~85 Mo/s est retombée à ~6-8 Mo/s peu
+après son ajout (7 min -> 20 min) -- confondu avec une régression
+causée par ce terminal. Un premier correctif de repeint (cadencé à
+33 ms via un `QTimer` dédié plutôt qu'un `self.update()` synchrone à
+chaque événement, police mise en cache) n'a rien changé au débit
+mesuré -- ce qui aurait dû alerter plus tôt que le terminal n'était
+pas en cause, plutôt que de le retirer entièrement dans un second
+temps.
+
+**Cause réelle, trouvée en bissectant par mesure du débit CLI pur
+(sans la moindre interface, donc sans ce terminal, éliminé comme
+variable) :** une carte SD d'origine de la console (non-marque,
+chinoise), pas un défaut logiciel -- voir la mise en garde générale,
+§8. Confirmé sur du vrai matériel : ~88,5 Mo/s en CLI sur la branche
+principale avec une carte SanDisk, sur le même port, la même machine,
+la même commande -- aucune régression de code n'a jamais existé.
+Piste environnementale (disque de destination plein/fragmenté, Avast)
+également écartée avant d'en arriver là : 222 Go libres sur le disque
+externe, débit inchangé Avast désactivé, et le même débit lent observé
+aussi bien sur une carte de 128 Go que sur une de 32 Go pour la carte
+d'origine en cause.
+
+**Leçon retenue** : ne jamais accuser un changement récent sur la seule
+foi d'une corrélation temporelle avant d'avoir isolé les autres
+variables (matériel, environnement) -- surtout quand un premier
+correctif censé régler la cause suspectée ne change rien au symptôme
+mesuré, ce qui est en soi un signal fort que l'hypothèse est fausse.
+
+**L'image de la console (photo de face, `gui/assets/console.png`) et sa
+découpe restent inchangées** -- le rectangle d'écran calibré pour y
+placer le terminal (`_SCREEN_RECT_FRACTIONS`) redevient utile tel quel.
+Remplacement de l'image (rappel) : photo source fournie par
+l'utilisateur (`IMG_20260906_105401.png`, 2000x4452, vue de face, écran
+rectangulaire, la console n'y occupant qu'environ un tiers de la
+hauteur). Écart constaté en la traitant : le fond n'était pas
+réellement transparent contrairement à ce qui était attendu (vérifié
+directement sur les pixels, `(255, 255, 255, 255)` partout) -- détourée
+par remplissage par propagation (`scipy.ndimage.label`, seules les
+composantes connexes touchant le bord de l'image retirées, pour ne
+jamais créer de trou dans un reflet clair isolé à l'intérieur de la
+console) puis un léger flou du canal alpha pour adoucir le contour ;
+recadrée à la boîte englobante du canal alpha (+5 % de marge) et
+réduite à 900 px de haut (595x900, contre 499x500 avant). `MainView`
+(expert) et `AssistedLandingScreen` (assisté) chargent toujours le même
+fichier via `build_console_stage()`/`asset_paths.asset_path
+("console.png")` -- aucun changement de code nécessaire pour que
+l'image comme le terminal s'appliquent aux deux. `packaging/*.spec`
+(trois fichiers) référencent déjà `"console.png"` par ce nom exact,
+inchangé.
+
+✅ **Vérifié, sur signalement du binaire empaqueté ouvrant en mode expert** :
+`config_dir()` résout `~/.config/r36s-studio/` (macOS/Linux) ou
+`%APPDATA%\r36s-studio\` (Windows) via `Path.home()`/`os.environ`, sans
+branche `sys.frozen` -- même fichier lu par le binaire empaqueté et par les
+sources, sur la même machine. `load_config()` retombe bien sur `AppConfig()`
+(`ui_mode="assisted"`) dès que le fichier est absent ou invalide, testé
+explicitement. Le mode expert observé provenait d'un `config.json` déjà
+présent sur la machine de test, écrit par un essai manuel antérieur du
+bouton « Mode expert » -- persistance attendue, pas un défaut du binaire.
+
+   **Premier correctif tenté (`is_same_card_or_unverifiable`, repli sur
+   `device.path`), non fonctionnel en pratique -- retiré.** Confirmé sur
+   du vrai matériel après coup : le lecteur de carte SD Realtek intégré
+   utilisé pour tester ce parcours (déjà rencontré ailleurs dans ce
+   projet, §4.1/§4.4) garde le *même* `\\.\PhysicalDrive1` quelle que
+   soit la carte insérée -- la sauvegarde (carte source 128 Go) et le
+   flash (carte cible 32 Go) apparaissaient donc sous le même chemin
+   dans les traces d'élévation, alors qu'il s'agit bien de deux cartes
+   physiques différentes. Un repli qui bloque sur un chemin identique
+   bloquait donc *indéfiniment* sur ce type de lecteur, sans aucune
+   issue -- pire que le problème d'origine (un garde-fou inutilisable
+   plutôt qu'un garde-fou dégradé). Restait aussi le trou signalé
+   séparément : deux cartes de même capacité (cas courant en préparant
+   plusieurs consoles) ont le même `size_bytes`, un signal tout aussi
+   inutilisable seul.
+
+⚠️ **Bug corrigé dans le diagnostic lui-même, confirmé sur du vrai
+matériel : le chien de garde ci-dessus se déclenchait en boucle et
+noyait le journal, deux faux positifs distincts.** Journal réel après
+une sauvegarde complète : une première ligne signalant un arrêt de
+615 s juste après la reprise du sondage à l'étape 3 (« légitimement en
+pause pendant les 10 min de sauvegarde, c'est le comportement voulu »),
+puis la même ligne répétée toutes les 6 à 12 s, indéfiniment, tant que
+la carte neuve n'était pas encore branchée.
+
+**Cause** : `_check_wizard_poll_stall` comparait chaque sondage réel au
+tout dernier, sans distinguer un arrêt anormal d'une pause *voulue* du
+minuteur -- or `_wizard_poll_timer` s'arrête légitimement à plusieurs
+endroits déjà documentés dans ce fichier : pendant toute l'étape
+CREATE_IMAGE (une sauvegarde de plusieurs minutes, aucun sondage
+n'ayant de sens pendant ce temps), et à *chaque* cycle « même carte que
+la source, on continue d'attendre » de l'étape DETECT_TARGET
+(`_on_wizard_fingerprint_ready`), où le minuteur est arrêté le temps de
+calculer l'empreinte (montage/démontage du BOOT, plusieurs secondes)
+puis relancé -- rien de tel qu'un arrêt réel du sondage, juste son
+fonctionnement normal en boucle tant que l'utilisateur n'a pas encore
+échangé les cartes. Comparer le premier sondage suivant chacune de ces
+pauses à celui d'*avant* la pause produisait à chaque fois un écart
+artificiellement énorme.
+
+**Corrigé** : `MainWindow._start_wizard_poll_timer` (nouveau point de
+passage unique pour redémarrer `_wizard_poll_timer`, remplace les
+quatre appels directs à `.start()` du fichier) réinitialise
+`_wizard_last_poll_monotonic` au moment précis de chaque redémarrage --
+plus seulement dans `_start_wizard` comme avant. Une pause volontaire,
+quelle que soit sa durée, ne compte donc plus jamais comme un arrêt
+anormal : seul un écart entre deux sondages *au sein d'une même
+période d'activité continue* du minuteur peut désormais dépasser le
+seuil. Deux tests dédiés (`tests/test_gui_main_window.py::
+test_wizard_poll_stall_diagnostic_does_not_fire_after_a_legitimate_
+pause_for_backup` et `..._does_not_fire_across_repeated_same_card_
+fingerprint_checks`) rejouent chacun des deux scénarios rapportés et
+confirment qu'aucune ligne n'est journalisée dans ces deux cas -- tout
+en gardant `test_wizard_poll_logs_a_stall_when_gap_far_exceeds_the_
+normal_interval` pour vérifier qu'un vrai arrêt (au sein d'une même
+période d'activité) est toujours signalé.
+
+Le mécanisme et le seuil (6 s) eux-mêmes restent inchangés -- c'est
+uniquement le calcul de la référence qui était en cause, pas la logique
+de comparaison. La question d'origine (le sondage automatique reste-t-il
+réellement bloqué après un retour à l'accueil puis une relance, cas non
+reproduit en isolation, ci-dessus) reste donc tout aussi ouverte
+qu'avant -- ce correctif rend seulement le diagnostic utilisable pour y
+répondre, en éliminant le bruit qui aurait masqué un vrai signal.

@@ -58,3 +58,18 @@
 
 ---
 
+---
+
+## Ajouté lors du découpage de CLAUDE.md (2026-09-25)
+
+> Récits déplacés tels quels depuis l'ancien `CLAUDE.md` (commit `930f3c9`). Les renvois « §N » désignent ses sections.
+
+⚠️ **Bug corrigé, constaté en lançant réellement le binaire Windows : il
+plantait dès le double-clic** (`FileNotFoundError` sur
+`doublons/data/extensions.json`, lu à l'import de `doublons/extensions.py`,
+lui-même importé par `__main__.py`). Le fichier n'était déclaré dans aucun
+des trois spec -- invisible pour la suite de tests, qui tourne depuis les
+sources. Ajouté aux trois spec (sans condition `.exists()` : obligatoire,
+son absence fait échouer la construction plutôt que le binaire), et
+`tests/test_packaging_specs.py` vérifie désormais que tout fichier non-Python
+du paquet est déclaré dans chaque spec.

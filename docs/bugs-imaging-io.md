@@ -210,3 +210,70 @@
 
 ---
 
+---
+
+## Ajouté lors du découpage de CLAUDE.md (2026-09-25)
+
+> Récits déplacés tels quels depuis l'ancien `CLAUDE.md` (commit `930f3c9`). Les renvois « §N » désignent ses sections.
+
+**Décompression native du `.7z` (py7zr) envisagée, non retenue.**
+Deux obstacles, l'un architectural et l'autre de poids :
+- **Streaming.** `open_image_source`/`copy_range` (§4.3 ci-dessus)
+  décompressent `.gz`/`.xz` en flux, bloc par bloc, sans fichier
+  temporaire — c'est ce qui permet de flasher une image de plusieurs Go
+  sans espace disque supplémentaire. py7zr expose une API d'extraction
+  (`SevenZipFile.read()`/`extractall()`) qui matérialise le contenu en
+  mémoire ou sur disque plutôt qu'un flux lisible bloc par bloc comme
+  `gzip.open`/`lzma.open` — l'intégrer proprement demanderait soit de
+  charger l'image entière en mémoire (rédhibitoire pour 2-6 Go, §1),
+  soit d'extraire vers un fichier temporaire (doublant l'espace disque
+  nécessaire, et contraire au principe "sans fichier temporaire" déjà en
+  place pour `.gz`/`.xz`).
+- **Poids.** py7zr tire plusieurs dépendances C (`pyzstd`, `pyppmd`,
+  `pycryptodomex`, `brotli`...) pour couvrir tous les filtres 7-Zip
+  possibles, alors qu'un seul (LZMA2) est en jeu ici — poids ajouté au
+  binaire empaqueté (§6) sur les trois OS, pour un problème qu'un
+  message clair au bon moment résout déjà sans nouvelle dépendance.
+
+Ni l'un ni l'autre n'est bloquant en soi, mais combinés ils ne justifient
+pas le coût face à la solution déjà en place (détection + message +
+avertissement préalable, ci-dessus). À revisiter si l'utilisateur le
+demande explicitement malgré ce compromis — l'évaluation n'a pas été
+vérifiée en installant réellement py7zr dans ce dépôt (pas d'accès
+réseau au moment d'écrire cette note) : le poids exact des dépendances
+et les capacités précises de l'API de streaming restent à confirmer si
+cette décision est reconsidérée.
+
+⚠️ **Bug corrigé, constaté en conditions réelles** (flash d'une image
+`ArkOS_R35S-R36S_v2.0_11072025_MultiPanel.img.xz`) : la barre de
+progression affichait 100 % et le temps restant 0 s dès le premier octet
+écrit, alors que l'écriture durait plusieurs minutes (le débit, lui,
+s'affichait correctement). Cause : `estimate_total_bytes` renvoyait
+toujours `None` pour `.img.xz` (la taille décompressée étant jugée non
+récupérable sans décompression complète), et `copy_range` traite alors la
+copie comme non bornée en rapportant `done` comme `total` — `done ==
+total` était donc vrai dès le premier événement. Corrigé : la taille
+décompressée d'un `.xz` est en fait récupérable sans décompression
+complète, via l'Index au pied de l'archive (format-xz.txt) — comme le
+champ ISIZE le fait déjà pour `.gz`. `image_source._xz_uncompressed_size`
+lit ce pied ; si le format n'est pas standard (fichier tronqué, flux
+multiples...), `flash_device` retombe sur la taille du périphérique cible
+plutôt que de traiter la copie comme non bornée.
+
+⚠️ **Bug corrigé, confirmé sur du vrai matériel par comparaison octet par
+octet** : le flash se déroulait sans erreur, mais la vérification
+SHA-256 qui suit (§4.6) échouait quand même. Diagnostic : les 16 premiers
+Mo de la relecture étaient identiques à la source, la première
+divergence tombait à l'octet 16 778 216 (juste après le début de la
+première partition), et seuls 3 blocs différaient sur les 22 premiers
+Mo — tous dans la zone FAT de la partition BOOT. Cause : `diskutil
+unmountDisk` (`write_target.prepared_write_target`) ne démonte qu'une
+fois, **avant** l'écriture — rien n'empêche macOS de remonter
+automatiquement les partitions juste après, puisque le disque porte
+désormais une table de partitions et des systèmes de fichiers valides
+(ce qu'il n'avait pas forcément avant le flash). Une fois montée, la
+partition BOOT reçoit aussitôt des fichiers d'index système
+(`.Spotlight-V100`, `.fseventsd`, dates d'accès...) que macOS écrit à
+l'ouverture de tout volume — ça modifie, dans la fenêtre entre la fin de
+l'écriture et la relecture de vérification, exactement les octets qu'on
+s'apprête à relire.

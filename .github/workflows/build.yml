@@ -49,10 +49,15 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path "dist/R36S Studio/*" -DestinationPath "R36S-Studio-windows.zip"
 
+      # retention-days : sans limite, les artefacts de chaque push sur main
+      # s'accumulaient jusqu'a saturer le quota de stockage Actions du depot
+      # (echec "Artifact storage quota has been hit"). 7 jours suffisent : le
+      # job release les telecharge pendant le meme run.
       - uses: actions/upload-artifact@v4
         with:
           name: R36S-Studio-windows
           path: R36S-Studio-windows.zip
+          retention-days: 7
 
   macos:
     name: macOS
@@ -85,6 +90,7 @@ jobs:
         with:
           name: R36S-Studio-macos
           path: dist/R36S-Studio-macos.zip
+          retention-days: 7
 
   linux:
     name: Linux
@@ -131,6 +137,7 @@ jobs:
         with:
           name: R36S-Studio-linux
           path: R36S-Studio-linux.tar.gz
+          retention-days: 7
 
   release:
     name: Publier la Release

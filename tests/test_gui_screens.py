@@ -1063,7 +1063,11 @@ def test_assisted_landing_screen_panel_content_is_vertically_centered(qapp):
     bottom_gap = screen._panel.height() - (
         screen._refresh_button.geometry().y() + screen._refresh_button.geometry().height()
     )
-    assert top_gap == bottom_gap
+    # Deux étirements de même facteur se partagent l'espace libre : quand
+    # il est impair, Qt attribue le pixel restant à l'un des deux (constaté
+    # sur la CI macOS, 155 contre 154). Un contenu tassé en haut, le défaut
+    # visé, donnerait un écart bien plus grand.
+    assert abs(top_gap - bottom_gap) <= 1
 
 
 def test_assisted_landing_screen_fits_within_a_1366x728_screen(qapp):

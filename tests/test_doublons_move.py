@@ -80,8 +80,15 @@ def _make_cross_volume(monkeypatch, destination_suffix="_doublons"):
         result = real_stat(path, *args, **kwargs)
         if str(path).endswith(destination_suffix):
 
+            # `move.os` est le module `os` global : ce faux `stat` est aussi
+            # vu par `os.path.exists`/`os.makedirs`, qui lisent `st_mode`
+            # (Python 3.11) -- tout attribut autre que `st_dev` est donc
+            # délégué au vrai résultat.
             class FakeStat:
                 st_dev = result.st_dev + 1
+
+                def __getattr__(self, name):
+                    return getattr(result, name)
 
             return FakeStat()
         return result
@@ -874,6 +881,10 @@ def test_move_duplicates_skips_fat_check_when_filesystem_kind_is_not_fat(tmp_pat
 def test_destination_filesystem_kind_windows_uses_volume_information(tmp_path, monkeypatch):
     monkeypatch.setattr("r36s_studio.doublons.move.platform.system", lambda: "Windows")
     monkeypatch.setattr("r36s_studio.doublons.move._windows_volume_filesystem", lambda root: "FAT32")
+    # Sur la CI Linux/macOS, `splitdrive` ne renvoie jamais de lecteur pour
+    # un chemin POSIX : sans ce faux lecteur, la fonction s'arrêterait avant
+    # même d'interroger `_windows_volume_filesystem`.
+    monkeypatch.setattr("r36s_studio.doublons.move.os.path.splitdrive", lambda p: ("C:", p))
 
     assert destination_filesystem_kind(str(tmp_path)) == "FAT32"
 

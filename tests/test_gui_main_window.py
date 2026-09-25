@@ -845,11 +845,12 @@ def test_copy_games_ad_hoc_from_assisted_landing_offers_next_step_choice(
     assert window._wizard_panel._prepare_card_button.isVisible() is False
 
 
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_eject_ad_hoc_from_assisted_landing_offers_next_step_choice_not_refresh_home(
-    mock_list, mock_filter, mock_load, qapp
+    mock_list, mock_filter, mock_load, mock_detect, qapp
 ):
     """§5, refonte menu de tuiles -- correctif du même défaut de parcours
     déjà corrigé pour les autres tuiles-job : l'éjection ad-hoc doit
@@ -879,9 +880,12 @@ def test_eject_ad_hoc_from_assisted_landing_offers_next_step_choice_not_refresh_
 # --- Tuile « Rechercher ma console » (identification DTB, §5) --------------
 
 
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_start_assisted_identify_single_device_runs_identify_and_shows_result(mock_list, mock_filter, qapp):
+def test_start_assisted_identify_single_device_runs_identify_and_shows_result(
+    mock_list, mock_filter, mock_detect, qapp
+):
     from r36s_studio.identify import IdentifyResult
     from r36s_studio.identify.dtb import DtbInfo
 

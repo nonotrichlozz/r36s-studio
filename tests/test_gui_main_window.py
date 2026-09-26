@@ -819,17 +819,18 @@ def test_backup_system_prepare_card_flash_finished_only_offers_return_home(
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_copy_games_ad_hoc_from_assisted_landing_offers_next_step_choice(
+def test_copy_games_ad_hoc_job_offers_next_step_choice(
     mock_list, mock_filter, mock_load, qapp
 ):
     """Généralisation du mécanisme ad-hoc à un job_key au-delà de backup/
     backup_system -- même mécanisme (`_start_assisted_ad_hoc_job`), une
     table de chaînes au lieu d'un `if`/`else` en dur pour exactement deux
-    cas."""
+    cas. Appelé directement : la tuile « Copier mes jeux » a quitté
+    l'accueil assisté (outils avancés en mode expert), le mécanisme reste."""
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
 
-    window._assisted_landing.copy_games_requested.emit()
+    window._start_assisted_ad_hoc_job("copy_games")
 
     assert window._mode == "copy_games"
     assert window._root_stack.currentWidget() is window._main_view
@@ -941,7 +942,7 @@ def test_find_duplicates_tile_opens_folder_screen_then_scan_shows_results(mock_l
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
 
-    window._assisted_landing.find_duplicates_requested.emit()
+    window._home.find_duplicates_requested.emit()
     assert window._root_stack.currentWidget() is window._doublons_folder_screen
 
     unit_a = Unit(tmp_path / "Aladdin.zip", [tmp_path / "Aladdin.zip"], 10, False)
@@ -5982,7 +5983,8 @@ def test_rocknix_download_failure_shows_friendly_message_in_log_panel(
 @patch("r36s_studio.gui.main_window.app_config.personal_web_url", return_value="https://nonotrichlozz.github.io/mon-dashboard/")
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_web_tile_visible_in_both_modes_when_url_configured(mock_list, mock_filter, mock_web_url, qapp):
+def test_web_row_visible_in_expert_mode_when_url_configured(mock_list, mock_filter, mock_web_url, qapp):
+    """« Web » n'existe plus qu'en mode expert (accueil assisté allégé)."""
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
 
@@ -5990,7 +5992,6 @@ def test_web_tile_visible_in_both_modes_when_url_configured(mock_list, mock_filt
     # défaut (mode assisté) : un widget non courant d'un `QStackedWidget`
     # reste caché quel que soit `setVisible`, il faut donc le rendre actif
     # pour que `isVisible()` reflète l'appel fait à la construction.
-    assert window._assisted_landing._web_tile.isVisible() is True
     window._root_stack.setCurrentWidget(window._main_view)
     assert window._home._web_row.isVisible() is True
 
@@ -5998,11 +5999,10 @@ def test_web_tile_visible_in_both_modes_when_url_configured(mock_list, mock_filt
 @patch("r36s_studio.gui.main_window.app_config.personal_web_url", return_value=None)
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_web_tile_hidden_in_both_modes_when_url_not_configured(mock_list, mock_filter, mock_web_url, qapp):
+def test_web_row_hidden_in_expert_mode_when_url_not_configured(mock_list, mock_filter, mock_web_url, qapp):
     window = MainWindow()
     window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
 
-    assert window._assisted_landing._web_tile.isVisible() is False
     window._root_stack.setCurrentWidget(window._main_view)
     assert window._home._web_row.isVisible() is False
 
@@ -6015,20 +6015,6 @@ def test_web_requested_from_home_opens_configured_url(mock_list, mock_filter, mo
     window = MainWindow()
 
     window._home.web_requested.emit()
-
-    mock_open_url.assert_called_once()
-    (opened_url,), _kwargs = mock_open_url.call_args
-    assert opened_url.toString() == "https://nonotrichlozz.github.io/mon-dashboard/"
-
-
-@patch("r36s_studio.gui.main_window.QDesktopServices.openUrl")
-@patch("r36s_studio.gui.main_window.app_config.personal_web_url", return_value="https://nonotrichlozz.github.io/mon-dashboard/")
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_web_requested_from_assisted_landing_opens_same_url(mock_list, mock_filter, mock_web_url, mock_open_url, qapp):
-    window = MainWindow()
-
-    window._assisted_landing.web_requested.emit()
 
     mock_open_url.assert_called_once()
     (opened_url,), _kwargs = mock_open_url.call_args

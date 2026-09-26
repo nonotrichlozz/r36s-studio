@@ -63,19 +63,6 @@ def test_android_button_from_home_switches_screen_and_back_returns(mock_list, mo
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_android_tile_from_assisted_landing_switches_screen(mock_list, mock_filter, mock_load, mock_save, qapp):
-    window = MainWindow()
-
-    with patch("r36s_studio.gui.main_window.android_adb.resolve_adb_path", return_value=None):
-        window._assisted_landing.android_requested.emit()
-
-    assert window._root_stack.currentWidget() is window._android_screen
-
-
-@patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])

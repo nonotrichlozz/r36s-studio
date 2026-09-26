@@ -896,7 +896,7 @@ def test_full_disk_access_screen_set_still_not_detected_shows_label(qapp):
 
 
 # Ordre de `_ASSISTED_TILE_SPECS` (screens.py) -- index dans `_all_tiles`
-# pour chacun des 10 signaux, tuile 1 (Préparer) en premier. « Rechercher
+# pour chacun des 5 signaux, tuile 1 (Préparer) en premier. « Rechercher
 # ma console »/« Consoles diverses » fusionnées en « Identifier ma
 # console » (§5, correctif visuel) -- plus de signal séparé pour cette
 # dernière, l'accès au catalogue passe par `IdentifyResultDialog.
@@ -908,53 +908,50 @@ _ASSISTED_TILE_SIGNAL_INDEX = {
     "prepare_requested": 0,
     "identify_requested": 1,
     "backup_requested": 2,
-    "flash_requested": 3,
-    "copy_games_requested": 4,
-    "find_duplicates_requested": 5,
-    "sort_games_requested": 6,
-    "eject_requested": 7,
-    "reset_card_requested": 8,
-    "help_requested": 9,
+    "eject_requested": 3,
+    "help_requested": 4,
 }
 
 
-def test_assisted_landing_screen_has_ten_tiles(qapp):
+def test_assisted_landing_screen_has_five_tiles(qapp):
+    """Accueil allégé pour le néophyte (§1) : seulement ce qui sert à
+    préparer une première carte."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
-    # 10 tuiles ordinaires (dont « Ranger mes jeux », docs/tri-roms.md) +
-    # la tuile « Console Android » (android/, étape 1, toujours visible) +
-    # la tuile personnelle « Web », toujours construite mais cachée par
-    # défaut (config.py::personal_web_url, jamais visible sans
-    # MainWindow.set_web_tile_visible(True)).
-    assert len(screen._all_tiles) == 12
-    assert screen._web_tile.isHidden() is True
+    assert len(screen._all_tiles) == 5
+    for tile in screen._all_tiles:
+        label_bottom = tile._label.geometry().y() + tile._label.geometry().height()
+        assert label_bottom <= tile.height()
 
 
-def test_assisted_landing_screen_web_tile_shown_only_via_set_web_tile_visible(qapp):
+def test_assisted_landing_screen_has_no_advanced_tool(qapp):
+    """Outils avancés déplacés vers le mode expert : plus aucun signal
+    pour eux sur l'accueil assisté, donc aucune tuile possible."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
-    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
 
-    assert screen._web_tile.isVisible() is False
+    for name in (
+        "flash_requested",
+        "copy_games_requested",
+        "find_duplicates_requested",
+        "sort_games_requested",
+        "reset_card_requested",
+        "android_requested",
+        "web_requested",
+    ):
+        assert not hasattr(screen, name), name
+    assert not any(tile.property("role") == "tileDestructive" for tile in screen._all_tiles)
 
-    screen.set_web_tile_visible(True)
-    assert screen._web_tile.isVisible() is True
 
-    screen.set_web_tile_visible(False)
-    assert screen._web_tile.isVisible() is False
+def test_assisted_grid_row_count_follows_the_number_of_tiles():
+    """Retour à la ligne automatique : la tuile 1 occupe deux cellules,
+    les autres une ; le nombre de rangées en découle, jamais figé."""
+    from r36s_studio.gui.screens import _ASSISTED_GRID_ROWS, _ASSISTED_TILE_GRID_COLUMNS, _ASSISTED_TILE_SPECS
 
-
-def test_assisted_landing_screen_web_tile_click_emits_signal(qapp):
-    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
-        screen = AssistedLandingScreen()
-    screen.set_web_tile_visible(True)
-    received = []
-    screen.web_requested.connect(lambda: received.append(True))
-
-    screen._web_tile.clicked.emit()
-
-    assert received == [True]
+    cells = 2 + len(_ASSISTED_TILE_SPECS)
+    assert _ASSISTED_GRID_ROWS == -(-cells // _ASSISTED_TILE_GRID_COLUMNS)
+    assert _ASSISTED_GRID_ROWS == 2
 
 
 def test_assisted_landing_screen_grid_and_panel_never_stretch_with_window(qapp):
@@ -975,7 +972,7 @@ def test_assisted_landing_screen_grid_and_panel_never_stretch_with_window(qapp):
     from r36s_studio.gui.screens import Tile
 
     assert screen._grid_scroll.size().width() == Tile.SIZE * 4 + Tile.SPACING * 3
-    assert screen._grid_scroll.size().height() == Tile.SIZE * 3 + Tile.SPACING * 2
+    assert screen._grid_scroll.size().height() == Tile.SIZE * 2 + Tile.SPACING
     assert screen._panel.size().width() == 308
     assert screen._panel.size().height() == screen._grid_scroll.size().height()
     for tile in screen._all_tiles:
@@ -1171,18 +1168,10 @@ def test_assisted_landing_screen_prepare_tile_has_emphasized_role(qapp):
     assert screen._all_tiles[0].property("role") == "tileEmphasized"
 
 
-def test_assisted_landing_screen_reset_card_tile_has_destructive_role(qapp):
-    """Seule action destructive de la grille (§5)."""
-    with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
-        screen = AssistedLandingScreen()
-
-    assert screen._all_tiles[_ASSISTED_TILE_SIGNAL_INDEX["reset_card_requested"]].property("role") == "tileDestructive"
-
-
 def test_assisted_landing_screen_set_busy_disables_all_tiles_and_expert_button(qapp):
     """Changer de mode ou lancer une deuxième action en plein flash/copie
     laisserait un job orphelin (§5 mode assisté) -- même garde que
-    `HomeScreen.set_busy`, étendue aux 9 tuiles."""
+    `HomeScreen.set_busy`, étendue à toutes les tuiles."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
@@ -1200,17 +1189,14 @@ def test_assisted_landing_screen_set_status_pushes_badges_to_the_right_tiles(qap
         screen = AssistedLandingScreen()
     screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
     status = {
-        "identify": StepStatus.AVAILABLE,
-        "flash": StepStatus.DONE,
-        "copy_games": StepStatus.PLATFORM_LIMITED,
+        "identify": StepStatus.DONE,
         "eject": StepStatus.NOT_RELEVANT,
     }
 
     screen.set_status(status)
 
     assert screen._tiles_by_status_key["identify"]._badge.isVisible() is True
-    assert screen._tiles_by_status_key["flash"]._badge.property("badgeKind") == "done"
-    assert screen._tiles_by_status_key["copy_games"]._badge.property("badgeKind") == "platform_limited"
+    assert screen._tiles_by_status_key["identify"]._badge.property("badgeKind") == "done"
     # NOT_RELEVANT (§5, correctif visuel) : aucun texte, aucun badgeKind
     # -- mais le widget reste visible pour réserver sa hauteur (jamais
     # `setVisible(False)`, contrairement à avant ce correctif).
@@ -1221,12 +1207,7 @@ def test_assisted_landing_screen_set_status_pushes_badges_to_the_right_tiles(qap
     # « Chercher les doublons » (§ outil « Doublons de jeux ») n'a plus de
     # clé de statut : c'est un outil autonome, sans rapport avec la carte
     # détectée -- comme la tuile Aide, jamais dans ce dict.
-    assert set(screen._tiles_by_status_key) == {
-        "identify",
-        "flash",
-        "copy_games",
-        "eject",
-    }
+    assert set(screen._tiles_by_status_key) == {"identify", "eject"}
 
 
 def test_tile_set_badge_none_reserves_height_without_showing_a_pill(qapp):
@@ -3430,3 +3411,48 @@ def test_capacity_go_uses_base_1024_like_format_size():
     # (l'ancien calcul), 29,7 Go en base 1024 (Explorateur Windows, valeur
     # confirmée sur du vrai matériel).
     assert round(_capacity_go(31_914_983_424), 1) == 29.7
+
+
+# --- HomeScreen : section « Outils » (outils avancés retirés de l'accueil
+# assisté, allégé pour le néophyte) ---------------------------------------
+
+
+def test_home_screen_tools_rows_emit_their_signal(qapp):
+    screen = HomeScreen()
+    received = []
+    screen.find_duplicates_requested.connect(lambda: received.append("duplicates"))
+    screen.sort_games_requested.connect(lambda: received.append("sort"))
+
+    screen._find_duplicates_row.clicked.emit()
+    screen._sort_games_row.clicked.emit()
+
+    assert received == ["duplicates", "sort"]
+
+
+def test_home_screen_set_busy_disables_tools_rows(qapp):
+    screen = HomeScreen()
+    screen.set_busy(True)
+    assert not screen._find_duplicates_row.isEnabled()
+    assert not screen._sort_games_row.isEnabled()
+    screen.set_busy(False)
+    assert screen._find_duplicates_row.isEnabled()
+    assert screen._sort_games_row.isEnabled()
+
+
+def test_home_screen_rows_scroll_instead_of_growing_the_window(qapp):
+    """Avec la section « Outils », la liste dépasse la hauteur minimale de
+    la fenêtre (690) : elle défile plutôt que d'imposer une fenêtre plus
+    haute qu'un écran 1366x768, ou de laisser des lignes se chevaucher."""
+    screen = HomeScreen()
+    assert screen._rows_scroll.widgetResizable()
+    assert screen.minimumSizeHint().height() <= 690
+
+
+def test_home_screen_row_titles_wrap_instead_of_being_clipped(qapp):
+    """Même garantie qu'aucun libellé n'est coupé que les tuiles de
+    l'accueil assisté : titre et description passent à la ligne."""
+    screen = HomeScreen()
+    labels = screen._sort_games_row.findChildren(QLabel)
+    wrapped = [label for label in labels if label.property("role") in ("rowTitle", "rowDesc")]
+    assert len(wrapped) == 2
+    assert all(label.wordWrap() for label in wrapped)

@@ -1034,6 +1034,11 @@ class HomeScreen(Screen):
     # distribuée) -- signal distinct des six étapes, jamais ajouté à
     # `ALL_STEPS`/`detect.py`.
     web_requested = Signal()
+    # Outils autonomes sur un dossier (docs/doublons.md, docs/tri-roms.md)
+    # -- section « Outils » : retirés de l'accueil assisté, allégé pour
+    # le néophyte (§1), ils ne vivent plus qu'ici.
+    find_duplicates_requested = Signal()
+    sort_games_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1055,7 +1060,10 @@ class HomeScreen(Screen):
         title_row = QHBoxLayout()
         title = QLabel(tr("home_title"))
         title.setProperty("role", "title")
-        title_row.addWidget(title)
+        # Retour à la ligne plutôt que coupé par les trois boutons de
+        # l'en-tête dans la colonne de ~480 px (constaté au rendu).
+        title.setWordWrap(True)
+        title_row.addWidget(title, 1)
         title_row.addStretch()
         self._consoles_diverses_button = QPushButton(tr("home_consoles_diverses_button"))
         self._consoles_diverses_button.setProperty("role", "flat")
@@ -1113,6 +1121,20 @@ class HomeScreen(Screen):
             help_row.addStretch()
             layout.addLayout(help_row)
 
+        # Lignes dans une zone qui défile : avec la section « Outils »,
+        # la liste dépasse la hauteur minimale de la fenêtre (690, mesurée
+        # à 677 sans elle, `main_window.py`) -- jamais une ligne coupée ou
+        # chevauchée sur un écran 1366x768, seulement un défilement.
+        rows_container = QWidget()
+        rows_layout = QVBoxLayout(rows_container)
+        rows_layout.setContentsMargins(0, 0, 0, 0)
+        rows_scroll = QScrollArea()
+        rows_scroll.setFrameShape(QFrame.NoFrame)
+        rows_scroll.setWidgetResizable(True)
+        rows_scroll.setWidget(rows_container)
+        layout.addWidget(rows_scroll, 1)
+        self._rows_scroll = rows_scroll  # exposé pour les tests
+
         step_signals = {
             "extract_boot": self.extract_boot_selected,
             "extract_easyroms": self.extract_easyroms_selected,
@@ -1127,16 +1149,16 @@ class HomeScreen(Screen):
             row, badge = self._build_row(letter, tr(title_key), tr(desc_key), step_signals[key])
             self._tiles[key] = row
             self._badges[key] = badge
-            layout.addWidget(row)
+            rows_layout.addWidget(row)
 
         separator = QLabel(tr("home_backup_separator"))
         separator.setProperty("role", "secondary")
-        layout.addWidget(separator)
+        rows_layout.addWidget(separator)
         self._backup_row, backup_badge = self._build_row(
             "◆", tr("home_tile_backup"), tr("home_tile_backup_desc"), self.backup_selected
         )
         backup_badge.setVisible(False)  # jamais de badge de statut pour la sauvegarde (§5)
-        layout.addWidget(self._backup_row)
+        rows_layout.addWidget(self._backup_row)
         self._backup_system_row, backup_system_badge = self._build_row(
             "◆",
             tr("home_tile_backup_system"),
@@ -1144,7 +1166,7 @@ class HomeScreen(Screen):
             self.backup_system_selected,
         )
         backup_system_badge.setVisible(False)  # jamais de badge de statut pour la sauvegarde (§5)
-        layout.addWidget(self._backup_system_row)
+        rows_layout.addWidget(self._backup_system_row)
         # Remise à zéro (§4.3 bis) : sous « Par sécurité » comme les deux
         # sauvegardes ci-dessus, jamais dans le parcours assisté -- une
         # opération destructrice qui n'en fait pas partie (§5).
@@ -1155,7 +1177,21 @@ class HomeScreen(Screen):
             self.reset_card_selected,
         )
         reset_card_badge.setVisible(False)  # jamais de badge de statut pour cette ligne (§5)
-        layout.addWidget(self._reset_card_row)
+        rows_layout.addWidget(self._reset_card_row)
+
+        tools_separator = QLabel(tr("home_tools_separator"))
+        tools_separator.setProperty("role", "secondary")
+        rows_layout.addWidget(tools_separator)
+        self._find_duplicates_row, duplicates_badge = self._build_row(
+            "◆", tr("home_tile_find_duplicates"), tr("home_tile_find_duplicates_desc"), self.find_duplicates_requested
+        )
+        duplicates_badge.setVisible(False)
+        rows_layout.addWidget(self._find_duplicates_row)
+        self._sort_games_row, sort_badge = self._build_row(
+            "◆", tr("home_tile_sort_games"), tr("home_tile_sort_games_desc"), self.sort_games_requested
+        )
+        sort_badge.setVisible(False)
+        rows_layout.addWidget(self._sort_games_row)
 
         # Tuile personnelle « Web » -- construite inconditionnellement
         # (même principe que `HelpDialog`, dont le bouton déclencheur n'est
@@ -1168,9 +1204,9 @@ class HomeScreen(Screen):
         )
         web_badge.setVisible(False)  # jamais de badge de statut pour cette ligne (§5)
         self._web_row.setVisible(False)
-        layout.addWidget(self._web_row)
+        rows_layout.addWidget(self._web_row)
 
-        layout.addStretch()
+        rows_layout.addStretch()
 
         # Numéro de version + horodatage de construction (§5, à la demande
         # explicite d'un utilisateur ayant perdu le fil entre plusieurs
@@ -1201,6 +1237,8 @@ class HomeScreen(Screen):
         self._consoles_diverses_button.setEnabled(not busy)
         self._android_button.setEnabled(not busy)
         self._web_row.setEnabled(not busy)
+        self._find_duplicates_row.setEnabled(not busy)
+        self._sort_games_row.setEnabled(not busy)
 
     def set_web_tile_visible(self, visible: bool) -> None:
         self._web_row.setVisible(visible)
@@ -1241,6 +1279,10 @@ class HomeScreen(Screen):
         texts.setSpacing(2)
         title_label = QLabel(title)
         title_label.setProperty("role", "rowTitle")
+        # Retour à la ligne aussi sur le titre, pas seulement la
+        # description : même garantie qu'aucun libellé n'est jamais coupé
+        # que les tuiles de l'accueil assisté (`Tile`).
+        title_label.setWordWrap(True)
         desc_label = QLabel(desc)
         desc_label.setProperty("role", "rowDesc")
         desc_label.setWordWrap(True)
@@ -2484,20 +2526,14 @@ class FullDiskAccessScreen(Screen):
 _ASSISTED_TILE_SPECS = [
     ("identify", "assisted_tile_identify", "tile", "identify_requested", IDENTIFY, 1),
     ("backup", "assisted_tile_backup", "tile", "backup_requested", None, 1),
-    ("flash", "assisted_tile_flash", "tile", "flash_requested", FLASH, 1),
-    ("copy_games", "assisted_tile_copy_games", "tile", "copy_games_requested", COPY_GAMES, 1),
-    # Aucune clé de statut (§ outil « Doublons de jeux », remplace la
-    # tuile carte-SD-uniquement) : cette tuile ouvre désormais un outil
-    # autonome (n'importe quel dossier -- PC, carte SD ou disque externe,
-    # docs/doublons.md), plus de rapport avec la carte détectée.
-    ("duplicates", "assisted_tile_find_duplicates", "tile", "find_duplicates_requested", None, 1),
-    # « Ranger mes jeux » (docs/tri-roms.md) -- à côté du dédoublonnage,
-    # même nature : outil autonome sur un dossier, sans badge de statut.
-    ("sort", "assisted_tile_sort_games", "tile", "sort_games_requested", None, 1),
     ("eject", "assisted_tile_eject", "tile", "eject_requested", EJECT, 1),
-    ("reset_card", "assisted_tile_reset_card", "tileDestructive", "reset_card_requested", None, 1),
     ("help", "assisted_tile_help", "tile", "help_requested", None, 1),
 ]
+# Accueil allégé pour le néophyte (§1) : seulement ce qui sert à préparer
+# une première carte. « Installer un système », « Copier mes jeux »,
+# « Chercher les doublons », « Ranger mes jeux », « Remettre la carte à
+# zéro », « Console Android » et « Web » vivent désormais uniquement en
+# mode expert (`HomeScreen`), à un clic via le bouton « Mode expert ».
 
 _ASSISTED_TILE_GRID_COLUMNS = 4
 
@@ -2511,15 +2547,18 @@ _ICON_COLOR_BY_ROLE = {
 # horizontal de HomeScreen (28, inchangée là-bas).
 _ASSISTED_PANEL_ICON_SIZE = 110
 
-# 1 rangée double-largeur (tuile 1) + 2 simples, puis 4, puis 3 -- 3
-# rangées complètes, toujours (§5, correctif visuel : dérivé une fois pour
-# toutes plutôt qu'un calcul dynamique à partir d'un widget dans un
+# Nombre de rangées dérivé du nombre de tuiles (retour à la ligne
+# automatique : la tuile 1 occupe deux cellules, les autres une chacune),
+# jamais une constante à resynchroniser à la main quand la grille change
+# -- toujours calculé ici plutôt qu'à partir d'un widget dans un
 # `QScrollArea`, dont le `sizeHint` ne reflète pas fidèlement un contenu
-# défilable). Sert à donner au panneau « Carte détectée » exactement la
-# même hauteur que la grille (`Tile.SIZE * lignes + Tile.SPACING *
-# (lignes - 1)`) et à garantir que la fenêtre s'ouvre assez grande pour
-# afficher les trois rangées sans défiler (`main_window.py`).
-_ASSISTED_GRID_ROWS = 3
+# défilable (§5, correctif visuel). Sert à donner au panneau « Carte
+# détectée » exactement la même hauteur que la grille (`Tile.SIZE *
+# lignes + Tile.SPACING * (lignes - 1)`) et à garantir que la fenêtre
+# s'ouvre assez grande pour afficher toutes les rangées sans défiler
+# (`main_window.py`).
+_ASSISTED_GRID_CELLS = 2 + sum(spec[5] for spec in _ASSISTED_TILE_SPECS)
+_ASSISTED_GRID_ROWS = -(-_ASSISTED_GRID_CELLS // _ASSISTED_TILE_GRID_COLUMNS)
 _ASSISTED_GRID_TOTAL_HEIGHT = _ASSISTED_GRID_ROWS * Tile.SIZE + (_ASSISTED_GRID_ROWS - 1) * Tile.SPACING
 _ASSISTED_GRID_TOTAL_WIDTH = _ASSISTED_TILE_GRID_COLUMNS * Tile.SIZE + (_ASSISTED_TILE_GRID_COLUMNS - 1) * Tile.SPACING
 # Gouttière entre la grille et le panneau de droite -- distincte de
@@ -2586,23 +2625,10 @@ class AssistedLandingScreen(Screen):
     prepare_requested = Signal()
     identify_requested = Signal()
     backup_requested = Signal()
-    flash_requested = Signal()
-    copy_games_requested = Signal()
-    find_duplicates_requested = Signal()
-    sort_games_requested = Signal()
     eject_requested = Signal()
-    reset_card_requested = Signal()
     help_requested = Signal()
     expert_mode_requested = Signal()
     refresh_requested = Signal()
-    # Outil « Console Android » (android/, étape 1) -- même signal que
-    # HomeScreen.android_requested, MainWindow connecte les deux au même
-    # gestionnaire.
-    android_requested = Signal()
-    # Tuile personnelle « Web » (config.py::personal_web_url, jamais
-    # distribuée) -- même signal que HomeScreen.web_requested, MainWindow
-    # connecte les deux au même gestionnaire.
-    web_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2739,30 +2765,6 @@ class AssistedLandingScreen(Screen):
                 col_index = 0
                 row_index += 1
 
-        # Outil « Console Android » (android/, étape 1) -- occupe la
-        # prochaine cellule libre de la grille (row_index/col_index laissés
-        # par la boucle ci-dessus, ici row2/col2) ; toujours visible,
-        # contrairement à la tuile Web ci-dessous (réservée à l'auteur du
-        # projet).
-        android_tile = Tile("android", tr("assisted_tile_android"), role="tile", icon_color=theme.ACCENT_CYAN)
-        android_tile.clicked.connect(self.android_requested.emit)
-        grid.addWidget(android_tile, row_index, col_index, 1, 1)
-        self._all_tiles.append(android_tile)
-        col_index += 1
-
-        # Tuile personnelle « Web » (config.py::personal_web_url, jamais
-        # distribuée à un client) -- construite inconditionnellement,
-        # comme la tuile Aide de `HomeScreen`, mais cachée par défaut ;
-        # occupe la toute dernière cellule de la grille (row2/col3), qui
-        # tient déjà dans les 3 rangées fixes (`_ASSISTED_GRID_ROWS`) sans
-        # agrandir la fenêtre. `MainWindow` seule décide de l'afficher, une
-        # fois, via `set_web_tile_visible` -- cet écran ne lit lui-même ni
-        # variable d'environnement ni config.
-        self._web_tile = Tile("web", tr("assisted_tile_web"), role="tile", icon_color=theme.ACCENT_CYAN)
-        self._web_tile.clicked.connect(self.web_requested.emit)
-        grid.addWidget(self._web_tile, row_index, col_index, 1, 1)
-        self._web_tile.setVisible(False)
-        self._all_tiles.append(self._web_tile)
 
         # Zone de la grille dans un `QScrollArea` (§5, correctif visuel) :
         # la dernière rangée sortait de la fenêtre quand celle-ci n'était
@@ -2867,9 +2869,6 @@ class AssistedLandingScreen(Screen):
         for tile in self._all_tiles:
             tile.setEnabled(not busy)
         self._expert_button.setEnabled(not busy)
-
-    def set_web_tile_visible(self, visible: bool) -> None:
-        self._web_tile.setVisible(visible)
 
     def set_status(
         self, status: Dict[str, StepStatus], device: Optional[Device] = None, has_device: Optional[bool] = None

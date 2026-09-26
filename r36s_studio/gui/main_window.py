@@ -487,7 +487,6 @@ class MainWindow(QMainWindow):
         # variable d'environnement ni config.
         web_tile_visible = app_config.personal_web_url() is not None
         self._home.set_web_tile_visible(web_tile_visible)
-        self._assisted_landing.set_web_tile_visible(web_tile_visible)
         # Écran de bienvenue macOS uniquement (§3) : construit
         # inconditionnellement (même principe que `_help_dialog`, dont le
         # bouton déclencheur n'apparaît lui aussi que sur macOS), mais
@@ -719,15 +718,10 @@ class MainWindow(QMainWindow):
         self._assisted_landing.refresh_requested.connect(self._refresh_home_state)
         self._assisted_landing.identify_requested.connect(self._start_assisted_identify)
         self._assisted_landing.backup_requested.connect(self._on_assisted_backup_tile_clicked)
-        self._assisted_landing.flash_requested.connect(lambda: self._start_assisted_ad_hoc_job("flash"))
-        self._assisted_landing.copy_games_requested.connect(lambda: self._start_assisted_ad_hoc_job("copy_games"))
-        self._assisted_landing.find_duplicates_requested.connect(self._start_doublons_tool)
-        self._assisted_landing.sort_games_requested.connect(self._open_tri_screen)
+        self._home.find_duplicates_requested.connect(self._start_doublons_tool)
+        self._home.sort_games_requested.connect(self._open_tri_screen)
         self._tri_screen.back_requested.connect(self._show_startup_screen)
-        self._assisted_landing.android_requested.connect(self._open_android_screen)
-        self._assisted_landing.web_requested.connect(self._on_web_requested)
         self._assisted_landing.eject_requested.connect(lambda: self._start_assisted_ad_hoc_job("eject"))
-        self._assisted_landing.reset_card_requested.connect(lambda: self._start_assisted_ad_hoc_job("reset_card"))
         self._assisted_landing.help_requested.connect(self._on_assisted_help_requested)
         self._assisted_backup_kind_dialog.full_copy_requested.connect(
             lambda: self._start_assisted_ad_hoc_job("backup")

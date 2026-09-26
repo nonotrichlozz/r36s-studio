@@ -159,11 +159,11 @@ def test_interrupted_result_is_titled_as_such(qapp, tmp_path):
 
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_sort_tile_opens_the_tri_screen_and_back_returns_home(mock_list, mock_filter, qapp):
+def test_sort_row_of_expert_home_opens_the_tri_screen_and_back_returns_home(mock_list, mock_filter, qapp):
     window = MainWindow()
     window._app_config.firmware = "emuelec"
 
-    window._assisted_landing.sort_games_requested.emit()
+    window._home.sort_games_requested.emit()
 
     assert window._root_stack.currentWidget() is window._tri_screen
     assert window._tri_screen.selected_firmware() == "emuelec"

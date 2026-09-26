@@ -50,7 +50,8 @@ Ne modifie jamais r36s-studio-cloud.
   licence, pour que l'utilisateur sache ce qu'il fait.
 
 ## Interface
-- Nouvelle tuile « Console Android » sur l'accueil.
+- Accès : bouton « Console Android » de l'en-tête du mode expert (la tuile
+  de l'accueil assisté a été retirée, accueil allégé pour le néophyte).
 - Écran : état de la connexion, informations lues, fiche console si
   trouvée, liste des émulateurs proposés.
 - Bouton « Actualiser ».

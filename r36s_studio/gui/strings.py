@@ -86,6 +86,13 @@ STRINGS = {
     # si R36S_STUDIO_WEB_URL est définie en https).
     "home_tile_web": "Web",
     "home_tile_web_desc": "Ouvre le site dans ton navigateur.",
+    # Section « Outils » du mode expert -- outils autonomes sur un dossier,
+    # retirés de l'accueil assisté (allégé pour le néophyte, §1).
+    "home_tools_separator": "Outils",
+    "home_tile_find_duplicates": "Chercher les doublons",
+    "home_tile_find_duplicates_desc": "Trouve les jeux en double dans un dossier et les met de côté, sans rien supprimer.",
+    "home_tile_sort_games": "Ranger mes jeux",
+    "home_tile_sort_games_desc": "Range un dossier de jeux mélangés dans un dossier par console.",
     "status_available": "Faisable",
     "status_done": "Déjà faite",
     "status_not_relevant": "Non pertinente pour cette carte",
@@ -103,7 +110,7 @@ STRINGS = {
     # Sauvegarde système sans les jeux (§4.3), aussi proposée comme option
     # du mode assisté -- discrète, sous le bouton principal.
     "assisted_backup_system_button": "Sauvegarder mon système sans les jeux",
-    # Libellés courts des 10 tuiles de l'accueil assisté (refonte menu de
+    # Libellés courts des 5 tuiles de l'accueil assisté (refonte menu de
     # tuiles, §5) -- un seul libellé par tuile, bas-gauche, pas de
     # description séparée contrairement aux lignes de HomeScreen (préfixe
     # distinct de "home_tile_*", qui reste celui des lignes du mode
@@ -117,19 +124,8 @@ STRINGS = {
     "assisted_tile_prepare_desc": "Copie complète de l'ancienne carte vers la neuve, étape par étape.",
     "assisted_tile_identify": "Identifier ma console",
     "assisted_tile_backup": "Sauvegarder ma carte",
-    "assisted_tile_flash": "Installer un système",
-    "assisted_tile_copy_games": "Copier mes jeux",
-    "assisted_tile_find_duplicates": "Chercher les doublons",
     "assisted_tile_eject": "Éjecter la carte",
-    "assisted_tile_reset_card": "Remettre la carte à zéro",
     "assisted_tile_help": "Aide",
-    # Outil « Console Android » (android/, étape 1) -- dernière cellule
-    # libre de la grille fixe (row2, col3), toujours visible (contrairement
-    # à la tuile Web ci-dessous, réservée à l'auteur du projet).
-    "assisted_tile_android": "Console Android",
-    # Tuile personnelle « Web » (config.py::personal_web_url) -- jamais
-    # visible dans la version distribuée à un client.
-    "assisted_tile_web": "Web",
     # En-tête de l'accueil assisté (§5, correctif visuel -- manquait
     # entièrement). Le nom de l'app lui-même réutilise "app_title", jamais
     # dupliqué ici.
@@ -916,7 +912,6 @@ STRINGS = {
     # choisi l'attend. Risque principal : un nom de dossier faux, et la
     # console n'affiche rien -- d'où l'indication, pour chaque système,
     # de la façon dont ses noms ont été vérifiés.
-    "assisted_tile_sort_games": "Ranger mes jeux",
     "tri_title": "Ranger mes jeux",
     "tri_hint": (
         "Choisis un dossier où tes jeux sont mélangés. Chaque jeu sera rangé dans le dossier "

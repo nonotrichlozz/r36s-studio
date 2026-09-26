@@ -181,3 +181,32 @@ points d'appel `start_activity`/`stop_activity` et le bloc `append_line`
 de `_on_progress` (`gui/main_window.py`) aussi. `LogPanel` (bas de la
 colonne droite) reste inchangé, le terminal reste un affichage distinct
 et complémentaire, jamais un remplacement.
+
+## Accueil assisté allégé, outils avancés en mode expert
+
+Public visé : le néophyte total (§1). L'accueil assisté ne garde que ce
+qui sert à préparer une première carte : « Préparer ma carte » (mise en
+avant), « Identifier ma console », « Sauvegarder ma carte », « Éjecter la
+carte », « Aide » (`screens.py::_ASSISTED_TILE_SPECS`). Le bouton « Mode
+expert » reste en haut à droite.
+
+Déplacés vers le mode expert (`HomeScreen`) : « Installer un système »
+(étape C), « Copier mes jeux » (étape E), « Remettre la carte à zéro »
+(« Par sécurité »), « Console Android » (bouton d'en-tête), et une
+section « Outils » : « Chercher les doublons », « Ranger mes jeux »,
+« Web ». Aucun de ces signaux n'existe plus sur `AssistedLandingScreen`
+(vérifié par `test_assisted_landing_screen_has_no_advanced_tool`).
+
+Retour à la ligne automatique dans les deux modes :
+- assisté : nombre de rangées dérivé du nombre de tuiles
+  (`_ASSISTED_GRID_ROWS`, la tuile 1 occupe deux cellules), panneau
+  « Carte détectée » à la même hauteur ;
+- expert : titre, titres et descriptions des lignes passent à la ligne
+  (ils étaient tronqués et tassés avant, constaté au rendu), et la liste
+  des lignes défile (`HomeScreen._rows_scroll`) au lieu d'agrandir la
+  fenêtre au-delà de 690 px de haut.
+
+Les tâches ad hoc « flash », « copy_games », « reset_card » de
+`main_window.py::_start_assisted_ad_hoc_job` ne sont plus déclenchées
+par aucune tuile ; le mécanisme reste en place (toujours utilisé par
+« backup », « backup_system », « eject »).

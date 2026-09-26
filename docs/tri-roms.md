@@ -5,8 +5,9 @@ par console, nommés comme le firmware cible les attend, prêts à copier
 sur la carte.
 
 Code : `r36s_studio/tri/` (sans Qt), écran `gui/tri_screen.py` (autonome,
-pages et threads internes), threads `gui/tri_runner.py`. Tuile « Ranger
-mes jeux » de l'accueil assisté, à côté de « Chercher les doublons ».
+pages et threads internes), threads `gui/tri_runner.py`. Ligne « Ranger
+mes jeux » de la section « Outils » du mode expert, à côté de « Chercher
+les doublons » (retirés de l'accueil assisté, allégé pour le néophyte).
 Tests : `tests/test_tri_*.py`, `tests/test_gui_tri_screen.py`.
 
 ## ⚠️ Risque principal : un nom de dossier faux
@@ -205,6 +206,3 @@ vise un dossier sur l'ordinateur, copié ensuite sur la carte.
   attente) ; ROCKNIX et EmuELEC non vérifiées.
 - TreeFrogUI : affichage des jeux confirmé pour `gba`/`snes` seulement.
 - Aucun essai sur une vraie collection de ROMs (signatures d'en-tête).
-- Tuile « Web » (personnelle, cachée par défaut) : avec « Ranger mes
-  jeux », elle passe sur une 4e rangée de la grille d'accueil (3 rangées
-  visibles) et n'est atteignable qu'en faisant défiler.

@@ -139,30 +139,25 @@ def test_load_config_falls_back_to_default_on_unknown_reset_card_filesystem_valu
     assert loaded.reset_card_filesystem == "exfat"
 
 
-def test_load_config_defaults_to_localhost_server_url_when_no_file_exists(tmp_path):
-    with patch("r36s_studio.config.config_path", return_value=tmp_path / "config.json"):
-        loaded = config.load_config()
+def test_server_url_is_no_longer_a_config_field():
+    """L'adresse du serveur « Consoles diverses » est en dur
+    (`settings_store.adresse_serveur`), jamais saisie ni mémorisée."""
+    assert "consoles_diverses_server_url" not in {f.name for f in fields(config.AppConfig)}
 
-    assert loaded.consoles_diverses_server_url == "http://localhost:8787"
 
-
-def test_save_then_load_roundtrips_consoles_diverses_server_url(tmp_path):
+def test_legacy_localhost_server_url_is_ignored_and_dropped_on_next_save(tmp_path):
+    """Un `config.json` d'une version précédente porte presque toujours
+    l'ancien défaut `http://localhost:8787` -- il ne doit plus jamais
+    rediriger la recherche, et disparaît au prochain enregistrement."""
     path = tmp_path / "config.json"
-    with patch("r36s_studio.config.config_path", return_value=path):
-        config.save_config(config.AppConfig(consoles_diverses_server_url="https://exemple.invalid"))
-        loaded = config.load_config()
-
-    assert loaded.consoles_diverses_server_url == "https://exemple.invalid"
-
-
-def test_load_config_falls_back_to_default_server_url_when_field_missing_or_blank(tmp_path):
-    path = tmp_path / "config.json"
-    path.write_text('{"consoles_diverses_server_url": "   "}', encoding="utf-8")
+    path.write_text('{"ui_mode": "expert", "consoles_diverses_server_url": "http://localhost:8787"}', encoding="utf-8")
 
     with patch("r36s_studio.config.config_path", return_value=path):
         loaded = config.load_config()
+        config.save_config(loaded)
 
-    assert loaded.consoles_diverses_server_url == "http://localhost:8787"
+    assert loaded.ui_mode == "expert"
+    assert "consoles_diverses_server_url" not in path.read_text(encoding="utf-8")
 
 
 def test_save_config_never_stores_a_secret_looking_key(tmp_path):
@@ -318,3 +313,20 @@ def test_record_doublons_destination_caps_the_recent_list():
     assert len(app_config.doublons_recent_destinations) == 10
     assert app_config.doublons_recent_destinations[0] == "new"
     assert "D9" not in app_config.doublons_recent_destinations  # le plus ancien tombe
+
+
+def test_consoles_diverses_licence_key_round_trips_through_config_json(tmp_path):
+    """Clé de licence mémorisée dans `config.json` (plus de trousseau
+    système), relue sans espace parasite ; une valeur non-texte retombe
+    sur « aucune clé »."""
+    path = tmp_path / "config.json"
+    with patch("r36s_studio.config.config_path", return_value=path):
+        assert config.load_config().consoles_diverses_licence_key == ""
+        config.save_config(config.AppConfig(consoles_diverses_licence_key="r36s-abc"))
+        assert config.load_config().consoles_diverses_licence_key == "r36s-abc"
+
+        path.write_text('{"consoles_diverses_licence_key": " r36s-abc\\n"}', encoding="utf-8")
+        assert config.load_config().consoles_diverses_licence_key == "r36s-abc"
+
+        path.write_text('{"consoles_diverses_licence_key": 42}', encoding="utf-8")
+        assert config.load_config().consoles_diverses_licence_key == ""

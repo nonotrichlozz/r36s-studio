@@ -61,25 +61,29 @@ DEFAULT_FIRMWARE = "rocknix"
 _VALID_FIRMWARES = set(FIRMWARE_BY_ID)
 
 # Système de fichiers choisi pour « Remettre la carte à zéro » (§4.3 bis,
-# mode expert uniquement). Mémorisé comme `firmware`/`ui_mode` -- signalé
-# par un utilisateur : une console (SF3000HD) qui ne lit que le FAT32,
-# rendue inutilisable par le formatage exFAT par défaut. exFAT reste le
-# défaut ici (le cas le plus courant, §4.3 bis -- l'EASYROMS de la carte
-# source d'une R36S d'origine est déjà en exFAT sur le matériel de test) ;
-# FAT32 reste un choix explicite, jamais présumé.
+# mode expert uniquement). Mémorisé comme `firmware`/`ui_mode`. Ajouté
+# après un signalement sur une SF3000HD (carte inutilisable après un
+# formatage exFAT) -- précisé depuis : ce n'est pas la console en soi, sa
+# carte d'origine est en exFAT et le menu d'origine la lit (vérifié sur la
+# carte le 2026-09-28). Le contexte probable est l'installation de
+# TreeFrogUI, dont le guide n'exige explicitement le FAT32 que pour la
+# R36HD (voir docs/claude/reset-card.md). exFAT reste le défaut (le cas le
+# plus courant, §4.3 bis -- l'EASYROMS d'une R36S d'origine est déjà en
+# exFAT sur le matériel de test) ; FAT32 reste un choix explicite, jamais
+# présumé.
 DEFAULT_RESET_CARD_FILESYSTEM = "exfat"
 _VALID_RESET_CARD_FILESYSTEMS = {"exfat", "fat32"}
 
-# Section « Consoles diverses » (consoles_diverses/, étape 1) -- adresse du
-# serveur r36s-studio-cloud interrogé par POST /recherche. Seule l'adresse
-# vit ici : jamais la clé de licence (trousseau système, `consoles_
-# diverses/settings_store.py`, §9 de CLAUDE.md racine -- aucun secret dans
-# un fichier de configuration). Pas d'ensemble de valeurs valides comme
-# `_VALID_FIRMWARES` ci-dessus : une adresse de serveur est un champ libre,
-# pas un choix parmi un catalogue fixe -- sa validité (schéma http(s),
-# localhost pour http:// nu) est vérifiée à la saisie par `consoles_
-# diverses/settings_store.py::valider_adresse_serveur`, pas ici.
-DEFAULT_CONSOLES_DIVERSES_SERVER_URL = "http://localhost:8787"
+# Section « Consoles diverses » : seule la clé de licence vit ici
+# (`consoles_diverses_licence_key`, saisie dans les réglages de la
+# section). Exception assumée au « config.json sans secret » : c'est une
+# clé par client, révocable côté serveur (r36s-studio-cloud, KV
+# LICENCES), pas un mot de passe -- et le trousseau système qui la
+# stockait avant a produit deux bugs réels sous Windows. L'adresse du
+# serveur est en dur (`consoles_diverses/settings_store.py::adresse_
+# serveur`) : l'ancienne clé `consoles_diverses_server_url` d'un
+# `config.json` existant est ignorée et disparaît au prochain
+# enregistrement.
 
 # Outil « Doublons de jeux » (docs/doublons.md) -- liste par défaut des
 # dossiers ignorés (« cochables », modifiable par l'utilisateur ensuite,
@@ -127,7 +131,7 @@ class AppConfig:
     language: str = DEFAULT_LANGUAGE
     firmware: str = DEFAULT_FIRMWARE
     reset_card_filesystem: str = DEFAULT_RESET_CARD_FILESYSTEM
-    consoles_diverses_server_url: str = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
+    consoles_diverses_licence_key: str = ""
     doublons_ignored_folders: List[str] = field(default_factory=lambda: list(DEFAULT_DOUBLONS_IGNORED_FOLDERS))
     doublons_simulation_mode: bool = DEFAULT_DOUBLONS_SIMULATION_MODE
     doublons_last_destination: Optional[str] = None
@@ -167,9 +171,9 @@ def load_config() -> AppConfig:
     reset_card_filesystem = raw.get("reset_card_filesystem")
     if reset_card_filesystem not in _VALID_RESET_CARD_FILESYSTEMS:
         reset_card_filesystem = DEFAULT_RESET_CARD_FILESYSTEM
-    consoles_diverses_server_url = raw.get("consoles_diverses_server_url")
-    if not isinstance(consoles_diverses_server_url, str) or not consoles_diverses_server_url.strip():
-        consoles_diverses_server_url = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
+    consoles_diverses_licence_key = raw.get("consoles_diverses_licence_key")
+    if not isinstance(consoles_diverses_licence_key, str):
+        consoles_diverses_licence_key = ""
     doublons_ignored_folders = raw.get("doublons_ignored_folders")
     if not isinstance(doublons_ignored_folders, list) or not all(
         isinstance(name, str) for name in doublons_ignored_folders
@@ -191,7 +195,7 @@ def load_config() -> AppConfig:
         language=language,
         firmware=firmware,
         reset_card_filesystem=reset_card_filesystem,
-        consoles_diverses_server_url=consoles_diverses_server_url,
+        consoles_diverses_licence_key=consoles_diverses_licence_key.strip(),
         doublons_ignored_folders=doublons_ignored_folders,
         doublons_simulation_mode=doublons_simulation_mode,
         doublons_last_destination=doublons_last_destination,

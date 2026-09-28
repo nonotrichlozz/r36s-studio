@@ -62,12 +62,14 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from r36s_studio.gui.screens import Screen
 
+from . import settings_store
 from .client import ResultatRecherche
 from .models import FicheConsole, Incompatible, OptionConsole
 from .search_runner import ConsoleSearchRunner
@@ -391,19 +393,24 @@ def _clear_layout(layout: QLayout) -> None:
             _clear_layout(sub_layout)
 
 
+# Refus de licence pour lesquels saisir (ou ressaisir) une clé est la
+# solution -- jamais le quota du jour, qu'une autre clé ne réglerait pas.
+_CODES_SAISIE_LICENCE = {"licence_requise", "licence_invalide", "licence_expiree", "licence_revoquee"}
+
+
 class ConsolesDiversesScreen(Screen):
     """Écran unique de la section (étape 1, mode recherche). `set_network_
-    config` doit être appelé (par `MainWindow`, depuis `AppConfig`/
-    `settings_store`) avant toute recherche -- valeurs par défaut sûres
-    (`http://localhost:8787`, aucune clé) sinon, pour ne jamais lever si
-    l'appelant oublie."""
+    config` doit être appelé (par `MainWindow`, depuis `settings_store`)
+    avant toute recherche -- valeurs par défaut sûres (serveur de
+    production, aucune clé) sinon, pour ne jamais lever si l'appelant
+    oublie."""
 
     back_requested = Signal()
     settings_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._server_url = "http://localhost:8787"
+        self._server_url = settings_store.adresse_serveur()
         self._licence_key = ""
         self._opener = None
         self._runner: Optional[ConsoleSearchRunner] = None
@@ -476,11 +483,43 @@ class ConsolesDiversesScreen(Screen):
         error_layout = QVBoxLayout(self._error_frame)
         self._error_label = _plain_label("", role="secondary", wrap=True)
         error_layout.addWidget(self._error_label)
+        error_buttons = QHBoxLayout()
         self._retry_error_button = QPushButton(tr("retry_button"))
         self._retry_error_button.clicked.connect(self._lancer_recherche)
-        error_layout.addWidget(self._retry_error_button)
+        error_buttons.addWidget(self._retry_error_button)
+        # Seulement pour un refus de licence : mène directement à la saisie
+        # de la clé plutôt que de laisser chercher le bon réglage.
+        self._error_licence_button = QPushButton(tr("enter_licence_button"))
+        self._error_licence_button.setProperty("role", "primary")
+        self._error_licence_button.clicked.connect(self.settings_requested.emit)
+        error_buttons.addWidget(self._error_licence_button)
+        error_buttons.addStretch()
+        error_layout.addLayout(error_buttons)
         root.addWidget(self._error_frame)
 
+        # Aucune clé saisie : explication et accès direct à la saisie, à la
+        # place de la zone vide sous le champ de recherche.
+        self._no_licence_frame = QWidget()
+        no_licence_layout = QVBoxLayout(self._no_licence_frame)
+        no_licence_layout.addWidget(_plain_label(tr("no_licence_title"), role="title"))
+        no_licence_layout.addWidget(_plain_label(tr("no_licence_message"), role="secondary", wrap=True))
+        self._no_licence_button = QPushButton(tr("enter_licence_button"))
+        self._no_licence_button.setProperty("role", "primary")
+        self._no_licence_button.clicked.connect(self.settings_requested.emit)
+        no_licence_layout.addWidget(self._no_licence_button, alignment=Qt.AlignLeft)
+        root.addWidget(self._no_licence_frame)
+
+        # Zones de message à leur hauteur naturelle, en haut : sans ça, tant
+        # que la zone de résultat (seule extensible) est masquée, Qt étirait
+        # chacune sur toute la hauteur -- titre, texte et boutons éparpillés
+        # avec de grands vides entre eux (constaté au rendu). L'espace restant
+        # va au ressort final, qui ne prend rien quand un résultat s'affiche
+        # (facteur 0 contre 1 pour `_result_frame`).
+        for frame in (self._no_info_frame, self._error_frame, self._no_licence_frame):
+            frame.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        root.addStretch(0)
+
+        self._zone = "idle"
         self._show_zone("idle")
 
     # --- Configuration réseau ------------------------------------------
@@ -489,14 +528,19 @@ class ConsolesDiversesScreen(Screen):
         self._server_url = server_url
         self._licence_key = licence_key
         self._opener = opener
+        # La clé vient peut-être d'être saisie ou effacée : l'explication
+        # « aucune clé » suit sans attendre une nouvelle recherche.
+        self._show_zone(self._zone)
 
     # --- Zones -----------------------------------------------------------
 
     def _show_zone(self, zone: str) -> None:
+        self._zone = zone
         self._status_label.setVisible(zone == "searching")
         self._result_frame.setVisible(zone == "result")
         self._no_info_frame.setVisible(zone == "no_info")
         self._error_frame.setVisible(zone == "error")
+        self._no_licence_frame.setVisible(zone == "idle" and not (self._licence_key or "").strip())
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         self._reference_edit.setEnabled(enabled)
@@ -539,6 +583,7 @@ class ConsolesDiversesScreen(Screen):
         self._slow_search_timer.stop()
         self._set_controls_enabled(True)
         self._error_label.setText(friendly_error_message(code, message_serveur))
+        self._error_licence_button.setVisible(code in _CODES_SAISIE_LICENCE)
         self._show_zone("error")
 
     # --- Affichage de la fiche ----------------------------------------------

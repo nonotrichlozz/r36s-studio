@@ -221,17 +221,17 @@ def test_download_error_shows_friendly_message(mock_list, mock_filter, mock_load
     assert "détail technique brut" not in window._android_screen._download_error_label.text()
 
 
-@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="cle")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch(
     "r36s_studio.gui.main_window.app_config.load_config",
-    return_value=AppConfig(ui_mode="expert", consoles_diverses_server_url="https://exemple.invalid"),
+    return_value=AppConfig(ui_mode="expert", consoles_diverses_licence_key="cle"),
 )
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_search_catalog_requested_starts_search_runner_with_configured_server(
-    mock_list, mock_filter, mock_load, mock_save, mock_lire_licence, qapp
+    mock_list, mock_filter, mock_load, mock_save, qapp, monkeypatch
 ):
+    monkeypatch.setenv("R36S_STUDIO_CLOUD_URL", "https://exemple.invalid")
     window = MainWindow()
     search_runner_class = _mock_runner_class()
 
@@ -287,22 +287,22 @@ def test_search_finished_not_found_shows_message(mock_list, mock_filter, mock_lo
     assert window._android_screen._catalog_status_label.isVisible()
 
 
-@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="cle-partagee")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch(
     "r36s_studio.gui.main_window.app_config.load_config",
-    return_value=AppConfig(ui_mode="expert", consoles_diverses_server_url="https://exemple.invalid"),
+    return_value=AppConfig(ui_mode="expert", consoles_diverses_licence_key="cle-partagee"),
 )
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_android_search_uses_exactly_the_same_config_as_consoles_diverses(
-    mock_list, mock_filter, mock_load, mock_save, mock_lire_licence, qapp
+    mock_list, mock_filter, mock_load, mock_save, qapp, monkeypatch
 ):
     """Signalé : « Impossible de joindre le serveur » depuis l'écran
     Console Android alors que la recherche marche depuis Consoles
     diverses -- vérifie que les deux chemins d'appel utilisent strictement
     la même URL de serveur et la même clé de licence (pas de configuration
     séparée pour cet écran, jamais une valeur par défaut différente)."""
+    monkeypatch.setenv("R36S_STUDIO_CLOUD_URL", "https://exemple.invalid")
     window = MainWindow()
 
     # Chemin « Consoles diverses » -- valeurs passées à `set_network_config`.
@@ -321,22 +321,22 @@ def test_android_search_uses_exactly_the_same_config_as_consoles_diverses(
     assert android_licence == consoles_diverses_licence == "cle-partagee"
 
 
-@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="cle")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch(
     "r36s_studio.gui.main_window.app_config.load_config",
-    return_value=AppConfig(ui_mode="expert", consoles_diverses_server_url="https://exemple.invalid/"),
+    return_value=AppConfig(ui_mode="expert", consoles_diverses_licence_key="cle"),
 )
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_android_search_logs_the_called_url(
-    mock_list, mock_filter, mock_load, mock_save, mock_lire_licence, qapp, tmp_path
+    mock_list, mock_filter, mock_load, mock_save, qapp, tmp_path, monkeypatch
 ):
     """Demandé explicitement : « Journalise l'URL appelée ». Le fixture
     autouse `_android_log_isolated` (tests/conftest.py) redirige `gui_logs.
     android_log_path` vers `tmp_path / "android.log"` -- même `tmp_path`
     que celui reçu ici (fixture function-scopée, une seule instance par
     test)."""
+    monkeypatch.setenv("R36S_STUDIO_CLOUD_URL", "https://exemple.invalid/")
     window = MainWindow()
     search_runner_class = _mock_runner_class()
 

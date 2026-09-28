@@ -219,6 +219,16 @@ def _doublons_scan_cache_isolated(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_cloud_url_override_from_the_developer_shell(monkeypatch):
+    """`R36S_STUDIO_CLOUD_URL` (`consoles_diverses/settings_store.py::
+    adresse_serveur`) est typiquement définie dans le terminal d'un
+    développeur qui fait tourner le Worker en local -- elle ne doit jamais
+    changer le résultat d'un test. Un test qui en a besoin la repose lui-
+    même (`monkeypatch.setenv`)."""
+    monkeypatch.delenv("R36S_STUDIO_CLOUD_URL", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _interface_language_is_french():
     """Langue de l'interface (`r36s_studio/i18n.py`) : état au niveau
     module, comme le point d'extension ci-dessous -- un test qui passe en

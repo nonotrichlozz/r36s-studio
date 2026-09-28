@@ -98,20 +98,6 @@ for _tri_name in ("systems.json", "firmware_folders.json"):
         raise SystemExit(f"Fichier de donnees obligatoire introuvable : {_tri_file}")
     EXTRA_DATAS.append((str(_tri_file), "r36s_studio/tri/data"))
 
-# `keyring` (consoles_diverses/settings_store.py) : aucun `hiddenimports`
-# manuel nécessaire ici -- PyInstaller fournit son propre hook officiel
-# (`hook-keyring.py`, `collect_submodules('keyring.backends')` +
-# `copy_metadata('keyring')`, cette dernière indispensable puisque
-# `keyring` découvre ses backends via les points d'entrée setuptools de sa
-# propre métadonnée) qui s'applique automatiquement dès que `keyring` est
-# importé quelque part dans le code -- vérifié en conditions réelles sur
-# le binaire Windows (même hook, non spécifique à un OS -- voir
-# `r36s_studio_windows.spec` pour le détail de cette vérification ;
-# non encore reconstruit sur du vrai matériel macOS à ce jour). Une
-# première version de ce fichier déclarait une liste manuelle de backends
-# par hypothèse -- retirée : elle n'ajoutait rien face au hook déjà
-# présent.
-
 a = Analysis(
     [ENTRY_SCRIPT],
     pathex=[str(PROJECT_ROOT)],

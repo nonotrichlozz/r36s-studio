@@ -157,7 +157,7 @@ def _journaliser_erreur_http_inattendue(status: int, raw: bytes) -> None:
         pass
 
 
-_CODES_LICENCE = {"licence_requise", "licence_invalide"}
+_CODES_LICENCE = {"licence_requise", "licence_invalide", "licence_expiree", "licence_revoquee"}
 
 
 def _hash_prefix(valeur: str) -> str:

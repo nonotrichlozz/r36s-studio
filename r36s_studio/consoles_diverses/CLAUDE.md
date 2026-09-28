@@ -89,157 +89,49 @@ verifie"`), jamais vérifiée par un humain. Quatre mesures :
 2. **Liens restreints à http(s)** (`screen.py::_est_url_externe_sure`) --
    `file:`/`javascript:`/un chemin local/un schéma absent restent du texte
    simple, jamais un lien ouvert automatiquement.
-3. **Adresse du serveur restreinte** (`settings_store.py::
-   valider_adresse_serveur`) -- `https://` toujours accepté, `http://`
+3. **Adresse du serveur en dur** (`settings_store.py::adresse_serveur`,
+   `PRODUCTION_SERVER_URL`) -- jamais saisie ni modifiable depuis la GUI
+   (champ retiré des réglages : un client ne saurait pas quoi y mettre, et
+   une adresse mal tapée rendait la section inutilisable sans message
+   clair). Seule surcharge : la variable d'environnement
+   `R36S_STUDIO_CLOUD_URL` (Worker local en développement), validée par
+   `valider_adresse_serveur` -- `https://` toujours accepté, `http://`
    seulement pour `localhost`/`127.0.0.1` (sinon la clé de licence
-   circulerait en clair).
+   circulerait en clair) ; une valeur refusée est signalée sur la sortie
+   d'erreur, repli sur la production. L'ancien champ `AppConfig.
+   consoles_diverses_server_url` n'existe plus : un `config.json` qui le
+   porte encore (souvent `http://localhost:8787`) est ignoré.
 4. **Réponse plafonnée à 1 Mio** (`client.py::MAX_RESPONSE_BYTES`) avant
    tout `json.loads`.
 
-## Clé de licence : trousseau système, avec repli
+## Clé de licence : `config.json`
 
-`settings_store.py` stocke la clé via `keyring`, jamais en clair dans
-`AppConfig`/`config.json`. Si aucun backend `keyring` n'est disponible
-(`trousseau_disponible()` renvoie `False` -- typiquement Linux sans
-`SecretService`/`kwallet` actif), la clé reste **uniquement en mémoire
-pour la session**, jamais écrite sur disque en clair à la place --
-`settings_dialog.py` affiche alors un message explicite plutôt qu'un
-échec silencieux.
+Clé saisie dans les réglages de la section (seul champ restant), mémorisée
+dans `config.json` (`AppConfig.consoles_diverses_licence_key`), lue et
+écrite par `MainWindow` avec le reste de la configuration -- jamais par
+un module à part, qui réécrirait `config.json` dans le dos de
+`MainWindow._app_config` (sa copie en mémoire écraserait la clé au
+prochain `save_config`). `.strip()` à l'enregistrement et à la lecture :
+un copier-coller dans un champ masqué laisse souvent un espace ou un
+retour à la ligne invisible (bug réel, clé valide refusée).
 
-⚠️ **Bug corrigé (cause n°1), signalé par un utilisateur** : une clé
-confirmée valide (`Invoke-RestMethod` contre le serveur de production
-renvoie `trouve_dans_catalogue`) était refusée par la GUI (« La clé de
-licence renseignée n'est pas reconnue par le serveur »). Cause :
-`settings_dialog.py::_on_save` retirait déjà les espaces de l'adresse du
-serveur (`.strip()`) mais jamais ceux de la clé de licence -- un
-copier-coller laisse souvent un espace ou un retour à la ligne parasite
-en tête/fin, jamais visible dans un champ masqué (`QLineEdit.Password`).
-`settings_store.py::enregistrer_licence` applique `.strip()` avant tout
-stockage (trousseau ou repli mémoire-session).
+Exception assumée au « config.json sans secret » (CLAUDE.md racine) :
+une clé par client, révocable côté serveur (KV `LICENCES` de
+r36s-studio-cloud, `npm run licence -- revoquer`), pas un mot de passe.
+**Historique** : la clé était auparavant au trousseau système
+(`keyring`), retiré -- sous Windows, `WinVaultKeyring.set_password` peut
+lever après avoir réécrit l'ancienne valeur, laissant une clé figée
+quelle que soit la ressaisie (deux signalements réels). Plus de
+dépendance `keyring`, ni dans `requirements.txt` ni dans les `.spec`.
 
-⚠️ **Bug corrigé (cause n°2, plus grave), même signalement, resurgi après
-le correctif ci-dessus** : la clé restait refusée après plusieurs
-ressaisies *et un redémarrage complet de l'app* -- le journal de
-diagnostic montrait la même longueur, sans espace parasite, à chaque
-tentative, preuve qu'une valeur figée était envoyée indépendamment de ce
-qui était retapé. Cause réelle, trouvée en relisant `keyring.backends.
-Windows.WinVaultKeyring.set_password` (lu en lecture seule, dépendance
-tierce) : ce backend relit l'ancienne valeur et la réécrit sous une cible
-composée (`{compte}@{service}`, simulation multi-utilisateur que
-`WinVaultKeyring` documente lui-même) *avant* d'écrire la nouvelle --
-et peut lever une exception à cette étape intermédiaire, avant que la
-nouvelle valeur n'ait jamais été écrite. L'ancien `enregistrer_licence`
-retombait alors correctement sur la mémoire-session en cas d'échec, mais
-`lire_licence()` préférait quand même une relecture trousseau non vide --
-qui rendait donc systématiquement l'ancienne valeur, jamais celle qu'on
-venait de demander, quel que soit le nombre de tentatives.
-
-**Corrigé** : `_licence_memoire_session` porte désormais la valeur
-explicitement demandée à chaque appel d'`enregistrer_licence`, que
-l'écriture trousseau réussisse ou non -- et `lire_licence()` la préfère
-toujours à une relecture trousseau pour le reste de la session. Une
-relecture trousseau n'est tentée qu'en l'absence de toute registration
-cette session (premier appel après lancement, ou après
-`effacer_licence`) -- ce qui préserve la persistance normale entre deux
-lancements quand l'écriture réussit réellement.
-
-**Diagnostics ajoutés pour confirmer/creuser sans jamais journaliser la
-clé en clair** (deux points de passage distincts, à comparer entre eux) :
-- `settings_store.py::_journaliser_diagnostic_enregistrement`, à chaque
-  `enregistrer_licence` : hash (8 premiers caractères du SHA-256) de la
-  clé demandée, hash de ce que le trousseau rend en relecture *directe*
-  (`keyring.get_password`, pas via le raccourci mémoire ci-dessus --
-  volontairement, pour tester l'aller-retour réel du trousseau), et la
-  source finalement utilisée (`trousseau`/`memoire`).
-- `client.py::_journaliser_diagnostic_licence`, à chaque
-  `licence_invalide`/`licence_requise` : longueur de la clé envoyée,
-  présence d'un espace parasite, son hash, et le code serveur.
-
-Un écart entre `sha256_demandee` et `sha256_trousseau_relue` au moment de
-l'enregistrement confirme un problème d'aller-retour au niveau du
-backend `keyring` lui-même (cause n°2 ci-dessus) ; un `sha256_envoyee`
-qui ne correspond à aucun des deux au moment d'une recherche pointerait
-plutôt vers un autre appelant non couvert par ce correctif.
-
-⚠️ **Suite du même signalement, une fois les causes n°1/n°2 exclues par
-comparaison des hashs** (clé identique à l'enregistrement, à la relecture
-et à l'envoi -- et fonctionnelle via `Invoke-RestMethod` contre la même
-URL de production) : la GUI seule reçoit encore `licence_invalide`, donc
-le problème est dans la requête que `client.py` construit, pas dans la
-clé. **Trois points vérifiés directement, aucun n'est en cause** (capturé
-sur un vrai socket local -- voir le commentaire de `rechercher_console`
-pour le détail) :
-- **URL finale** (`server_url.rstrip("/") + "/recherche"`) : jamais de
-  barre oblique double ni de segment manquant.
-- **En-tête `X-Licence-Key`** : stocké en interne sous une casse mutilée
-  par `Request.add_header` (`.capitalize()` -> `X-licence-key`), mais
-  `AbstractHTTPHandler.do_open` retitre tous les en-têtes (`.title()`)
-  juste avant l'envoi -- casse restaurée sur le fil. Sans incidence de
-  toute façon : les noms d'en-tête HTTP sont insensibles à la casse par
-  spécification, et Cloudflare Workers les normalise en minuscules à la
-  réception quelle que soit la casse envoyée.
-- **Encodage du corps** : `json.dumps(..., ensure_ascii=True)` (défaut)
-  échappe tout caractère non-ASCII avant l'encodage UTF-8 -- le corps
-  posté est toujours de l'ASCII pur, jamais un problème de charset
-  malgré l'absence de paramètre `charset` explicite sur `Content-Type`.
-
-**Piste restée ouverte, désormais instrumentée** : une redirection HTTP
-suivie silencieusement par `urllib` convertirait la requête POST en GET
-et supprimerait son corps (`Content-Type`/`Content-Length`), mais PAS les
-en-têtes personnalisés comme `X-Licence-Key` (vérifié dans le code source
-d'`HTTPRedirectHandler.redirect_request`, lu en lecture seule) -- une
-piste plausible seulement si l'URL configurée diffère, même légèrement,
-de celle validée manuellement. `client.py::_journaliser_diagnostic_
-licence` journalise désormais `statut_http` (le code HTTP numérique,
-distinct du code d'erreur `{"erreur": ...}` déjà consigné),
-`url_demandee` (celle construite par ce module) et `url_atteinte`
-(`HTTPError.url`, celle où l'erreur a réellement été levée -- diffère de
-`url_demandee` si une redirection a été suivie) ; `redirection_suivie`
-compare les deux.
-
-**Découverte en cours de route, à exploiter au prochain essai réel** :
-`r36s-studio-cloud/worker/src/routes/recherche.ts::logLicenceDiagnostic`
-(lu en lecture seule, jamais modifié depuis ce dépôt) existe déjà côté
-serveur pour cette même enquête -- visible via `wrangler tail`, il
-journalise, côté Worker, la liste des en-têtes réellement *reçus*, la
-présence/longueur/hash de `X-Licence-Key` tel que le serveur le voit, le
-hash de la clé attendue (`LICENCE_TEST_KEY`), et l'URL/`User-Agent` de la
-requête reçue. Comparer ce journal serveur (au prochain essai depuis la
-GUI, `wrangler tail` ouvert en parallèle) au journal client ci-dessus
-pour la même requête tranche définitivement entre un problème d'émission
-(ce module) et un problème de réception/configuration côté Worker (ex. :
-l'URL configurée dans la GUI pointe vers un environnement Cloudflare
-différent de celui interrogé manuellement, avec un `LICENCE_TEST_KEY`
-différent -- expliquerait une clé prouvée identique tout du long côté
-client, mais refusée uniquement depuis la GUI).
-
-⚠️ **Non vérifié sur du vrai matériel au moment d'écrire cette note** :
-seul Windows (Credential Manager, backend natif toujours disponible) a pu
-être testé lors de l'implémentation initiale. Le comportement sur macOS
-(Keychain) et sur un Linux sans trousseau de bureau (repli mémoire-session
-réel) reste à confirmer au premier essai sur ces plateformes.
-
-**Packaging, corrigé après vérification sur du vrai binaire.** L'hypothèse
-initiale (PyInstaller ne détecterait pas seul les backends `keyring`,
-nécessitant un `hiddenimports` manuel par OS dans `packaging/*.spec`) était
-fausse. Construit et inspecté directement (`packaging/r36s_studio_windows.
-spec`, `pyinstaller` réel, PYZ embarqué décompressé et listé) : PyInstaller
-fournit son propre hook officiel (`hook-keyring.py`,
-`collect_submodules('keyring.backends')` + `copy_metadata('keyring')`) qui
-s'applique automatiquement dès que `keyring` est importé -- les neuf
-sous-modules de `keyring.backends` (`Windows`, `macOS`, `SecretService`,
-`kwallet`, `libsecret`, `chainer`, `fail`, `null`, `macOS.api`) et les
-métadonnées `keyring-*.dist-info` (indispensables : `keyring` découvre ses
-backends via les points d'entrée setuptools de sa propre métadonnée) sont
-tous présents dans le binaire construit, sans aucune déclaration manuelle.
-Un appel réel `enregistrer_licence`/`lire_licence`/`effacer_licence` depuis
-le binaire compilé (Windows Credential Manager) a fonctionné correctement.
-Les trois fichiers `.spec` ont été simplifiés en conséquence (retrait des
-`hiddenimports` ajoutés par hypothèse). **macOS et Linux restent non
-vérifiés sur du vrai matériel** -- le hook lui-même n'est pas conditionné à
-l'OS, donc la même collecte s'applique en théorie aux trois plateformes,
-mais seul le binaire Windows a été réellement construit et testé à ce
-jour.
+Refus serveur et message affiché (`strings.py::_ERROR_MESSAGE_KEYS`) :
+`licence_requise`, `licence_invalide`, `licence_expiree`,
+`licence_revoquee` (403, bouton « Saisir ma clé » sous le message),
+`quota_licence_depasse` (429, quota quotidien du client), `licence_non_
+supportee` (500, serveur mal réglé). Sans clé, l'écran l'explique d'emblée
+(`_no_licence_frame`) au lieu de rester vide.
+`client.py::_journaliser_diagnostic_licence` consigne toujours, à chaque
+refus de licence, longueur/hash/URL (jamais la clé en clair).
 
 ## Hors périmètre (étape 1)
 
@@ -256,6 +148,4 @@ affichés à l'utilisateur.
 
 Toute communication réseau passe par un paramètre `opener` injectable
 (`client.py::Opener`, même principe que `identify/rocknix.py`) -- aucun
-test de ce package ne fait un appel réseau réel. `keyring` est monkeypatché
-dans `tests/test_consoles_diverses_settings.py`, jamais un vrai trousseau
-système lu ou écrit pendant la suite.
+test de ce package ne fait un appel réseau réel.

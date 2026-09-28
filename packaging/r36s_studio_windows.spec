@@ -85,23 +85,6 @@ for _tri_name in ("systems.json", "firmware_folders.json"):
         raise SystemExit(f"Fichier de donnees obligatoire introuvable : {_tri_file}")
     EXTRA_DATAS.append((str(_tri_file), "r36s_studio/tri/data"))
 
-# `keyring` (consoles_diverses/settings_store.py) : aucun `hiddenimports`
-# manuel nécessaire ici -- PyInstaller fournit son propre hook officiel
-# (`hook-keyring.py`, `collect_submodules('keyring.backends')` +
-# `copy_metadata('keyring')`, cette dernière indispensable puisque
-# `keyring` découvre ses backends via les points d'entrée setuptools de sa
-# propre métadonnée) qui s'applique automatiquement dès que `keyring` est
-# importé quelque part dans le code. Vérifié en conditions réelles sur le
-# binaire Windows construit par ce fichier (§CLAUDE.md racine, §
-# durcissement consoles_diverses, point 5) : les neuf sous-modules de
-# `keyring.backends` et les métadonnées `keyring-*.dist-info` sont bien
-# présents dans l'archive embarquée, et un appel `keyring.set_password`/
-# `get_password`/`delete_password` réel depuis le binaire compilé
-# fonctionne correctement (Windows Credential Manager). Une première
-# version de ce fichier déclarait une liste manuelle de backends par
-# hypothèse -- retirée une fois cette vérification faite : elle n'ajoutait
-# rien face au hook déjà présent.
-
 a = Analysis(
     [ENTRY_SCRIPT],
     pathex=[str(PROJECT_ROOT)],

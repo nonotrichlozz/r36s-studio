@@ -14,12 +14,13 @@
 # Vous devez avoir reçu une copie de la GNU General Public License avec
 # R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
 
-"""Fenêtre de réglages de la section « Consoles diverses » -- adresse du
-serveur et clé de licence (champ masqué). Suit le même contrat que les
-autres fenêtres modales du projet (`gui/screens.py::Dialog`) : elle
-n'émet qu'un signal sur l'action de l'utilisateur, jamais elle-même
-responsable d'enregistrer quoi que ce soit -- c'est `MainWindow` qui
-décide (persistance dans `AppConfig`, trousseau via `settings_store`)."""
+"""Fenêtre de réglages de la section « Consoles diverses » -- la clé de
+licence seule (champ masqué). L'adresse du serveur n'y figure plus :
+elle est en dur (`settings_store.adresse_serveur`), un client ne saurait
+pas quoi y mettre. Suit le même contrat que les autres fenêtres modales
+du projet (`gui/screens.py::Dialog`) : elle n'émet qu'un signal sur
+l'action de l'utilisateur, jamais elle-même responsable d'enregistrer
+quoi que ce soit -- c'est `MainWindow` qui décide (`config.json`)."""
 
 from __future__ import annotations
 
@@ -28,16 +29,15 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBox
 
 from r36s_studio.gui.screens import Dialog
 
-from . import settings_store
 from .strings import tr
 
 
 class ConsolesDiversesSettingsDialog(Dialog):
     """`set_values` doit être appelé avant chaque ouverture (`MainWindow`,
-    depuis `AppConfig`/`settings_store.lire_licence()`) pour préremplir les
-    champs avec l'état actuel -- jamais de valeur imposée."""
+    depuis `AppConfig.consoles_diverses_licence_key`) pour préremplir le champ avec
+    l'état actuel -- jamais de valeur imposée."""
 
-    settings_saved = Signal(str, str)  # server_url, licence_key
+    settings_saved = Signal(str)  # licence_key
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,27 +50,10 @@ class ConsolesDiversesSettingsDialog(Dialog):
         title.setProperty("role", "title")
         layout.addWidget(title)
 
-        layout.addWidget(QLabel(tr("settings_server_url_label")))
-        self._server_url_edit = QLineEdit()
-        layout.addWidget(self._server_url_edit)
-
         layout.addWidget(QLabel(tr("settings_licence_label")))
         self._licence_edit = QLineEdit()
         self._licence_edit.setEchoMode(QLineEdit.Password)
         layout.addWidget(self._licence_edit)
-
-        self._keyring_warning_label = QLabel(tr("settings_no_keyring_warning"))
-        self._keyring_warning_label.setTextFormat(Qt.PlainText)
-        self._keyring_warning_label.setWordWrap(True)
-        self._keyring_warning_label.setProperty("role", "secondary")
-        self._keyring_warning_label.setVisible(False)
-        layout.addWidget(self._keyring_warning_label)
-
-        self._error_label = QLabel("")
-        self._error_label.setTextFormat(Qt.PlainText)
-        self._error_label.setWordWrap(True)
-        self._error_label.setProperty("role", "dangerMessage")
-        layout.addWidget(self._error_label)
 
         layout.addStretch()
 
@@ -86,23 +69,15 @@ class ConsolesDiversesSettingsDialog(Dialog):
         buttons.addWidget(self._save_button)
         layout.addLayout(buttons)
 
-        self.resize(420, 260)
+        self.resize(420, 200)
 
-    def set_values(self, server_url: str, licence_key: str) -> None:
-        self._server_url_edit.setText(server_url)
+    def set_values(self, licence_key: str) -> None:
         self._licence_edit.setText(licence_key or "")
-        self._error_label.setText("")
-        self._keyring_warning_label.setVisible(not settings_store.trousseau_disponible())
 
     def _on_save(self) -> None:
-        server_url = self._server_url_edit.text().strip()
-        erreur = settings_store.valider_adresse_serveur(server_url)
-        if erreur:
-            self._error_label.setText(erreur)
-            return
         licence_key = self._licence_edit.text()
         self.close()
-        self.settings_saved.emit(server_url, licence_key)
+        self.settings_saved.emit(licence_key)
 
 
 __all__ = ["ConsolesDiversesSettingsDialog"]

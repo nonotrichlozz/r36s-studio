@@ -278,8 +278,8 @@ def _journaliser_android_recherche(url: str, reference: str) -> None:
     """Diagnostic pour le signalement « Impossible de joindre le serveur
     depuis l'écran Console Android, alors que la recherche marche depuis
     Consoles diverses » -- les deux écrans utilisent pourtant exactement
-    la même source de configuration (`AppConfig.consoles_diverses_server_
-    url`, `consoles_diverses_settings_store.lire_licence()`, voir `_on_
+    la même source de configuration (`consoles_diverses_settings_store.
+    adresse_serveur()`/`AppConfig.consoles_diverses_licence_key`, voir `_on_
     android_search_catalog_requested` ci-dessous et le test dédié qui
     compare les deux chemins d'appel). Consigne l'URL réellement appelée,
     pour comparer d'une session à l'autre plutôt que de deviner --
@@ -2620,8 +2620,8 @@ class MainWindow(QMainWindow):
         licence ont pu changer depuis la dernière visite, via la fenêtre
         de réglages)."""
         self._consoles_diverses_screen.set_network_config(
-            self._app_config.consoles_diverses_server_url,
-            consoles_diverses_settings_store.lire_licence() or "",
+            consoles_diverses_settings_store.adresse_serveur(),
+            self._app_config.consoles_diverses_licence_key,
         )
         self._root_stack.setCurrentWidget(self._consoles_diverses_screen)
 
@@ -2713,12 +2713,12 @@ class MainWindow(QMainWindow):
         if not reference:
             return
         self._android_screen.show_catalog_searching()
-        server_url = self._app_config.consoles_diverses_server_url
-        licence_key = consoles_diverses_settings_store.lire_licence() or ""
+        server_url = consoles_diverses_settings_store.adresse_serveur()
+        licence_key = self._app_config.consoles_diverses_licence_key
         # URL/clé venant strictement de la même source que `_open_consoles_
-        # diverses` (`AppConfig.consoles_diverses_server_url`, `consoles_
-        # diverses_settings_store.lire_licence()`) -- pas de configuration
-        # séparée pour cet écran, vérifié par un test dédié.
+        # diverses` (`consoles_diverses_settings_store.adresse_serveur()`/
+        # `AppConfig.consoles_diverses_licence_key`) -- pas de configuration séparée pour cet écran,
+        # vérifié par un test dédié.
         self._android_last_search_url = _android_catalog_search_url(server_url)
         _journaliser_android_recherche(self._android_last_search_url, reference)
         runner = ConsoleSearchRunner(reference, server_url, licence_key)
@@ -2755,18 +2755,17 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl(url))
 
     def _on_consoles_diverses_settings_requested(self) -> None:
-        licence = consoles_diverses_settings_store.lire_licence() or ""
-        self._consoles_diverses_settings_dialog.set_values(
-            self._app_config.consoles_diverses_server_url, licence
-        )
+        self._consoles_diverses_settings_dialog.set_values(self._app_config.consoles_diverses_licence_key)
         self._consoles_diverses_settings_dialog.open()
 
-    def _on_consoles_diverses_settings_saved(self, server_url: str, licence_key: str) -> None:
-        self._app_config.consoles_diverses_server_url = server_url
+    def _on_consoles_diverses_settings_saved(self, licence_key: str) -> None:
+        # `.strip()` : un copier-coller laisse souvent un espace ou un retour
+        # à la ligne invisible dans un champ masqué (bug réel, clé refusée).
+        self._app_config.consoles_diverses_licence_key = licence_key.strip()
         app_config.save_config(self._app_config)
-        consoles_diverses_settings_store.enregistrer_licence(licence_key)
         self._consoles_diverses_screen.set_network_config(
-            server_url, consoles_diverses_settings_store.lire_licence() or licence_key
+            consoles_diverses_settings_store.adresse_serveur(),
+            self._app_config.consoles_diverses_licence_key,
         )
 
     def _start_wizard(self) -> None:

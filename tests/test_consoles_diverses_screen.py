@@ -197,6 +197,84 @@ def test_search_error_shows_error_zone_with_friendly_message(qapp):
     assert "serveur" in screen._error_label.text().lower()
 
 
+# --- Licence : jamais un écran vide, un message précis par cas -----------------
+
+
+def test_without_a_key_the_idle_screen_explains_and_offers_to_enter_one(qapp):
+    """Signalé : écran vide sous le champ de recherche tant qu'aucune clé
+    n'est saisie. L'explication ne bloque rien -- le catalogue vérifié se
+    consulte sans clé."""
+    screen = ConsolesDiversesScreen()
+    screen.show()
+    emitted = []
+    screen.settings_requested.connect(lambda: emitted.append(True))
+
+    assert screen._no_licence_frame.isVisible() is True
+    assert screen._search_button.isEnabled() is True
+    screen._no_licence_button.click()
+    assert emitted == [True]
+
+
+def test_the_no_key_explanation_disappears_once_a_key_is_saved(qapp):
+    screen = ConsolesDiversesScreen()
+    screen.show()
+
+    screen.set_network_config("https://exemple.invalid", "r36s-" + "a" * 32)
+
+    assert screen._no_licence_frame.isVisible() is False
+
+
+def test_the_no_key_explanation_never_hides_a_result_or_an_error(qapp):
+    screen = ConsolesDiversesScreen()
+    screen.show()
+
+    screen._on_search_error("serveur_injoignable", "")
+
+    assert screen._error_frame.isVisible() is True
+    assert screen._no_licence_frame.isVisible() is False
+
+
+@pytest.mark.parametrize(
+    "code, attendu",
+    [
+        ("licence_requise", "clé de licence est nécessaire"),
+        ("licence_invalide", "n'est pas reconnue"),
+        ("licence_expiree", "a expiré"),
+        ("licence_revoquee", "a été désactivée"),
+    ],
+)
+def test_licence_refusals_show_a_precise_message_and_a_way_to_enter_the_key(qapp, code, attendu):
+    screen = ConsolesDiversesScreen()
+    screen.show()
+
+    screen._on_search_error(code, "")
+
+    assert screen._error_frame.isVisible() is True
+    assert attendu in screen._error_label.text()
+    assert screen._error_licence_button.isVisible() is True
+
+
+@pytest.mark.parametrize(
+    "code, attendu",
+    [
+        ("quota_licence_depasse", "pour aujourd'hui"),
+        ("trop_de_requetes", "Attends une minute"),
+        ("erreur_interne", "problème"),
+    ],
+)
+def test_quota_and_server_refusals_are_explained_without_asking_for_another_key(qapp, code, attendu):
+    """Une autre clé ne réglerait ni le quota du jour ni une panne : pas
+    de bouton « Saisir ma clé » ici."""
+    screen = ConsolesDiversesScreen()
+    screen.show()
+
+    screen._on_search_error(code, "")
+
+    assert attendu in screen._error_label.text()
+    assert screen._error_label.text() != "Une erreur est survenue."
+    assert screen._error_licence_button.isVisible() is False
+
+
 def test_search_finished_reenables_controls(qapp):
     screen = ConsolesDiversesScreen()
     screen._set_controls_enabled(False)

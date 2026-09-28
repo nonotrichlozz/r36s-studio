@@ -24,6 +24,7 @@ installation, contributions au catalogue, dédoublonnage des jeux.
 ## Contexte
 Un serveur séparé (projet r36s-studio-cloud) renvoie des fiches console.
 En développement, il tourne en local : http://localhost:8787
+(visé seulement via R36S_STUDIO_CLOUD_URL, voir « Réglages » ci-dessous)
 En production : https://r36s-studio-cloud.r36studio.workers.dev (HTTPS,
 derrière Cloudflare -- voir la note User-Agent ci-dessus).
 Documentation de référence (dépôts locaux séparés, lecture seule, ne rien
@@ -46,9 +47,13 @@ serveur injoignable.
   indicateur « Recherche en cours… » (la recherche IA prend 10 à 15 s).
 
 ## Réglages de la section
-- Adresse du serveur (par défaut http://localhost:8787).
-- Clé de licence : champ masqué, stockée avec le trousseau du système
-  (bibliothèque keyring), jamais en clair dans un fichier de config.
+- Adresse du serveur : **plus un réglage** (révisé après coup). En dur,
+  https://r36s-studio-cloud.r36studio.workers.dev ; un client ne saurait
+  pas quoi saisir. Worker local en développement : variable
+  d'environnement R36S_STUDIO_CLOUD_URL (ex. http://localhost:8787),
+  jamais accessible depuis l'interface.
+- Clé de licence (seul champ de la fenêtre de réglages) : champ masqué, mémorisée dans
+  `config.json` (voir `consoles_diverses/CLAUDE.md`, « Clé de licence »).
 
 ## Écran de recherche
 - Champ « Référence de la console » + bouton Rechercher.

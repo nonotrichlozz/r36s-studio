@@ -71,16 +71,17 @@ STRINGS = {
     "no_info_title": "Aucune information trouvée",
     "no_info_message": "Le serveur n'a trouvé aucune information sur cette console.",
     "retry_button": "Réessayer",
+    # Aucune clé saisie : l'écran l'explique d'emblée plutôt que de rester
+    # vide sous le champ de recherche -- sans bloquer (le catalogue vérifié
+    # se consulte sans clé).
+    "no_licence_title": "Clé de licence",
+    "no_licence_message": "Les consoles déjà au catalogue se consultent sans clé. Pour chercher une console qui n'y est pas encore, saisis la clé de licence reçue à l'achat.",
+    "enter_licence_button": "Saisir ma clé",
     # Réglages
     "settings_title": "Réglages — Consoles diverses",
-    "settings_server_url_label": "Adresse du serveur",
     "settings_licence_label": "Clé de licence",
     "settings_save_button": "Enregistrer",
     "settings_cancel_button": "Annuler",
-    "settings_no_keyring_warning": (
-        "Aucun trousseau système disponible sur cet ordinateur : la clé sera "
-        "mémorisée seulement pour cette session, à ressaisir au prochain lancement."
-    ),
     "settings_url_empty": "Indique une adresse de serveur.",
     "settings_url_invalid_scheme": "L'adresse doit commencer par http:// ou https://.",
     "settings_url_http_remote_refused": (
@@ -92,13 +93,18 @@ STRINGS = {
     # vocabulaire de CLAUDE.md racine). Le message brut du serveur, quand il
     # existe, est interpolé en second plan plutôt qu'affiché seul.
     "error_reference_invalide": "Cette référence n'est pas valide (caractères non autorisés ou trop longue).",
-    "error_licence_requise": "Une clé de licence est nécessaire pour la recherche automatique. Renseigne-la dans les réglages de cette section.",
-    "error_licence_invalide": "La clé de licence renseignée n'est pas reconnue par le serveur. Vérifie-la dans les réglages.",
+    "error_licence_requise": "Une clé de licence est nécessaire pour chercher une console qui n'est pas encore au catalogue. Saisis la clé reçue à l'achat.",
+    "error_licence_invalide": "Cette clé de licence n'est pas reconnue. Vérifie qu'elle a été copiée en entier (elle commence par « r36s- »), sans espace en trop.",
+    "error_licence_expiree": "Ta clé de licence a expiré. Renouvelle-la pour continuer à chercher de nouvelles consoles ; les consoles déjà au catalogue restent consultables.",
+    "error_licence_revoquee": "Cette clé de licence a été désactivée. Contacte le vendeur si tu penses que c'est une erreur.",
+    "error_quota_licence_depasse": "Ta clé a atteint son nombre de recherches pour aujourd'hui. Réessaie demain ; les consoles déjà au catalogue restent consultables.",
+    "error_trop_de_requetes": "Trop de recherches d'affilée. Attends une minute, puis réessaie.",
+    "error_erreur_interne": "Le serveur a rencontré un problème. Réessaie dans quelques minutes.",
     "error_recherche_ia_indisponible": "La recherche automatique est momentanément indisponible.{message_serveur}",
     "error_configuration_manquante": "Le serveur n'est pas configuré correctement. Contacte l'administrateur du serveur.",
     "error_erreur_api_ia": "La recherche automatique a rencontré un problème. Réessaie plus tard.",
     "error_reponse_ia_non_json": "La recherche automatique a renvoyé une réponse invalide. Réessaie plus tard.",
-    "error_serveur_injoignable": "Impossible de joindre le serveur. Vérifie l'adresse dans les réglages et ta connexion.",
+    "error_serveur_injoignable": "Impossible de joindre le serveur. Vérifie ta connexion internet, puis réessaie.",
     "error_delai_depasse": "Le serveur met trop de temps à répondre (plus de 90 secondes). Réessaie.",
     "error_ia_surchargee": "Le service de recherche est surchargé pour le moment. Réessaie dans quelques minutes.",
     "error_reponse_invalide": "Le serveur a renvoyé une réponse inattendue.",
@@ -127,6 +133,14 @@ _ERROR_MESSAGE_KEYS = {
     "reference_invalide": "error_reference_invalide",
     "licence_requise": "error_licence_requise",
     "licence_invalide": "error_licence_invalide",
+    "licence_expiree": "error_licence_expiree",
+    "licence_revoquee": "error_licence_revoquee",
+    "quota_licence_depasse": "error_quota_licence_depasse",
+    # Serveur mal réglé (LICENCE_MODE ≠ "prod") : même message qu'une
+    # configuration manquante, rien que l'utilisateur puisse corriger.
+    "licence_non_supportee": "error_configuration_manquante",
+    "trop_de_requetes": "error_trop_de_requetes",
+    "erreur_interne": "error_erreur_interne",
     "recherche_ia_indisponible": "error_recherche_ia_indisponible",
     "ia_surchargee": "error_ia_surchargee",
     "configuration_manquante": "error_configuration_manquante",

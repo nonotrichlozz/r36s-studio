@@ -3809,42 +3809,61 @@ def test_consoles_diverses_button_from_home_switches_screen_and_back_returns(
     assert window._root_stack.currentWidget() is window._main_view
 
 
-@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="cle-existante")
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(consoles_diverses_server_url="https://exemple.invalid"))
+@patch(
+    "r36s_studio.gui.main_window.app_config.load_config",
+    return_value=AppConfig(ui_mode="expert", consoles_diverses_licence_key="cle-existante"),
+)
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_consoles_diverses_settings_requested_prefills_dialog(
-    mock_list, mock_filter, mock_detect, mock_load, mock_lire_licence, qapp
+    mock_list, mock_filter, mock_detect, mock_load, qapp
 ):
     window = MainWindow()
 
     window._consoles_diverses_screen.settings_requested.emit()
 
     assert window._consoles_diverses_settings_dialog.isVisible() is True
-    assert window._consoles_diverses_settings_dialog._server_url_edit.text() == "https://exemple.invalid"
     assert window._consoles_diverses_settings_dialog._licence_edit.text() == "cle-existante"
 
 
-@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.enregistrer_licence")
-@patch("r36s_studio.gui.main_window.consoles_diverses_settings_store.lire_licence", return_value="nouvelle-cle")
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
 @patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_consoles_diverses_settings_saved_persists_url_and_licence(
-    mock_list, mock_filter, mock_detect, mock_load, mock_save, mock_lire_licence, mock_enregistrer, qapp
+def test_consoles_diverses_settings_saved_stores_only_the_licence(
+    mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp, monkeypatch
 ):
+    """La clé seule, mémorisée dans `config.json` sans espace parasite
+    (copier-coller) ; l'adresse du serveur reste celle de production."""
+    monkeypatch.delenv("R36S_STUDIO_CLOUD_URL", raising=False)
     window = MainWindow()
 
-    window._consoles_diverses_settings_dialog.settings_saved.emit("https://nouveau-serveur.invalid", "nouvelle-cle")
+    window._consoles_diverses_settings_dialog.settings_saved.emit(" nouvelle-cle\n")
 
     mock_save.assert_called_once()
-    assert mock_save.call_args[0][0].consoles_diverses_server_url == "https://nouveau-serveur.invalid"
-    mock_enregistrer.assert_called_once_with("nouvelle-cle")
-    assert window._consoles_diverses_screen._server_url == "https://nouveau-serveur.invalid"
+    assert mock_save.call_args.args[0].consoles_diverses_licence_key == "nouvelle-cle"
+    assert window._consoles_diverses_screen._server_url == "https://r36s-studio-cloud.r36studio.workers.dev"
     assert window._consoles_diverses_screen._licence_key == "nouvelle-cle"
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_opening_consoles_diverses_targets_production_or_the_dev_override(
+    mock_list, mock_filter, mock_detect, mock_load, qapp, monkeypatch
+):
+    monkeypatch.delenv("R36S_STUDIO_CLOUD_URL", raising=False)
+    window = MainWindow()
+    window._home.consoles_diverses_requested.emit()
+    assert window._consoles_diverses_screen._server_url == "https://r36s-studio-cloud.r36studio.workers.dev"
+
+    monkeypatch.setenv("R36S_STUDIO_CLOUD_URL", "http://localhost:8787")
+    window._consoles_diverses_screen.back_requested.emit()
+    window._home.consoles_diverses_requested.emit()
+    assert window._consoles_diverses_screen._server_url == "http://localhost:8787"
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")

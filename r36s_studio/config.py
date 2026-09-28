@@ -35,10 +35,17 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from r36s_studio.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 
 DEFAULT_UI_MODE = "assisted"
 _VALID_UI_MODES = {"assisted", "expert"}
+
+# Langue de l'interface (`r36s_studio/i18n.py`) -- mémorisée comme
+# `ui_mode`, même repli silencieux sur le français pour une valeur
+# inconnue (fichier édité à la main, langue retirée d'une version à
+# l'autre). Appliquée au démarrage seulement (`gui/app.py::run`).
+_VALID_LANGUAGES = set(SUPPORTED_LANGUAGES)
 
 # Firmware choisi pour l'étape de flash (§4.6 étape C, mode expert
 # uniquement -- le parcours de clonage du mode assisté n'a pas de choix
@@ -117,6 +124,7 @@ _MAX_DOUBLONS_RECENT_DESTINATIONS = 10
 @dataclass
 class AppConfig:
     ui_mode: str = DEFAULT_UI_MODE
+    language: str = DEFAULT_LANGUAGE
     firmware: str = DEFAULT_FIRMWARE
     reset_card_filesystem: str = DEFAULT_RESET_CARD_FILESYSTEM
     consoles_diverses_server_url: str = DEFAULT_CONSOLES_DIVERSES_SERVER_URL
@@ -150,6 +158,9 @@ def load_config() -> AppConfig:
     ui_mode = raw.get("ui_mode")
     if ui_mode not in _VALID_UI_MODES:
         ui_mode = DEFAULT_UI_MODE
+    language = raw.get("language")
+    if language not in _VALID_LANGUAGES:
+        language = DEFAULT_LANGUAGE
     firmware = raw.get("firmware")
     if firmware not in _VALID_FIRMWARES:
         firmware = DEFAULT_FIRMWARE
@@ -177,6 +188,7 @@ def load_config() -> AppConfig:
         doublons_recent_destinations = []
     return AppConfig(
         ui_mode=ui_mode,
+        language=language,
         firmware=firmware,
         reset_card_filesystem=reset_card_filesystem,
         consoles_diverses_server_url=consoles_diverses_server_url,

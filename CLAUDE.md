@@ -92,7 +92,7 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 | `partitions/` : localisation/montage, copie, archives, éjection | `docs/claude/partitions.md` |
 | `detect/` : badges de statut des étapes A→F | `docs/claude/detect.md` |
 | Opérations A→F, catalogue de firmwares, ROCKNIX, clones, avertissements après flash | `docs/claude/firmwares-flash.md` |
-| `gui/screens.py`, `gui/theme.py`, `gui/strings.py`, `LogPanel`, mode expert | `docs/claude/interface.md` |
+| `gui/screens.py`, `gui/theme.py`, `gui/strings.py`/`strings_en.py`, `i18n.py`, `LogPanel`, mode expert | `docs/claude/interface.md` |
 | Mode assisté : accueil, parcours de clonage, empreinte de carte, sondage | `docs/claude/assisted-wizard.md` |
 | `packaging/`, `.spec`, CI, releases, `config.json` | `docs/claude/packaging.md` |
 | Écrire/déboguer des tests, bancs de test matériel | `docs/claude/testing.md` |
@@ -140,7 +140,10 @@ sauvegarde système sans les jeux, remise à zéro).
 - **Vocabulaire** : aucun terme technique dans l'interface (« ta carte SD »,
   « les jeux », « le système de la console ») ; chemin ou message brut en
   ligne supplémentaire du journal, jamais dans le message principal.
-  Chaînes dans `gui/strings.py`, interface en français.
+  Chaînes dans `gui/strings.py` (français, référence) et
+  `gui/strings_en.py`, mêmes clés et mêmes `{…}` ; langue fixée au
+  démarrage (`i18n.py`, `config.json::language`). Une langue n'est
+  ajoutée que si quelqu'un peut la relire (§2 n°6).
 - **Tailles affichées en base 1024 partout** (`_capacity_go`/`_format_size`,
   dupliqué dans `__main__.py` pour que le CLI ne dépende pas de PySide6).
 - **Thème** : aucune couleur en dur dans les écrans ; `setProperty("role"/

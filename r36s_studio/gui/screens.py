@@ -77,6 +77,7 @@ from r36s_studio.android.models import VALEUR_INCONNUE, AndroidDeviceInfo, Detec
 # publique, jamais une modification du package (règle d'isolation, son
 # propre CLAUDE.md : "Ne modifie jamais r36s-studio-cloud"/"Ne touche pas
 # ... à consoles_diverses/").
+from r36s_studio import i18n
 from r36s_studio.consoles_diverses.models import FicheConsole
 from r36s_studio.consoles_diverses.strings import tr as _consoles_diverses_tr
 from r36s_studio.detect import (
@@ -499,6 +500,10 @@ _TILE_LABEL_FONT_PIXEL_SIZE = {
     "tileLabel": 14,
     "tileLabelLarge": 16,
 }
+_TILE_LABEL_FONT_WEIGHT = {
+    "tileLabel": 600,
+    "tileLabelLarge": 700,
+}
 
 
 def _tile_label_reserved_height(label_role: str, lines: int) -> int:
@@ -506,9 +511,18 @@ def _tile_label_reserved_height(label_role: str, lines: int) -> int:
     (§5, deuxième correctif de taille) -- jamais déduite du texte
     réellement affiché (variable d'une tuile à l'autre), pour que toutes
     les tuiles d'un même rôle aient exactement la même hauteur de zone
-    libellé, et que la plus longue ne soit jamais coupée."""
+    libellé, et que la plus longue ne soit jamais coupée.
+
+    Mesurée avec la police du thème (`theme.FONT_FAMILY`, graisse du
+    rôle), pas la police par défaut de Qt : bug corrigé, constaté au
+    rendu en anglais -- « Prepare my card » (tuile 1, une seule ligne
+    réservée) perdait le bas de ses « p »/« y », 18 px réservés pour 21
+    nécessaires avec Segoe UI gras. Le français était touché aussi
+    (« Préparer »), moins visiblement."""
     font = QFont()
+    font.setFamilies([name.strip(" '\"") for name in theme.FONT_FAMILY.split(",")])
     font.setPixelSize(_TILE_LABEL_FONT_PIXEL_SIZE[label_role])
+    font.setWeight(QFont.Weight(_TILE_LABEL_FONT_WEIGHT[label_role]))
     return QFontMetrics(font).lineSpacing() * lines
 
 
@@ -998,6 +1012,36 @@ def build_window_backdrop(parent=None) -> Optional[WindowBackdrop]:
     return WindowBackdrop(pixmap, parent)
 
 
+class LanguageSelector(QComboBox):
+    """Choix de la langue de l'interface (`r36s_studio/i18n.py`), présent
+    sur les deux accueils. Chaque langue est écrite dans sa propre langue
+    (« English », jamais « Anglais ») et l'infobulle est bilingue : un
+    utilisateur qui ne lit pas la langue affichée doit pouvoir le trouver.
+    N'émet `language_selected` que sur un choix de l'utilisateur, jamais
+    sur `set_language` (synchronisation entre les deux accueils)."""
+
+    language_selected = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        for code, name in i18n.LANGUAGE_NAMES.items():
+            self.addItem(name, code)
+        self.setToolTip(tr("language_selector_label"))
+        self.setAccessibleName(tr("language_selector_label"))
+        self.set_language(i18n.get_language())
+        self.activated.connect(self._on_activated)
+
+    def set_language(self, code: str) -> None:
+        index = self.findData(code)
+        if index >= 0:
+            self.blockSignals(True)
+            self.setCurrentIndex(index)
+            self.blockSignals(False)
+
+    def _on_activated(self, index: int) -> None:
+        self.language_selected.emit(self.itemData(index))
+
+
 class HomeScreen(Screen):
     """Colonne gauche, largeur fixe, toujours visible (§5, refonte
     navigation) : bandeau de détection, six étapes A à F, puis la
@@ -1039,6 +1083,9 @@ class HomeScreen(Screen):
     # le néophyte (§1), ils ne vivent plus qu'ici.
     find_duplicates_requested = Signal()
     sort_games_requested = Signal()
+    # Choix de la langue (i18n.py) -- cet écran ne fait qu'émettre le
+    # code choisi, main_window.py le mémorise.
+    language_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1078,6 +1125,15 @@ class HomeScreen(Screen):
         self._assisted_mode_button.clicked.connect(self.assisted_mode_requested.emit)
         title_row.addWidget(self._assisted_mode_button)
         layout.addLayout(title_row)
+        # Sur sa propre ligne, alignée à droite : l'en-tête ci-dessus porte
+        # déjà trois boutons dans une colonne étroite, un quatrième ferait
+        # chevaucher les libellés plus longs d'une autre langue.
+        language_row = QHBoxLayout()
+        language_row.addStretch()
+        self._language_selector = LanguageSelector()
+        self._language_selector.language_selected.connect(self.language_selected.emit)
+        language_row.addWidget(self._language_selector)
+        layout.addLayout(language_row)
 
         # Bandeau de détection, toujours en haut -- cadre à bordure cyan et
         # coins arrondis (theme.py, role="banner"), distinct des lignes
@@ -1243,6 +1299,11 @@ class HomeScreen(Screen):
     def set_web_tile_visible(self, visible: bool) -> None:
         self._web_row.setVisible(visible)
 
+    def set_language(self, code: str) -> None:
+        """Aligne le sélecteur sur la langue mémorisée (choix fait depuis
+        l'autre accueil), sans réémettre `language_selected`."""
+        self._language_selector.set_language(code)
+
     def _update_backup_rows_enabled(self) -> None:
         """« Par sécurité » (§4.3) exige une carte -- contrairement aux
         six étapes lettrées, toujours cliquables par principe (§4.5) : la
@@ -1396,7 +1457,7 @@ class DeviceDialog(Dialog):
         self._list.clear()
         for device in devices:
             size_go = _capacity_go(device.size_bytes)
-            item = QListWidgetItem(f"{device.display} — {size_go:.1f} Go — {device.bus}")
+            item = QListWidgetItem(tr("device_list_entry", display=device.display, size_go=size_go, bus=device.bus))
             item.setData(Qt.UserRole, device)
             self._list.addItem(item)
         self._empty_label.setVisible(not devices)
@@ -1487,10 +1548,6 @@ _FILE_TITLE_KEYS = {
 _ARCHIVE_MODES = {"inject_boot", "copy_games"}  # étapes D/E : choix parmi les archives existantes
 _DESTINATION_MODES = {"extract_boot", "extract_easyroms"}  # étapes A/B : dossier de destination, avec défaut
 
-_FRENCH_MONTHS = [
-    "janvier", "février", "mars", "avril", "mai", "juin",
-    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
-]  # fmt: skip
 
 
 def format_datetime_label(timestamp) -> str:
@@ -1498,8 +1555,14 @@ def format_datetime_label(timestamp) -> str:
     00h21 » -- réutilisée par `format_archive_label` (nom d'un dossier
     d'archive horodaté) et `ArchiveReuseDialog` (date d'une sauvegarde déjà
     mémorisée dans la configuration, §5 mode assisté)."""
-    month = _FRENCH_MONTHS[timestamp.month - 1]
-    return f"{timestamp.day} {month} {timestamp.year} à {timestamp.hour:02d}h{timestamp.minute:02d}"
+    return tr(
+        "datetime_label",
+        day=timestamp.day,
+        month=tr(f"month_{timestamp.month:02d}"),
+        year=timestamp.year,
+        hour=timestamp.hour,
+        minute=timestamp.minute,
+    )
 
 
 def format_archive_label(path) -> str:
@@ -2276,11 +2339,11 @@ def _format_duration(seconds: float) -> str:
 
 def _format_size(num_bytes: int) -> str:
     size = float(num_bytes)
-    for unit in ("o", "Ko", "Mo", "Go"):
-        if size < 1024 or unit == "Go":
-            return f"{int(size)} {unit}" if unit == "o" else f"{size:.1f} {unit}"
+    for unit in ("unit_bytes", "unit_kb", "unit_mb", "unit_gb"):
+        if size < 1024 or unit == "unit_gb":
+            return f"{int(size)} {tr(unit)}" if unit == "unit_bytes" else f"{size:.1f} {tr(unit)}"
         size /= 1024
-    return f"{size:.1f} To"
+    return f"{size:.1f} {tr('unit_tb')}"
 
 
 def _capacity_go(size_bytes: int) -> float:
@@ -2628,6 +2691,8 @@ class AssistedLandingScreen(Screen):
     eject_requested = Signal()
     help_requested = Signal()
     expert_mode_requested = Signal()
+    # Choix de la langue (i18n.py), même rôle que sur `HomeScreen`.
+    language_selected = Signal(str)
     refresh_requested = Signal()
 
     def __init__(self, parent=None):
@@ -2680,7 +2745,15 @@ class AssistedLandingScreen(Screen):
         self._expert_button = QPushButton(tr("assisted_expert_mode_button"))
         self._expert_button.setProperty("role", "flat")
         self._expert_button.clicked.connect(self.expert_mode_requested.emit)
-        header_row.addWidget(self._expert_button, 0, Qt.AlignTop)
+        # Sélecteur de langue sous le bouton Mode expert, dans la même
+        # colonne de droite : l'en-tête garde sa largeur fixe.
+        header_actions = QVBoxLayout()
+        header_actions.setSpacing(4)
+        header_actions.addWidget(self._expert_button, 0, Qt.AlignRight)
+        self._language_selector = LanguageSelector()
+        self._language_selector.language_selected.connect(self.language_selected.emit)
+        header_actions.addWidget(self._language_selector, 0, Qt.AlignRight)
+        header_row.addLayout(header_actions)
         root.addLayout(_centered_row(header_container))
 
         root.addSpacing(8)
@@ -2869,6 +2942,10 @@ class AssistedLandingScreen(Screen):
         for tile in self._all_tiles:
             tile.setEnabled(not busy)
         self._expert_button.setEnabled(not busy)
+
+    def set_language(self, code: str) -> None:
+        """Miroir de `HomeScreen.set_language`."""
+        self._language_selector.set_language(code)
 
     def set_status(
         self, status: Dict[str, StepStatus], device: Optional[Device] = None, has_device: Optional[bool] = None

@@ -20,9 +20,15 @@ spec) -- seule une clé de libellé de bouton d'entrée vit dans
 `gui/strings.py`, puisque le bouton lui-même appartient à des écrans
 existants (`HomeScreen`/`AssistedLandingScreen`). Même vocabulaire que le
 reste de l'application (§5 de CLAUDE.md racine) : aucun terme technique,
-jamais de jargon."""
+jamais de jargon. Français = référence ; l'anglais vit dans
+`strings_en.py`, langue choisie par `r36s_studio.i18n` (module neutre,
+ni `gui/` ni PySide6)."""
 
 from __future__ import annotations
+
+from r36s_studio import i18n
+
+from .strings_en import STRINGS_EN
 
 STRINGS = {
     "screen_title": "Consoles diverses",
@@ -103,9 +109,18 @@ STRINGS = {
 
 def tr(key: str, **kwargs) -> str:
     """Traduit `key` et l'interpole avec `kwargs` -- point d'entrée unique
-    vers `STRINGS` (même contrat que `gui/strings.py::tr`)."""
-    template = STRINGS[key]
+    vers les chaînes (même contrat que `gui/strings.py::tr` : langue
+    courante, repli sur le français pour une clé manquante)."""
+    template = _TRANSLATIONS.get(i18n.get_language(), STRINGS).get(key)
+    if template is None:
+        template = STRINGS[key]
     return template.format(**kwargs) if kwargs else template
+
+
+_TRANSLATIONS = {
+    "fr": STRINGS,
+    "en": STRINGS_EN,
+}
 
 
 _ERROR_MESSAGE_KEYS = {

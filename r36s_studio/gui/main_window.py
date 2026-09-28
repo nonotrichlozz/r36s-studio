@@ -141,6 +141,7 @@ from .strings import (
     error_log_detail,
     friendly_error_message,
     tr,
+    tr_in,
 )
 from .tri_screen import TriScreen
 from .wizard_flow import WizardFlow, WizardJob
@@ -720,6 +721,8 @@ class MainWindow(QMainWindow):
         self._assisted_landing.backup_requested.connect(self._on_assisted_backup_tile_clicked)
         self._home.find_duplicates_requested.connect(self._start_doublons_tool)
         self._home.sort_games_requested.connect(self._open_tri_screen)
+        self._home.language_selected.connect(self._on_language_selected)
+        self._assisted_landing.language_selected.connect(self._on_language_selected)
         self._tri_screen.back_requested.connect(self._show_startup_screen)
         self._assisted_landing.eject_requested.connect(lambda: self._start_assisted_ad_hoc_job("eject"))
         self._assisted_landing.help_requested.connect(self._on_assisted_help_requested)
@@ -1467,20 +1470,20 @@ class MainWindow(QMainWindow):
 
     def _success_message(self) -> str:
         if self._mode == "backup":
-            return f"{self._device.display} a été sauvegardée dans {self._file_path}."
+            return tr("success_backup", display=self._device.display, path=self._file_path)
         if self._mode == "backup_system":
-            return f"Le système de {self._device.display} a été sauvegardé dans {self._file_path}."
+            return tr("success_backup_system", display=self._device.display, path=self._file_path)
         if self._mode == "extract_boot":
-            return "L'écran et les réglages d'origine ont été copiés sur ton ordinateur."
+            return tr("success_extract_boot")
         if self._mode == "extract_easyroms":
-            return "Tes jeux et sauvegardes ont été copiés sur ton ordinateur."
+            return tr("success_extract_easyroms")
         if self._mode == "inject_boot":
-            return f"{self._device.display} a retrouvé son écran d'origine."
+            return tr("success_inject_boot", display=self._device.display)
         if self._mode == "copy_games":
-            return f"Les jeux ont été copiés sur {self._device.display}."
+            return tr("success_copy_games", display=self._device.display)
         if self._mode == "reset_card":
-            return f"{self._device.display} a été remise à zéro."
-        return f"{self._device.display} est prête."  # flash
+            return tr("success_reset_card", display=self._device.display)
+        return tr("success_ready", display=self._device.display)  # flash
 
     def _archive_info(self) -> str:
         """Ligne supplémentaire du journal de bord précisant l'archive
@@ -2578,6 +2581,23 @@ class MainWindow(QMainWindow):
         if self._doublons_root is not None:
             self._start_doublons_scan(self._doublons_root)
 
+    def _on_language_selected(self, code: str) -> None:
+        """Choix de langue depuis l'un des deux accueils (i18n.py) --
+        mémorisé comme `ui_mode`, appliqué au prochain démarrage seulement :
+        chaque écran a lu `tr()` à sa construction, et reconstruire la
+        fenêtre en cours de route risquerait d'orpheliner un job ou la
+        session d'autorisation macOS. Le message parle la langue choisie,
+        pas celle encore affichée."""
+        if code == self._app_config.language:
+            return
+        self._app_config.language = code
+        app_config.save_config(self._app_config)
+        self._home.set_language(code)
+        self._assisted_landing.set_language(code)
+        QMessageBox.information(
+            self, tr_in(code, "language_restart_title"), tr_in(code, "language_restart_message")
+        )
+
     def _switch_to_assisted_mode(self) -> None:
         """Bouton « Mode assisté », symétrique de `_switch_to_expert_mode`
         -- sans lui, basculer en mode expert était un aller simple :
@@ -3311,11 +3331,7 @@ class MainWindow(QMainWindow):
         if len(devices) == 1:
             return devices[0]
         self._last_error_code = "DEVICE_NOT_ALLOWED"
-        self._last_error_msg = (
-            "Plusieurs cartes détectées -- débranche celles qui ne sont pas concernées, puis réessaie."
-            if devices
-            else "Carte introuvable -- vérifie qu'elle est toujours branchée, puis réessaie."
-        )
+        self._last_error_msg = tr("eject_multiple_cards") if devices else tr("eject_card_not_found")
         self._log_panel.finish_error(
             friendly_error_message(self._last_error_code), details=self._last_error_msg
         )

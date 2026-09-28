@@ -80,8 +80,39 @@ il suit comme ligne supplémentaire dans le journal de bord (`LogPanel.finish_er
 — plus de panneau « Détails » séparé à déplier depuis la refonte de navigation
 ci-dessus, un journal étant par nature un endroit où tout finit par être visible.
 
-Interface en français, avec les chaînes isolées dans un fichier de traduction dès le
-départ (l'anglais viendra vite si tu diffuses la vidéo hors France).
+**Langues : français (référence) et anglais.** `r36s_studio/i18n.py` tient
+la langue courante, fixée une seule fois au démarrage (`gui/app.py::run`,
+depuis `config.json::language`, avant le premier widget). `tr()` lit
+`gui/strings.py` (`STRINGS`, français) ou `gui/strings_en.py`
+(`STRINGS_EN`) ; `consoles_diverses/` a sa propre paire, même mécanique
+(règle d'isolation). Clé absente d'une traduction → français, jamais vide.
+
+- **Sélecteur** (`screens.LanguageSelector`) sur les deux accueils : sous
+  « Mode expert » (assisté), sur sa propre ligne sous l'en-tête (expert,
+  déjà trois boutons dans 480 px). Noms de langue écrits dans leur langue,
+  infobulle bilingue « Langue / Language ». Le choix est mémorisé et
+  s'applique **au prochain démarrage** : les écrans lisent `tr()` à leur
+  construction, et reconstruire la fenêtre risquerait d'orpheliner un job
+  ou la session macOS. Le message qui l'annonce parle la langue choisie
+  (`strings.tr_in`).
+- **Variables** : chaque traduction garde exactement les mêmes `{…}` et
+  formats (`{size_go:.1f}`) que le français, clés identiques (vérifié par
+  `tests/test_i18n.py`). Unités (`unit_*`), dates (`datetime_label`,
+  `month_NN`) et libellés d'OS (`reveal_*`) passent aussi par `tr()`.
+- **Nouvelle langue** : un code dans `i18n.LANGUAGE_NAMES`, un
+  `strings_<code>.py` dans `gui/` et `consoles_diverses/` — seulement
+  quand quelqu'un peut la relire. Un avertissement faux avant une écriture
+  destructive (CLAUDE.md §2 n°6) est pire qu'aucune traduction.
+- **Reste en français** : le CLI et le worker (lignes brutes du journal,
+  jamais le message principal) et `consoles_diverses/models.py` (journal).
+- **Mise en page** : vérifiée par rendu réel dans les deux langues. Les
+  tests de largeur (`test_header_buttons_never_overlap…`) sont ignorés
+  sans police installée (offscreen nu : chaque lettre est une boîte) —
+  les lancer avec `QT_QPA_FONTDIR=C:/Windows/Fonts` sous Windows. Bug
+  trouvé au passage : la tuile 1 réservait la hauteur de son titre avec la
+  police par défaut de Qt au lieu de celle du thème (18 px pour 21) — bas
+  de « Préparer ma carte » / « Prepare my card » coupé ;
+  `_tile_label_reserved_height` mesure désormais avec `theme.FONT_FAMILY`.
 
 **Affichage des tailles, une seule base partout :** toute capacité affichée
 (carte entière ou octets copiés) utilise la base 1024 (`size_bytes / 1024**3`,

@@ -25,6 +25,8 @@ from __future__ import annotations
 import platform
 import subprocess
 
+from .strings import tr
+
 
 def reveal(path: str) -> None:
     """Ouvre le gestionnaire de fichiers avec `path` sélectionné quand l'OS
@@ -49,10 +51,10 @@ def reveal_label() -> str:
     que l'utilisateur connaît déjà sur sa machine)."""
     system = platform.system()
     if system == "Darwin":
-        return "Afficher dans le Finder"
+        return tr("reveal_finder")
     if system == "Windows":
-        return "Afficher dans l'Explorateur"
-    return "Afficher dans le gestionnaire de fichiers"
+        return tr("reveal_explorer")
+    return tr("reveal_file_manager")
 
 
 __all__ = ["reveal", "reveal_label"]

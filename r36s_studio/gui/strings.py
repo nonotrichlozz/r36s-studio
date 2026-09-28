@@ -14,8 +14,10 @@
 # Vous devez avoir reçu une copie de la GNU General Public License avec
 # R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
 
-"""Chaînes de l'interface, isolées ici dès le départ pour faciliter une
-traduction future (§5 : « chaînes isolées dans un fichier de traduction »).
+"""Chaînes de l'interface, en français -- la langue de référence. Les
+autres langues vivent chacune dans leur fichier (`strings_en.py`), avec
+exactement les mêmes clés et les mêmes variables `{…}` ; `tr()` choisit
+selon `i18n.get_language()`, fixée au démarrage.
 
 Vocabulaire : aucun terme technique ('périphérique bloc', '/dev/sdb',
 'partition') ne doit apparaître ailleurs que dans le journal de bord
@@ -26,6 +28,10 @@ périphérique bloc"."""
 from __future__ import annotations
 
 from typing import Optional
+
+from r36s_studio import i18n
+
+from .strings_en import STRINGS_EN
 
 STRINGS = {
     "app_title": "R36S Studio",
@@ -499,7 +505,7 @@ STRINGS = {
     # l'app (même principe que `HelpDialog`, §3).
     "flash_android_format_prompt_warning": (
         "Windows va sans doute proposer de formater ta carte (« Vous devez formater le "
-        "disque… »), parfois plusieurs fois de suite — refuse à chaque fois, c'est normal : "
+        "disque… »), parfois plusieurs fois de suite — clique sur Annuler à chaque fois, c'est normal : "
         "Windows ne sait simplement pas lire le système Android que tu viens d'installer, "
         "ce n'est pas un problème avec ta carte."
     ),
@@ -509,7 +515,7 @@ STRINGS = {
     # générique, sans détailler un mécanisme (écrans de rechange...) propre
     # à Android uniquement.
     "flash_format_prompt_warning_generic": (
-        "Windows va peut-être proposer de formater la carte — refuse, c'est normal."
+        "Windows va peut-être proposer de formater la carte — clique sur Annuler, c'est normal."
     ),
     # Constaté en usage réel : une image Android démarre parfois sur un
     # écran figé si l'écran choisi ne correspond pas à celui de la console
@@ -517,9 +523,10 @@ STRINGS = {
     # mais rien ne l'indiquait dans l'app avant ce message (un débutant en
     # aurait conclu que le logiciel ne marche pas).
     "flash_android_panel_mismatch_warning": (
-        "Si l'écran reste noir ou figé au démarrage, regarde sur le BOOT de la carte : "
-        "un dossier « Panels » contient un sous-dossier par type d'écran, chacun avec des "
-        "fichiers .dtb à copier à la racine du BOOT pour changer d'écran. Plusieurs essais "
+        "Si l'écran reste noir ou figé au démarrage, ouvre le lecteur BOOT de la carte "
+        "(Windows l'affiche comme un lecteur à part, nommé BOOT) : un dossier « Panels » "
+        "contient un sous-dossier par type d'écran, chacun avec des fichiers .dtb à copier "
+        "à la racine du lecteur BOOT pour changer d'écran. Plusieurs essais "
         "sont parfois nécessaires — et rien ne garantit qu'un de ces écrans corresponde à "
         "ta console."
     ),
@@ -572,12 +579,12 @@ STRINGS = {
     # que soit la carte insérée).
     "same_card_unverified_title": "Confirme qu'il s'agit d'une carte différente",
     "same_card_unverified_message": (
+        "Assure-toi d'avoir bien retiré la carte d'origine : y écrire par erreur "
+        "détruirait la seule copie fonctionnelle de ta console.\n\n"
         "Impossible de vérifier automatiquement que « {display} » ({size_go:.1f} Go) "
         "est bien une carte différente de la carte d'origine — elle n'a pas de "
         "système lisible pour comparer son contenu, et la taille seule ne suffit "
-        "pas à le prouver. Si c'est une carte neuve ou vierge, c'est normal. "
-        "Assure-toi d'avoir bien retiré la carte d'origine : y écrire par erreur "
-        "détruirait la seule copie fonctionnelle de ta console."
+        "pas à le prouver. Si c'est une carte neuve ou vierge, c'est normal."
     ),
     "same_card_unverified_checkbox": "Je confirme qu'il s'agit bien d'une carte différente de la carte d'origine.",
     "same_card_unverified_confirm": "Continuer",
@@ -998,14 +1005,98 @@ STRINGS = {
     "tri_reason_system_not_supported": "console {system} : non prise en charge par ce système",
     "tri_reason_extension_not_accepted": "ce système n'affiche pas les fichiers {detail} pour cette console",
     "tri_reason_folder_case_conflict": "le dossier attendu « {detail} » existe déjà, écrit autrement",
+    # Choix de la langue (i18n.py) -- libellé bilingue volontairement
+    # figé : quelqu'un qui ne lit pas la langue courante doit reconnaître
+    # le sélecteur. Les noms de langues eux-mêmes viennent de
+    # `i18n.LANGUAGE_NAMES`, jamais d'ici.
+    "language_selector_label": "Langue / Language",
+    "language_restart_title": "Langue / Language",
+    "language_restart_message": "La nouvelle langue s'appliquera au prochain démarrage de R36S Studio.",
+    # Unités de taille, base 1024 partout (CLAUDE.md §5) -- seules les
+    # lettres changent d'une langue à l'autre, jamais le calcul.
+    "unit_bytes": "o",
+    "unit_kb": "Ko",
+    "unit_mb": "Mo",
+    "unit_gb": "Go",
+    "unit_tb": "To",
+    "device_list_entry": "{display} — {size_go:.1f} Go — {bus}",
+    # Date d'une sauvegarde (`screens.format_datetime_label`).
+    "datetime_label": "{day} {month} {year} à {hour:02d}h{minute:02d}",
+    "month_01": "janvier",
+    "month_02": "février",
+    "month_03": "mars",
+    "month_04": "avril",
+    "month_05": "mai",
+    "month_06": "juin",
+    "month_07": "juillet",
+    "month_08": "août",
+    "month_09": "septembre",
+    "month_10": "octobre",
+    "month_11": "novembre",
+    "month_12": "décembre",
+    # Messages de réussite (`main_window._success_message`).
+    "success_backup": "{display} a été sauvegardée dans {path}.",
+    "success_backup_system": "Le système de {display} a été sauvegardé dans {path}.",
+    "success_extract_boot": "L'écran et les réglages d'origine ont été copiés sur ton ordinateur.",
+    "success_extract_easyroms": "Tes jeux et sauvegardes ont été copiés sur ton ordinateur.",
+    "success_inject_boot": "{display} a retrouvé son écran d'origine.",
+    "success_copy_games": "Les jeux ont été copiés sur {display}.",
+    "success_reset_card": "{display} a été remise à zéro.",
+    "success_ready": "{display} est prête.",
+    # Éjection sans carte unique (`main_window`, détail du journal).
+    "eject_multiple_cards": "Plusieurs cartes détectées -- débranche celles qui ne sont pas concernées, puis réessaie.",
+    "eject_card_not_found": "Carte introuvable -- vérifie qu'elle est toujours branchée, puis réessaie.",
+    "cancelled_after_bytes": "Opération annulée après {done} octets",
+    "cancelled_or_elevation_failed": "L'opération a été annulée ou l'élévation a échoué.",
+    # Bouton « Afficher » (`reveal.reveal_label`), nom réel du gestionnaire
+    # de fichiers de chaque OS.
+    "reveal_finder": "Afficher dans le Finder",
+    "reveal_explorer": "Afficher dans l'Explorateur",
+    "reveal_file_manager": "Afficher dans le gestionnaire de fichiers",
+    # Indications macOS jointes au journal (`worker_runner.py`).
+    "macos_tcc_hint": (
+        "macOS empêche l'accès à la carte SD même avec les droits administrateur : "
+        "R36S Studio n'a pas (ou plus) la permission Accès complet au disque. Va "
+        "dans Réglages Système → Confidentialité et sécurité → Accès complet au "
+        "disque, ajoute R36S Studio (ou retire-le puis rajoute-le s'il y figure "
+        "déjà : la signature de l'app change à chaque reconstruction, ce qui "
+        "invalide l'autorisation précédente), puis relance l'opération. Voir "
+        "l'écran Aide depuis l'accueil pour le détail de la procédure."
+    ),
+    "macos_protected_folder_hint": (
+        "macOS bloque l'accès à ce fichier parce qu'il se trouve dans un dossier "
+        "protégé (Téléchargements, Bureau ou Documents) : le worker élevé n'a pas "
+        "la même autorisation que Terminal ou le Finder pour ces emplacements, "
+        "même si l'un d'eux l'a. Déplace le fichier ailleurs — par exemple "
+        "directement dans ton dossier personnel — puis réessaie."
+    ),
+}
+
+
+# `STRINGS` (français) reste la référence : toute clé existe d'abord ici.
+_TRANSLATIONS = {
+    "fr": STRINGS,
+    "en": STRINGS_EN,
 }
 
 
 def tr(key: str, **kwargs) -> str:
-    """Traduit `key` et l'interpole avec `kwargs` — point d'entrée unique
-    vers `STRINGS`, pour qu'un futur fichier par langue n'ait qu'un seul
-    endroit à brancher."""
-    template = STRINGS[key]
+    """Traduit `key` dans la langue courante (`i18n.get_language`) et
+    l'interpole avec `kwargs` — point d'entrée unique vers les chaînes."""
+    return tr_in(i18n.get_language(), key, **kwargs)
+
+
+def tr_in(language: str, key: str, **kwargs) -> str:
+    """Comme `tr`, dans une langue donnée plutôt que la courante -- sert
+    au seul message qui doit parler la langue que l'utilisateur vient de
+    choisir, pas celle encore affichée (changement de langue, appliqué au
+    prochain démarrage). Une clé absente de cette langue retombe sur le
+    français, jamais sur une chaîne vide ; une clé absente du français
+    lève `KeyError` (faute de frappe dans le code, pas un trou de
+    traduction)."""
+    template = _TRANSLATIONS.get(language, STRINGS).get(key)
+    if template is None:
+        template = STRINGS[key]
     return template.format(**kwargs) if kwargs else template
 
 

@@ -219,6 +219,19 @@ def _doublons_scan_cache_isolated(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _interface_language_is_french():
+    """Langue de l'interface (`r36s_studio/i18n.py`) : état au niveau
+    module, comme le point d'extension ci-dessous -- un test qui passe en
+    anglais ne doit jamais laisser les suivants en anglais (la plupart
+    comparent des chaînes françaises)."""
+    from r36s_studio import i18n
+
+    i18n.set_language("fr")
+    yield
+    i18n.set_language("fr")
+
+
+@pytest.fixture(autouse=True)
 def _reset_privileged_mount_hook():
     """`partitions/locate.py::_privileged_mount_hook` est un point
     d'extension au niveau module que `MainWindow.__init__` installe sur

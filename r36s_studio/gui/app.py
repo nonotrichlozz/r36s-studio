@@ -24,6 +24,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
+from r36s_studio import config as app_config
+from r36s_studio import i18n
+
 from . import theme
 from .main_window import MainWindow
 from .strings import tr
@@ -61,6 +64,9 @@ def _build_splash() -> QSplashScreen:
 
 
 def run() -> int:
+    # Avant le premier widget, écran d'attente compris : chaque écran lit
+    # `tr()` à sa construction (i18n.py).
+    i18n.set_language(app_config.load_config().language)
     app = QApplication.instance() or QApplication(sys.argv)
     app.setStyleSheet(theme.STYLESHEET)
     splash = _build_splash()

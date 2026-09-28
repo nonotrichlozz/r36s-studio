@@ -65,6 +65,8 @@ from r36s_studio.partitions import (
 )
 from r36s_studio.safety.card_fingerprint import compute_boot_fingerprint
 
+from .strings import tr
+
 
 class PartitionJobRunner(QThread):
     """`mode` : "extract_boot", "extract_easyroms", "inject_boot" ou
@@ -115,7 +117,7 @@ class PartitionJobRunner(QThread):
         try:
             job(self._device, self._source_path, on_progress=on_progress, should_cancel=should_cancel)
         except OperationCancelled as exc:
-            self.error.emit("CANCELLED", f"Opération annulée après {exc.done} octets")
+            self.error.emit("CANCELLED", tr("cancelled_after_bytes", done=exc.done))
             self.finished_job.emit(False)
             return
         except MacosNtfsWriteUnsupported as exc:

@@ -30,6 +30,7 @@ from typing import List, Optional
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from . import elevate, logs
+from .strings import tr
 
 POLL_INTERVAL_MS = 200
 
@@ -44,15 +45,6 @@ POLL_INTERVAL_MS = 200
 # signature ad hoc et invalide l'autorisation précédente -- voir l'écran
 # Aide, `screens.HelpScreen`).
 MACOS_TCC_BLOCKED = "MACOS_TCC_BLOCKED"
-_MACOS_TCC_HINT = (
-    "macOS empêche l'accès à la carte SD même avec les droits administrateur : "
-    "R36S Studio n'a pas (ou plus) la permission Accès complet au disque. Va "
-    "dans Réglages Système → Confidentialité et sécurité → Accès complet au "
-    "disque, ajoute R36S Studio (ou retire-le puis rajoute-le s'il y figure "
-    "déjà : la signature de l'app change à chaque reconstruction, ce qui "
-    "invalide l'autorisation précédente), puis relance l'opération. Voir "
-    "l'écran Aide depuis l'accueil pour le détail de la procédure."
-)
 
 
 def _is_macos_tcc_blocked(detail: str) -> bool:
@@ -72,13 +64,6 @@ def _is_macos_tcc_blocked(detail: str) -> bool:
 # '/Users/x/Desktop/r36s/ArkOS...img.xz'.
 MACOS_TCC_PROTECTED_FOLDER = "MACOS_TCC_PROTECTED_FOLDER"
 _MACOS_PROTECTED_FOLDER_NAMES = ("downloads", "desktop", "documents")
-_MACOS_PROTECTED_FOLDER_HINT = (
-    "macOS bloque l'accès à ce fichier parce qu'il se trouve dans un dossier "
-    "protégé (Téléchargements, Bureau ou Documents) : le worker élevé n'a pas "
-    "la même autorisation que Terminal ou le Finder pour ces emplacements, "
-    "même si l'un d'eux l'a. Déplace le fichier ailleurs — par exemple "
-    "directement dans ton dossier personnel — puis réessaie."
-)
 
 
 def _is_macos_tcc_protected_folder(detail: str) -> bool:
@@ -258,11 +243,11 @@ class WorkerRunner(QObject):
                 if not self._error_emitted:
                     detail = self._read_elevation_log()
                     if _is_macos_tcc_blocked(detail):
-                        self.error.emit(MACOS_TCC_BLOCKED, _MACOS_TCC_HINT)
+                        self.error.emit(MACOS_TCC_BLOCKED, tr("macos_tcc_hint"))
                     elif _is_macos_tcc_protected_folder(detail):
-                        self.error.emit(MACOS_TCC_PROTECTED_FOLDER, _MACOS_PROTECTED_FOLDER_HINT)
+                        self.error.emit(MACOS_TCC_PROTECTED_FOLDER, tr("macos_protected_folder_hint"))
                     else:
-                        msg = "L'opération a été annulée ou l'élévation a échoué."
+                        msg = tr("cancelled_or_elevation_failed")
                         if detail:
                             msg = f"{msg}\n{detail}"
                         self.error.emit("ELEVATION_FAILED", msg)

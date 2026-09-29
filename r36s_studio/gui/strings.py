@@ -472,6 +472,17 @@ STRINGS = {
         "Le système de référence pour la R36S, qui annonce aussi prendre en "
         "charge de nombreuses consoles clones. Mis à jour par la communauté (dArkOS)."
     ),
+    # dArkOSen (identify/releases.py::DARKOSEN_R36S_RELEASES_URL) -- les
+    # trois points qu'un débutant découvrirait trop tard : consoles
+    # d'origine seulement, archive à extraire avant, modèle à choisir après.
+    "file_firmware_darkosen_title": "dArkOSen",
+    "file_firmware_darkosen_desc": (
+        "Version enrichie de dArkOS, mise à jour environ toutes les deux semaines. Uniquement pour "
+        "les R36 d'origine (R36S, R36S Plus, R36H, R36H ProMax) : ne fonctionne sur aucune console "
+        "clone. Le téléchargement se fait en deux fichiers .7z.001 et .7z.002 : extrais-les avec "
+        "7-Zip pour obtenir le fichier .img. Après l'installation, choisis le modèle de ta console "
+        "(outil fourni sur la carte)."
+    ),
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
     # EmuELEC (§4.6) -- seul fait vérifié : il démarre sur un clone réel
@@ -530,6 +541,15 @@ STRINGS = {
         "à la racine du lecteur BOOT pour changer d'écran. Plusieurs essais "
         "sont parfois nécessaires — et rien ne garantit qu'un de ces écrans corresponde à "
         "ta console."
+    ),
+    # dArkOSen (identify/firmware_catalog.py::post_flash_log_key) -- son
+    # README : « use SELECT MODEL.bat to select your model », outil placé
+    # sur la partition de démarrage. Nomme le vrai fichier, comme
+    # `flash_android_panel_mismatch_warning` nomme le dossier « Panels ».
+    "flash_darkosen_model_selection_note": (
+        "Avant de démarrer la console : rebranche la carte sur un PC Windows, ouvre le lecteur "
+        "de la carte qui contient « SELECT MODEL.bat » et lance-le pour choisir le modèle de ta "
+        "console. Sans cette étape, dArkOSen peut mal fonctionner."
     ),
     "file_manual_download_hint": (
         "Le fichier téléchargé peut être une archive (.7z, .zip…) : décompresse-la "

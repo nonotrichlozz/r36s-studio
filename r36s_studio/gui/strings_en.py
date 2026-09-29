@@ -293,6 +293,13 @@ STRINGS_EN = {
         "The reference system for the R36S, which also says it supports many clone consoles. "
         "Updated by the community (dArkOS)."
     ),
+    "file_firmware_darkosen_title": "dArkOSen",
+    "file_firmware_darkosen_desc": (
+        "An enhanced version of dArkOS, updated about every two weeks. Only for genuine R36 consoles "
+        "(R36S, R36S Plus, R36H, R36H ProMax): it does not work on any clone console. The download "
+        "comes as two files, .7z.001 and .7z.002: extract them with 7-Zip to get the .img file. "
+        "After installing, choose your console's model (tool provided on the card)."
+    ),
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "A more recent system, with built-in game transfer over USB.",
     "file_firmware_emuelec_title": "EmuELEC",
@@ -319,6 +326,11 @@ STRINGS_EN = {
         "screen type, each with .dtb files to copy to the root of the BOOT drive to change the "
         "screen. It sometimes takes several tries — and there is no "
         "guarantee that one of these screens matches your console."
+    ),
+    "flash_darkosen_model_selection_note": (
+        "Before starting the console: plug the card back into a Windows PC, open the card's drive "
+        "that contains \"SELECT MODEL.bat\" and run it to choose your console's model. "
+        "Without this step, dArkOSen may not work properly."
     ),
     "file_manual_download_hint": (
         "The downloaded file may be an archive (.7z, .zip…): extract it first if needed, then "

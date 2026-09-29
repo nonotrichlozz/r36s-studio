@@ -32,3 +32,19 @@ DARKOS_R36S_RELEASES_URL = "https://github.com/southoz/dArkOSRE-R36/releases"
 # projet -- pas de correspondance d'assets par SoC (RK3326) vérifiée à ce
 # jour, contrairement à ROCKNIX.
 EMUELEC_R36S_RELEASES_URL = "https://github.com/EmuELEC/EmuELEC/releases"
+
+# dArkOSen (djparentx/dArkOSen-R36S), distinct de dArkOS (southoz/
+# dArkOSRE-R36) : « dArkOS enhanced », construit à partir de
+# dArkOS_RG351MP_trixie. Vérifié sur l'API GitHub le 2026-09-29 : non
+# archivé, licence MIT, 8 releases depuis le 2026-07-04 (environ toutes les
+# deux semaines, tags MMJJAAAA), dernière `09302026` publiée le 2026-09-29.
+# Contrairement à dArkOS, l'image **est** attachée à la release, mais en
+# archive 7-Zip découpée en deux (`dArkOSen_R36_<tag>.7z.001` + `.002`,
+# ~2,9 Go) contenant un seul `dArkOSen_R36_<tag>.img` de ~8,2 Gio (LZMA2,
+# CRC32 de l'image dans l'en-tête de l'archive). GitHub fournit un SHA-256
+# par partie (champ `digest` de l'API) ; aucun fichier de sommes publié par
+# l'auteur. L'app ne décompresse pas le 7-Zip (`SEVEN_ZIP_ARCHIVE`) : lien
+# manuel pour l'instant, l'utilisateur extrait le `.img` lui-même.
+# R36 d'origine uniquement (README : incompatible avec tout clone, G80CA et
+# « Soy Sauce » compris).
+DARKOSEN_R36S_RELEASES_URL = "https://github.com/djparentx/dArkOSen-R36S/releases"

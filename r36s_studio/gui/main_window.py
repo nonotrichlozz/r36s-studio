@@ -1450,6 +1450,16 @@ class MainWindow(QMainWindow):
         entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
         return entry is not None and entry.is_android
 
+    def _flash_post_log_key(self) -> Optional[str]:
+        """Consigne du firmware flashé à journaliser après un flash réussi
+        (`FirmwareEntry.post_flash_log_key`) -- mêmes conditions que
+        `_is_flashing_android_firmware` : jamais pour le parcours de
+        clonage du mode assisté, qui n'a pas choisi de firmware."""
+        if self._mode != "flash" or self._wizard_active:
+            return None
+        entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
+        return entry.post_flash_log_key if entry is not None else None
+
     def _flash_may_trigger_windows_format_prompt(self) -> bool:
         """Vrai pour tout flash mode expert, quel que soit le firmware
         choisi -- constaté en usage réel : Windows propose de formater la
@@ -1573,6 +1583,13 @@ class MainWindow(QMainWindow):
                 # ci-dessus (pas de partitions multiples ni de mécanisme
                 # d'écran de rechange à expliquer ici).
                 self._log_panel.append_log(tr("flash_format_prompt_warning_generic"))
+            post_flash_key = self._flash_post_log_key()
+            if post_flash_key:
+                # Consigne propre au firmware (dArkOSen : choisir le modèle
+                # de la console), après les avertissements de formatage --
+                # la description lue avant le flash est oubliée plusieurs
+                # minutes après (`FirmwareEntry.post_flash_log_key`).
+                self._log_panel.append_log(tr(post_flash_key))
         else:
             # `friendly_error_message` mappe déjà "CANCELLED" sur le
             # message d'annulation adéquat (`strings._ERROR_MESSAGE_KEYS`)

@@ -46,7 +46,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-from .releases import DARKOS_R36S_RELEASES_URL, EMUELEC_R36S_RELEASES_URL
+from .releases import DARKOS_R36S_RELEASES_URL, DARKOSEN_R36S_RELEASES_URL, EMUELEC_R36S_RELEASES_URL
 
 # Vérifiées manuellement (WebFetch sur les pages de releases réelles)
 # avant l'ajout de ce catalogue -- pas de nouveau module de téléchargement
@@ -80,6 +80,11 @@ class FirmwareEntry:
     # avertissement explicite dans le journal après le flash, et un
     # `--eject-after` best-effort côté CLI).
     is_android: bool = False
+    # Clé `gui/strings.py` d'une consigne propre au firmware, ajoutée au
+    # journal après un flash réussi en mode expert (`MainWindow.
+    # _on_worker_finished`), en plus des avertissements de formatage : la
+    # description lue avant le flash est oubliée plusieurs minutes après.
+    post_flash_log_key: Optional[str] = None
     # None = ROCKNIX (téléchargement automatique, identify/rocknix.py) --
     # le seul cas à ce jour, voir docstring de module.
     releases_url: Optional[str] = None
@@ -100,6 +105,19 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
         "file_firmware_arkos_desc",
         status="maintained",
         releases_url=DARKOS_R36S_RELEASES_URL,
+    ),
+    # dArkOSen : « maintenu » (vérifié le 2026-09-29, voir `identify/
+    # releases.py::DARKOSEN_R36S_RELEASES_URL`). Jamais `is_clone_safe` :
+    # son README l'exclut explicitement de tout clone. Lien manuel : l'image
+    # est attachée à la release mais en 7-Zip découpé, que l'app ne
+    # décompresse pas (téléchargement automatique à part, non fait).
+    FirmwareEntry(
+        "darkosen",
+        "file_firmware_darkosen_title",
+        "file_firmware_darkosen_desc",
+        status="maintained",
+        post_flash_log_key="flash_darkosen_model_selection_note",
+        releases_url=DARKOSEN_R36S_RELEASES_URL,
     ),
     FirmwareEntry(
         "rocknix",

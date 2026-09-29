@@ -86,6 +86,23 @@ compatibilité non officiellement confirmée par leurs projets
 respectifs — descriptions honnêtes sur cette incertitude plutôt qu'une
 promesse non vérifiée.
 
+**dArkOSen** (`djparentx/dArkOSen-R36S`, ajouté le 2026-09-29) : entrée
+distincte de dArkOS (`southoz/dArkOSRE-R36`), « maintenu » (MIT, release
+environ toutes les deux semaines). Consoles d'origine seulement (README :
+incompatible avec tout clone), donc jamais `is_clone_safe`. L'image est
+attachée à la release, mais en 7-Zip découpé (`.7z.001` + `.7z.002`,
+~2,9 Go pour un `.img` de ~8,2 Gio). GitHub donne un SHA-256 par partie,
+l'auteur ne publie aucun fichier de sommes. **Lien manuel, volontairement** :
+un téléchargement automatique demanderait de décompresser le 7-Zip, et
+`py7zr` est écarté pour ce projet (dépendances C sur trois OS, pas de
+décompression en flux, donc espace disque doublé). Après un flash réussi
+en mode expert, le journal rappelle de lancer « SELECT MODEL.bat » pour
+choisir le modèle de la console (`FirmwareEntry.post_flash_log_key`, affiché
+par `MainWindow._on_worker_finished` après l'avertissement de formatage).
+Les 6 dossiers de modèles de `boot/dtb/r36s` (dépôt `dArkOSen-updates`)
+ne contiennent pas `rk3326-evb-lp3-v12-linux.dtb` : `identify` les traite
+comme des consoles standard, ce qui est cohérent avec dArkOSen.
+
 Les deux dépôts ne se prêtent pas au même traitement, ce qui explique la
 dissymétrie entre les deux options :
 - **dArkOS** (`identify/releases.py`) : les images ne sont pas hébergées

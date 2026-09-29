@@ -5755,6 +5755,46 @@ def test_non_android_flash_success_warns_generically_and_hides_eject_button(
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_darkosen_flash_success_logs_model_selection_after_format_warning(mock_list, mock_filter, mock_load, qapp):
+    """dArkOSen demande de choisir le modèle de la console après le flash
+    (« SELECT MODEL.bat », README du projet) -- rappelé dans le journal,
+    après l'avertissement de formatage générique (firmware « Linux »)."""
+    from r36s_studio.gui.strings import tr
+
+    window = MainWindow()
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/darkosen.img"
+    window._app_config.firmware = "darkosen"
+
+    window._on_worker_finished(True)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert tr("flash_darkosen_model_selection_note") in log_text
+    assert log_text.index(tr("flash_format_prompt_warning_generic")) < log_text.index("SELECT MODEL.bat")
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_model_selection_note_only_for_darkosen(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._mode = "flash"
+    for firmware_id in ("arkos", "rocknix", "emuelec", "amberelec", "minui", "r36droid", "andr36oid"):
+        window._app_config.firmware = firmware_id
+        assert window._flash_post_log_key() is None, firmware_id
+    window._app_config.firmware = "darkosen"
+    assert window._flash_post_log_key() == "flash_darkosen_model_selection_note"
+    window._wizard_active = True  # le clonage restaure une sauvegarde, pas un firmware choisi
+    assert window._flash_post_log_key() is None
+    window._wizard_active = False
+    window._mode = "backup"
+    assert window._flash_post_log_key() is None
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_flash_success_shows_eject_button_when_chained_eject_actually_failed(
     mock_list, mock_filter, mock_load, qapp
 ):

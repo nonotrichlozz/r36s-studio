@@ -21,6 +21,25 @@ def test_rocknix_is_the_only_automatic_download_entry():
     assert "rocknix" not in manual
 
 
+def test_darkosen_is_a_separate_maintained_entry_never_offered_for_clones():
+    """dArkOSen (djparentx) n'est pas dArkOS (southoz) : entrée distincte,
+    lien vers son propre dépôt, jamais sûre pour un clone (son README les
+    exclut tous)."""
+    entry = FIRMWARE_BY_ID["darkosen"]
+    assert entry.status == "maintained"
+    assert entry.is_clone_safe is False
+    assert entry.is_android is False
+    assert entry.releases_url == "https://github.com/djparentx/dArkOSen-R36S/releases"
+    assert entry.releases_url != FIRMWARE_BY_ID["arkos"].releases_url
+
+
+def test_darkosen_description_warns_about_clones_extraction_and_model_choice():
+    desc = tr("file_firmware_darkosen_desc")
+    assert "clone" in desc
+    assert ".7z.001" in desc and ".img" in desc
+    assert "modèle" in desc
+
+
 def test_every_entry_has_a_valid_status():
     for entry in FIRMWARE_CATALOG:
         assert entry.status in ("maintained", "archived", "experimental")

@@ -1642,6 +1642,22 @@ class FileDialog(Dialog):
         self._firmware_radios: Dict[str, QRadioButton] = {}
         self._firmware_rows: List[QWidget] = []
         self._firmware_group = QButtonGroup(self)
+        # Lignes dans une zone qui défile, comme `HomeScreen._rows_scroll` --
+        # bug corrigé, constaté au rendu à l'ajout de dArkOSen (8e entrée) :
+        # empilées directement dans la fenêtre, les lignes étaient écrasées
+        # dès que leur hauteur totale dépassait celle de la fenêtre, et les
+        # descriptions sur plusieurs lignes débordaient sur la ligne
+        # suivante (déjà visible avant cet ajout pour ArkOS et EmuELEC).
+        firmware_container = QWidget()
+        firmware_layout = QVBoxLayout(firmware_container)
+        firmware_layout.setContentsMargins(0, 0, 0, 0)
+        self._firmware_scroll = QScrollArea()
+        self._firmware_scroll.setFrameShape(QFrame.NoFrame)
+        self._firmware_scroll.setWidgetResizable(True)
+        self._firmware_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._firmware_scroll.setMinimumHeight(260)
+        self._firmware_scroll.setWidget(firmware_container)
+        layout.addWidget(self._firmware_scroll, 1)
         for entry in FIRMWARE_CATALOG:
             row = QWidget()
             row_layout = QVBoxLayout(row)
@@ -1663,7 +1679,8 @@ class FileDialog(Dialog):
             self._firmware_group.addButton(radio)
             self._firmware_radios[entry.id] = radio
             self._firmware_rows.append(row)
-            layout.addWidget(row)
+            firmware_layout.addWidget(row)
+        firmware_layout.addStretch()
 
         # Lien manuel (tout le catalogue sauf ROCKNIX, §4.6) -- aucune
         # image hébergée directement sur GitHub pour ces entrées, donc
@@ -1757,6 +1774,7 @@ class FileDialog(Dialog):
         self._system_backup_size_label.setVisible(False)
 
         is_flash = mode == "flash"
+        self._firmware_scroll.setVisible(is_flash)
         for row in self._firmware_rows:
             row.setVisible(is_flash)
         if is_flash:

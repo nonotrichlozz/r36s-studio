@@ -25,8 +25,10 @@ taille, jusqu'à la limite protocolaire de 2 To imposée par le champ 32 bits
 `BPB_TotSec32`). Une carte SD R36S fait typiquement 64 à 256 Go -- cette
 limite rend donc le choix FAT32 impossible en pratique sur ce genre de
 carte avec l'outil Windows standard, ce qui a été signalé par un
-utilisateur (console SF3000HD, qui ne lit que le FAT32 -- carte de 128 Go
-rendue inutilisable par un formatage exFAT).
+utilisateur (carte de 128 Go pour une SF3000HD, inutilisable après un
+formatage exFAT). Précisé depuis : la SF3000HD elle-même lit l'exFAT (sa
+carte d'origine l'est) ; le besoin de FAT32 venait vraisemblablement de
+TreeFrogUI -- voir docs/claude/reset-card.md.
 
 macOS (`diskutil eraseVolume "MS-DOS FAT32"`) et Linux (`mkfs.vfat -F 32`)
 n'ont pas cette limite -- rapporté comme tel, non vérifié indépendamment

@@ -82,3 +82,26 @@ débit — aucune estimation de temps n'a de sens pour un formatage.
 est confirmée sur du vrai matériel ; les branches macOS et Linux
 (y compris le montage best-effort) ne le sont pas, faute de matériel
 disponible lors de leur écriture.
+
+## FAT32 et SF3000HD : ce qui est vérifié
+
+Le choix exFAT/FAT32 a été ajouté après un signalement : une carte de
+128 Go pour une SF3000HD, inutilisable après le formatage exFAT alors
+systématique. Le code disait depuis « la SF3000HD ne lit que le FAT32 » --
+**faux pour la console elle-même**, corrigé le 2026-09-28 :
+
+- **Carte d'origine de la SF3000HD : exFAT**, lue par le menu d'origine
+  (inventaire en lecture seule d'une vraie carte d'origine : partition
+  unique exFAT, clusters de 64 Kio, début à 16 Kio).
+- **Guide d'installation de TreeFrogUI** (`install.md` du dépôt
+  tzubertowski/TreeFrogUI) : « format the SD card » pour la SF3000/SF3000 HD,
+  sans système de fichiers imposé ; FAT32 **explicitement** exigé
+  seulement pour la R36HD (« freshly FAT32-formatted card »).
+- **Carte TreeFrogUI de l'utilisateur** : FAT32, étiquette `SDCARD` --
+  l'étiquette par défaut de cette remise à zéro, donc très probablement
+  formatée ici en FAT32 avant l'installation de TreeFrogUI.
+
+Conclusion retenue : la contrainte FAT32 vient du contexte TreeFrogUI (ou
+de la R36HD), pas de la SF3000HD. **Non vérifié** : que TreeFrogUI refuse
+réellement une carte exFAT sur SF3000 -- personne ne l'a testé dans ce
+projet. FAT32 reste un choix explicite de l'utilisateur, jamais présumé.

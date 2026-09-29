@@ -2019,9 +2019,11 @@ class ResetCardLabelDialog(Dialog):
     toujours remplaçables, même principe que les chemins par défaut
     proposés ailleurs dans ce projet (§4.4).
 
-    Choix du système de fichiers ajouté suite à un signalement : une
-    console (SF3000HD) ne lit que le FAT32, rendue inutilisable par le
-    formatage exFAT jusque-là systématique. exFAT reste le choix par
+    Choix du système de fichiers ajouté suite à un signalement (carte de
+    SF3000HD inutilisable après le formatage exFAT jusque-là
+    systématique -- vraisemblablement pour TreeFrogUI, la carte d'origine
+    de cette console étant elle-même en exFAT, voir docs/claude/
+    reset-card.md). exFAT reste le choix par
     défaut (le plus courant) ; FAT32 est décrit en une phrase plutôt
     qu'en jargon technique sec (§5 vocabulaire), avec un rappel de sa
     limite de taille de fichier (4 Go) -- une surprise plausible pour un

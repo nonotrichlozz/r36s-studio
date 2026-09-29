@@ -81,8 +81,10 @@ from .write_target import prepared_write_target
 # une incohérence.
 MBR_FAT32_LBA_PARTITION_TYPE = 0x0C
 
-# Bug corrigé, signalé par un utilisateur (carte SF3000HD, 128 Go, qui ne
-# lit que le FAT32) : `Format-Volume`/`format.exe` (et `diskpart`, qui
+# Bug corrigé, signalé par un utilisateur (carte de 128 Go pour une
+# SF3000HD, voulue en FAT32 -- vraisemblablement pour TreeFrogUI : la
+# carte d'origine de cette console est en exFAT et lue par le menu
+# d'origine, voir docs/claude/reset-card.md) : `Format-Volume`/`format.exe` (et `diskpart`, qui
 # passe par la même API `fmifs.dll`) refusent de formater en FAT32 tout
 # volume dépassant 32 Go -- limite artificielle du formateur Windows
 # standard, pas du pilote qui *lit* du FAT32 (`fastfat.sys`, voir

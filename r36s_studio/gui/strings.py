@@ -418,9 +418,10 @@ STRINGS = {
     ),
     "reset_card_label_continue": "Continuer",
     # Choix du système de fichiers (§4.3 bis) -- ajouté suite à un
-    # signalement : une console (SF3000HD) ne lit que le FAT32, rendue
-    # inutilisable par le formatage exFAT jusque-là systématique. exFAT
-    # reste le choix par défaut (le plus courant).
+    # signalement (carte de SF3000HD inutilisable après un formatage exFAT,
+    # vraisemblablement pour TreeFrogUI : la carte d'origine de cette
+    # console est en exFAT). exFAT reste le choix par défaut (le plus
+    # courant).
     "reset_card_filesystem_title": "Comment formater la carte ?",
     "reset_card_filesystem_exfat": "exFAT — recommandé",
     "reset_card_filesystem_exfat_desc": "Accepte les gros fichiers. Fonctionne avec la plupart des consoles récentes.",

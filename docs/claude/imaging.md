@@ -256,6 +256,29 @@ carte -- sans jamais demander à l'utilisateur de la deviner :
   `GAMES_PARTITION_FORMAT_FAILED` (qui faisaient échouer tout le flash)
   ont été retirés en conséquence, `gui/strings.py` compris.
 
+**Exception : carte de console SF3000 (2026-09-28).** Quand la première
+partition de la carte fraîchement écrite contient `cubegm/rkgame` (menu
+d'origine HiChip ou TreeFrogUI), `cmd_flash` ne crée **aucune** partition
+de jeux et le journalise (« Carte de console SF3000 reconnue… »). Le
+système de ces consoles ne lit que `/mnt/sdcard`, la première partition
+(`cubegm/*.sh`, `rootfs/etc/mdev/mount-helper.sh` de la carte d'origine :
+toute autre partition finirait sous `/media/mmcblk0pN`, qu'aucun programme
+ne lit) -- une EASYROMS y était de l'espace perdu (constaté : clone d'une
+carte d'origine de 48,8 Go sur 128 Go, EASYROMS de 70 Go vide et
+invisible). Détection en lecture seule sur le périphérique brut
+(`imaging/card_probe.py`, exFAT et FAT32, jamais d'exception), donc
+identique en mode expert et dans le parcours guidé. **Étendre la
+partition principale à la place n'est pas fait** : l'exFAT ne se
+redimensionne pas sans déplacer toutes les données (table d'allocation de
+taille fixée au formatage, suivie immédiatement des données), aucun outil
+standard ne le fait (Windows refuse, exfatprogs n'a pas de redimensionnement)
+-- l'espace restant reste non partitionné. Un vrai « utiliser toute la
+carte » passerait par une copie fichier par fichier vers une partition
+unique recréée au même décalage (16 Kio sur la carte d'origine) : fonction
+à part, non faite. **Non vérifié sur une vraie carte** : la détection n'a
+été testée que sur des images construites selon les spécifications (la
+lecture brute d'un vrai disque exige les droits administrateur).
+
 **Non confirmé sur du vrai matériel au moment d'écrire cette note** :
 couvert par des tests qui isolent le calcul (lecture directe d'un
 fichier factice servant de périphérique, sans verrouillage) et la

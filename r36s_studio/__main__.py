@@ -109,6 +109,7 @@ from r36s_studio.imaging import (
     flash_device,
     format_reset_partition,
 )
+from r36s_studio.imaging.card_probe import is_sf3000_card
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.winlock import VolumeInUseError
 from r36s_studio.partitions import (
@@ -430,6 +431,27 @@ def _confirm_flash(device: Device, prompt=input) -> bool:
     return answer.strip() == "OUI"
 
 
+def _create_games_partition_after_flash(device: Device) -> None:
+    """Partition de jeux sur l'espace libre restant après un flash vérifié
+    (comportement inchangé pour ArkOS et les autres firmwares, voir
+    `cmd_flash`) -- best-effort, journalisé dans tous les cas, ne lève
+    jamais."""
+    try:
+        games_result = create_and_format_games_partition_if_worthwhile(device)
+    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+        emit_log(f"Espace de jeux non recréé : {exc}", level="warning")
+        return
+    if games_result is None:
+        emit_log("Pas assez d'espace libre restant pour créer un espace de jeux supplémentaire.")
+        return
+    emit_log(f"Espace de jeux recréé sur l'espace libre restant ({games_result.size_bytes} octets).")
+    if games_result.drive_letter:
+        # Bug corrigé, confirmé sur du vrai matériel (§4.3 bis) : sans lettre
+        # de lecteur, un volume exFAT fraîchement formaté n'apparaît pas dans
+        # l'Explorateur malgré un formatage réussi.
+        emit_log(f"La carte est disponible sous {games_result.drive_letter}:.")
+
+
 def cmd_flash(args: argparse.Namespace) -> int:
     progress_file = _open_progress_file(args)
     try:
@@ -541,21 +563,24 @@ def cmd_flash(args: argparse.Namespace) -> int:
         # -- journalisé dans tous les cas (§4.4 : jamais une décision
         # silencieuse), que le résultat soit « rien à faire », un succès ou
         # un échec.
-        try:
-            games_result = create_and_format_games_partition_if_worthwhile(device)
-        except (OSError, subprocess.CalledProcessError, ValueError) as exc:
-            emit_log(f"Espace de jeux non recréé : {exc}", level="warning")
+        #
+        # Exception : carte de console SF3000 (menu d'origine ou TreeFrogUI,
+        # `cubegm/rkgame` sur la première partition). Son système ne lit que
+        # la première partition (`/mnt/sdcard`) : une partition de jeux
+        # séparée y serait de l'espace perdu, invisible pour la console
+        # (constaté sur un clone de carte d'origine en 128 Go). Détection en
+        # lecture seule, sur la carte telle qu'elle vient d'être écrite --
+        # donc pareil en mode expert et dans le parcours guidé, qui passent
+        # tous deux par ici. Étendre la partition principale n'est pas
+        # possible sans risque (exFAT, voir docs/claude/imaging.md) :
+        # l'espace restant reste non partitionné, et le journal le dit.
+        if is_sf3000_card(device.path):
+            emit_log(
+                "Carte de console SF3000 reconnue (cubegm/rkgame) : pas d'espace de jeux séparé, "
+                "la console ne lit que la première partition. Le reste de la carte reste inutilisé."
+            )
         else:
-            if games_result is None:
-                emit_log("Pas assez d'espace libre restant pour créer un espace de jeux supplémentaire.")
-            else:
-                emit_log(f"Espace de jeux recréé sur l'espace libre restant ({games_result.size_bytes} octets).")
-                if games_result.drive_letter:
-                    # Bug corrigé, confirmé sur du vrai matériel (§4.3
-                    # bis) : sans lettre de lecteur, un volume exFAT
-                    # fraîchement formaté n'apparaît pas dans
-                    # l'Explorateur malgré un formatage réussi.
-                    emit_log(f"La carte est disponible sous {games_result.drive_letter}:.")
+            _create_games_partition_after_flash(device)
 
         if args.eject_after:
             # Généralisé au-delà d'Android (§4.6) : au moins une partition
@@ -1164,8 +1189,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["exfat", "fat32"],
         default="exfat",
         help=(
-            "Système de fichiers du volume créé (défaut : exfat) -- fat32 pour les "
-            "consoles anciennes qui ne lisent pas l'exFAT (ex. SF3000HD)"
+            "Système de fichiers du volume créé (défaut : exfat) -- fat32 quand le "
+            "système de la console l'exige (ex. consoles anciennes sans exFAT)"
         ),
     )
     reset_card_parser.add_argument(

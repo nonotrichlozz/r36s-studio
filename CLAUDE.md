@@ -190,6 +190,9 @@ Détail et bancs de test : `docs/claude/testing.md`.
 - Éjection macOS (`diskutil eject`) et Linux (`udisksctl power-off`) ; un cas
   Windows d'éjection de la source non déclenchée, non reproduit (`partitions.md`).
 - Remise à zéro et montage best-effort sur macOS/Linux (`reset-card.md`).
+- Carte SF3000 (`cubegm/rkgame`) : aucune partition de jeux après un flash --
+  détection (`imaging/card_probe.py`) testée sur images synthétiques
+  seulement ; l'espace restant reste non partitionné (`imaging.md`).
 - Partition de jeux recréée automatiquement après un flash plus petit que la
   carte : ligne « Espace de jeux recréé… » attendue dans le journal (`imaging.md`).
 - Avertissement de formatage Windows après un flash « Linux » (`firmwares-flash.md`).

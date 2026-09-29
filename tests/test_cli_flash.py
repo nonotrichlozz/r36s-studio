@@ -329,6 +329,92 @@ def test_cmd_flash_games_partition_failure_is_best_effort_and_does_not_fail_the_
     assert '"ok": true' in out
 
 
+# --- carte SF3000 : jamais de partition de jeux séparée ----------------------
+# Le système de la console ne lit que la première partition (`/mnt/sdcard`) :
+# une EASYROMS y serait invisible. Détection sur la carte déjà écrite
+# (`imaging/card_probe.py`), donc valable en mode expert comme dans le
+# parcours guidé -- tous deux passent par `cmd_flash`.
+
+
+@patch("r36s_studio.__main__.is_sf3000_card", return_value=True)
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_sf3000_card_gets_no_separate_games_partition(
+    mock_list, mock_confirm, mock_flash, mock_create_games, mock_probe, tmp_path, capsys
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "sf3000.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    code = args.func(args)
+
+    assert code == 0
+    mock_probe.assert_called_once_with(device.path)
+    mock_create_games.assert_not_called()
+    out = capsys.readouterr().out
+    assert "Carte de console SF3000 reconnue" in out
+    assert "Espace de jeux recréé" not in out
+    assert '"ok": true' in out
+
+
+@patch("r36s_studio.__main__.is_sf3000_card", return_value=False)
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile", return_value=None)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_other_cards_keep_the_automatic_games_partition(
+    mock_list, mock_confirm, mock_flash, mock_create_games, mock_probe, tmp_path, capsys
+):
+    """ArkOS et tout le reste : comportement inchangé."""
+    mock_list.return_value = [_make_device()]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "arkos.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    assert args.func(args) == 0
+
+    mock_create_games.assert_called_once()
+    assert "SF3000" not in capsys.readouterr().out
+
+
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_probes_the_real_card_content(
+    mock_list, mock_confirm, mock_flash, mock_create_games, tmp_path, capsys
+):
+    """Sans mock de la détection : une « carte » (fichier) exFAT contenant
+    cubegm/rkgame, telle que le flash l'a écrite, suffit à sauter la
+    partition de jeux."""
+    from tests.test_imaging_card_probe import _sf3000_exfat
+
+    card = tmp_path / "carte.img"
+    _sf3000_exfat(card)
+    mock_list.return_value = [_make_device(path=str(card))]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "sf3000.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", str(card)])
+    assert args.func(args) == 0
+
+    mock_create_games.assert_not_called()
+    assert "Carte de console SF3000 reconnue" in capsys.readouterr().out
+
+
 # --- --eject-after (§4.6) ----------------------------------------------------
 # Firmware Android : ses partitions sont illisibles pour Windows, qui propose
 # de les formater dès qu'il les découvre -- éjecter tout de suite, dans le

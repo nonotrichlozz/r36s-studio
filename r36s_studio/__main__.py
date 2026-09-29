@@ -30,6 +30,11 @@
   l'exFAT) occupant toute la carte, pour une carte laissée en plusieurs
   partitions illisibles après des essais de firmware. Même confirmation
   explicite obligatoire que `flash` (règle §2 n°6).
+- `python -m r36s_studio clone-sf3000 --image X --device Y [--no-verify]`
+  -- carte SF3000 (Windows) : une seule partition exFAT sur toute la
+  carte, puis copie des fichiers de l'image un par un au lieu de
+  l'écriture brute (`imaging/sf3000_clone.py`). Même confirmation que
+  `flash`.
 - `python -m r36s_studio gui` (phase 4) — assistant graphique PySide6,
   branché sur `backup`/`flash` via un worker élevé (§3).
 - `python -m r36s_studio inject-boot --device X --boot-source Y` et
@@ -80,6 +85,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -109,8 +115,11 @@ from r36s_studio.imaging import (
     flash_device,
     format_reset_partition,
 )
+from r36s_studio.imaging import sf3000_clone
 from r36s_studio.imaging.card_probe import is_sf3000_card
+from r36s_studio.imaging.exfat_reader import ExFatError
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
+from r36s_studio.imaging.mbr import SECTOR_SIZE
 from r36s_studio.imaging.winlock import VolumeInUseError
 from r36s_studio.partitions import (
     BOOT_LABEL,
@@ -764,6 +773,170 @@ def cmd_reset_card(args: argparse.Namespace) -> int:
             progress_file.close()
 
 
+def cmd_clone_sf3000(args: argparse.Namespace) -> int:
+    """« Utiliser toute la carte » pour une image de carte SF3000
+    (`imaging/sf3000_clone.py`) : une seule partition exFAT sur toute la
+    carte, puis copie des fichiers un par un depuis l'image au lieu de
+    l'écriture brute. Tout ce qui peut être refusé (image non SF3000, nom
+    de fichier impossible sous Windows, carte trop petite) l'est avant la
+    première écriture. L'image n'est jamais que lue ; en cas d'échec après
+    la première écriture, la carte est à refaire depuis le début (fichier
+    témoin `MARKER_NAME` laissé à sa racine)."""
+    progress_file = _open_progress_file(args)
+    try:
+        if not os.path.exists(args.image):
+            emit_error("IMAGE_NOT_FOUND", f"Fichier image introuvable : {args.image}")
+            return 1
+        if platform.system() != "Windows":
+            emit_error("UNSUPPORTED_OS", "« Utiliser toute la carte » n'est disponible que sous Windows.")
+            return 1
+        device = _resolve_device_or_report(args)
+        if device is None:
+            return 1
+
+        try:
+            with sf3000_clone.open_sf3000_image(args.image) as (image_f, volume):
+                return _clone_sf3000(args, device, image_f, volume)
+        except sf3000_clone.NotSf3000Image as exc:
+            emit_error("NOT_SF3000_IMAGE", str(exc))
+            return 1
+        except OSError as exc:
+            emit_error("IO_ERROR", str(exc))
+            emit_done(False)
+            return 1
+    finally:
+        if progress_file is not None:
+            progress_file.close()
+
+
+def _clone_sf3000(args: argparse.Namespace, device: Device, image_f, volume) -> int:
+    emit_log("Lecture de la liste des fichiers de l'image...")
+    try:
+        content = sf3000_clone.scan_image(volume)
+    except sf3000_clone.InvalidFileNames as exc:
+        emit_error("INVALID_FILE_NAMES", f"Noms impossibles sous Windows : {exc}")
+        return 1
+    except (ExFatError, EOFError, OSError) as exc:
+        emit_error("NOT_SF3000_IMAGE", str(exc))
+        return 1
+    emit_log(
+        f"{content.file_count} fichiers et {content.dir_count} dossiers, {_format_size(content.total_bytes)} à copier."
+    )
+    available = sf3000_clone.partition_sector_count(device) * SECTOR_SIZE
+    if content.required_bytes() > available:
+        emit_error(
+            "DESTINATION_TOO_SMALL",
+            f"{content.required_bytes()} octets nécessaires, {available} disponibles sur « {device.display} ».",
+        )
+        return 1
+
+    image_f.seek(0)
+    head = sf3000_clone.build_head(image_f.read(sf3000_clone.HEAD_BYTES), device)
+
+    if not args.worker and not _confirm_flash(device):
+        emit_error("CONFIRMATION_REFUSED", "Écriture annulée : confirmation non reçue.")
+        return 1
+
+    should_cancel = _make_should_cancel(args)
+
+    def on_progress(event: ProgressEvent) -> None:
+        emit_progress(event.done, event.total, event.speed)
+
+    emit_log(f"Préparation de {device.display} ({device.path}) : un seul espace sur toute la carte...")
+    try:
+        sf3000_clone.write_layout(device, head)
+        emit_log(f"Formatage exFAT (clusters de {sf3000_clone.CLUSTER_SIZE // 1024} Kio)...")
+        drive_letter = sf3000_clone.format_whole_card(device, volume.label)
+    except VolumeInUseError as exc:
+        emit_error("VOLUME_IN_USE", str(exc))
+        emit_done(False)
+        return 1
+    except (OSError, subprocess.CalledProcessError, ValueError, NotImplementedError) as exc:
+        emit_error("WHOLE_CARD_PREPARE_FAILED", str(exc))
+        emit_done(False)
+        return 1
+    if not drive_letter:
+        emit_error("WHOLE_CARD_PREPARE_FAILED", "Aucune lettre de lecteur attribuée à la carte formatée.")
+        emit_done(False)
+        return 1
+    emit_log(f"Carte formatée ({_format_size(available)}), disponible sous {drive_letter}:.")
+    root = sf3000_clone.long_path_root(drive_letter)
+
+    emit_log("Copie des fichiers...")
+    try:
+        sf3000_clone.write_marker(root)
+        hashes = sf3000_clone.copy_files(volume, content, root, on_progress=on_progress, should_cancel=should_cancel)
+    except OperationCancelled as exc:
+        emit_error("CANCELLED", f"Copie annulée après {exc.done} octets : la carte est incomplète.")
+        emit_done(False)
+        return 1
+    except (OSError, ExFatError, EOFError) as exc:
+        emit_error("WHOLE_CARD_COPY_FAILED", str(exc))
+        emit_done(False)
+        return 1
+    emit_log(f"{content.file_count} fichiers copiés.")
+
+    if args.no_verify:
+        emit_log("Vérification des fichiers désactivée à la demande.", level="warning")
+    else:
+        emit_log("Vérification : relecture de chaque fichier sur la carte...")
+        try:
+            sf3000_clone.drop_volume_cache(device)
+        except OSError as exc:
+            # Relecture quand même, mais possiblement depuis le cache : dit.
+            emit_log(
+                f"Carte non démontée avant la vérification ({exc}) ; relecture possiblement depuis le cache.",
+                level="warning",
+            )
+        try:
+            sf3000_clone.verify_files(hashes, root, content.total_bytes, on_progress=on_progress, should_cancel=should_cancel)
+        except sf3000_clone.VerifyMismatch as exc:
+            emit_error("VERIFY_FAILED", f"Fichier différent de la source après copie : {exc.path}")
+            emit_done(False)
+            return 1
+        except OperationCancelled as exc:
+            emit_error("CANCELLED", f"Vérification annulée après {exc.done} octets.")
+            emit_done(False)
+            return 1
+        except OSError as exc:
+            emit_error("WHOLE_CARD_COPY_FAILED", f"Relecture : {exc}")
+            emit_done(False)
+            return 1
+        emit_log("Vérification SHA-256 réussie pour chaque fichier.")
+
+    try:
+        sf3000_clone.remove_marker(root)
+    except OSError as exc:
+        emit_error("WHOLE_CARD_COPY_FAILED", f"Fichier témoin non retiré : {exc}")
+        emit_done(False)
+        return 1
+    if not is_sf3000_card(device.path):
+        emit_error("WHOLE_CARD_COPY_FAILED", "cubegm/rkgame introuvable sur la carte après la copie.")
+        emit_done(False)
+        return 1
+    emit_log("Carte SF3000 prête : le système de la console est en place sur toute la carte.")
+
+    if args.eject_after:
+        emit_log("Éjection automatique de la carte...")
+        try:
+            eject_device(device.path)
+        except Exception as exc:
+            emit_log(f"Éjection automatique impossible : {exc}", level="warning")
+            emit_eject_result(False, str(exc))
+        else:
+            emit_log(f"{device.display} peut maintenant être retirée en toute sécurité.")
+            emit_eject_result(True)
+
+    emit_done(True)
+    return 0
+
+
+def _format_size(size_bytes: int) -> str:
+    """Base 1024, comme `gui/screens.py::_format_size` (dupliqué : le CLI ne
+    dépend pas de PySide6)."""
+    return f"{_capacity_go(size_bytes):.1f} Go"
+
+
 def _resolve_device_or_report(args: argparse.Namespace) -> Optional[Device]:
     """Commun à `inject-boot`/`copy-games` : résout `--device` et émet
     l'erreur adaptée (jamais d'accès par un chemin refusé par `safety`)."""
@@ -1202,6 +1375,35 @@ def build_parser() -> argparse.ArgumentParser:
     _add_worker_args(reset_card_parser)
     _add_dev_args(reset_card_parser)
     reset_card_parser.set_defaults(func=cmd_reset_card)
+
+    clone_sf3000_parser = subparsers.add_parser(
+        "clone-sf3000",
+        help=(
+            "Carte SF3000 : un seul espace exFAT sur toute la carte, puis copie des fichiers "
+            "de l'image un par un (Windows), avec confirmation et vérification SHA-256"
+        ),
+    )
+    clone_sf3000_parser.add_argument("--image", required=True, help="Image .img d'une carte SF3000")
+    clone_sf3000_parser.add_argument(
+        "--device", required=True, help="Chemin du périphérique cible (voir `list`)"
+    )
+    clone_sf3000_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Ne relit pas chaque fichier après la copie (plus rapide, déconseillé)",
+    )
+    clone_sf3000_parser.add_argument(
+        "--eject-after", action="store_true", help="Éjecte la carte à la fin"
+    )
+    clone_sf3000_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    _add_worker_args(clone_sf3000_parser)
+    _add_dev_args(clone_sf3000_parser)
+    clone_sf3000_parser.set_defaults(func=cmd_clone_sf3000)
 
     inject_boot_parser = subparsers.add_parser(
         "inject-boot",

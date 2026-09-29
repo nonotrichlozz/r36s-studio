@@ -484,7 +484,9 @@ _WINDOWS_PARTITION_RETRY_COUNT = 10
 _WINDOWS_PARTITION_RETRY_DELAY_MS = 500
 
 
-def _format_windows(device_path: str, label: str, filesystem: str) -> Optional[str]:
+def _format_windows(
+    device_path: str, label: str, filesystem: str, allocation_unit_size: Optional[int] = None
+) -> Optional[str]:
     """`partition_path` est ici le disque (`\\\\.\\PhysicalDriveN`), pas la
     partition elle-même -- contrairement à macOS/Linux, la partition
     nouvellement créée n'a pas forcément de lettre de lecteur ni de volume
@@ -526,6 +528,12 @@ def _format_windows(device_path: str, label: str, filesystem: str) -> Optional[s
         raise ValueError(f"chemin de périphérique Windows invalide : {device_path}")
     disk_number = match.group(1)
     fs_name = "exFAT" if filesystem == "exfat" else "FAT32"
+    # Étiquette vide : paramètre omis (volume sans étiquette, comme la carte
+    # SF3000 d'origine, `sf3000_clone.py`). Apostrophes doublées pour la
+    # chaîne PowerShell entre apostrophes.
+    format_options = f" -NewFileSystemLabel '{label.replace(chr(39), chr(39) * 2)}'" if label else ""
+    if allocation_unit_size:
+        format_options += f" -AllocationUnitSize {int(allocation_unit_size)}"
     command = (
         "$diskNumber = %s\n"
         "$partition = $null\n"
@@ -544,7 +552,7 @@ def _format_windows(device_path: str, label: str, filesystem: str) -> Optional[s
         "    Write-Error \"Volume introuvable pour la nouvelle partition sur le disque $diskNumber.\"\n"
         "    exit 1\n"
         "}\n"
-        "$volume | Format-Volume -FileSystem %s -NewFileSystemLabel '%s' -Confirm:$false\n"
+        "$volume | Format-Volume -FileSystem %s%s -Confirm:$false\n"
         "if (-not $?) { exit 1 }\n"
         "$partition | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction SilentlyContinue\n"
         "$updated = Get-Partition -DiskNumber $diskNumber -PartitionNumber $partition.PartitionNumber"
@@ -552,7 +560,7 @@ def _format_windows(device_path: str, label: str, filesystem: str) -> Optional[s
         "if ($updated -and $updated.DriveLetter) {\n"
         "    Write-Output \"DRIVE_LETTER=$($updated.DriveLetter)\"\n"
         "}\n"
-    ) % (disk_number, _WINDOWS_PARTITION_RETRY_COUNT, _WINDOWS_PARTITION_RETRY_DELAY_MS, fs_name, label)
+    ) % (disk_number, _WINDOWS_PARTITION_RETRY_COUNT, _WINDOWS_PARTITION_RETRY_DELAY_MS, fs_name, format_options)
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", command],
         capture_output=True,

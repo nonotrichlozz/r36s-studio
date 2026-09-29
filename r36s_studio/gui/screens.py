@@ -2135,6 +2135,90 @@ class ResetCardLabelDialog(Dialog):
         self.label_chosen.emit(label, filesystem)
 
 
+class WholeCardChoiceDialog(Dialog):
+    """Image de carte SF3000 plus petite que la carte cible (mode expert,
+    `imaging/sf3000_clone.py`) : utiliser toute la carte (copie fichier par
+    fichier, plus longue) ou copie brute (plus rapide, le reste de la carte
+    perdu). Chaque option annonce son coût -- la durée en plus, l'espace
+    inutilisable -- demandé explicitement après un clone de 48,8 Go sur
+    128 Go qui en avait perdu 70 sans le dire. Précède toujours la fenêtre
+    Confirmation (§2 n°6)."""
+
+    choice_made = Signal(bool, bool)  # (toute la carte, vérifier chaque fichier)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("whole_card_title"))
+
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("whole_card_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+
+        instruction = QLabel(tr("whole_card_instruction"))
+        instruction.setWordWrap(True)
+        instruction.setProperty("role", "secondary")
+        layout.addWidget(instruction)
+
+        self._group = QButtonGroup(self)
+        self._whole_radio = QRadioButton(tr("whole_card_option_whole"))
+        self._whole_radio.setChecked(True)
+        self._whole_desc = QLabel()
+        self._whole_desc.setWordWrap(True)
+        self._whole_desc.setProperty("role", "secondary")
+        self._raw_radio = QRadioButton(tr("whole_card_option_raw"))
+        self._raw_desc = QLabel()
+        self._raw_desc.setWordWrap(True)
+        self._raw_desc.setProperty("role", "secondary")
+        for widget in (self._whole_radio, self._whole_desc, self._raw_radio, self._raw_desc):
+            layout.addWidget(widget)
+        self._group.addButton(self._whole_radio)
+        self._group.addButton(self._raw_radio)
+
+        self._verify_check = QCheckBox()
+        self._verify_check.setChecked(True)
+        layout.addWidget(self._verify_check)
+        # La vérification ne concerne que la copie fichier par fichier (la
+        # copie brute vérifie toujours toute l'image).
+        self._whole_radio.toggled.connect(self._verify_check.setEnabled)
+
+        layout.addStretch()
+
+        buttons = QHBoxLayout()
+        cancel_button = QPushButton(tr("confirm_cancel"))
+        cancel_button.clicked.connect(self.close)
+        continue_button = QPushButton(tr("whole_card_continue"))
+        continue_button.setProperty("role", "primary")
+        continue_button.setDefault(True)
+        continue_button.clicked.connect(self._on_continue)
+        buttons.addWidget(cancel_button)
+        buttons.addStretch()
+        buttons.addWidget(continue_button)
+        layout.addLayout(buttons)
+
+        self.resize(480, 420)
+
+    def set_estimates(self, card_bytes: int, image_bytes: int, extra_minutes: int, verify_minutes: int) -> None:
+        """Remet aussi les choix par défaut (toute la carte, vérification)."""
+        self._whole_desc.setText(
+            tr("whole_card_option_whole_desc", card=_format_size(card_bytes), extra=extra_minutes)
+        )
+        self._raw_desc.setText(
+            tr(
+                "whole_card_option_raw_desc",
+                image=_format_size(image_bytes),
+                remaining=_format_size(max(0, card_bytes - image_bytes)),
+            )
+        )
+        self._verify_check.setText(tr("whole_card_verify", minutes=verify_minutes))
+        self._whole_radio.setChecked(True)
+        self._verify_check.setChecked(True)
+
+    def _on_continue(self) -> None:
+        self.close()
+        self.choice_made.emit(self._whole_radio.isChecked(), self._verify_check.isChecked())
+
+
 _OPERATION_TITLE_KEYS = {
     "backup": "execute_title_backup",
     "backup_system": "execute_title_backup_system",

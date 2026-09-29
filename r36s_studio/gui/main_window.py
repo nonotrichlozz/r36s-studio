@@ -27,6 +27,7 @@ permanent (`LogPanel`), pas dans des écrans Exécution/Résultat séparés
 
 from __future__ import annotations
 
+import os
 import platform
 import re
 import shutil
@@ -83,6 +84,7 @@ from r36s_studio.imaging import (
     check_image_format,
     estimate_total_bytes,
 )
+from r36s_studio.imaging import sf3000_clone
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, list_partitions, set_privileged_mount_hook
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
@@ -124,6 +126,7 @@ from .screens import (
     LogPanel,
     MainView,
     ResetCardLabelDialog,
+    WholeCardChoiceDialog,
     RocknixVariantDialog,
     SameCardUnverifiedDialog,
     WizardStepPanel,
@@ -363,6 +366,14 @@ class MainWindow(QMainWindow):
         # choisir. Consommé (remis à False) dès que `_on_device_chosen` en
         # tient compte.
         self._skip_file_dialog_for_flash = False
+        # « Utiliser toute la carte » pour une image SF3000 (`imaging/
+        # sf3000_clone.py`) : choisi dans `WholeCardChoiceDialog` (mode
+        # expert) ou automatiquement (mode assisté) -- remis à False avant
+        # chaque flash, lu par `_start_worker`.
+        self._whole_card = False
+        self._whole_card_verify = True
+        # Carte déjà signalée comme copie interrompue (une seule fois par carte).
+        self._whole_card_marker_warned: Optional[str] = None
         # Candidate détectée par le sondage automatique de cette même
         # étape (`_on_prepare_card_poll`, ci-dessous) -- `None` tant
         # qu'aucune carte unique n'a été trouvée (bouton Continuer
@@ -629,6 +640,7 @@ class MainWindow(QMainWindow):
         self._doublons_pending_risk_action = None
         self._same_card_unverified_dialog = SameCardUnverifiedDialog(self)
         self._reset_card_label_dialog = ResetCardLabelDialog(self)
+        self._whole_card_dialog = WholeCardChoiceDialog(self)
         self._consoles_diverses_settings_dialog = ConsolesDiversesSettingsDialog(self)
 
         self._wire_signals()
@@ -706,6 +718,7 @@ class MainWindow(QMainWindow):
         self._backup_kind_dialog.system_only_requested.connect(lambda: self._on_backup_kind_chosen("system"))
         self._backup_kind_dialog.cancelled.connect(self._cancel_wizard)
         self._reset_card_label_dialog.label_chosen.connect(self._on_reset_card_label_chosen)
+        self._whole_card_dialog.choice_made.connect(self._on_whole_card_chosen)
 
         self._confirm_dialog.confirmed.connect(self._on_confirmed)
         self._same_card_unverified_dialog.confirmed.connect(self._on_same_card_unverified_confirmed)
@@ -818,11 +831,26 @@ class MainWindow(QMainWindow):
         # séparément, sert justement à cette distinction pour « Par
         # sécurité » (§4.3) : au moins une carte suffit, même ambiguë.
         status = detect_workflow_status(device)
+        self._warn_if_interrupted_whole_card_copy(device)
         self._home.set_status(status, device, has_device=bool(devices))
         # Accueil assisté (§5, refonte menu de tuiles) : même dict déjà
         # calculé ci-dessus, un second récepteur -- jamais une seconde
         # détection dupliquée.
         self._assisted_landing.set_status(status, device, has_device=bool(devices))
+
+    def _warn_if_interrupted_whole_card_copy(self, device: Optional[Device]) -> None:
+        """Fichier témoin de `clone-sf3000` resté à la racine de la carte :
+        la copie a été interrompue, la carte est incomplète -- dit une fois
+        par carte dans le journal (lecture d'un fichier, sans élévation)."""
+        if device is None:
+            return
+        try:
+            interrupted = any(sf3000_clone.has_marker(mp) for mp in device.mountpoints)
+        except OSError:
+            return
+        if interrupted and self._whole_card_marker_warned != device.path:
+            self._whole_card_marker_warned = device.path
+            self._log_panel.append_log(tr("whole_card_marker_found", display=device.display))
 
     # --- déclenchement d'une étape -> fenêtre Choix de la carte -------------
 
@@ -1098,10 +1126,40 @@ class MainWindow(QMainWindow):
         except UnsupportedImageFormatError:
             QMessageBox.warning(self, tr("app_title"), friendly_error_message("UNSUPPORTED_IMAGE_FORMAT"))
             return
+        self._whole_card = False
+        used_bytes = sf3000_clone.whole_card_used_bytes(self._file_path, self._device)
+        if used_bytes is not None:
+            if self._assisted_ad_hoc_active:
+                # Mode assisté : pas de choix technique à faire, toute la carte.
+                self._use_whole_card_automatically(used_bytes)
+            else:
+                self._whole_card_dialog.set_estimates(
+                    self._device.size_bytes,
+                    os.path.getsize(self._file_path),
+                    sf3000_clone.extra_minutes_vs_raw(used_bytes, os.path.getsize(self._file_path)),
+                    sf3000_clone.verify_minutes(used_bytes),
+                )
+                self._whole_card_dialog.open()
+                return
         # Le flash écrit sur le périphérique brut : confirmation explicite
         # obligatoire (règle §2 n°6). Les autres jobs n'effacent rien
         # (sauvegarde vers un fichier, ou copie de fichiers sur une
         # partition déjà en usage) — pas de fenêtre rouge.
+        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.open()
+
+    def _use_whole_card_automatically(self, used_bytes: int) -> None:
+        """Mode assisté, image SF3000 : toute la carte, vérification
+        toujours faite -- décision journalisée avec sa durée estimée."""
+        self._whole_card = True
+        self._whole_card_verify = True
+        self._log_panel.append_log(tr("whole_card_wizard_log", minutes=sf3000_clone.total_minutes(used_bytes)))
+
+    def _on_whole_card_chosen(self, whole_card: bool, verify: bool) -> None:
+        """Réponse de `WholeCardChoiceDialog`, puis la fenêtre Confirmation
+        obligatoire (§2 n°6) dans les deux cas."""
+        self._whole_card = whole_card
+        self._whole_card_verify = verify
         self._confirm_dialog.set_device(self._device)
         self._confirm_dialog.open()
 
@@ -1193,6 +1251,14 @@ class MainWindow(QMainWindow):
                 "--filesystem",
                 self._reset_card_filesystem,
             ]
+        elif self._whole_card:
+            argv = ["clone-sf3000", "--image", self._file_path, "--device", self._device.path]
+            if not self._whole_card_verify:
+                argv.append("--no-verify")
+            # Éjection en fin d'opération en mode expert, comme le flash
+            # (ci-dessous) ; le parcours guidé éjecte à son étape 5.
+            if self._flash_may_trigger_windows_format_prompt():
+                argv.append("--eject-after")
         else:
             argv = ["flash", "--image", self._file_path, "--device", self._device.path]
             # Plus de drapeau `--create-games-partition` à construire ici
@@ -1527,7 +1593,7 @@ class MainWindow(QMainWindow):
             self._on_assisted_ad_hoc_worker_finished(ok)
             return
         if ok:
-            android_flash = self._is_flashing_android_firmware()
+            android_flash = self._is_flashing_android_firmware() and not self._whole_card
             format_prompt_flash = self._flash_may_trigger_windows_format_prompt()
             # Déjà éjectée par le worker lui-même dans le cas courant
             # (`--eject-after`, ajouté dans `_start_worker` dès que
@@ -1574,7 +1640,9 @@ class MainWindow(QMainWindow):
                 # console de test, les trois écrans compatibles essayés ont
                 # tous échoué) -- une piste à essayer, pas une garantie.
                 self._log_panel.append_log(tr("flash_android_panel_mismatch_warning"))
-            elif format_prompt_flash:
+            elif format_prompt_flash and not self._whole_card:
+                # (Jamais après « utiliser toute la carte » : un seul
+                # volume exFAT, lisible par Windows.)
                 # Constaté en usage réel : le même genre de boîte « Vous
                 # devez formater le disque » apparaît aussi après un flash
                 # non-Android (ArkOS/ROCKNIX/EmuELEC/AmberELEC/MinUI, une
@@ -3307,6 +3375,10 @@ class MainWindow(QMainWindow):
             )
             self._wizard_panel.show_error()
             return
+        self._whole_card = False
+        used_bytes = sf3000_clone.whole_card_used_bytes(self._file_path, self._device)
+        if used_bytes is not None:
+            self._use_whole_card_automatically(used_bytes)
         self._confirm_dialog.set_device(self._device)
         self._confirm_dialog.open()
 

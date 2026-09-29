@@ -411,6 +411,34 @@ STRINGS = {
     # Remise à zéro (§4.3 bis, mode expert uniquement) -- choix de
     # l'étiquette du volume avant la fenêtre Confirmation, valeur par
     # défaut simple toujours remplaçable.
+    # Carte SF3000 plus grande que l'image (`WholeCardChoiceDialog`, mode
+    # expert) : la durée en plus et l'espace perdu, annoncés avant de choisir.
+    "whole_card_title": "Comment installer ce système ?",
+    "whole_card_instruction": (
+        "Ce fichier vient d'une carte de console SF3000, et ta carte est plus grande que lui. "
+        "Choisis comment l'utiliser."
+    ),
+    "whole_card_option_whole": "Utiliser toute la carte (recommandé)",
+    "whole_card_option_whole_desc": (
+        "Copie les fichiers un par un sur un seul espace qui occupe toute la carte : les {card} "
+        "seront utilisables pour tes jeux. Plus long : environ {extra} minutes de plus qu'une "
+        "copie brute."
+    ),
+    "whole_card_option_raw": "Copie brute de l'image",
+    "whole_card_option_raw_desc": (
+        "Plus rapide, mais seuls les {image} de l'image seront utilisables : les {remaining} "
+        "restants de la carte resteront inutilisables par la console."
+    ),
+    "whole_card_verify": "Vérifier chaque fichier après la copie (recommandé, environ {minutes} minutes de plus)",
+    "whole_card_continue": "Continuer",
+    "whole_card_wizard_log": (
+        "Carte de console SF3000 : toute la carte sera utilisée (copie des fichiers un par un, "
+        "puis vérification de chacun). Durée estimée : environ {minutes} minutes."
+    ),
+    "whole_card_marker_found": (
+        "« {display} » contient une copie interrompue : la carte est incomplète. "
+        "Relance l'installation pour la refaire depuis le début."
+    ),
     "reset_card_label_title": "Nom de la carte",
     "reset_card_label_instruction": (
         "Choisis le nom qui s'affichera pour cette carte une fois vide — "
@@ -721,6 +749,23 @@ STRINGS = {
     "error_reset_card_failed": (
         "Impossible de remettre cette carte à zéro. Débranche-la puis rebranche-la, "
         "ferme les fenêtres qui l'affichent, puis réessaie."
+    ),
+    # « Utiliser toute la carte » (carte SF3000, `imaging/sf3000_clone.py`).
+    "error_not_sf3000_image": (
+        "Ce fichier n'est pas une sauvegarde de carte SF3000 lisible fichier par fichier. "
+        "Choisis plutôt la copie brute de l'image."
+    ),
+    "error_invalid_file_names": (
+        "Certains fichiers de la sauvegarde ont un nom que Windows ne peut pas créer. "
+        "Rien n'a été écrit sur ta carte ; la liste est dans le journal."
+    ),
+    "error_whole_card_prepare_failed": (
+        "La préparation de ta carte a échoué : elle n'est pas utilisable en l'état. "
+        "Ferme les fenêtres qui l'affichent, puis relance l'opération depuis le début."
+    ),
+    "error_whole_card_copy_failed": (
+        "La copie des fichiers s'est arrêtée avant la fin : ta carte est incomplète. "
+        "Relance l'opération depuis le début."
     ),
     "error_macos_tcc_blocked": (
         "Ton Mac empêche l'accès à la carte SD tant que R36S Studio n'a pas la permission "
@@ -1134,6 +1179,10 @@ _ERROR_MESSAGE_KEYS = {
     "EJECT_FAILED": "error_eject_failed",
     "ELEVATION_REFUSED": "error_elevation_refused",
     "RESET_CARD_FAILED": "error_reset_card_failed",
+    "NOT_SF3000_IMAGE": "error_not_sf3000_image",
+    "INVALID_FILE_NAMES": "error_invalid_file_names",
+    "WHOLE_CARD_PREPARE_FAILED": "error_whole_card_prepare_failed",
+    "WHOLE_CARD_COPY_FAILED": "error_whole_card_copy_failed",
     "MACOS_TCC_BLOCKED": "error_macos_tcc_blocked",
     "MACOS_TCC_PROTECTED_FOLDER": "error_macos_tcc_protected_folder",
     "SEVEN_ZIP_ARCHIVE": "error_seven_zip_archive",

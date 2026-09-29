@@ -272,12 +272,65 @@ partition principale à la place n'est pas fait** : l'exFAT ne se
 redimensionne pas sans déplacer toutes les données (table d'allocation de
 taille fixée au formatage, suivie immédiatement des données), aucun outil
 standard ne le fait (Windows refuse, exfatprogs n'a pas de redimensionnement)
--- l'espace restant reste non partitionné. Un vrai « utiliser toute la
-carte » passerait par une copie fichier par fichier vers une partition
-unique recréée au même décalage (16 Kio sur la carte d'origine) : fonction
-à part, non faite. **Non vérifié sur une vraie carte** : la détection n'a
-été testée que sur des images construites selon les spécifications (la
-lecture brute d'un vrai disque exige les droits administrateur).
+-- l'espace restant reste non partitionné par ce chemin ; « utiliser toute
+la carte » (ci-dessous) est l'alternative. Détection vérifiée depuis sur
+la vraie image d'une carte d'origine (fichier `.img`, lecture seule).
+
+**« Utiliser toute la carte » (carte SF3000, 2026-09-29).** Commande
+`clone-sf3000` (`__main__.py::cmd_clone_sf3000`, `imaging/sf3000_clone.py`,
+lecteur `imaging/exfat_reader.py`) : au lieu d'écrire l'image brute, une
+seule partition exFAT sur toute la carte, puis copie des fichiers de
+l'image un par un. **Windows uniquement** (formatage `Format-Volume`) ;
+image `.img` non compressée seulement (sinon : copie brute, comme avant).
+Étapes :
+1. Avant toute écriture : image exFAT avec `cubegm/rkgame`
+   (`NOT_SF3000_IMAGE`), inventaire complet, noms impossibles sous
+   Windows refusés (`INVALID_FILE_NAMES`), place suffisante
+   (`DESTINATION_TOO_SMALL`). Puis la confirmation (§2 n°6).
+2. Disposition : les 16 premiers Kio de l'image recopiés (vérifié sur la
+   carte d'origine : MBR à code de démarrage nul + signature de disque,
+   secteurs 1-31 à zéro -- rien d'autre à restituer), seule l'entrée 1
+   réécrite (type `0x07`, début secteur 32, fin de carte moins 1 Mio) ;
+   1 Mio effacé après l'en-tête (un ancien secteur de démarrage exFAT au
+   même décalage ferait remonter l'ancien volume) et en fin de carte.
+3. Formatage exFAT, clusters de 64 Kio, étiquette de l'image (aucune sur
+   la carte d'origine) ; lettre de lecteur obligatoire
+   (`WHOLE_CARD_PREPARE_FAILED` sinon).
+4. Fichier témoin `R36S_STUDIO_COPIE_EN_COURS.txt` à la racine, copie
+   (chemins `\\?\`, dates de modification, attributs lecture seule/caché/
+   système, `fsync` par fichier, SHA-256 calculé pendant la copie ;
+   `System Volume Information` sauté), progression en octets réels.
+5. Vérification (par défaut ; `--no-verify` en mode expert seulement) :
+   volumes démontés d'abord (sinon la relecture viendrait du cache de
+   Windows), puis SHA-256 de chaque fichier relu ; arrêt au premier écart
+   (`VERIFY_FAILED`, chemin du fichier dans le détail).
+6. Témoin retiré, `cubegm/rkgame` relu sur la carte, éjection
+   (`--eject-after`, mode expert).
+Tout échec après l'étape 2 : carte à refaire depuis le début (pas de
+reprise) ; le témoin la signale au prochain branchement (journal,
+`MainWindow._warn_if_interrupted_whole_card_copy`). L'image n'est jamais
+que lue.
+
+Interface : mode expert, `WholeCardChoiceDialog` avant la Confirmation
+dès que l'image est une carte SF3000 exFAT et la carte plus grande d'au
+moins 1 Gio (`sf3000_clone.whole_card_used_bytes`, lecture rapide du
+bitmap d'allocation, sans élévation) -- chaque option annonce son coût
+(minutes de plus / espace inutilisable), case « vérifier » cochée par
+défaut. Mode assisté (parcours de clonage, étape 4, et « Préparer une
+carte avec cette sauvegarde ») : toute la carte automatiquement,
+vérification toujours faite, décision et durée journalisées.
+
+Durées : débits supposés (`FILE_COPY_BYTES_PER_SECOND` 25 Mio/s,
+`RAW_WRITE_BYTES_PER_SECOND` 35 Mio/s, `VERIFY_BYTES_PER_SECOND`
+80 Mio/s), **à recaler au premier essai réel**. Carte d'origine
+(29 486 fichiers, 191 dossiers, 45,5 Gio, inventaire lu en 2 s) : environ
+8 min de plus qu'une copie brute, 10 min de vérification, 42 min en tout.
+
+Prérequis vérifié sur du vrai matériel avant d'écrire le code
+(procédure manuelle `diskpart` `offset=16` + `format fs=exfat unit=64K` +
+`robocopy`, fichier de remplissage de 60 Go pour pousser des données
+au-delà de l'ancienne limite) : la console démarre et les jeux
+fonctionnent. **Jamais lancé depuis l'app sur une vraie carte à ce jour.**
 
 **Non confirmé sur du vrai matériel au moment d'écrire cette note** :
 couvert par des tests qui isolent le calcul (lecture directe d'un

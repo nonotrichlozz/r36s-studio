@@ -261,6 +261,31 @@ STRINGS_EN = {
     "wizard_backup_kind_system": "System only, without the games",
     "wizard_backup_kind_system_desc": "Only the screen and the settings — a much smaller file.",
     "wizard_create_image_size_hint": "Maximum size of the copy: about {size}.",
+    "whole_card_title": "How should this system be installed?",
+    "whole_card_instruction": (
+        "This file comes from an SF3000 console card, and your card is larger than it. "
+        "Choose how to use it."
+    ),
+    "whole_card_option_whole": "Use the whole card (recommended)",
+    "whole_card_option_whole_desc": (
+        "Copies the files one by one to a single space that fills the whole card: all {card} "
+        "will be usable for your games. Slower: about {extra} minutes more than a raw copy."
+    ),
+    "whole_card_option_raw": "Raw copy of the image",
+    "whole_card_option_raw_desc": (
+        "Faster, but only the image's {image} will be usable: the remaining {remaining} of the "
+        "card will stay unusable by the console."
+    ),
+    "whole_card_verify": "Check every file after copying (recommended, about {minutes} minutes more)",
+    "whole_card_continue": "Continue",
+    "whole_card_wizard_log": (
+        "SF3000 console card: the whole card will be used (files copied one by one, then each "
+        "one checked). Estimated time: about {minutes} minutes."
+    ),
+    "whole_card_marker_found": (
+        "\"{display}\" holds an interrupted copy: the card is incomplete. "
+        "Start the installation again to redo it from the beginning."
+    ),
     "reset_card_label_title": "Card name",
     "reset_card_label_instruction": (
         "Choose the name this card will show once it is empty — you can keep this one."
@@ -450,6 +475,22 @@ STRINGS_EN = {
     "error_elevation_refused": "The Windows permission was refused. Try again and accept the prompt.",
     "error_reset_card_failed": (
         "Could not reset this card. Unplug it, plug it back in, close the windows showing it, then try again."
+    ),
+    "error_not_sf3000_image": (
+        "This file is not an SF3000 card backup that can be read file by file. "
+        "Choose the raw copy of the image instead."
+    ),
+    "error_invalid_file_names": (
+        "Some files in the backup have a name Windows cannot create. "
+        "Nothing was written to your card; the list is in the log."
+    ),
+    "error_whole_card_prepare_failed": (
+        "Preparing your card failed: it cannot be used as it is. "
+        "Close the windows showing it, then start the operation again from the beginning."
+    ),
+    "error_whole_card_copy_failed": (
+        "Copying the files stopped before the end: your card is incomplete. "
+        "Start the operation again from the beginning."
     ),
     "error_macos_tcc_blocked": (
         "Your Mac blocks access to the SD card until R36S Studio has the Full Disk Access permission. "

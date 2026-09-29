@@ -6093,3 +6093,107 @@ def test_web_requested_does_nothing_when_url_not_https(mock_list, mock_filter, m
     window._home.web_requested.emit()
 
     mock_open_url.assert_not_called()
+
+
+# --- « utiliser toute la carte » (image de carte SF3000) --------------------
+
+
+def _flash_until_file_chosen(window, path="/tmp/sf3000.img"):
+    window._home.flash_selected.emit()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
+    window._file_dialog.file_chosen.emit(path)
+
+
+@patch("r36s_studio.gui.main_window.os.path.getsize", return_value=45 * 1024**3)
+@patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=46 * 1024**3)
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_sf3000_image_asks_whole_card_or_raw_then_confirms(mock_list, mock_filter, _d, _l, _u, _s, qapp):
+    """Mode expert : le choix précède la fenêtre Confirmation (§2 n°6),
+    chaque option annonce son coût, et le choix décide de la commande."""
+    device = _make_device(size_bytes=128 * 1024**3)
+    mock_list.return_value = mock_filter.return_value = [device]
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window = MainWindow()
+        _flash_until_file_chosen(window)
+        assert window._whole_card_dialog.isVisible() is True
+        assert window._confirm_dialog.isVisible() is False
+        assert "minutes de plus" in window._whole_card_dialog._whole_desc.text()
+        assert "inutilisables" in window._whole_card_dialog._raw_desc.text()
+
+        window._whole_card_dialog._verify_check.setChecked(False)
+        window._whole_card_dialog._on_continue()
+        assert window._confirm_dialog.isVisible() is True
+        runner_class.assert_not_called()
+        window._confirm_dialog._checkbox.setChecked(True)
+        window._confirm_dialog.confirmed.emit()
+
+    assert runner_class.instances[0].argv == [
+        "clone-sf3000", "--image", "/tmp/sf3000.img", "--device", device.path, "--no-verify", "--eject-after",
+    ]
+
+
+@patch("r36s_studio.gui.main_window.os.path.getsize", return_value=45 * 1024**3)
+@patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=46 * 1024**3)
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_sf3000_image_raw_copy_choice_keeps_the_regular_flash(mock_list, mock_filter, _d, _l, _u, _s, qapp):
+    device = _make_device(size_bytes=128 * 1024**3)
+    mock_list.return_value = mock_filter.return_value = [device]
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window = MainWindow()
+        _flash_until_file_chosen(window)
+        window._whole_card_dialog._raw_radio.setChecked(True)
+        window._whole_card_dialog._on_continue()
+        window._confirm_dialog._checkbox.setChecked(True)
+        window._confirm_dialog.confirmed.emit()
+
+    assert runner_class.instances[0].argv[0] == "flash"
+
+
+@patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=46 * 1024**3)
+@patch("r36s_studio.gui.main_window.estimate_total_bytes", return_value=45 * 1024**3)
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_wizard_restore_uses_the_whole_card_automatically_with_verification(_l, _d, _e, _u, qapp):
+    """Mode assisté : aucun choix technique, toute la carte et vérification,
+    décision et durée journalisées ; la Confirmation reste obligatoire."""
+    device = _make_device(size_bytes=128 * 1024**3)
+    runner_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window = MainWindow()
+        window._wizard_active = True
+        window._wizard_target_device = device
+        window._file_path = "/tmp/sauvegarde.img"
+        window._enter_wizard_restore_image_step()
+        assert window._whole_card_dialog.isVisible() is False
+        assert window._confirm_dialog.isVisible() is True
+        assert "toute la carte sera utilisée" in window._log_panel._log_view.toPlainText()
+        window._start_worker()
+
+    assert runner_class.instances[0].argv == ["clone-sf3000", "--image", "/tmp/sauvegarde.img", "--device", device.path]
+
+
+@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_interrupted_whole_card_copy_is_reported_once(mock_list, mock_filter, _d, tmp_path, qapp):
+    from r36s_studio.imaging import sf3000_clone
+
+    sf3000_clone.write_marker(str(tmp_path))
+    device = _make_device()
+    device.mountpoints = [str(tmp_path)]
+    mock_list.return_value = mock_filter.return_value = [device]
+    window = MainWindow()
+    window._refresh_home_state()
+    window._refresh_home_state()
+    assert window._log_panel._log_view.toPlainText().count("copie interrompue") == 1

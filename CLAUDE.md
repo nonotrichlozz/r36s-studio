@@ -87,7 +87,7 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 |---|---|
 | `gui/elevate.py`, worker élevé, TCC/Accès complet au disque macOS | `docs/claude/elevation-macos.md` |
 | `devices/` (détection des cartes), `safety/` (garde-fou) | `docs/claude/devices-safety.md` |
-| `imaging/` : sauvegarde, sauvegarde système (GPT/MBR), flash, SHA-256, formats, partition de jeux auto | `docs/claude/imaging.md` |
+| `imaging/` : sauvegarde, sauvegarde système (GPT/MBR), flash, SHA-256, formats, partition de jeux auto, « utiliser toute la carte » SF3000 | `docs/claude/imaging.md` |
 | `imaging/reset_card.py`, `cmd_reset_card`, `_format_windows` | `docs/claude/reset-card.md` |
 | `partitions/` : localisation/montage, copie, archives, éjection | `docs/claude/partitions.md` |
 | `detect/` : badges de statut des étapes A→F | `docs/claude/detect.md` |
@@ -191,13 +191,16 @@ Détail et bancs de test : `docs/claude/testing.md`.
   Windows d'éjection de la source non déclenchée, non reproduit (`partitions.md`).
 - Remise à zéro et montage best-effort sur macOS/Linux (`reset-card.md`).
 - Carte SF3000 (`cubegm/rkgame`) : aucune partition de jeux après un flash --
-  détection (`imaging/card_probe.py`) testée sur images synthétiques
-  seulement ; l'espace restant reste non partitionné (`imaging.md`).
+  détection (`imaging/card_probe.py`) vérifiée sur l'image d'une vraie carte,
+  pas encore sur la carte elle-même (`imaging.md`).
 - Partition de jeux recréée automatiquement après un flash plus petit que la
   carte : ligne « Espace de jeux recréé… » attendue dans le journal (`imaging.md`).
 - Avertissement de formatage Windows après un flash « Linux » (`firmwares-flash.md`).
 - Tour complet UAC depuis le binaire Windows empaqueté ; paquets `apt` du job
   CI Linux ; aucun tag `v*` créé à ce jour, donc aucune Release (`packaging.md`).
+- « Utiliser toute la carte » (`clone-sf3000`, carte SF3000, Windows) :
+  jamais lancé depuis l'app sur une vraie carte ; durées estimées à
+  recaler au premier essai (`imaging.md`).
 - Chien de garde du sondage : ne détecte qu'un ralentissement, jamais un arrêt
   complet du minuteur (`assisted-wizard.md`).
 

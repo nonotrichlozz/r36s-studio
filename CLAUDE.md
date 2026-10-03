@@ -153,6 +153,12 @@ sauvegarde système sans les jeux, remise à zéro).
 - **Dossiers utilisateur** : archives, sauvegardes, firmwares dans
   `~/Documents/R36S Studio/`, proposés mais toujours remplaçables ; jamais dans
   `~/.config` (réservé à `config.json`, sans secret).
+- **Version** : `APP_VERSION` (`r36s_studio/__init__.py`) est la seule
+  source (`--version`, vérification des mises à jour) ; `release.yml`
+  refuse un tag `v*` qui ne lui correspond pas.
+- **Licences** : R36S Studio est sous PolyForm Strict 1.0.0 (`LICENSE`) ;
+  aucun composant embarqué sous GPL seule (exclusion `_EXCLUDED_QT` des
+  specs), chaque composant tiers listé dans `THIRD_PARTY_NOTICES.txt`.
 - **Paquet** : tout fichier non-Python lu à l'exécution doit être déclaré dans
   les trois `packaging/*.spec` (vérifié par `tests/test_packaging_specs.py`).
 - **Dépendances de `partitions/`** : jamais d'import de `gui/` (points
@@ -168,6 +174,8 @@ Détail et bancs de test : `docs/claude/testing.md`.
   mocké lève `UnmockedSubprocessError`. Exceptions déclarées par marqueur :
   `@pytest.mark.real_subprocess`, `@pytest.mark.real_fda_probe`
   (`has_full_disk_access` est stubée à `True` par défaut).
+- `config.json` est redirigé vers `tmp_path` en autouse (`conftest.py`) : un
+  test ne doit jamais écrire le vrai fichier de la machine.
 - Chemins de périphérique factices impossibles à confondre avec du matériel
   réel : `/dev/fake-disk-test-*`, ou numéro implausible quand le format compte
   (`disk9903`, `PhysicalDrive9902`).
@@ -197,7 +205,8 @@ Détail et bancs de test : `docs/claude/testing.md`.
   carte : ligne « Espace de jeux recréé… » attendue dans le journal (`imaging.md`).
 - Avertissement de formatage Windows après un flash « Linux » (`firmwares-flash.md`).
 - Tour complet UAC depuis le binaire Windows empaqueté ; paquets `apt` du job
-  CI Linux ; aucun tag `v*` créé à ce jour, donc aucune Release (`packaging.md`).
+  CI Linux ; `release.yml` (installeur Inno Setup, `.dmg`, test de fumée
+  `--version`) jamais exécuté : aucun tag `v*` créé à ce jour (`packaging.md`).
 - « Utiliser toute la carte » (`clone-sf3000`, carte SF3000, Windows) :
   jamais lancé depuis l'app sur une vraie carte ; durées estimées à
   recaler au premier essai (`imaging.md`).

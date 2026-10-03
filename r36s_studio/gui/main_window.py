@@ -1,18 +1,5 @@
-# R36S Studio
-# Copyright (C) 2026 nonotrichlozz
-#
-# Ce fichier fait partie de R36S Studio. R36S Studio est un logiciel libre :
-# vous pouvez le redistribuer et/ou le modifier selon les termes de la GNU
-# General Public License telle que publiée par la Free Software Foundation,
-# version 3 de la licence.
-#
-# R36S Studio est distribué dans l'espoir qu'il sera utile, mais SANS
-# AUCUNE GARANTIE ; sans même la garantie implicite de QUALITÉ MARCHANDE ou
-# d'ADÉQUATION À UN USAGE PARTICULIER. Consultez la GNU General Public
-# License pour plus de détails.
-#
-# Vous devez avoir reçu une copie de la GNU General Public License avec
-# R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
 
 """Fenêtre principale (§5, refonte navigation) : une seule vue permanente
 (`MainView`, deux colonnes) plutôt qu'une succession d'écrans dans un
@@ -44,6 +31,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QStackedWidget
 
 from r36s_studio import config as app_config
+from r36s_studio import update_check
 from r36s_studio.android import adb as android_adb
 from r36s_studio.android import emulators as android_emulators
 from r36s_studio.android import platform_tools as android_platform_tools
@@ -101,6 +89,7 @@ from .partition_runner import (
     RocknixListRunner,
     SystemBackupEstimate,
     SystemBackupEstimateRunner,
+    UpdateCheckRunner,
     WizardFingerprintRunner,
 )
 from .reveal import reveal
@@ -129,6 +118,7 @@ from .screens import (
     WholeCardChoiceDialog,
     RocknixVariantDialog,
     SameCardUnverifiedDialog,
+    UpdateDialog,
     WizardStepPanel,
     _ASSISTED_CONTENT_SPACING,
     _ASSISTED_GRID_TOTAL_HEIGHT,
@@ -785,6 +775,17 @@ class MainWindow(QMainWindow):
         # réellement actif).
         self._wizard_panel.prepare_card_requested.connect(self._on_prepare_card_requested)
         self._wizard_panel.return_to_home_requested.connect(self._on_assisted_ad_hoc_return_home)
+
+        # (tag, notes) -- repris de config.json tant qu'APP_VERSION n'a pas
+        # rattrapé la version mémorisée (badge persistant sans réseau).
+        self._pending_update: Optional[tuple] = None
+        if update_check.is_newer(self._app_config.latest_update_tag):
+            self._pending_update = (self._app_config.latest_update_tag, self._app_config.latest_update_notes)
+        for controls in (self._home.update_controls, self._assisted_landing.update_controls):
+            controls.set_checked(self._app_config.check_updates)
+            controls.check_toggled.connect(self._on_update_check_toggled)
+            controls.badge_clicked.connect(self._open_update_dialog)
+        self._show_update_badge_if_idle()
 
     # --- colonne gauche, annotée par detect.detect_workflow_status (§4.5) --
 
@@ -1573,6 +1574,7 @@ class MainWindow(QMainWindow):
 
     @Slot(bool)
     def _on_worker_finished(self, ok: bool) -> None:
+        QTimer.singleShot(0, self._show_update_badge_if_idle)
         self._home.set_busy(False)
         self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
@@ -2665,6 +2667,54 @@ class MainWindow(QMainWindow):
             )
         if self._doublons_root is not None:
             self._start_doublons_scan(self._doublons_root)
+
+    # --- mises à jour (update_check.py) -----------------------------------
+
+    def start_update_check(self) -> None:
+        """Au plus une fois par jour, sur un thread séparé ; silence total
+        si rien de neuf ou hors ligne (`UpdateCheckRunner`). Appelée par
+        `app.py::run`, jamais par le constructeur (tests sans réseau)."""
+        today = datetime.now().date().isoformat()
+        if not self._app_config.check_updates or self._app_config.last_update_check == today:
+            return
+        self._app_config.last_update_check = today
+        app_config.save_config(self._app_config)
+        self._update_runner = UpdateCheckRunner(parent=self)
+        self._update_runner.update_available.connect(self._on_update_available)
+        self._update_runner.start()
+
+    def _on_update_available(self, tag: str, notes: str) -> None:
+        self._pending_update = (tag, notes)
+        self._app_config.latest_update_tag = tag
+        self._app_config.latest_update_notes = notes
+        app_config.save_config(self._app_config)
+        self._log_panel.append_log(f"[mise à jour] {tag} disponible")
+        self._show_update_badge_if_idle()
+
+    def _show_update_badge_if_idle(self) -> None:
+        """Jamais pendant une opération disque : rappelée à la fin de chaque
+        opération (`_on_worker_finished`)."""
+        if self._pending_update is None or self._log_panel.is_operation_active():
+            return
+        for controls in (self._home.update_controls, self._assisted_landing.update_controls):
+            controls.badge.setVisible(self._app_config.check_updates)
+
+    def _on_update_check_toggled(self, checked: bool) -> None:
+        self._app_config.check_updates = checked
+        app_config.save_config(self._app_config)
+        for controls in (self._home.update_controls, self._assisted_landing.update_controls):
+            controls.set_checked(checked)
+            controls.badge.setVisible(False)
+        if checked:
+            self._show_update_badge_if_idle()
+            self.start_update_check()
+
+    def _open_update_dialog(self) -> None:
+        if self._pending_update is None:
+            return
+        dialog = UpdateDialog(*self._pending_update, parent=self)
+        dialog.download_requested.connect(lambda: webbrowser.open(update_check.STORE_URL))
+        dialog.open()
 
     def _on_language_selected(self, code: str) -> None:
         """Choix de langue depuis l'un des deux accueils (i18n.py) --

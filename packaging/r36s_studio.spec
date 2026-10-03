@@ -111,6 +111,13 @@ a = Analysis(
     noarchive=False,
     cipher=block_cipher,
 )
+# Modules Qt jamais utilisés (l'app n'importe que QtCore/QtGui/QtWidgets/
+# QtNetwork) mais tirés par les plugins de PySide6. Qt Virtual Keyboard en
+# particulier n'existe qu'en GPL v3 ou licence commerciale, jamais en LGPL :
+# incompatible avec la licence de R36S Studio (THIRD_PARTY_NOTICES.txt).
+_EXCLUDED_QT = ("virtualkeyboard", "qt6quick", "qtquick", "qt6qml", "qtqml", "qt6pdf", "qtpdf", "qpdf")
+a.binaries = [entry for entry in a.binaries if not any(name in entry[0].lower() for name in _EXCLUDED_QT)]
+a.datas = [entry for entry in a.datas if not any(name in entry[0].lower() for name in _EXCLUDED_QT)]
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(

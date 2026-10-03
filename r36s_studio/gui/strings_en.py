@@ -1,18 +1,5 @@
-# R36S Studio
-# Copyright (C) 2026 nonotrichlozz
-#
-# Ce fichier fait partie de R36S Studio. R36S Studio est un logiciel libre :
-# vous pouvez le redistribuer et/ou le modifier selon les termes de la GNU
-# General Public License telle que publiée par la Free Software Foundation,
-# version 3 de la licence.
-#
-# R36S Studio est distribué dans l'espoir qu'il sera utile, mais SANS
-# AUCUNE GARANTIE ; sans même la garantie implicite de QUALITÉ MARCHANDE ou
-# d'ADÉQUATION À UN USAGE PARTICULIER. Consultez la GNU General Public
-# License pour plus de détails.
-#
-# Vous devez avoir reçu une copie de la GNU General Public License avec
-# R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
 
 """Chaînes anglaises de l'interface -- même clés que `strings.STRINGS`
 (français, source de référence), mêmes variables `{…}` dans chaque
@@ -93,6 +80,7 @@ STRINGS_EN = {
         "done, not relevant for this card). Nothing ever happens until you click, and any action "
         "that erases something asks you explicitly before it starts."
     ),
+    "about_licence": "Source available but not free: personal use only, no modification, redistribution or commercial use without permission (PolyForm Strict 1.0.0).",
     "about_close": "Close",
     "identify_result_title": "Your console",
     "identify_result_board": "Detected identifier: {board}",
@@ -706,6 +694,11 @@ STRINGS_EN = {
     "tri_reason_extension_not_accepted": "this system does not show {detail} files for this console",
     "tri_reason_folder_case_conflict": "the expected folder \"{detail}\" already exists, spelled differently",
     "language_selector_label": "Langue / Language",
+    "update_badge": "New version available",
+    "update_check_label": "Check for updates",
+    "update_dialog_title": "R36S Studio {version} is available",
+    "update_dialog_later": "Later",
+    "update_dialog_download": "Get the new version",
     "language_restart_title": "Langue / Language",
     "language_restart_message": "The new language will apply the next time you start R36S Studio.",
     "unit_bytes": "B",

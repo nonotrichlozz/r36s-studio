@@ -255,3 +255,14 @@ def _reset_privileged_mount_hook():
     locate.set_privileged_mount_hook(None)
     yield
     locate.set_privileged_mount_hook(None)
+
+
+@pytest.fixture(autouse=True)
+def _config_json_isolated(tmp_path, monkeypatch):
+    """Jamais le vrai `config.json` de la machine : un test qui déclenche
+    `save_config` sans le mocker (ex. `_on_update_available`) l'écrasait
+    avec les valeurs par défaut d'`AppConfig` (constaté le 2026-10-03)."""
+    from r36s_studio import config
+
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config.json")
+    yield

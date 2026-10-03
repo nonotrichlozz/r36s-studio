@@ -1,18 +1,5 @@
-# R36S Studio
-# Copyright (C) 2026 nonotrichlozz
-#
-# Ce fichier fait partie de R36S Studio. R36S Studio est un logiciel libre :
-# vous pouvez le redistribuer et/ou le modifier selon les termes de la GNU
-# General Public License telle que publiée par la Free Software Foundation,
-# version 3 de la licence.
-#
-# R36S Studio est distribué dans l'espoir qu'il sera utile, mais SANS
-# AUCUNE GARANTIE ; sans même la garantie implicite de QUALITÉ MARCHANDE ou
-# d'ADÉQUATION À UN USAGE PARTICULIER. Consultez la GNU General Public
-# License pour plus de détails.
-#
-# Vous devez avoir reçu une copie de la GNU General Public License avec
-# R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
 
 """Exécute les jobs d'extraction/injection (`partitions/jobs.py`) sur un
 thread Qt séparé, plutôt que via le worker élevé de `worker_runner.py`.
@@ -35,6 +22,7 @@ from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
 
+from r36s_studio import update_check
 from r36s_studio.devices import Device
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, identify_from_boot_directory
 from r36s_studio.identify.rocknix import (
@@ -196,6 +184,19 @@ class RocknixListRunner(QThread):
             self.finished_list.emit([])
             return
         self.finished_list.emit(variants)
+
+
+class UpdateCheckRunner(QThread):
+    """Vérification des mises à jour (`update_check.py`) hors du thread Qt
+    principal. N'émet `update_available` que si une version plus récente
+    existe ; sinon (à jour, hors ligne, erreur) ne dit rien."""
+
+    update_available = Signal(str, str)  # tag, notes
+
+    def run(self) -> None:
+        latest = update_check.fetch_latest()
+        if latest is not None and update_check.is_newer(latest[0]):
+            self.update_available.emit(*latest)
 
 
 class RocknixDownloadRunner(QThread):

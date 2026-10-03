@@ -5,7 +5,7 @@ R36S Studio — à lire avant de lancer l'application
 ------------------------------------------------
 macOS bloque par défaut l'ouverture des applications qui ne viennent pas
 d'un développeur reconnu par Apple — c'est le cas de R36S Studio, une
-application gratuite et open source.
+application indépendante.
 
 Pour l'ouvrir la première fois :
 

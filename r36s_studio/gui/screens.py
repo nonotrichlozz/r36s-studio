@@ -1,18 +1,5 @@
-# R36S Studio
-# Copyright (C) 2026 nonotrichlozz
-#
-# Ce fichier fait partie de R36S Studio. R36S Studio est un logiciel libre :
-# vous pouvez le redistribuer et/ou le modifier selon les termes de la GNU
-# General Public License telle que publiée par la Free Software Foundation,
-# version 3 de la licence.
-#
-# R36S Studio est distribué dans l'espoir qu'il sera utile, mais SANS
-# AUCUNE GARANTIE ; sans même la garantie implicite de QUALITÉ MARCHANDE ou
-# d'ADÉQUATION À UN USAGE PARTICULIER. Consultez la GNU General Public
-# License pour plus de détails.
-#
-# Vous devez avoir reçu une copie de la GNU General Public License avec
-# R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
 
 """Vue principale et fenêtres modales de l'application (§5, refonte
 navigation) : plus une succession d'écrans dans un `QStackedWidget`, mais
@@ -57,6 +44,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -1042,6 +1030,64 @@ class LanguageSelector(QComboBox):
         self.language_selected.emit(self.itemData(index))
 
 
+class UpdateControls(QWidget):
+    """Sous le sélecteur de langue des deux accueils : badge « Nouvelle
+    version disponible » (masqué tant que `MainWindow` n'en signale pas)
+    et case « Rechercher les mises à jour » (`config.check_updates`)."""
+
+    badge_clicked = Signal()
+    check_toggled = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        self.badge = QPushButton(tr("update_badge"))
+        self.badge.setProperty("role", "cta")
+        self.badge.clicked.connect(self.badge_clicked.emit)
+        self.badge.hide()
+        layout.addWidget(self.badge, 0, Qt.AlignRight)
+        self.checkbox = QCheckBox(tr("update_check_label"))
+        self.checkbox.toggled.connect(self.check_toggled.emit)
+        layout.addWidget(self.checkbox, 0, Qt.AlignRight)
+
+    def set_checked(self, checked: bool) -> None:
+        self.checkbox.blockSignals(True)
+        self.checkbox.setChecked(checked)
+        self.checkbox.blockSignals(False)
+
+
+class UpdateDialog(Dialog):
+    """Notes de la nouvelle version + bouton vers la boutique
+    (`update_check.STORE_URL`, ouvert par `MainWindow`, `download_requested`)."""
+
+    download_requested = Signal()
+
+    def __init__(self, tag: str, notes: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("update_dialog_title", version=tag))
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("update_dialog_title", version=tag))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setMarkdown(notes)
+        layout.addWidget(browser, 1)
+        buttons = QHBoxLayout()
+        later = QPushButton(tr("update_dialog_later"))
+        later.clicked.connect(self.close)
+        download = QPushButton(tr("update_dialog_download"))
+        download.setProperty("role", "primary")
+        download.clicked.connect(self.download_requested.emit)
+        buttons.addWidget(later)
+        buttons.addStretch()
+        buttons.addWidget(download)
+        layout.addLayout(buttons)
+        self.resize(520, 440)
+
+
 class HomeScreen(Screen):
     """Colonne gauche, largeur fixe, toujours visible (§5, refonte
     navigation) : bandeau de détection, six étapes A à F, puis la
@@ -1134,6 +1180,8 @@ class HomeScreen(Screen):
         self._language_selector.language_selected.connect(self.language_selected.emit)
         language_row.addWidget(self._language_selector)
         layout.addLayout(language_row)
+        self.update_controls = UpdateControls()
+        layout.addWidget(self.update_controls, 0, Qt.AlignRight)
 
         # Bandeau de détection, toujours en haut -- cadre à bordure cyan et
         # coins arrondis (theme.py, role="banner"), distinct des lignes
@@ -2857,6 +2905,8 @@ class AssistedLandingScreen(Screen):
         self._language_selector = LanguageSelector()
         self._language_selector.language_selected.connect(self.language_selected.emit)
         header_actions.addWidget(self._language_selector, 0, Qt.AlignRight)
+        self.update_controls = UpdateControls()
+        header_actions.addWidget(self.update_controls, 0, Qt.AlignRight)
         header_row.addLayout(header_actions)
         root.addLayout(_centered_row(header_container))
 
@@ -3113,6 +3163,10 @@ class AboutDialog(Dialog):
         body = QLabel(tr("about_orientation"))
         body.setWordWrap(True)
         layout.addWidget(body)
+        licence = QLabel(tr("about_licence"))
+        licence.setProperty("role", "secondary")
+        licence.setWordWrap(True)
+        layout.addWidget(licence)
         layout.addStretch()
 
         buttons = QHBoxLayout()

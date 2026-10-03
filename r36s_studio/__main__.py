@@ -1,18 +1,5 @@
-# R36S Studio
-# Copyright (C) 2026 nonotrichlozz
-#
-# Ce fichier fait partie de R36S Studio. R36S Studio est un logiciel libre :
-# vous pouvez le redistribuer et/ou le modifier selon les termes de la GNU
-# General Public License telle que publiée par la Free Software Foundation,
-# version 3 de la licence.
-#
-# R36S Studio est distribué dans l'espoir qu'il sera utile, mais SANS
-# AUCUNE GARANTIE ; sans même la garantie implicite de QUALITÉ MARCHANDE ou
-# d'ADÉQUATION À UN USAGE PARTICULIER. Consultez la GNU General Public
-# License pour plus de détails.
-#
-# Vous devez avoir reçu une copie de la GNU General Public License avec
-# R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
 
 """Point d'entrée CLI :
 
@@ -92,6 +79,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional, TextIO
 
+from r36s_studio import APP_VERSION
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons.journal_check import verify_journal
 from r36s_studio.identify import identify_from_boot_directory
@@ -1252,6 +1240,8 @@ def _add_worker_args(subparser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="r36s_studio")
+    # Quitte aussitôt (test de fumée de l'installeur, release.yml).
+    parser.add_argument("--version", action="version", version=f"R36S Studio {APP_VERSION}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     list_parser = subparsers.add_parser("list", help="Liste les cartes SD détectées")

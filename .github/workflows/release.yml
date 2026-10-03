@@ -1,0 +1,138 @@
+name: Release
+
+# Crée une Release BROUILLON à chaque tag vX.Y.Z (docs/claude/packaging.md),
+# avec R36S-Studio-Setup.exe, R36S-Studio-macOS.dmg, R36S-Studio-Linux.tar.gz.
+# Ces installeurs sont vendus sur la boutique : scripts/publish_release.sh
+# les retire avant de publier la Release (code et notes seulement).
+# Aucun secret : seul GITHUB_TOKEN (fourni par GitHub) est utilisé.
+# La Release est créée en BROUILLON. Les artefacts Actions ne servent qu'à
+# passer les fichiers entre jobs (rétention 1 jour) : sur un dépôt public,
+# tout compte GitHub connecté peut les télécharger -- jamais un canal de
+# diffusion.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  version:
+    name: Tag = APP_VERSION
+    runs-on: ubuntu-22.04
+    outputs:
+      app_version: ${{ steps.v.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          APP_VERSION=$(python3 -c "import r36s_studio; print(r36s_studio.APP_VERSION)")
+          if [ "v$APP_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Le tag $GITHUB_REF_NAME ne correspond pas à APP_VERSION ($APP_VERSION, r36s_studio/__init__.py)"
+            exit 1
+          fi
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows (installeur)
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Construire l'application (PyInstaller)
+        shell: pwsh
+        run: packaging/build_windows.ps1
+
+      - name: Construire l'installeur (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe" "/DAppVersion=${{ needs.version.outputs.app_version }}" packaging\windows_installer.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # Test de fumée : installation silencieuse comme le ferait un
+      # utilisateur, puis lancement de l'exe installé avec --version (quitte
+      # aussitôt). Échoue si l'exe ne démarre pas (DLL ou fichier manquant).
+      - name: Tester l'installation
+        shell: pwsh
+        run: |
+          $setup = Start-Process dist\R36S-Studio-Setup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "Installation : code $($setup.ExitCode)" }
+          $exe = "$env:LOCALAPPDATA\Programs\R36S Studio\R36S Studio.exe"
+          if (-not (Test-Path $exe)) { throw "Introuvable apres installation : $exe" }
+          $run = Start-Process $exe -ArgumentList '--version' -Wait -PassThru
+          if ($run.ExitCode -ne 0) { throw "--version : code $($run.ExitCode)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/R36S-Studio-Setup.exe
+          retention-days: 1
+
+  macos:
+    name: macOS (.dmg)
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Construire l'image disque
+        run: packaging/build_macos.sh dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/R36S-Studio-macOS.dmg
+          retention-days: 1
+
+  # ponytail: .tar.gz du dossier onedir, AppImage quand une entrée .desktop
+  # existera. Un échec ici ne bloque jamais la Release (continue-on-error).
+  linux:
+    name: Linux (.tar.gz)
+    needs: version
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Construire l'application
+        run: packaging/build_linux.sh
+      - name: Empaqueter
+        run: |
+          cp LICENSE "dist/R36S Studio/LICENSE.txt"
+          cp THIRD_PARTY_NOTICES.txt "dist/R36S Studio/"
+          tar -C dist -czf R36S-Studio-Linux.tar.gz "R36S Studio"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: R36S-Studio-Linux.tar.gz
+          retention-days: 1
+
+  publish:
+    name: Publier la Release
+    needs: [windows, macos, linux]
+    if: ${{ !cancelled() && needs.windows.result == 'success' && needs.macos.result == 'success' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          # Brouillon : visible des seuls membres du dépôt. Publié par
+          # scripts/publish_release.sh, après retrait des fichiers ; la
+          # vérification des mises à jour de l'app ne voit que les publiées.
+          draft: true
+          name: R36S Studio ${{ github.ref_name }}
+          body_path: packaging/RELEASE_NOTES.md
+          files: artifacts/**/*

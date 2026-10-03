@@ -6197,3 +6197,55 @@ def test_interrupted_whole_card_copy_is_reported_once(mock_list, mock_filter, _d
     window._refresh_home_state()
     window._refresh_home_state()
     assert window._log_panel._log_view.toPlainText().count("copie interrompue") == 1
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_update_badge_waits_for_running_operation(mock_list, mock_filter, mock_load, qapp):
+    """Jamais de badge « Nouvelle version » pendant une opération disque."""
+    window = MainWindow()
+    badge = window._assisted_landing.update_controls.badge
+    window._log_panel.start_operation("Sauvegarde")
+    window._on_update_available("v9.0.0", "Notes")
+    assert badge.isHidden()
+
+    window._log_panel.finish_success("ok", allow_eject=False, reveal_path=None)
+    window._show_update_badge_if_idle()
+    assert not badge.isHidden()
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_update_badge_persists_across_launches_until_app_catches_up(mock_list, mock_filter, qapp, tmp_path):
+    """Version trouvée un jour = badge aux lancements suivants, sans
+    nouvelle vérification ; disparaît dès qu'APP_VERSION la rattrape."""
+    with patch("r36s_studio.config.config_path", return_value=tmp_path / "config.json"):
+        window = MainWindow()
+        window._on_update_available("v9.0.0", "Notes")
+
+        relaunched = MainWindow()  # relit config.json, aucun appel réseau
+        assert relaunched._pending_update == ("v9.0.0", "Notes")
+        assert not relaunched._assisted_landing.update_controls.badge.isHidden()
+
+        with patch("r36s_studio.update_check.APP_VERSION", "9.0.0"):
+            caught_up = MainWindow()
+        assert caught_up._pending_update is None
+        assert caught_up._assisted_landing.update_controls.badge.isHidden()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_update_dialog_button_opens_store(mock_list, mock_filter, mock_load, qapp):
+    """Les installeurs sont vendus sur la boutique, jamais sur GitHub."""
+    from r36s_studio import update_check
+    from r36s_studio.gui.screens import UpdateDialog
+
+    window = MainWindow()
+    window._on_update_available("v9.0.0", "Notes")
+    with patch("r36s_studio.gui.main_window.webbrowser.open") as mock_open:
+        window._open_update_dialog()
+        dialog = window.findChild(UpdateDialog)
+        dialog.download_requested.emit()
+    mock_open.assert_called_once_with(update_check.STORE_URL)

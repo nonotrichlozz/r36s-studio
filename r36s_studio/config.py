@@ -1,18 +1,5 @@
-# R36S Studio
-# Copyright (C) 2026 nonotrichlozz
-#
-# Ce fichier fait partie de R36S Studio. R36S Studio est un logiciel libre :
-# vous pouvez le redistribuer et/ou le modifier selon les termes de la GNU
-# General Public License telle que publiée par la Free Software Foundation,
-# version 3 de la licence.
-#
-# R36S Studio est distribué dans l'espoir qu'il sera utile, mais SANS
-# AUCUNE GARANTIE ; sans même la garantie implicite de QUALITÉ MARCHANDE ou
-# d'ADÉQUATION À UN USAGE PARTICULIER. Consultez la GNU General Public
-# License pour plus de détails.
-#
-# Vous devez avoir reçu une copie de la GNU General Public License avec
-# R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
 
 """Configuration utilisateur persistée (§6) : `~/.config/r36s-studio/
 config.json` (`%APPDATA%\\r36s-studio\\config.json` sous Windows, même
@@ -136,6 +123,15 @@ class AppConfig:
     doublons_simulation_mode: bool = DEFAULT_DOUBLONS_SIMULATION_MODE
     doublons_last_destination: Optional[str] = None
     doublons_recent_destinations: List[str] = field(default_factory=list)
+    # Vérification des mises à jour (update_check.py) : au plus une par
+    # jour, `last_update_check` = date ISO (AAAA-MM-JJ) du dernier essai.
+    check_updates: bool = True
+    last_update_check: str = ""
+    # Dernière version plus récente trouvée : garde le badge affiché aux
+    # lancements suivants sans nouvel appel réseau, jusqu'à ce que
+    # APP_VERSION la rattrape. Lien non stocké : nom de fichier stable.
+    latest_update_tag: str = ""
+    latest_update_notes: str = ""
 
 
 def config_dir() -> Path:
@@ -190,6 +186,16 @@ def load_config() -> AppConfig:
         isinstance(path, str) for path in doublons_recent_destinations
     ):
         doublons_recent_destinations = []
+    check_updates = raw.get("check_updates")
+    if not isinstance(check_updates, bool):
+        check_updates = True
+    last_update_check = raw.get("last_update_check")
+    if not isinstance(last_update_check, str):
+        last_update_check = ""
+    latest_update_tag = raw.get("latest_update_tag")
+    latest_update_notes = raw.get("latest_update_notes")
+    if not isinstance(latest_update_tag, str) or not isinstance(latest_update_notes, str):
+        latest_update_tag = latest_update_notes = ""
     return AppConfig(
         ui_mode=ui_mode,
         language=language,
@@ -200,6 +206,10 @@ def load_config() -> AppConfig:
         doublons_simulation_mode=doublons_simulation_mode,
         doublons_last_destination=doublons_last_destination,
         doublons_recent_destinations=doublons_recent_destinations[:_MAX_DOUBLONS_RECENT_DESTINATIONS],
+        check_updates=check_updates,
+        last_update_check=last_update_check,
+        latest_update_tag=latest_update_tag,
+        latest_update_notes=latest_update_notes,
     )
 
 

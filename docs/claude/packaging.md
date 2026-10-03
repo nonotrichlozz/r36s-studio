@@ -1,5 +1,44 @@
 # Packaging, CI et diffusion
 
+**Diffusion (à jour, prime sur les paragraphes historiques ci-dessous).**
+Modèle : code public, installeurs **vendus sur une boutique**, jamais
+téléchargeables depuis GitHub. `release.yml` (tag `v*` = `v` +
+`APP_VERSION`, sinon échec) crée une Release **brouillon** (visible des
+seuls membres du dépôt) avec `R36S-Studio-Setup.exe` (Inno Setup,
+`packaging/windows_installer.iss` : sans UAC, `{localappdata}\Programs`,
+`AppId` fixe — ne jamais le changer, sinon une mise à jour s'installe à
+côté de l'ancienne), `R36S-Studio-macOS.dmg` (`build_macos.sh dmg`) et
+`R36S-Studio-Linux.tar.gz` (non bloquant, pas encore d'AppImage). Test de
+fumée Windows : installation `/VERYSILENT` puis `R36S Studio.exe
+--version`. Artefacts Actions : passage entre jobs uniquement, rétention
+1 jour (sur un dépôt public, tout compte connecté peut les télécharger) ;
+`build.yml` n'en produit plus. `scripts/publish_release.sh <tag>` retire
+tous les fichiers du brouillon, refuse de continuer s'il en reste, puis
+publie (code + notes `packaging/RELEASE_NOTES.md`). Licence : PolyForm
+Strict 1.0.0 (`LICENSE`, en-tête de deux lignes dans chaque `.py`).
+`THIRD_PARTY_NOTICES.txt` (textes officiels, jamais réécrits de mémoire)
+et `LICENSE.txt` sont livrés avec l'installeur, le `.dmg` et le `.tar.gz`.
+Les trois specs excluent les modules Qt inutilisés (`_EXCLUDED_QT`) :
+Qt Virtual Keyboard n'existe qu'en GPL v3/commercial -- jamais dans le
+paquet. Ajouter un module Qt = vérifier sa licence (LGPL v3 obligatoire)
+et mettre à jour `THIRD_PARTY_NOTICES.txt`. Page `STORE_URL` :
+`docs/site/index.html`, publiée par `pages.yml` (Pages, source « GitHub
+Actions »). Icône :
+`packaging/r36s_studio.ico` (générée depuis `gui/assets/console.png`).
+
+**Vérification des mises à jour** (`update_check.py`, `UpdateCheckRunner`,
+`UpdateControls`/`UpdateDialog` sur les deux accueils) : lancée par
+`app.py::run` (jamais par le constructeur de `MainWindow`, donc jamais en
+test), au plus une fois par jour (`config.json::last_update_check`),
+désactivable (`check_updates`). Toute erreur réseau = silence. Dernière
+version trouvée mémorisée (`latest_update_tag`/`latest_update_notes`) :
+badge aux lancements suivants sans réseau, jusqu'à ce qu'`APP_VERSION` la
+rattrape. Bouton « Obtenir la nouvelle version » → `update_check.
+STORE_URL` (page GitHub Pages `docs/site/`, publiée par `pages.yml`, qui
+redirigera vers la boutique), jamais un lien de téléchargement GitHub. Badge
+masqué tant qu'une opération est en cours, réévalué à chaque
+`_on_worker_finished`.
+
 À lire quand tu touches à `packaging/`, aux fichiers `.spec`, à `.github/workflows/build.yml` ou à la publication d'une release.
 
 > Les renvois « §N » de ce texte désignent les sections de l'ancien `CLAUDE.md` monolithique (commit `930f3c9`) : §3 → `elevation-macos.md`, §4.1/§4.2 → `devices-safety.md`, §4.3 → `imaging.md`/`reset-card.md`, §4.4 → `partitions.md`, §4.5 → `detect.md`, §4.6 → `firmwares-flash.md`, §5 → `interface.md`/`assisted-wizard.md`, §6 → `packaging.md`, §8 → `testing.md` ; §1/§2/§9 restent dans `CLAUDE.md`.

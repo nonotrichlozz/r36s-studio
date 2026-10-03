@@ -1,18 +1,5 @@
-# R36S Studio
-# Copyright (C) 2026 nonotrichlozz
-#
-# Ce fichier fait partie de R36S Studio. R36S Studio est un logiciel libre :
-# vous pouvez le redistribuer et/ou le modifier selon les termes de la GNU
-# General Public License telle que publiée par la Free Software Foundation,
-# version 3 de la licence.
-#
-# R36S Studio est distribué dans l'espoir qu'il sera utile, mais SANS
-# AUCUNE GARANTIE ; sans même la garantie implicite de QUALITÉ MARCHANDE ou
-# d'ADÉQUATION À UN USAGE PARTICULIER. Consultez la GNU General Public
-# License pour plus de détails.
-#
-# Vous devez avoir reçu une copie de la GNU General Public License avec
-# R36S Studio. Si ce n'est pas le cas, consultez <https://www.gnu.org/licenses/>.
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
 
 """Chaînes de l'interface, en français -- la langue de référence. Les
 autres langues vivent chacune dans leur fichier (`strings_en.py`), avec
@@ -151,6 +138,7 @@ STRINGS = {
         "cliques dessus, et toute action qui efface quelque chose te le "
         "demande explicitement avant de commencer."
     ),
+    "about_licence": "Code consultable mais non libre : usage personnel uniquement, ni modification, ni redistribution, ni usage commercial sans accord (PolyForm Strict 1.0.0).",
     "about_close": "Fermer",
     # Résultat de la tuile « Rechercher ma console » (§5, refonte menu de
     # tuiles) -- `identify/__init__.py::identify_from_boot_directory`,
@@ -1076,6 +1064,11 @@ STRINGS = {
     # le sélecteur. Les noms de langues eux-mêmes viennent de
     # `i18n.LANGUAGE_NAMES`, jamais d'ici.
     "language_selector_label": "Langue / Language",
+    "update_badge": "Nouvelle version disponible",
+    "update_check_label": "Rechercher les mises à jour",
+    "update_dialog_title": "R36S Studio {version} est disponible",
+    "update_dialog_later": "Plus tard",
+    "update_dialog_download": "Obtenir la nouvelle version",
     "language_restart_title": "Langue / Language",
     "language_restart_message": "La nouvelle langue s'appliquera au prochain démarrage de R36S Studio.",
     # Unités de taille, base 1024 partout (CLAUDE.md §5) -- seules les

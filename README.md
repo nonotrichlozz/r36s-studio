@@ -1,7 +1,15 @@
 # R36S Studio
 
-Application de bureau gratuite (Windows, macOS, Linux) pour préparer une
+Application de bureau (Windows, macOS, Linux) pour préparer une
 carte SD de console R36S — **sans jamais ouvrir de ligne de commande**.
+
+## Obtenir R36S Studio
+
+Les installeurs Windows, Mac et Linux sont disponibles sur
+[la boutique R36S Studio](https://nonotrichlozz.github.io/r36s-studio/).
+
+Le code source est consultable ici, mais il n'est pas libre : voir la
+section [Licences](#licences) ci-dessous.
 
 ## À qui ça s'adresse
 
@@ -159,44 +167,34 @@ procédure de vérification sur du vrai matériel : voir
 
 ### Intégration continue et publication d'une Release
 
-`.github/workflows/build.yml` définit quatre jobs GitHub Actions :
+- `.github/workflows/build.yml` — à chaque push sur `main` et chaque pull
+  request : tests puis construction sur Windows, macOS et Linux.
+- `.github/workflows/release.yml` — sur un tag `v*` : vérifie que le tag
+  vaut `v` + `APP_VERSION` (`r36s_studio/__init__.py`), construit
+  l'installeur Windows (Inno Setup, testé par une installation silencieuse
+  puis `--version`), le `.dmg` macOS et le `.tar.gz` Linux (non bloquant),
+  puis crée une Release **brouillon** avec ces fichiers et
+  `packaging/RELEASE_NOTES.md`.
+- `scripts/publish_release.sh <tag>` — une fois les installeurs récupérés
+  et mis en vente : retire tous les fichiers du brouillon, vérifie qu'il
+  n'en reste aucun, puis publie la Release (code et notes seulement).
 
-- **Windows**, **macOS**, **Linux** (`windows-latest`, `macos-latest`,
-  `ubuntu-22.04`) — chacun installe les dépendances, **lance la suite de
-  tests complète** (`python -m pytest`), puis construit le binaire de son
-  OS avec le script correspondant ci-dessus et l'empaquette
-  (`.zip` pour Windows/macOS, `.tar.gz` pour Linux). Ces trois jobs
-  tournent sur **chaque push sur `main`** et **chaque pull request** — un
-  changement qui casse la construction ou une régression sur un OS
-  particulier est visible avant merge, pas seulement en local sur la seule
-  machine du contributeur.
-- **release** — ne se déclenche **que sur un tag** de la forme `v*` (ex.
-  `v0.2.0`) et seulement si les trois constructions précédentes ont
-  réussi (`needs:`). Télécharge les trois artefacts et les publie sur une
-  [Release GitHub](../../releases) via `softprops/action-gh-release`, avec
-  des notes de version générées automatiquement à partir des commits
-  depuis le tag précédent.
-
-Publier une nouvelle version :
+Publier une nouvelle version : mettre à jour `APP_VERSION`, committer, puis
 
 ```sh
 git tag v0.2.0
 git push origin v0.2.0
 ```
 
-Le tag déclenche le workflow complet (tests + construction sur les trois
-OS), puis, si tout est vert, la Release GitHub correspondante apparaît
-automatiquement avec les trois binaires en pièces jointes — rien d'autre à
-faire manuellement. Le numéro de version affiché dans l'app elle-même
-(pied de page de l'écran d'accueil, `gui/build_info.py`) vient de
-`r36s_studio/__init__.py::__version__`, à mettre à jour avant de poser le
-tag pour que les deux restent cohérents.
-
 ## Licences
 
-Ce projet est distribué sous licence **GNU General Public License version 3
-(GPLv3)** — texte intégral dans [`LICENSE`](LICENSE). La dépendance
-principale a des implications à connaître avant toute redistribution :
+Le code de R36S Studio est consultable librement, mais il n'est pas
+libre. Tu peux l'utiliser à titre personnel ; toute modification,
+redistribution ou utilisation commerciale est interdite sans mon accord.
+La version prête à installer est disponible sur [la boutique](https://nonotrichlozz.github.io/r36s-studio/).
+Texte complet : voir [`LICENSE`](LICENSE) (PolyForm Strict 1.0.0).
+
+Dépendances tierces, chacune sous sa propre licence :
 
 | Dépendance | Rôle | Licence |
 |---|---|---|

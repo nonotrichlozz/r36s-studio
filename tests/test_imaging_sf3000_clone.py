@@ -359,6 +359,21 @@ def test_progress_reports_real_bytes_up_to_the_total(image, tmp_path):
     assert events[-1].done == events[-1].total == content.total_bytes
 
 
+def test_set_attributes_keeps_only_dos_bits_and_calls_windows_api(monkeypatch):
+    """`ctypes.windll` simulé (create=True) : tourne aussi sur Linux/macOS."""
+    import ctypes
+
+    monkeypatch.setattr(sf3000_clone.platform, "system", lambda: "Windows")
+    with patch.object(ctypes, "windll", create=True) as windll:
+        windll.kernel32.SetFileAttributesW.return_value = 1
+        sf3000_clone._set_attributes("Z:\f", sf3000_clone.ATTR_HIDDEN | 0x20)
+        windll.kernel32.SetFileAttributesW.assert_called_once_with("Z:\f", sf3000_clone.ATTR_HIDDEN)
+
+        windll.kernel32.SetFileAttributesW.return_value = 0
+        with pytest.raises(OSError):
+            sf3000_clone._set_attributes("Z:\f", sf3000_clone.ATTR_SYSTEM)
+
+
 def test_marker_round_trip(tmp_path):
     sf3000_clone.write_marker(str(tmp_path))
     assert sf3000_clone.has_marker(str(tmp_path))
@@ -379,7 +394,7 @@ def _run(image, device, tmp_path, extra=(), probe=True):
          patch.object(sf3000_clone, "write_layout") as layout, \
          patch.object(sf3000_clone, "format_whole_card", return_value="Z") as fmt, \
          patch.object(sf3000_clone, "drop_volume_cache"), \
-         patch.object(sf3000_clone, "long_path_root", return_value=str(card)), \
+         patch.object(sf3000_clone, "long_path_root", return_value=str(card)),          patch.object(sf3000_clone, "_set_attributes"), \
          patch("r36s_studio.__main__.is_sf3000_card", return_value=probe), \
          patch("r36s_studio.__main__.eject_device") as eject:
         args = cli.build_parser().parse_args(

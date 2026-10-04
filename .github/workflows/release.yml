@@ -9,9 +9,18 @@ name: Release
 # passer les fichiers entre jobs (rétention 1 jour) : sur un dépôt public,
 # tout compte GitHub connecté peut les télécharger -- jamais un canal de
 # diffusion.
+#
+# Deux déclencheurs : un tag v* poussé à la main, ou un push sur main qui
+# change APP_VERSION (r36s_studio/__init__.py) -- dans ce cas le tag
+# v<APP_VERSION> est créé à la publication du brouillon. Si ce tag ou une
+# Release (même brouillon) de ce nom existe déjà, rien n'est construit.
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths:
+      - "r36s_studio/__init__.py"
+      - ".github/workflows/release.yml"
 
 jobs:
   version:
@@ -19,20 +28,36 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       app_version: ${{ steps.v.outputs.app_version }}
+      build: ${{ steps.v.outputs.build }}
     steps:
       - uses: actions/checkout@v4
       - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           APP_VERSION=$(python3 -c "import r36s_studio; print(r36s_studio.APP_VERSION)")
-          if [ "v$APP_VERSION" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Le tag $GITHUB_REF_NAME ne correspond pas à APP_VERSION ($APP_VERSION, r36s_studio/__init__.py)"
-            exit 1
-          fi
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "v$APP_VERSION" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::Le tag $GITHUB_REF_NAME ne correspond pas à APP_VERSION ($APP_VERSION, r36s_studio/__init__.py)"
+              exit 1
+            fi
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="v$APP_VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null \
+             || gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::$TAG existe déjà (tag ou Release) : rien à construire. Change APP_VERSION pour une nouvelle version."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
 
   windows:
     name: Windows (installeur)
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +99,7 @@ jobs:
   macos:
     name: macOS (.dmg)
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,6 +120,7 @@ jobs:
   linux:
     name: Linux (.tar.gz)
     needs: version
+    if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-22.04
     continue-on-error: true
     steps:
@@ -117,8 +144,8 @@ jobs:
 
   publish:
     name: Publier la Release
-    needs: [windows, macos, linux]
-    if: ${{ !cancelled() && needs.windows.result == 'success' && needs.macos.result == 'success' }}
+    needs: [version, windows, macos, linux]
+    if: ${{ !cancelled() && needs.version.outputs.build == 'true' && needs.windows.result == 'success' && needs.macos.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -133,6 +160,8 @@ jobs:
           # scripts/publish_release.sh, après retrait des fichiers ; la
           # vérification des mises à jour de l'app ne voit que les publiées.
           draft: true
-          name: R36S Studio ${{ github.ref_name }}
+          tag_name: v${{ needs.version.outputs.app_version }}
+          target_commitish: ${{ github.sha }}
+          name: R36S Studio v${{ needs.version.outputs.app_version }}
           body_path: packaging/RELEASE_NOTES.md
           files: artifacts/**/*

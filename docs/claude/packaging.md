@@ -3,7 +3,9 @@
 **Diffusion (à jour, prime sur les paragraphes historiques ci-dessous).**
 Modèle : code public, installeurs **vendus sur une boutique**, jamais
 téléchargeables depuis GitHub. `release.yml` (tag `v*` = `v` +
-`APP_VERSION`, sinon échec) crée une Release **brouillon** (visible des
+`APP_VERSION`, sinon échec ; **ou** simple push sur `main` qui change
+`APP_VERSION` -- le tag est alors créé à la publication du brouillon, et
+rien n'est construit si ce tag ou une Release de ce nom existe déjà) crée une Release **brouillon** (visible des
 seuls membres du dépôt) avec `R36S-Studio-Setup.exe` (Inno Setup,
 `packaging/windows_installer.iss` : sans UAC, `{localappdata}\Programs`,
 `AppId` fixe — ne jamais le changer, sinon une mise à jour s'installe à

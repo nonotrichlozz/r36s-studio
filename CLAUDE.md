@@ -155,7 +155,9 @@ sauvegarde système sans les jeux, remise à zéro).
   `~/.config` (réservé à `config.json`, sans secret).
 - **Version** : `APP_VERSION` (`r36s_studio/__init__.py`) est la seule
   source (`--version`, vérification des mises à jour) ; `release.yml`
-  refuse un tag `v*` qui ne lui correspond pas.
+  refuse un tag `v*` qui ne lui correspond pas. Pour sortir une version :
+  changer `APP_VERSION` et pousser sur `main` suffit (brouillon de Release
+  construit automatiquement, sans tag à créer).
 - **Licences** : R36S Studio est sous PolyForm Strict 1.0.0 (`LICENSE`) ;
   aucun composant embarqué sous GPL seule (exclusion `_EXCLUDED_QT` des
   specs), chaque composant tiers listé dans `THIRD_PARTY_NOTICES.txt`.

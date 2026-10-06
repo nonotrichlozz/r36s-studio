@@ -90,7 +90,13 @@ STRINGS = {
     "status_done": "Déjà faite",
     "status_not_relevant": "Non pertinente pour cette carte",
     "status_platform_limited": "PC ou Linux",
-    "status_system_incompatible": "Non applicable — carte ROCKNIX",
+    "status_system_incompatible": "Non applicable — carte {system}",
+    # Nom du système affiché dans le badge ci-dessus et le bandeau (detect.
+    # CardSystem) -- « non ArkOS » quand la carte n'est pas reconnue.
+    "card_system_rocknix": "ROCKNIX",
+    "card_system_emuelec": "EmuELEC",
+    "card_system_unknown": "non ArkOS",
+    "home_banner_state_other_system": "Carte {system} reconnue",
     # Bandeau carte détectée, en haut de l'accueil.
     "home_banner_line_device": "{display} — {size_go:.1f} Go",
     "home_banner_state_arkos": "Carte ArkOS reconnue",
@@ -711,6 +717,18 @@ STRINGS = {
         "Impossible de trouver les fichiers de la console sur cette carte. "
         "As-tu bien préparé cette carte avec R36S Studio ?"
     ),
+    # Étapes A/B/D/E refusées avant lancement sur une carte non ArkOS
+    # (detect.arkos_step_refusal) -- jamais de reproche : la carte va bien.
+    "step_refused_card_system": (
+        "Cette étape est prévue pour les cartes ArkOS. Ta carte contient {system} : "
+        "elle fonctionne normalement, mais elle est organisée autrement, donc cette étape "
+        "ne s'y applique pas. Rien n'a été modifié."
+    ),
+    "error_card_system_incompatible": (
+        "Cette étape est prévue pour les cartes ArkOS, et cette carte n'est pas reconnue "
+        "comme telle. Elle n'est pas forcément abîmée : elle est peut-être préparée pour "
+        "un autre système. Rien n'a été modifié."
+    ),
     "error_partition_not_mounted": (
         "La carte n'a pas pu s'ouvrir correctement. Débranche-la, rebranche-la, puis réessaie."
     ),
@@ -1200,6 +1218,7 @@ _ERROR_MESSAGE_KEYS = {
     "DESTINATION_FILESYSTEM_ROOT": "error_destination_filesystem_root",
     "COPY_VERIFICATION_FAILED": "error_copy_verification_failed",
     "MOVE_FILE_FAILED": "error_move_file_failed",
+    "CARD_SYSTEM_INCOMPATIBLE": "error_card_system_incompatible",
     "PARTIAL_MOVE_COMPLETED": "error_partial_move_completed",
     "FAT_FILE_SIZE_LIMIT": "error_fat_file_size_limit",
 }

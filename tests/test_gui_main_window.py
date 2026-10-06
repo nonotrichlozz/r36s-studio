@@ -3,7 +3,7 @@ navigation) : une seule vue permanente (deux colonnes) devant laquelle les
 choix ponctuels s'ouvrent en fenêtres modales, plutôt qu'une succession
 d'écrans. Traverse le parcours de bout en bout pour les six étapes du
 workflow à deux cartes (§4.4/§4.5) et la sauvegarde complète. `list_devices`,
-`detect_workflow_status`, `WorkerRunner`/`PartitionJobRunner`, `archives` et
+`detect_card`, `WorkerRunner`/`PartitionJobRunner`, `archives` et
 `eject_device` sont mockés — aucun périphérique réel, aucune élévation,
 aucune écriture disque."""
 
@@ -12,9 +12,11 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from r36s_studio import config as app_config
 from r36s_studio.config import AppConfig
-from r36s_studio.detect import StepStatus
+from r36s_studio.detect import CardSystem, StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.doublons.move import default_destination as default_doublons_destination
 from r36s_studio.gui import elevate
@@ -42,6 +44,16 @@ def _make_device(path="/dev/fake-disk-test-3", size_bytes=32_000_000_000, displa
         is_system=False,
         mountpoints=[],
     )
+
+
+@pytest.fixture(autouse=True)
+def _card_accepted_for_arkos_steps():
+    """Les flux A/B/D/E de ce fichier portent sur ce qui suit le choix de
+    la carte : le refus d'une carte non ArkOS (`arkos_step_refusal`, qui
+    lirait les vraies partitions) est neutralisé -- les tests de ce refus
+    le repatchent eux-mêmes."""
+    with patch("r36s_studio.gui.main_window.arkos_step_refusal", return_value=None):
+        yield
 
 
 def _all_status(value: StepStatus) -> dict:
@@ -92,7 +104,7 @@ def _mock_partition_runner_class():
     return factory
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_backup_flow_reaches_worker_with_correct_argv(mock_list, mock_filter, mock_detect, qapp):
@@ -151,7 +163,7 @@ def _mock_estimate_runner_class():
     return factory
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_backup_system_device_chosen_starts_estimate_runner_not_file_dialog(
@@ -173,7 +185,7 @@ def test_backup_system_device_chosen_starts_estimate_runner_not_file_dialog(
     assert window._file_dialog.isVisible() is False
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_backup_system_estimate_marks_home_busy_while_running(mock_list, mock_filter, mock_detect, qapp):
@@ -198,7 +210,7 @@ def test_backup_system_estimate_marks_home_busy_while_running(mock_list, mock_fi
         assert tile.isEnabled() is False
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_releases_busy_state_on_success(mock_list, mock_filter, mock_detect, qapp):
@@ -215,7 +227,7 @@ def test_estimate_ready_releases_busy_state_on_success(mock_list, mock_filter, m
         assert tile.isEnabled() is True
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_releases_busy_state_on_error(mock_list, mock_filter, mock_detect, qapp):
@@ -232,7 +244,7 @@ def test_estimate_ready_releases_busy_state_on_error(mock_list, mock_filter, moc
         assert tile.isEnabled() is True
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_opens_file_dialog_with_model_in_suggested_filename(mock_list, mock_filter, mock_detect, qapp):
@@ -252,7 +264,7 @@ def test_estimate_ready_opens_file_dialog_with_model_in_suggested_filename(mock_
     assert suggested.endswith(".img")
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_shows_the_size_directly_on_the_file_dialog(mock_list, mock_filter, mock_detect, qapp):
@@ -275,7 +287,7 @@ def test_estimate_ready_shows_the_size_directly_on_the_file_dialog(mock_list, mo
 # --- partitions brute exige les droits administrateur sur macOS) ----------
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_needs_elevation_starts_elevated_worker_and_stays_busy(mock_list, mock_filter, mock_detect, qapp):
@@ -306,7 +318,7 @@ def test_needs_elevation_starts_elevated_worker_and_stays_busy(mock_list, mock_f
         assert tile.isEnabled() is False
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_elevated_estimate_success_opens_file_dialog_and_releases_busy(mock_list, mock_filter, mock_detect, qapp):
@@ -327,7 +339,7 @@ def test_elevated_estimate_success_opens_file_dialog_and_releases_busy(mock_list
         assert tile.isEnabled() is True
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_elevated_estimate_failure_logs_real_detail_and_releases_busy(mock_list, mock_filter, mock_detect, qapp):
@@ -347,7 +359,7 @@ def test_elevated_estimate_failure_logs_real_detail_and_releases_busy(mock_list,
         assert tile.isEnabled() is True
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_elevated_estimate_finished_true_without_estimate_event_is_treated_as_failure(
@@ -365,7 +377,7 @@ def test_elevated_estimate_finished_true_without_estimate_event_is_treated_as_fa
     assert window._file_dialog.isVisible() is False
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_suggested_filename_preserves_periods_in_model(mock_list, mock_filter, mock_detect, qapp):
@@ -388,7 +400,7 @@ def test_estimate_ready_suggested_filename_preserves_periods_in_model(mock_list,
     assert "8.4 Go" in log_text  # taille estimée journalisée avant l'ouverture
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_suggests_a_filename_without_model_when_unknown(mock_list, mock_filter, mock_detect, qapp):
@@ -404,7 +416,7 @@ def test_estimate_ready_suggests_a_filename_without_model_when_unknown(mock_list
     assert window._file_dialog._path_label.text().endswith(".img")
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_shows_friendly_error_and_does_not_open_file_dialog(mock_list, mock_filter, mock_detect, qapp):
@@ -421,7 +433,7 @@ def test_estimate_ready_shows_friendly_error_and_does_not_open_file_dialog(mock_
     assert "jeux" in log_text.lower()
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_logs_the_real_error_detail(mock_list, mock_filter, mock_detect, qapp):
@@ -442,7 +454,7 @@ def test_estimate_ready_logs_the_real_error_detail(mock_list, mock_filter, mock_
     assert "Device not configured" in log_text
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_estimate_ready_refreshes_home_state_on_error(mock_list, mock_filter, mock_detect, qapp):
@@ -461,7 +473,7 @@ def test_estimate_ready_refreshes_home_state_on_error(mock_list, mock_filter, mo
     mock_detect.assert_called_once()
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_backup_system_flow_reaches_worker_with_system_only_flag(mock_list, mock_filter, mock_detect, qapp):
@@ -627,7 +639,7 @@ def test_backup_system_prepare_card_starts_polling_with_continue_disabled(
     assert window._wizard_panel._continue_button.isEnabled() is False
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
@@ -652,7 +664,7 @@ def test_backup_system_prepare_card_single_candidate_enables_continue(
     assert "Carte neuve" in window._wizard_panel._status_label.text()
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
@@ -739,7 +751,7 @@ def test_backup_system_prepare_card_no_candidate_keeps_waiting(mock_list, mock_f
     assert window._device_dialog.isVisible() is False
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
@@ -846,7 +858,7 @@ def test_copy_games_ad_hoc_job_offers_next_step_choice(
     assert window._wizard_panel._prepare_card_button.isVisible() is False
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
@@ -881,7 +893,7 @@ def test_eject_ad_hoc_from_assisted_landing_offers_next_step_choice_not_refresh_
 # --- Tuile « Rechercher ma console » (identification DTB, §5) --------------
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_start_assisted_identify_single_device_runs_identify_and_shows_result(
@@ -2073,7 +2085,7 @@ def test_fda_welcome_screen_open_settings_opens_the_same_settings_pane(
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_flash_flow_requires_confirmation_before_worker_starts(mock_list, mock_filter, mock_detect, mock_load, qapp):
@@ -2372,7 +2384,7 @@ def test_mount_boot_privileged_reuses_the_shared_macos_auth_session(
     )
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_two_worker_operations_share_the_same_macos_auth_session(mock_list, mock_filter, mock_detect, qapp):
@@ -2418,7 +2430,7 @@ def test_two_worker_operations_share_the_same_macos_auth_session(mock_list, mock
     )
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_system_backup_worker_shares_the_same_macos_auth_session_as_flash(mock_list, mock_filter, mock_detect, qapp):
@@ -2473,7 +2485,7 @@ def test_system_backup_worker_shares_the_same_macos_auth_session_as_flash(mock_l
 
 
 @patch("r36s_studio.gui.main_window.QMessageBox.warning")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_choosing_a_seven_zip_file_for_flash_blocks_confirm_dialog(
@@ -2497,7 +2509,7 @@ def test_choosing_a_seven_zip_file_for_flash_blocks_confirm_dialog(
 
 
 @patch("r36s_studio.gui.main_window.QMessageBox.warning")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_choosing_an_unsupported_format_for_flash_blocks_confirm_dialog(
@@ -2520,7 +2532,7 @@ def test_choosing_an_unsupported_format_for_flash_blocks_confirm_dialog(
     assert "pas une image utilisable" in mock_warning.call_args[0][2]
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_confirm_dialog_cancel_never_starts_the_worker(mock_list, mock_filter, mock_detect, qapp):
@@ -2552,7 +2564,7 @@ def test_confirm_dialog_cancel_never_starts_the_worker(mock_list, mock_filter, m
 # Dialog) -> confirmation obligatoire (§2 n°6) -> worker.
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_reset_card_flow_goes_from_device_to_label_to_confirmation(mock_list, mock_filter, mock_detect, qapp):
@@ -2741,7 +2753,7 @@ def test_reset_card_success_hides_eject_button_since_already_ejected(
 
 
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_flash_progress_reaches_log_panel_through_real_worker_runner(
@@ -2789,7 +2801,7 @@ def test_flash_progress_reaches_log_panel_through_real_worker_runner(
 
 
 @patch("r36s_studio.gui.worker_runner.elevate.launch_elevated_worker")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_flash_progress_survives_byte_counts_beyond_32_bit_int(
@@ -2822,7 +2834,7 @@ def test_flash_progress_survives_byte_counts_beyond_32_bit_int(
 
 
 @patch("r36s_studio.gui.partition_runner.copy_games")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_copy_games_progress_reaches_log_panel_through_real_cross_thread_signal(
@@ -2856,7 +2868,7 @@ def test_copy_games_progress_reaches_log_panel_through_real_cross_thread_signal(
 
 
 @patch("r36s_studio.gui.partition_runner.extract_easyroms")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_extract_easyroms_progress_survives_byte_counts_beyond_32_bit_int_cross_thread(
@@ -3081,7 +3093,7 @@ def test_eject_requested_runs_eject_command_via_elevated_worker(mock_list, mock_
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.detect_card")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_startup_detects_single_card_and_annotates_home(mock_list, mock_filter, mock_detect, mock_load, qapp):
@@ -3089,7 +3101,7 @@ def test_startup_detects_single_card_and_annotates_home(mock_list, mock_filter, 
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
     status = _all_status(StepStatus.AVAILABLE)
-    mock_detect.return_value = status
+    mock_detect.return_value = (CardSystem.UNKNOWN, status)
     window = MainWindow()
     window.show()
 
@@ -3100,13 +3112,13 @@ def test_startup_detects_single_card_and_annotates_home(mock_list, mock_filter, 
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.detect_card")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_startup_with_no_card_still_shows_all_six_tiles(mock_list, mock_filter, mock_detect, mock_load, qapp):
     mock_list.return_value = []
     mock_filter.return_value = []
-    mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
+    mock_detect.return_value = (CardSystem.UNKNOWN, _all_status(StepStatus.NOT_RELEVANT))
     window = MainWindow()
     window.show()
 
@@ -3116,7 +3128,7 @@ def test_startup_with_no_card_still_shows_all_six_tiles(mock_list, mock_filter, 
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.NOT_RELEVANT))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.NOT_RELEVANT)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_no_card_disables_backup_rows_but_not_the_six_tiles(mock_list, mock_filter, mock_detect, mock_load, qapp):
@@ -3134,7 +3146,7 @@ def test_no_card_disables_backup_rows_but_not_the_six_tiles(mock_list, mock_filt
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_single_card_enables_backup_rows(mock_list, mock_filter, mock_detect, mock_load, qapp):
@@ -3150,7 +3162,7 @@ def test_single_card_enables_backup_rows(mock_list, mock_filter, mock_detect, mo
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.NOT_RELEVANT))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.NOT_RELEVANT)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_multiple_candidate_cards_keep_backup_rows_enabled(mock_list, mock_filter, mock_detect, mock_load, qapp):
@@ -3170,17 +3182,17 @@ def test_multiple_candidate_cards_keep_backup_rows_enabled(mock_list, mock_filte
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.detect_card")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_startup_with_multiple_cards_passes_none_to_detection(mock_list, mock_filter, mock_detect, mock_load, qapp):
     """Cas non couvert par une carte unique : plusieurs cartes candidates
-    -- `detect_workflow_status` reçoit `None` (aucune mise en avant
+    -- `detect_card` reçoit `None` (aucune mise en avant
     possible), mais les six lignes restent affichées normalement."""
     devices = [_make_device(path="/dev/fake-disk-test-3"), _make_device(path="/dev/fake-disk-test-4")]
     mock_list.return_value = devices
     mock_filter.return_value = devices
-    mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
+    mock_detect.return_value = (CardSystem.UNKNOWN, _all_status(StepStatus.NOT_RELEVANT))
     window = MainWindow()
     window.show()
 
@@ -3189,14 +3201,14 @@ def test_startup_with_multiple_cards_passes_none_to_detection(mock_list, mock_fi
         assert tile.isVisible() is True
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.detect_card")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_home_refresh_requested_re_runs_detection(mock_list, mock_filter, mock_detect, qapp):
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
-    mock_detect.return_value = _all_status(StepStatus.AVAILABLE)
+    mock_detect.return_value = (CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE))
     window = MainWindow()
     mock_detect.reset_mock()
 
@@ -3205,7 +3217,7 @@ def test_home_refresh_requested_re_runs_detection(mock_list, mock_filter, mock_d
     mock_detect.assert_called_once_with(device)
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.detect_card")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_worker_finished_re_runs_detection(mock_list, mock_filter, mock_detect, qapp):
@@ -3216,14 +3228,14 @@ def test_worker_finished_re_runs_detection(mock_list, mock_filter, mock_detect, 
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
-    mock_detect.return_value = _all_status(StepStatus.AVAILABLE)
+    mock_detect.return_value = (CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE))
     window = MainWindow()
     window._mode = "flash"
     window._device = device
     window._file_path = "/tmp/sd.img"
     mock_detect.reset_mock()
 
-    mock_detect.return_value = _all_status(StepStatus.DONE)
+    mock_detect.return_value = (CardSystem.UNKNOWN, _all_status(StepStatus.DONE))
     window._on_worker_finished(True)
 
     mock_detect.assert_called_once_with(device)
@@ -3232,14 +3244,14 @@ def test_worker_finished_re_runs_detection(mock_list, mock_filter, mock_detect, 
 # --- fenêtre Aide (macOS uniquement, §3) ------------------------------------
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.detect_card")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 @patch("r36s_studio.gui.screens.platform.system", return_value="Darwin")
 def test_home_help_requested_opens_help_dialog(mock_platform, mock_list, mock_filter, mock_detect, qapp):
     mock_list.return_value = []
     mock_filter.return_value = []
-    mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
+    mock_detect.return_value = (CardSystem.UNKNOWN, _all_status(StepStatus.NOT_RELEVANT))
     window = MainWindow()
 
     window._home.help_requested.emit()
@@ -3249,7 +3261,7 @@ def test_home_help_requested_opens_help_dialog(mock_platform, mock_list, mock_fi
 
 @patch("r36s_studio.gui.main_window.platform.system", return_value="Darwin")
 @patch("r36s_studio.gui.main_window.subprocess.run")
-@patch("r36s_studio.gui.main_window.detect_workflow_status")
+@patch("r36s_studio.gui.main_window.detect_card")
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_help_dialog_open_settings_opens_full_disk_access_pane(
@@ -3265,7 +3277,7 @@ def test_help_dialog_open_settings_opens_full_disk_access_pane(
     `TypeError: expected string or bytes-like object, got 'MagicMock'`."""
     mock_list.return_value = []
     mock_filter.return_value = []
-    mock_detect.return_value = _all_status(StepStatus.NOT_RELEVANT)
+    mock_detect.return_value = (CardSystem.UNKNOWN, _all_status(StepStatus.NOT_RELEVANT))
     window = MainWindow()
 
     window._help_dialog.open_settings_requested.emit()
@@ -3279,7 +3291,7 @@ def test_help_dialog_open_settings_opens_full_disk_access_pane(
 
 
 @patch("r36s_studio.gui.main_window.archives.list_archives", return_value=["/tmp/R36S Studio/BOOT_x"])
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_inject_boot_flow_offers_existing_archive_and_uses_partition_runner(
@@ -3308,7 +3320,7 @@ def test_inject_boot_flow_offers_existing_archive_and_uses_partition_runner(
 
 
 @patch("r36s_studio.gui.main_window.archives.list_archives", return_value=[])
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_copy_games_flow_falls_back_to_manual_browse_when_no_archives(
@@ -3376,7 +3388,7 @@ def test_backup_success_never_allows_eject(mock_list, mock_filter, qapp):
 
 
 @patch("r36s_studio.gui.main_window.archives.default_archives_dir")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_extract_boot_shows_file_dialog_with_default_path_preselected(
@@ -3397,9 +3409,38 @@ def test_extract_boot_shows_file_dialog_with_default_path_preselected(
     assert window._file_dialog._next_button.isEnabled() is True  # défaut déjà accepté
 
 
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.arkos_step_refusal", return_value=CardSystem.EMUELEC)
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.EMUELEC, _all_status(StepStatus.AVAILABLE)))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_extract_boot_on_emuelec_card_is_refused_before_anything_starts(
+    mock_list, mock_filter, mock_detect, mock_refusal, mock_warning, qapp
+):
+    """Carte EmuELEC saine : refus clair au choix de la carte, nommant le
+    système -- ni fenêtre de dossier, ni worker, ni « as-tu bien préparé
+    cette carte ? » (erreur PARTITION_NOT_FOUND d'avant le correctif)."""
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner") as mock_runner:
+        window = MainWindow()
+        window._home.extract_boot_selected.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+
+    mock_refusal.assert_called_once_with(device, "extract_boot")
+    message = mock_warning.call_args.args[2]
+    assert "EmuELEC" in message and "Rien n'a été modifié" in message
+    assert "préparé" not in message
+    assert window._file_dialog.isVisible() is False
+    mock_runner.assert_not_called()
+
+
 @patch("r36s_studio.gui.main_window.archives.new_archive_path")
 @patch("r36s_studio.gui.main_window.archives.default_archives_dir", return_value="/home/x/Documents/R36S Studio")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_extract_boot_accepting_default_uses_it_as_base_dir(
@@ -3429,7 +3470,7 @@ def test_extract_boot_accepting_default_uses_it_as_base_dir(
 
 
 @patch("r36s_studio.gui.main_window.archives.new_archive_path")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_extract_boot_can_replace_default_with_external_drive(
@@ -3463,7 +3504,7 @@ def test_extract_boot_can_replace_default_with_external_drive(
 
 @patch("r36s_studio.gui.main_window.archives.new_archive_path")
 @patch("r36s_studio.gui.main_window.archives.default_archives_dir", return_value="/home/x/Documents/R36S Studio")
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_extract_easyroms_uses_easyroms_label(
@@ -3620,7 +3661,7 @@ def test_backup_success_shows_no_reveal_button(mock_list, mock_filter, qapp):
 # --- eject (étape F) : immédiat, sans fenêtre Fichier ni opération ----------
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_eject_flow_runs_via_elevated_worker_and_confirms_success(mock_list, mock_filter, mock_detect, qapp):
@@ -3645,7 +3686,7 @@ def test_eject_flow_runs_via_elevated_worker_and_confirms_success(mock_list, moc
     assert window._file_dialog.isVisible() is False  # étape F : aucune fenêtre Fichier
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_eject_flow_logs_friendly_error_and_raw_detail_on_failure(mock_list, mock_filter, mock_detect, qapp):
@@ -3735,7 +3776,7 @@ from r36s_studio.gui.wizard_flow import WizardJob
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_default_startup_shows_assisted_landing_screen(mock_list, mock_filter, mock_detect, mock_load, qapp):
@@ -3745,7 +3786,7 @@ def test_default_startup_shows_assisted_landing_screen(mock_list, mock_filter, m
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_expert_ui_mode_startup_shows_main_view_with_home(mock_list, mock_filter, mock_detect, mock_load, qapp):
@@ -3757,7 +3798,7 @@ def test_expert_ui_mode_startup_shows_main_view_with_home(mock_list, mock_filter
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_expert_mode_button_from_landing_persists_config_and_shows_home(
@@ -3774,7 +3815,7 @@ def test_expert_mode_button_from_landing_persists_config_and_shows_home(
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_catalog_access_from_identify_result_dialog_switches_screen(
@@ -3794,7 +3835,7 @@ def test_catalog_access_from_identify_result_dialog_switches_screen(
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_consoles_diverses_button_from_home_switches_screen_and_back_returns(
@@ -3813,7 +3854,7 @@ def test_consoles_diverses_button_from_home_switches_screen_and_back_returns(
     "r36s_studio.gui.main_window.app_config.load_config",
     return_value=AppConfig(ui_mode="expert", consoles_diverses_licence_key="cle-existante"),
 )
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_consoles_diverses_settings_requested_prefills_dialog(
@@ -3829,7 +3870,7 @@ def test_consoles_diverses_settings_requested_prefills_dialog(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_consoles_diverses_settings_saved_stores_only_the_licence(
@@ -3849,7 +3890,7 @@ def test_consoles_diverses_settings_saved_stores_only_the_licence(
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_opening_consoles_diverses_targets_production_or_the_dev_override(
@@ -3868,7 +3909,7 @@ def test_opening_consoles_diverses_targets_production_or_the_dev_override(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_ui_mode_switch_works_both_ways_and_config_follows(
@@ -3895,7 +3936,7 @@ def test_ui_mode_switch_works_both_ways_and_config_follows(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_prepare_button_starts_wizard_on_step_one(mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp):
@@ -3922,7 +3963,7 @@ def test_prepare_button_starts_wizard_on_step_one(mock_list, mock_filter, mock_d
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_poll_start_is_logged_once_not_on_every_internal_restart(
@@ -3940,7 +3981,7 @@ def test_wizard_poll_start_is_logged_once_not_on_every_internal_restart(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_poll_stop_is_logged_once_when_card_found(mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp):
@@ -3992,7 +4033,7 @@ def _mock_fingerprint_runner_class():
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_step_one_poll_with_multiple_candidates_opens_device_dialog(
@@ -4019,7 +4060,7 @@ def test_wizard_step_one_poll_with_multiple_candidates_opens_device_dialog(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_choosing_a_candidate_from_device_dialog_starts_fingerprint_check(
@@ -4046,7 +4087,7 @@ def test_wizard_choosing_a_candidate_from_device_dialog_starts_fingerprint_check
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_poll_logs_rejected_devices_with_reason_once(mock_list, mock_load, mock_save, qapp):
     """Trace diagnosticable (§5 mode assisté) : combien de périphériques
@@ -4078,7 +4119,7 @@ def test_wizard_poll_logs_rejected_devices_with_reason_once(mock_list, mock_load
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_step_panel_refresh_button_triggers_immediate_poll(
@@ -4116,7 +4157,7 @@ def test_wizard_step_panel_refresh_button_triggers_immediate_poll(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_poll_logs_nothing_on_first_poll_or_normal_cadence(
@@ -4139,7 +4180,7 @@ def test_wizard_poll_logs_nothing_on_first_poll_or_normal_cadence(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_poll_logs_a_stall_when_gap_far_exceeds_the_normal_interval(
@@ -4165,7 +4206,7 @@ def test_wizard_poll_logs_a_stall_when_gap_far_exceeds_the_normal_interval(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_poll_stall_message_does_not_repeat_while_the_stall_persists(
@@ -4191,7 +4232,7 @@ def test_wizard_poll_stall_message_does_not_repeat_while_the_stall_persists(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_poll_stall_diagnostic_does_not_fire_after_a_legitimate_pause_for_backup(
@@ -4233,7 +4274,7 @@ def test_wizard_poll_stall_diagnostic_does_not_fire_after_a_legitimate_pause_for
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_poll_stall_diagnostic_does_not_fire_across_repeated_same_card_fingerprint_checks(
@@ -4279,7 +4320,7 @@ def test_wizard_poll_stall_diagnostic_does_not_fire_across_repeated_same_card_fi
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_relaunch_after_cancelling_backup_kind_dialog_restarts_poll_and_immediately_redetects_the_device(
@@ -4323,7 +4364,7 @@ def test_wizard_relaunch_after_cancelling_backup_kind_dialog_restarts_poll_and_i
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_panel_refresh_button_resumes_automatic_polling_when_nothing_found(
@@ -4343,7 +4384,7 @@ def test_wizard_step_panel_refresh_button_resumes_automatic_polling_when_nothing
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_one_shows_refresh_button(mock_list, mock_filter, mock_detect, mock_load, mock_save, qapp):
@@ -4357,7 +4398,7 @@ def test_wizard_step_one_shows_refresh_button(mock_list, mock_filter, mock_detec
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_step_one_poll_starts_fingerprint_runner_on_a_separate_thread(
@@ -4391,7 +4432,7 @@ def test_wizard_step_one_poll_starts_fingerprint_runner_on_a_separate_thread(
 @patch("r36s_studio.detect.list_partitions", return_value=[])
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_fingerprint_ready_for_detect_source_stores_device_and_enables_continue(
@@ -4410,7 +4451,7 @@ def test_wizard_fingerprint_ready_for_detect_source_stores_device_and_enables_co
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_continue_on_step_one_advances_to_create_image_and_opens_backup_kind_dialog(
@@ -5017,7 +5058,7 @@ def _target_setup(window, device):
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_step_three_poll_also_starts_fingerprint_runner(
@@ -5043,7 +5084,7 @@ def test_wizard_step_three_poll_also_starts_fingerprint_runner(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_refuses_to_continue_when_fingerprint_matches_source(
@@ -5066,7 +5107,7 @@ def test_wizard_step_three_refuses_to_continue_when_fingerprint_matches_source(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_allows_continue_when_fingerprint_differs(
@@ -5096,7 +5137,7 @@ def test_wizard_step_three_allows_continue_when_fingerprint_differs(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_opens_confirmation_dialog_when_unverifiable(
@@ -5129,7 +5170,7 @@ def test_wizard_step_three_opens_confirmation_dialog_when_unverifiable(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_confirming_dialog_accepts_the_candidate(
@@ -5157,7 +5198,7 @@ def test_wizard_step_three_confirming_dialog_accepts_the_candidate(
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_step_three_allows_continue_without_confirmation_when_sizes_differ(
@@ -5190,7 +5231,7 @@ def test_wizard_step_three_allows_continue_without_confirmation_when_sizes_diffe
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_wizard_resume_after_create_image_failure_reopens_backup_kind_dialog_not_detect_source(
@@ -5248,7 +5289,7 @@ def test_wizard_finish_shows_simple_success_message(mock_list, mock_filter, mock
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_cancel_returns_to_landing_and_stops_polling(
@@ -6108,7 +6149,7 @@ def _flash_until_file_chosen(window, path="/tmp/sf3000.img"):
 @patch("r36s_studio.gui.main_window.os.path.getsize", return_value=45 * 1024**3)
 @patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=46 * 1024**3)
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_sf3000_image_asks_whole_card_or_raw_then_confirms(mock_list, mock_filter, _d, _l, _u, _s, qapp):
@@ -6141,7 +6182,7 @@ def test_sf3000_image_asks_whole_card_or_raw_then_confirms(mock_list, mock_filte
 @patch("r36s_studio.gui.main_window.os.path.getsize", return_value=45 * 1024**3)
 @patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=46 * 1024**3)
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_sf3000_image_raw_copy_choice_keeps_the_regular_flash(mock_list, mock_filter, _d, _l, _u, _s, qapp):
@@ -6162,7 +6203,7 @@ def test_sf3000_image_raw_copy_choice_keeps_the_regular_flash(mock_list, mock_fi
 
 @patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=46 * 1024**3)
 @patch("r36s_studio.gui.main_window.estimate_total_bytes", return_value=45 * 1024**3)
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_wizard_restore_uses_the_whole_card_automatically_with_verification(_l, _d, _e, _u, qapp):
     """Mode assisté : aucun choix technique, toute la carte et vérification,
@@ -6183,7 +6224,7 @@ def test_wizard_restore_uses_the_whole_card_automatically_with_verification(_l, 
     assert runner_class.instances[0].argv == ["clone-sf3000", "--image", "/tmp/sauvegarde.img", "--device", device.path]
 
 
-@patch("r36s_studio.gui.main_window.detect_workflow_status", return_value=_all_status(StepStatus.AVAILABLE))
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_interrupted_whole_card_copy_is_reported_once(mock_list, mock_filter, _d, tmp_path, qapp):

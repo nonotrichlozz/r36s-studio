@@ -85,3 +85,32 @@ doit comprendre pourquoi, pas juste que « ce n'est pas pertinent
 maintenant » comme s'il suffisait d'attendre.
 
 **Retiré, ne pas réintroduire** : `detect_card_system_for_device` (adaptation ROCKNIX de l'ancien parcours guidé). `CardSystem`/`detect_card_system`/`ROCKNIX_BOOT_LABEL` restent utilisés par `detect_workflow_status` (badges `SYSTEM_INCOMPATIBLE`).
+
+**EmuELEC (`CardSystem.EMUELEC`, `EMUELEC_BOOT_LABEL`)** — bug corrigé :
+l'étape A sur une carte EmuELEC saine finissait en « Impossible de trouver
+les fichiers de la console sur cette carte. As-tu bien préparé cette
+carte avec R36S Studio ? » + « Partition "BOOT" introuvable ». Cause : sa
+forme (FAT32 `EMUELEC` en tête, Linux, FAT32 `STORAGE` en troisième,
+structure relevée dans `firmwares-flash.md`) passe `looks_like_arkos`, la
+carte était donc prise pour ArkOS. Reconnue désormais à l'étiquette de sa
+partition de démarrage, **avant** ArkOS, comme ROCKNIX
+(`_SYSTEM_BY_BOOT_LABEL`) ; `OTHER_SYSTEMS` = ROCKNIX + EmuELEC.
+`detect_card(device)` renvoie `(CardSystem, statuts)` pour que le badge et
+le bandeau nomment le système (« Non applicable — carte EmuELEC »,
+« Carte EmuELEC reconnue » plutôt que « Carte non préparée ») ;
+`detect_workflow_status` en reste l'enveloppe sans le système.
+
+**Refus avant lancement des étapes A/B/D/E (`arkos_step_refusal(device,
+step)`)** — exception voulue au principe « le statut informe, ne verrouille
+jamais » ci-dessus, pour ces quatre étapes seulement : les lignes restent
+visibles et cliquables, mais le choix de la carte est refusé avec un
+message clair (`step_refused_card_system` / `error_card_system_incompatible`)
+avant la fenêtre de dossier et toute demande de mot de passe
+(`main_window._refuse_non_arkos_card`), puis revérifié par le worker (code
+`CARD_SYSTEM_INCOMPATIBLE`, `__main__._refuse_non_arkos_card`). Refusé :
+un système de `OTHER_SYSTEMS`, ou — sur toute autre carte lisible — l'absence
+de la partition dont l'étape a besoin (BOOT pour A/D, EASYROMS pour B/E),
+c.-à-d. exactement les cas où le worker aurait échoué sur une partition
+introuvable. **Pas un refus de toute carte non ArkOS** : l'étape A sur la
+carte d'origine d'une console (une seule partition FAT, jamais ArkOS)
+reste possible. Partitions illisibles → pas de refus, le worker tranche.

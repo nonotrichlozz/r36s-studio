@@ -18,6 +18,8 @@ from r36s_studio.detect import (
     INJECT_BOOT,
     CardSystem,
     StepStatus,
+    arkos_step_refusal,
+    detect_card,
     detect_card_system,
     detect_workflow_status,
 )
@@ -329,6 +331,78 @@ def test_rocknix_card_copy_games_is_system_incompatible_even_on_macos(mock_list,
     status = detect_workflow_status(_make_device())
 
     assert status[COPY_GAMES] == StepStatus.SYSTEM_INCOMPATIBLE
+
+
+# --- carte EmuELEC : reconnue avant ArkOS, A/B/D/E incompatibles ---------
+#
+# Structure relevée sur du vrai matériel (firmwares-flash.md) : partition
+# de démarrage FAT32 étiquetée EMUELEC, partition Linux, partition de jeux
+# FAT32 étiquetée STORAGE. Sa forme seule passe `looks_like_arkos` : sans
+# l'étiquette, la carte était prise pour ArkOS et l'étape A échouait sur
+# « Partition BOOT introuvable » / « As-tu bien préparé cette carte ? ».
+
+_EMUELEC_PARTITIONS = [
+    PartitionInfo("/dev/fake-disk-test-3s1", "EMUELEC", "fat32", "/Volumes/EMUELEC"),
+    PartitionInfo("/dev/fake-disk-test-3s2", "", "ext4", None),
+    PartitionInfo("/dev/fake-disk-test-3s3", "STORAGE", "fat32", "/Volumes/STORAGE"),
+]
+
+
+def test_detect_card_system_recognizes_emuelec_even_though_its_shape_looks_like_arkos():
+    assert detect_card_system(_EMUELEC_PARTITIONS) == CardSystem.EMUELEC
+
+
+@patch("r36s_studio.detect.platform.system", return_value="Linux")
+@patch("r36s_studio.detect.list_partitions", return_value=_EMUELEC_PARTITIONS)
+def test_emuelec_card_marks_a_b_d_e_incompatible_and_is_not_taken_for_arkos(mock_list, mock_platform):
+    card_system, status = detect_card(_make_device())
+
+    assert card_system == CardSystem.EMUELEC
+    for step in (EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, COPY_GAMES):
+        assert status[step] == StepStatus.SYSTEM_INCOMPATIBLE
+    assert status[FLASH] == StepStatus.AVAILABLE  # pas « déjà ArkOS »
+    assert status[EJECT] == StepStatus.AVAILABLE
+
+
+# --- arkos_step_refusal : refus avant lancement, jamais après coup ---------
+
+
+@patch("r36s_studio.detect.list_partitions", return_value=_EMUELEC_PARTITIONS)
+def test_refusal_names_emuelec_for_every_arkos_step(mock_list):
+    for step in (EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, COPY_GAMES):
+        assert arkos_step_refusal(_make_device(), step) == CardSystem.EMUELEC
+
+
+@patch("r36s_studio.detect.list_partitions", return_value=_ROCKNIX_PARTITIONS)
+def test_refusal_names_rocknix(mock_list):
+    assert arkos_step_refusal(_make_device(), EXTRACT_BOOT) == CardSystem.ROCKNIX
+
+
+@patch("r36s_studio.detect.list_partitions", return_value=_ARKOS_PARTITIONS)
+def test_no_refusal_on_arkos_card(mock_list):
+    for step in (EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, COPY_GAMES):
+        assert arkos_step_refusal(_make_device(), step) is None
+
+
+@patch("r36s_studio.detect.list_partitions")
+def test_original_single_partition_card_still_allows_boot_extraction(mock_list):
+    """Carte d'origine (une seule partition FAT, jamais ArkOS) : l'étape A
+    reste possible -- seule l'étape dont la partition manque est refusée."""
+    mock_list.return_value = [PartitionInfo("/dev/fake-disk-test-3s1", "", "fat32", "/Volumes/NO NAME")]
+
+    assert arkos_step_refusal(_make_device(), EXTRACT_BOOT) is None
+    assert arkos_step_refusal(_make_device(), EXTRACT_EASYROMS) == CardSystem.UNKNOWN
+    assert arkos_step_refusal(_make_device(), COPY_GAMES) == CardSystem.UNKNOWN
+
+
+@patch("r36s_studio.detect.list_partitions", return_value=[])
+def test_blank_card_refuses_arkos_steps(mock_list):
+    assert arkos_step_refusal(_make_device(), INJECT_BOOT) == CardSystem.UNKNOWN
+
+
+@patch("r36s_studio.detect.list_partitions", side_effect=OSError("carte débranchée"))
+def test_unreadable_card_is_not_refused_the_worker_decides(mock_list):
+    assert arkos_step_refusal(_make_device(), EXTRACT_BOOT) is None
 
 
 # --- identify (accueil assisté, menu de tuiles) ---------------------------

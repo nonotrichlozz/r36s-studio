@@ -17,6 +17,14 @@ from r36s_studio import __main__ as cli
 from r36s_studio.devices import Device
 
 
+@pytest.fixture(autouse=True)
+def _card_accepted_for_arkos_steps():
+    """Le refus d'une carte non ArkOS (`arkos_step_refusal`) lirait les
+    vraies partitions du chemin factice -- neutralisé ici, testé à part."""
+    with patch("r36s_studio.__main__.arkos_step_refusal", return_value=None):
+        yield
+
+
 def _make_device(path="/dev/fake-disk-test-3") -> Device:
     return Device(
         path=path,

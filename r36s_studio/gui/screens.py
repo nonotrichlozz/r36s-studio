@@ -73,6 +73,8 @@ from r36s_studio.detect import (
     EJECT,
     FLASH,
     IDENTIFY,
+    OTHER_SYSTEMS,
+    CardSystem,
     StepStatus,
 )
 from r36s_studio.devices import Device
@@ -103,6 +105,29 @@ _BADGE_KIND_BY_STATUS = {
     StepStatus.PLATFORM_LIMITED: "platform_limited",
     StepStatus.SYSTEM_INCOMPATIBLE: "system_incompatible",
 }
+
+
+def card_system_name(card_system: Optional[CardSystem]) -> str:
+    """Nom du système d'une carte non ArkOS, tel qu'affiché (« EmuELEC »,
+    « ROCKNIX », « non ArkOS » si non reconnu ou inconnu de l'appelant)."""
+    if card_system not in OTHER_SYSTEMS:
+        card_system = CardSystem.UNKNOWN
+    return tr(f"card_system_{card_system.value}")
+
+
+def _status_text(status: StepStatus, card_system: Optional[CardSystem]) -> str:
+    return tr(_STATUS_TEXT_KEYS[status], system=card_system_name(card_system))
+
+
+def _banner_state_text(is_arkos: bool, card_system: Optional[CardSystem]) -> str:
+    """« Carte EmuELEC reconnue » plutôt que « Carte non préparée » : une
+    carte d'un autre système reconnu n'a rien de mal préparé."""
+    if is_arkos:
+        return tr("home_banner_state_arkos")
+    if card_system in OTHER_SYSTEMS:
+        return tr("home_banner_state_other_system", system=card_system_name(card_system))
+    return tr("home_banner_state_unprepared")
+
 
 # Les six étapes chronologiques fixes du workflow à deux cartes (§4.4/§4.5),
 # dans l'ordre A à F. Clés identiques aux noms de job déjà utilisés par
@@ -625,7 +650,7 @@ class Tile(ClickableFrame):
             desc_row.addWidget(desc_label)
             layout.addLayout(desc_row)
 
-    def set_badge(self, status: Optional[StepStatus]) -> None:
+    def set_badge(self, status: Optional[StepStatus], card_system: Optional[CardSystem] = None) -> None:
         """Même mécanique que `HomeScreen.set_status` (§5) : `setProperty`
         puis `theme.repolish` -- Qt ne réévalue un sélecteur
         `[badgeKind="..."]` qu'au moment où le style est recalculé, pas à
@@ -645,7 +670,7 @@ class Tile(ClickableFrame):
             self._badge.setProperty("badgeKind", None)
             theme.repolish(self._badge)
             return
-        self._badge.setText(tr(_STATUS_TEXT_KEYS[status]))
+        self._badge.setText(_status_text(status, card_system))
         self._badge.setProperty("badgeKind", _BADGE_KIND_BY_STATUS[status])
         theme.repolish(self._badge)
 
@@ -1407,9 +1432,14 @@ class HomeScreen(Screen):
         return row, badge
 
     def set_status(
-        self, status: Dict[str, StepStatus], device: Optional[Device] = None, has_device: Optional[bool] = None
+        self,
+        status: Dict[str, StepStatus],
+        device: Optional[Device] = None,
+        has_device: Optional[bool] = None,
+        card_system: Optional[CardSystem] = None,
     ) -> None:
-        """`status` (voir `detect.detect_workflow_status`) annote chaque
+        """`card_system` (voir `detect.detect_card`) nomme le système dans
+        le badge « Non applicable » et le bandeau. `status` annote chaque
         ligne d'un badge de statut — jamais de ligne masquée ni désactivée
         par ceci pour les six étapes (voir `set_busy` pour leur seule
         désactivation prévue) : une étape absente du dict (détection pas
@@ -1430,7 +1460,7 @@ class HomeScreen(Screen):
                 badge.setVisible(False)
                 badge.setText("")
                 continue
-            badge.setText(tr(_STATUS_TEXT_KEYS[step_status]))
+            badge.setText(_status_text(step_status, card_system))
             badge.setProperty("badgeKind", _BADGE_KIND_BY_STATUS[step_status])
             theme.repolish(badge)
             badge.setVisible(True)
@@ -1439,9 +1469,11 @@ class HomeScreen(Screen):
             self._has_device = has_device
             self._update_backup_rows_enabled()
 
-        self._update_banner(status, device)
+        self._update_banner(status, device, card_system)
 
-    def _update_banner(self, status: Dict[str, StepStatus], device: Optional[Device]) -> None:
+    def _update_banner(
+        self, status: Dict[str, StepStatus], device: Optional[Device], card_system: Optional[CardSystem] = None
+    ) -> None:
         if device is None:
             self._banner_device_label.setText(tr("home_banner_state_none"))
             self._banner_state_label.setText("")
@@ -1452,8 +1484,7 @@ class HomeScreen(Screen):
         # calculé par `detect_workflow_status` pour "cette carte est déjà
         # ArkOS" -- pas besoin d'exposer `is_arkos` séparément.
         is_arkos = status.get("flash") == StepStatus.DONE
-        state_key = "home_banner_state_arkos" if is_arkos else "home_banner_state_unprepared"
-        self._banner_state_label.setText(tr(state_key))
+        self._banner_state_label.setText(_banner_state_text(is_arkos, card_system))
 
 
 class DeviceDialog(Dialog):
@@ -3102,7 +3133,11 @@ class AssistedLandingScreen(Screen):
         self._language_selector.set_language(code)
 
     def set_status(
-        self, status: Dict[str, StepStatus], device: Optional[Device] = None, has_device: Optional[bool] = None
+        self,
+        status: Dict[str, StepStatus],
+        device: Optional[Device] = None,
+        has_device: Optional[bool] = None,
+        card_system: Optional[CardSystem] = None,
     ) -> None:
         """Miroir de `HomeScreen.set_status` (§5) : pousse le badge sur
         chaque tuile qui en affiche un (`identify`/`flash`/`copy_games`/
@@ -3118,10 +3153,12 @@ class AssistedLandingScreen(Screen):
         l'absence de carte : les neuf restent cliquables par principe
         (§4.5), `_start_flow` guide déjà sans carte branchée."""
         for key, tile in self._tiles_by_status_key.items():
-            tile.set_badge(status.get(key))
-        self._update_panel(status, device)
+            tile.set_badge(status.get(key), card_system)
+        self._update_panel(status, device, card_system)
 
-    def _update_panel(self, status: Dict[str, StepStatus], device: Optional[Device]) -> None:
+    def _update_panel(
+        self, status: Dict[str, StepStatus], device: Optional[Device], card_system: Optional[CardSystem] = None
+    ) -> None:
         if device is None:
             self._panel_device_label.setText(tr("home_banner_state_none"))
             self._panel_state_badge.setText("")
@@ -3131,8 +3168,7 @@ class AssistedLandingScreen(Screen):
         size_go = _capacity_go(device.size_bytes)
         self._panel_device_label.setText(tr("home_banner_line_device", display=device.display, size_go=size_go))
         is_arkos = status.get("flash") == StepStatus.DONE
-        state_key = "home_banner_state_arkos" if is_arkos else "home_banner_state_unprepared"
-        self._panel_state_badge.setText(tr(state_key))
+        self._panel_state_badge.setText(_banner_state_text(is_arkos, card_system))
         self._panel_state_badge.setProperty("badgeKind", "done" if is_arkos else "neutral")
         theme.repolish(self._panel_state_badge)
 

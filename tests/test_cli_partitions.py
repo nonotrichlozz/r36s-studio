@@ -6,12 +6,22 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from r36s_studio import __main__ as cli
 from r36s_studio.devices import Device
 from r36s_studio.imaging import OperationCancelled
 from r36s_studio.partitions.copy import MountpointNotWritable
 from r36s_studio.partitions.jobs import MacosNtfsWriteUnsupported
 from r36s_studio.partitions.locate import PartitionNotFound, PartitionNotMounted
+
+
+@pytest.fixture(autouse=True)
+def _card_accepted_for_arkos_steps():
+    """Le refus d'une carte non ArkOS (`arkos_step_refusal`) lirait les
+    vraies partitions du chemin factice -- neutralisé ici, testé à part."""
+    with patch("r36s_studio.__main__.arkos_step_refusal", return_value=None):
+        yield
 
 
 def _make_device(path="/dev/fake-disk-test-3") -> Device:

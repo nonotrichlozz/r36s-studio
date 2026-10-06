@@ -57,7 +57,11 @@ STRINGS_EN = {
     "status_done": "Already done",
     "status_not_relevant": "Not relevant for this card",
     "status_platform_limited": "PC or Linux",
-    "status_system_incompatible": "Not applicable — ROCKNIX card",
+    "status_system_incompatible": "Not applicable — {system} card",
+    "card_system_rocknix": "ROCKNIX",
+    "card_system_emuelec": "EmuELEC",
+    "card_system_unknown": "non-ArkOS",
+    "home_banner_state_other_system": "{system} card recognized",
     "home_banner_line_device": "{display} — {size_go:.1f} GB",
     "home_banner_state_arkos": "ArkOS card recognized",
     "home_banner_state_unprepared": "Card not prepared",
@@ -446,6 +450,14 @@ STRINGS_EN = {
     "about_dev": "development version",
     "error_partition_not_found": (
         "Could not find the console's files on this card. Did you prepare this card with R36S Studio?"
+    ),
+    "step_refused_card_system": (
+        "This step is meant for ArkOS cards. Your card has {system} on it: it works normally, "
+        "but it is organized differently, so this step does not apply to it. Nothing was changed."
+    ),
+    "error_card_system_incompatible": (
+        "This step is meant for ArkOS cards, and this card is not recognized as one. It is not "
+        "necessarily damaged: it may be set up for another system. Nothing was changed."
     ),
     "error_partition_not_mounted": "The card could not be opened properly. Unplug it, plug it back in, then try again.",
     "error_easyroms_ntfs_macos": (

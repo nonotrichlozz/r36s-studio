@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import patch
 
+import pytest
+
 from r36s_studio import __main__ as cli
 from r36s_studio import protocol
 from r36s_studio.devices import Device
@@ -23,6 +25,14 @@ def teardown_function() -> None:
     # autre, écrive sans le savoir dans un fichier déjà refermé (même
     # principe que `tests/test_cli_worker.py::teardown_function`).
     protocol.configure(None)
+
+
+@pytest.fixture(autouse=True)
+def _card_accepted_for_arkos_steps():
+    """Le refus d'une carte non ArkOS (`arkos_step_refusal`) lirait les
+    vraies partitions du chemin factice -- neutralisé ici, testé à part."""
+    with patch("r36s_studio.__main__.arkos_step_refusal", return_value=None):
+        yield
 
 
 def _make_device(path="/dev/fake-disk-test-3") -> Device:
@@ -42,6 +52,29 @@ def _parse(argv):
 
 
 # --- extract-boot ------------------------------------------------------
+
+
+@patch("r36s_studio.__main__.extract_boot")
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_extract_boot_refuses_emuelec_card_with_a_clear_code_before_touching_it(mock_list, mock_extract, capsys):
+    """Revérification côté worker (CLAUDE.md, vérifications avant
+    élévation) : code dédié, jamais PARTITION_NOT_FOUND sur une carte saine
+    d'un autre système."""
+    from r36s_studio.detect import CardSystem
+
+    mock_list.return_value = [_make_device()]
+
+    with patch("r36s_studio.__main__.arkos_step_refusal", return_value=CardSystem.EMUELEC) as mock_refusal:
+        args = _parse(["extract-boot", "--device", "/dev/fake-disk-test-3"])
+        code = args.func(args)
+
+    assert code == 1
+    mock_refusal.assert_called_once()
+    assert mock_refusal.call_args.args[1] == "extract_boot"
+    mock_extract.assert_not_called()
+    out = capsys.readouterr().out
+    assert "CARD_SYSTEM_INCOMPATIBLE" in out
+    assert "PARTITION_NOT_FOUND" not in out
 
 
 @patch("r36s_studio.__main__.archives.new_archive_path")

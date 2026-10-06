@@ -80,6 +80,7 @@ from pathlib import Path
 from typing import List, Optional, TextIO
 
 from r36s_studio import APP_VERSION
+from r36s_studio.detect import COPY_GAMES, EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, arkos_step_refusal
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons.journal_check import verify_journal
 from r36s_studio.identify import identify_from_boot_directory
@@ -945,9 +946,24 @@ def _resolve_device_or_report(args: argparse.Namespace) -> Optional[Device]:
     return device
 
 
+def _refuse_non_arkos_card(device: Device, step: str) -> bool:
+    """Étapes A/B/D/E : revérification côté worker du refus déjà fait par
+    l'interface avant élévation (`detect.arkos_step_refusal`) -- jamais
+    une erreur de partition introuvable sur une carte saine d'un autre
+    système."""
+    refusal = arkos_step_refusal(device, step)
+    if refusal is None:
+        return False
+    emit_error(
+        "CARD_SYSTEM_INCOMPATIBLE",
+        f"Système de la carte : {refusal.value} -- étape réservée aux cartes ArkOS ({device.path})",
+    )
+    return True
+
+
 def cmd_inject_boot(args: argparse.Namespace) -> int:
     device = _resolve_device_or_report(args)
-    if device is None:
+    if device is None or _refuse_non_arkos_card(device, INJECT_BOOT):
         return 1
 
     if not os.path.isdir(args.boot_source):
@@ -987,7 +1003,7 @@ def cmd_inject_boot(args: argparse.Namespace) -> int:
 
 def cmd_copy_games(args: argparse.Namespace) -> int:
     device = _resolve_device_or_report(args)
-    if device is None:
+    if device is None or _refuse_non_arkos_card(device, COPY_GAMES):
         return 1
 
     if not os.path.isdir(args.games_source):
@@ -1030,7 +1046,7 @@ def cmd_copy_games(args: argparse.Namespace) -> int:
 
 def cmd_extract_boot(args: argparse.Namespace) -> int:
     device = _resolve_device_or_report(args)
-    if device is None:
+    if device is None or _refuse_non_arkos_card(device, EXTRACT_BOOT):
         return 1
 
     base_dir = Path(args.output_dir) if args.output_dir else None
@@ -1069,7 +1085,7 @@ def cmd_extract_boot(args: argparse.Namespace) -> int:
 
 def cmd_extract_easyroms(args: argparse.Namespace) -> int:
     device = _resolve_device_or_report(args)
-    if device is None:
+    if device is None or _refuse_non_arkos_card(device, EXTRACT_EASYROMS):
         return 1
 
     base_dir = Path(args.output_dir) if args.output_dir else None

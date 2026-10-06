@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from r36s_studio.detect import StepStatus
+from r36s_studio.detect import CardSystem, StepStatus
 from r36s_studio.devices import Device
 from r36s_studio.doublons.scan import ExactDuplicateGroup, ExclusionWarning, ScanResult, Unit, VersionGroup
 from r36s_studio.gui.screens import (
@@ -237,7 +237,7 @@ def test_home_screen_status_shows_system_incompatible_badge_for_rocknix_card(qap
     screen = HomeScreen()
     screen.show()
 
-    screen.set_status({"extract_boot": StepStatus.SYSTEM_INCOMPATIBLE})
+    screen.set_status({"extract_boot": StepStatus.SYSTEM_INCOMPATIBLE}, card_system=CardSystem.ROCKNIX)
 
     assert screen._badges["extract_boot"].text() == "Non applicable — carte ROCKNIX"
     assert screen._badges["extract_boot"].property("badgeKind") == "system_incompatible"
@@ -478,6 +478,21 @@ def test_home_screen_banner_shows_unprepared_for_non_arkos_card(qapp):
     screen.set_status({"flash": StepStatus.AVAILABLE}, device=device)
 
     assert screen._banner_state_label.text() == "Carte non préparée"
+
+
+def test_home_screen_names_emuelec_in_badge_and_banner(qapp):
+    """Une carte EmuELEC saine n'est ni « non préparée » ni anonyme."""
+    screen = HomeScreen()
+    screen.show()
+
+    screen.set_status(
+        {"extract_boot": StepStatus.SYSTEM_INCOMPATIBLE, "flash": StepStatus.AVAILABLE},
+        device=_make_device(),
+        card_system=CardSystem.EMUELEC,
+    )
+
+    assert screen._badges["extract_boot"].text() == "Non applicable — carte EmuELEC"
+    assert screen._banner_state_label.text() == "Carte EmuELEC reconnue"
 
 
 # --- illustrations décoratives (§5) -----------------------------------------

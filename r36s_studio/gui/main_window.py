@@ -42,7 +42,7 @@ from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
 from r36s_studio.consoles_diverses.search_runner import ConsoleSearchRunner
 from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettingsDialog
 from r36s_studio.consoles_diverses.strings import friendly_error_message as consoles_diverses_friendly_error_message
-from r36s_studio.detect import detect_workflow_status
+from r36s_studio.detect import ARKOS_ONLY_STEPS, CardSystem, arkos_step_refusal, detect_card
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons import scan_cache as doublons_scan_cache
 from r36s_studio.doublons.move import (
@@ -127,6 +127,7 @@ from .screens import (
     _OPERATION_TITLE_KEYS,
     _format_size,
     build_console_stage,
+    card_system_name,
 )
 from .strings import (
     doublons_move_file_error_message,
@@ -787,7 +788,7 @@ class MainWindow(QMainWindow):
             controls.badge_clicked.connect(self._open_update_dialog)
         self._show_update_badge_if_idle()
 
-    # --- colonne gauche, annotée par detect.detect_workflow_status (§4.5) --
+    # --- colonne gauche, annotée par detect.detect_card (§4.5) -------------
 
     def _list_devices_with_diagnostics(self) -> Tuple[List[Device], List[str]]:
         """Un seul appel `list_devices`/`filter_devices` -- le mode expert
@@ -821,7 +822,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_home_state(self) -> None:
         """Une seule carte candidate : son contenu annote le statut des six
-        étapes. Zéro ou plusieurs : `detect_workflow_status(None)` marque
+        étapes. Zéro ou plusieurs : `detect_card(None)` marque
         tout « non pertinent » sans qu'aucune ligne ne disparaisse pour
         autant (§4.5) — la fenêtre Choix de la carte guide dans tous les
         cas vers le bon geste (brancher une carte, ou choisir laquelle)."""
@@ -831,13 +832,13 @@ class MainWindow(QMainWindow):
         # candidates" (les deux valent `None`, §4.5) -- `has_device`,
         # séparément, sert justement à cette distinction pour « Par
         # sécurité » (§4.3) : au moins une carte suffit, même ambiguë.
-        status = detect_workflow_status(device)
+        card_system, status = detect_card(device)
         self._warn_if_interrupted_whole_card_copy(device)
-        self._home.set_status(status, device, has_device=bool(devices))
+        self._home.set_status(status, device, has_device=bool(devices), card_system=card_system)
         # Accueil assisté (§5, refonte menu de tuiles) : même dict déjà
         # calculé ci-dessus, un second récepteur -- jamais une seconde
         # détection dupliquée.
-        self._assisted_landing.set_status(status, device, has_device=bool(devices))
+        self._assisted_landing.set_status(status, device, has_device=bool(devices), card_system=card_system)
 
     def _warn_if_interrupted_whole_card_copy(self, device: Optional[Device]) -> None:
         """Fichier témoin de `clone-sf3000` resté à la racine de la carte :
@@ -883,6 +884,9 @@ class MainWindow(QMainWindow):
 
         self._device = device
         self._device_dialog.close()
+
+        if self._mode in ARKOS_ONLY_STEPS and self._refuse_non_arkos_card(device, self._mode):
+            return
 
         if self._mode == "flash" and self._skip_file_dialog_for_flash:
             # « Préparer une carte avec cette sauvegarde » (§4.3) : le
@@ -939,6 +943,25 @@ class MainWindow(QMainWindow):
         firmware = self._app_config.firmware if self._mode == "flash" else None
         self._file_dialog.set_mode(self._mode, archive_choices=archive_choices, firmware=firmware)
         self._file_dialog.open()
+
+    def _refuse_non_arkos_card(self, device: Device, step: str) -> bool:
+        """Étapes A/B/D/E sur une carte qui n'est pas ArkOS (EmuELEC,
+        ROCKNIX, structure non reconnue) : refus clair ici, avant le choix
+        du dossier et toute demande de mot de passe -- jamais une erreur de
+        partition introuvable après coup, qui laissait croire la carte mal
+        préparée. Partitions illisibles : on laisse passer, le worker
+        revérifie (`CARD_SYSTEM_INCOMPATIBLE`)."""
+        refusal = arkos_step_refusal(device, step)
+        if refusal is None:
+            return False
+        if refusal == CardSystem.UNKNOWN:
+            message = tr("error_card_system_incompatible")
+        else:
+            message = tr("step_refused_card_system", system=card_system_name(refusal))
+        self._log_panel.append_log(message)
+        self._log_panel.append_log(f"[détection] {device.display} ({device.path}) : système {refusal.value}")
+        QMessageBox.warning(self, tr("app_title"), message)
+        return True
 
     # --- sauvegarde système sans les jeux (§4.3) -----------------------------
 

@@ -38,6 +38,8 @@ from r36s_studio.imaging.system_backup import (
 )
 from r36s_studio.partitions.locate import PartitionInfo
 
+from .sparse_file import create_sparse_file
+
 SECTOR_SIZE = 512
 PARTITION_TABLE_OFFSET = 446
 
@@ -78,10 +80,7 @@ def _build_fake_mbr_image(
 
     path = tmp_path / "fake_mbr_sd.img"
     if sparse:
-        with open(path, "wb") as f:
-            f.write(bytes(first_sector))
-            f.seek(total_sectors * SECTOR_SIZE - 1)
-            f.write(b"\x00")
+        create_sparse_file(path, total_sectors * SECTOR_SIZE, bytes(first_sector))
     else:
         data = bytearray(os.urandom(total_sectors * SECTOR_SIZE))
         data[0:SECTOR_SIZE] = bytes(first_sector)
@@ -428,10 +427,7 @@ def _build_fake_gpt_image(tmp_path, *, boot=(34, 133), root=(134, 233), games=(2
 
     path = tmp_path / "fake_gpt_sd.img"
     if sparse:
-        with open(path, "wb") as f:
-            f.write(bytes(head))
-            f.seek(total_sectors * SECTOR_SIZE - 1)
-            f.write(b"\x00")
+        create_sparse_file(path, total_sectors * SECTOR_SIZE, bytes(head))
     else:
         data = bytearray(os.urandom(total_sectors * SECTOR_SIZE))
         data[0 : len(head)] = bytes(head)
@@ -712,10 +708,7 @@ def _build_independent_fake_gpt_source(tmp_path, *, boot=(34, 133), root=(134, 2
     head[2 * SECTOR_SIZE : 2 * SECTOR_SIZE + len(entries_bytes)] = entries_bytes
 
     path = tmp_path / "independent_fake_source.img"
-    with open(path, "wb") as f:
-        f.write(bytes(head))
-        f.seek(total_sectors * SECTOR_SIZE - 1)
-        f.write(b"\x00")
+    create_sparse_file(path, total_sectors * SECTOR_SIZE, bytes(head))
     return str(path), total_sectors
 
 

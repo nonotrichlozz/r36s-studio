@@ -12,6 +12,8 @@ import pytest
 from r36s_studio.imaging.card_probe import first_partition_contains, is_sf3000_card
 from r36s_studio.imaging.fat32 import format_fat32
 
+from .sparse_file import create_sparse_file
+
 SECTOR = 512
 PART_START_LBA = 32  # comme la carte SF3000HD d'origine (16 Kio)
 
@@ -140,10 +142,7 @@ FAT32_TEST_BYTES = 300 * 1024 * 1024
 
 
 def _new_fat32(path) -> None:
-    with open(path, "wb") as f:
-        f.truncate(PART_START_LBA * SECTOR + FAT32_TEST_BYTES)
-        f.seek(0)
-        f.write(_mbr(0x0C, PART_START_LBA, FAT32_TEST_BYTES // SECTOR))
+    create_sparse_file(path, PART_START_LBA * SECTOR + FAT32_TEST_BYTES, _mbr(0x0C, PART_START_LBA, FAT32_TEST_BYTES // SECTOR))
     format_fat32(str(path), PART_START_LBA * SECTOR, FAT32_TEST_BYTES, "SDCARD")
 
 

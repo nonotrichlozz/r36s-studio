@@ -19,6 +19,8 @@ from r36s_studio.imaging.fat32 import (
     sectors_per_cluster_for_size,
 )
 
+from .sparse_file import create_sparse_file
+
 SECTOR_SIZE = 512
 
 
@@ -74,9 +76,7 @@ def test_compute_fat_size_sectors_grows_with_more_sectors_to_address():
 
 def _make_backing_file(tmp_path, name, total_bytes):
     path = tmp_path / name
-    with open(path, "wb") as f:
-        f.seek(total_bytes - 1)
-        f.write(b"\x00")
+    create_sparse_file(path, total_bytes)
     return str(path)
 
 

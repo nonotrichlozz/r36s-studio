@@ -42,6 +42,8 @@ from r36s_studio.imaging.games_partition import (
 )
 from r36s_studio.partitions.locate import PartitionInfo
 
+from .sparse_file import create_sparse_file
+
 SECTOR_SIZE = 512
 
 
@@ -257,10 +259,7 @@ def _make_fake_mbr_device_file(tmp_path, *, boot=(2048, 4095), root=(4096, 6143)
     first_sector[510:512] = b"\x55\xaa"
 
     path = tmp_path / "fake_target_mbr.img"
-    with open(path, "wb") as f:
-        f.write(bytes(first_sector))
-        f.seek(total_sectors * SECTOR_SIZE - 1)
-        f.write(b"\x00")
+    create_sparse_file(path, total_sectors * SECTOR_SIZE, bytes(first_sector))
     return str(path), total_sectors
 
 

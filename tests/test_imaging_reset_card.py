@@ -30,6 +30,8 @@ from r36s_studio.imaging.reset_card import (
     plan_full_disk_partition,
 )
 
+from .sparse_file import create_sparse_file
+
 SECTOR_SIZE = 512
 
 
@@ -47,10 +49,7 @@ def _make_device(path: str, size_bytes: int) -> Device:
 
 def _make_fake_device_file(tmp_path, name, total_sectors=200_000, first_sector=None):
     path = tmp_path / name
-    with open(path, "wb") as f:
-        f.write(first_sector or bytes(SECTOR_SIZE))
-        f.seek(total_sectors * SECTOR_SIZE - 1)
-        f.write(b"\x00")
+    create_sparse_file(path, total_sectors * SECTOR_SIZE, first_sector or bytes(SECTOR_SIZE))
     return str(path)
 
 
@@ -161,11 +160,9 @@ def test_erase_partition_table_erases_a_gpt_signature(mock_prep, tmp_path):
     schéma GPT."""
     total_sectors = 200_000
     path = tmp_path / "fake_gpt_card.img"
-    with open(path, "wb") as f:
-        f.write(b"\x00" * SECTOR_SIZE)
-        f.write(b"EFI PART" + b"\x00" * (SECTOR_SIZE - 8))
-        f.seek(total_sectors * SECTOR_SIZE - 1)
-        f.write(b"\x00")
+    create_sparse_file(
+        path, total_sectors * SECTOR_SIZE, b"\x00" * SECTOR_SIZE + b"EFI PART" + b"\x00" * (SECTOR_SIZE - 8)
+    )
     device = _make_device(str(path), total_sectors * SECTOR_SIZE)
 
     erase_partition_table(device)

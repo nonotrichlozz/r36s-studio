@@ -22,10 +22,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
-from r36s_studio.doublons.move import MoveFileFailed, _check_writable, _move_one_file, _path_exists_long, _unique_destination
+from r36s_studio.doublons.move import (
+    MoveFileFailed,
+    _check_disk_space,
+    _check_writable,
+    _move_one_file,
+    _path_exists_long,
+    _unique_destination,
+    is_cross_volume_destination,
+)
 from r36s_studio.doublons.undo import UndoConflict, UndoResult
 
-from .plan import SORT_JOURNAL_FILENAME, UNIDENTIFIED_DIR_NAME, PlannedMove, SortPlan
+from .plan import SET_ASIDE_DIR_NAMES, SORT_JOURNAL_FILENAME, PlannedMove, SortPlan
 
 __all__ = ["ApplyResult", "apply_plan", "journal_path", "has_journal", "undo_sort", "MAX_CONSECUTIVE_FAILURES"]
 
@@ -38,9 +46,10 @@ MAX_CONSECUTIVE_FAILURES = 20
 class ApplyResult:
     moved_files: int = 0
     failures: List[Tuple[Path, str]] = field(default_factory=list)
-    # Groupe non identifié dont un fichier existe déjà dans
-    # `_non_identifies` (tri précédent) : laissé en place, jamais écrasé
-    # ni renommé (renommer un `.bin` casserait son `.cue`).
+    # Groupe non identifié (ou écarté par le filtre) dont un fichier existe
+    # déjà dans `_non_identifies`/`_hors_filtre` (tri précédent) : laissé
+    # en place, jamais écrasé ni renommé (renommer un `.bin` casserait son
+    # `.cue`).
     skipped_existing: List[PlannedMove] = field(default_factory=list)
     # Fichier disparu entre l'aperçu et le déplacement.
     missing_sources: List[Path] = field(default_factory=list)
@@ -87,10 +96,14 @@ def _read_entries(path: Path) -> List[dict]:
     return entries
 
 
+def _destination_root(plan: SortPlan) -> Path:
+    return plan.destination if plan.destination is not None else plan.root
+
+
 def _destinations(plan: SortPlan, move: PlannedMove) -> List[Path]:
-    if move.folder == UNIDENTIFIED_DIR_NAME:
-        return [plan.root / UNIDENTIFIED_DIR_NAME / member.relative_to(plan.root) for member in move.members]
-    return [_unique_destination(plan.root / move.folder / member.name) for member in move.members]
+    if move.folder in SET_ASIDE_DIR_NAMES:
+        return [plan.root / move.folder / member.relative_to(plan.root) for member in move.members]
+    return [_unique_destination(_destination_root(plan) / move.folder / member.name) for member in move.members]
 
 
 def apply_plan(
@@ -99,12 +112,25 @@ def apply_plan(
     should_cancel: Optional[Callable[[], bool]] = None,
 ) -> ApplyResult:
     """Lève `DestinationNotWritable` (`doublons/move.py`) avant tout
-    déplacement si le dossier n'est pas inscriptible. Ensuite, jamais
-    d'exception pour un fichier précis : chaque échec est consigné dans
-    le résultat et le tri continue avec le suivant."""
+    déplacement si le dossier ou la destination n'est pas inscriptible, et
+    `InsufficientDiskSpace` si une destination sur un autre disque n'a pas
+    la place pour les jeux rangés. Ensuite, jamais d'exception pour un
+    fichier précis : chaque échec est consigné dans le résultat et le tri
+    continue avec le suivant.
+
+    Destination sur un autre disque (une carte, typiquement) : chaque jeu
+    est copié, vérifié, puis seulement retiré de la source -- le chemin
+    prudent de `_move_one_file`. Ce qui est mis de côté reste sur le même
+    disque que la source."""
     _check_writable(plan.root)
+    destination_root = _destination_root(plan)
+    cross_volume = destination_root != plan.root and is_cross_volume_destination(str(plan.root), str(destination_root))
+    if destination_root != plan.root:
+        _check_writable(destination_root)
+    if cross_volume:
+        _check_disk_space(destination_root, sum(move.size_bytes for move in plan.moves))
     journal = journal_path(str(plan.root))
-    units = plan.moves + plan.unidentified
+    units = plan.moves + plan.unidentified + plan.filtered_out
     total = sum(len(unit.members) for unit in units)
     result = ApplyResult()
     consecutive_failures = 0
@@ -118,12 +144,13 @@ def apply_plan(
             result.missing_sources.extend(missing)
             continue
         destinations = _destinations(plan, unit)
-        if unit.folder == UNIDENTIFIED_DIR_NAME and any(_path_exists_long(dest) for dest in destinations):
+        set_aside = unit.folder in SET_ASIDE_DIR_NAMES
+        if set_aside and any(_path_exists_long(dest) for dest in destinations):
             result.skipped_existing.append(unit)
             continue
         for member, destination in zip(unit.members, destinations):
             try:
-                _move_one_file(member, destination, None, cross_volume=False)
+                _move_one_file(member, destination, None, cross_volume=cross_volume and not set_aside)
             except MoveFileFailed as exc:
                 result.failures.append((member, exc.reason))
                 consecutive_failures += 1

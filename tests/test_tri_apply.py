@@ -10,6 +10,7 @@ import pytest
 from r36s_studio.doublons.move import REASON_ACCESS_DENIED, MoveFileFailed
 from r36s_studio.tri.apply import MAX_CONSECUTIVE_FAILURES, apply_plan, has_journal, journal_path, undo_sort
 from r36s_studio.tri.plan import build_plan
+from r36s_studio.tri.regions import RegionFilter
 
 from . import tri_fixtures as fx
 
@@ -169,3 +170,55 @@ def test_every_firmware_table_sorts_a_gba_game(tmp_path, firmware):
     result = apply_plan(build_plan(str(tmp_path), firmware))
     assert result.moved_files == 1
     assert (tmp_path / "gba" / "Zelda.gba").exists()
+
+
+def test_apply_to_a_separate_destination_sets_aside_near_the_source_and_undo_restores(tmp_path):
+    source, destination = tmp_path / "telechargements", tmp_path / "carte"
+    fx.write(source / "Sonic (Europe).md", fx.megadrive())
+    fx.write(source / "sous/Streets (Japan).md", fx.megadrive())
+    fx.write(source / "mystere.bin", fx.raw())
+    before = _all_files(source)
+
+    criteria = RegionFilter(regions=frozenset({"Europe"}))
+    result = apply_plan(build_plan(str(source), "rocknix", destination=str(destination), region_filter=criteria))
+
+    assert result.moved_files == 3 and result.failures == []
+    # La destination ne reçoit que les jeux rangés ; le reste reste près de la source.
+    assert _all_files(destination) == ["megadrive/Sonic (Europe).md"]
+    assert _all_files(source) == [
+        "_hors_filtre/sous/Streets (Japan).md",
+        "_non_identifies/mystere.bin",
+        "_rangement_journal.json",
+    ]
+
+    undo = undo_sort(str(source))
+
+    assert undo.restored == 3 and undo.conflicts == []
+    assert _all_files(source) == before
+    assert _all_files(destination) == []
+
+
+def test_destination_on_another_drive_uses_verified_copy_and_checks_space_first(tmp_path):
+    from unittest.mock import patch
+
+    from r36s_studio.doublons.move import InsufficientDiskSpace
+
+    source, destination = tmp_path / "pc", tmp_path / "carte"
+    fx.write(source / "Sonic (Europe).md", fx.megadrive())
+    fx.write(source / "Streets (Japan).md", fx.megadrive())
+    plan = build_plan(str(source), "rocknix", destination=str(destination), region_filter=RegionFilter(regions=frozenset({"Europe"})))
+
+    with patch("r36s_studio.tri.apply.is_cross_volume_destination", return_value=True), patch(
+        "r36s_studio.tri.apply._check_disk_space", side_effect=InsufficientDiskSpace(str(destination), 10, 1)
+    ):
+        with pytest.raises(InsufficientDiskSpace):
+            apply_plan(plan)
+    assert _all_files(source) == ["Sonic (Europe).md", "Streets (Japan).md"]  # rien n'a bougé
+
+    calls = []
+    with patch("r36s_studio.tri.apply.is_cross_volume_destination", return_value=True), patch(
+        "r36s_studio.tri.apply._move_one_file", side_effect=lambda member, dest, sha, cross_volume: calls.append((member.name, cross_volume))
+    ):
+        apply_plan(plan)
+    # Le jeu rangé passe par la copie vérifiée ; le jeu écarté reste sur le disque de la source.
+    assert sorted(calls) == [("Sonic (Europe).md", True), ("Streets (Japan).md", False)]

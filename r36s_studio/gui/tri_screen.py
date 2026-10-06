@@ -18,6 +18,7 @@ from typing import List, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -37,6 +38,7 @@ from r36s_studio.config import DEFAULT_DOUBLONS_IGNORED_FOLDERS
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.tri.apply import ApplyResult, has_journal
 from r36s_studio.tri.plan import PlannedMove, SortPlan
+from r36s_studio.tri.regions import LANGUAGE_CHOICES, REGION_CHOICES, RegionFilter
 from r36s_studio.tri.tables import SORT_FIRMWARE_IDS, load_firmware_tables, load_systems
 
 from . import reveal as reveal_module
@@ -104,6 +106,8 @@ class TriScreen(Screen):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._root: Optional[str] = None
+        # Destination distincte du dossier analysé (`None` : rangé sur place).
+        self._destination: Optional[str] = None
         self._plan: Optional[SortPlan] = None
         self._plan_runner: Optional[SortPlanRunner] = None
         self._apply_runner: Optional[SortApplyRunner] = None
@@ -151,6 +155,27 @@ class TriScreen(Screen):
         root.addWidget(self._verification_label)
         self._update_verification_label()
 
+        destination_row = QHBoxLayout()
+        destination_row.addWidget(QLabel(tr("tri_destination_label")))
+        self._destination_label = QLabel(tr("tri_destination_same"))
+        destination_row.addWidget(self._destination_label, 1)
+        destination_button = QPushButton(tr("tri_destination_choose_button"))
+        destination_button.clicked.connect(self._on_choose_destination_clicked)
+        destination_row.addWidget(destination_button)
+        self._destination_reset_button = QPushButton(tr("tri_destination_reset_button"))
+        self._destination_reset_button.setProperty("role", "flat")
+        self._destination_reset_button.clicked.connect(lambda: self.set_destination(None))
+        self._destination_reset_button.setVisible(False)
+        destination_row.addWidget(self._destination_reset_button)
+        root.addLayout(destination_row)
+
+        root.addWidget(QLabel(tr("tri_filter_title")))
+        root.addWidget(_secondary(tr("tri_filter_hint")))
+        self._region_checks = self._add_check_row(root, "tri_filter_regions_label", "tri_region_", REGION_CHOICES)
+        self._language_checks = self._add_check_row(
+            root, "tri_filter_languages_label", "tri_language_", LANGUAGE_CHOICES
+        )
+
         choose_button = QPushButton(tr("tri_choose_folder_button"))
         choose_button.setProperty("role", "primary")
         choose_button.clicked.connect(self._on_choose_folder_clicked)
@@ -162,6 +187,35 @@ class TriScreen(Screen):
         root.addWidget(self._choose_error_frame)
         root.addStretch()
         return page
+
+    @staticmethod
+    def _add_check_row(layout: QVBoxLayout, label_key: str, text_prefix: str, choices) -> dict:
+        row = QHBoxLayout()
+        row.addWidget(QLabel(tr(label_key)))
+        checks = {}
+        for choice in choices:
+            check = QCheckBox(tr(text_prefix + choice.lower()))
+            row.addWidget(check)
+            checks[choice] = check
+        row.addStretch()
+        layout.addLayout(row)
+        return checks
+
+    def region_filter(self) -> RegionFilter:
+        return RegionFilter(
+            regions=frozenset(choice for choice, check in self._region_checks.items() if check.isChecked()),
+            languages=frozenset(choice for choice, check in self._language_checks.items() if check.isChecked()),
+        )
+
+    def set_destination(self, path: Optional[str]) -> None:
+        self._destination = path or None
+        self._destination_label.setText(path or tr("tri_destination_same"))
+        self._destination_reset_button.setVisible(self._destination is not None)
+
+    def _on_choose_destination_clicked(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, tr("tri_destination_choose_button"))
+        if path:
+            self.set_destination(path)
 
     def _build_scan_page(self) -> QWidget:
         page = QWidget()
@@ -312,7 +366,14 @@ class TriScreen(Screen):
         self._root = path
         self._scan_count_label.setText(tr("tri_scan_count", count=0))
         self._stack.setCurrentIndex(self.PAGE_SCAN)
-        self._plan_runner = SortPlanRunner(path, self.selected_firmware(), DEFAULT_DOUBLONS_IGNORED_FOLDERS, parent=self)
+        self._plan_runner = SortPlanRunner(
+            path,
+            self.selected_firmware(),
+            DEFAULT_DOUBLONS_IGNORED_FOLDERS,
+            parent=self,
+            destination=self._destination,
+            region_filter=self.region_filter(),
+        )
         self._plan_runner.progress.connect(lambda count: self._scan_count_label.setText(tr("tri_scan_count", count=count)))
         self._plan_runner.finished_plan.connect(self._on_plan_ready)
         self._plan_runner.cancelled.connect(self.show_choose_page)
@@ -339,17 +400,23 @@ class TriScreen(Screen):
         self._root = str(plan.root)
         sorted_count = len(plan.moves)
         folders = plan.moves_by_folder()
-        if sorted_count == 0 and not plan.unidentified:
+        if sorted_count == 0 and not plan.unidentified and not plan.filtered_out:
             self._preview_summary_label.setText(tr("tri_preview_nothing"))
         else:
-            self._preview_summary_label.setText(
+            lines = [
                 tr(
                     "tri_preview_summary",
                     sorted=sorted_count,
                     folders=len(folders),
                     unidentified=sum(len(move.members) for move in plan.unidentified),
                 )
-            )
+            ]
+            if plan.region_filter.is_active():
+                lines.append(tr("tri_preview_filtered", count=len(plan.filtered_out)))
+                lines.append(tr("tri_preview_no_region", count=len(plan.no_region)))
+            if plan.destination is not None and plan.destination != plan.root:
+                lines.append(tr("tri_preview_destination", path=str(plan.destination)))
+            self._preview_summary_label.setText("\n".join(lines))
         self._preview_verification_label.setText(
             f"{firmware_display_name(plan.firmware_id)} : {_verification_text(plan.firmware_id)}\n{tr('tri_preview_risk')}"
         )
@@ -365,6 +432,12 @@ class TriScreen(Screen):
             for move in moves:
                 QTreeWidgetItem(group, [move.members[0].name])
             tree.addTopLevelItem(group)
+        self._add_reason_group(tree, "tri_group_filtered", plan.filtered_out)
+        if plan.no_region:
+            group = QTreeWidgetItem([tr("tri_group_no_region", count=len(plan.no_region))])
+            for move in plan.no_region:
+                QTreeWidgetItem(group, [move.members[0].name])
+            tree.addTopLevelItem(group)
         self._add_reason_group(tree, "tri_group_unidentified", plan.unidentified)
         self._add_reason_group(tree, "tri_group_left_in_place", plan.left_in_place)
         if plan.kept_folders:
@@ -373,7 +446,7 @@ class TriScreen(Screen):
                 QTreeWidgetItem(kept, [relative])
             tree.addTopLevelItem(kept)
 
-        self._sort_button.setEnabled(bool(plan.moves or plan.unidentified))
+        self._sort_button.setEnabled(bool(plan.moves or plan.unidentified or plan.filtered_out))
         self._undo_previous_button.setVisible(has_journal(self._root))
         self._stack.setCurrentIndex(self.PAGE_PREVIEW)
 
@@ -391,9 +464,17 @@ class TriScreen(Screen):
     def _show_confirm_page(self) -> None:
         if self._plan is None:
             return
-        self._confirm_message_label.setText(
-            tr("tri_confirm_message", count=self._plan.file_count(), root=str(self._plan.root))
-        )
+        plan = self._plan
+        if plan.destination is not None and plan.destination != plan.root:
+            message = tr(
+                "tri_confirm_message_destination",
+                count=plan.file_count(),
+                destination=str(plan.destination),
+                root=str(plan.root),
+            )
+        else:
+            message = tr("tri_confirm_message", count=plan.file_count(), root=str(plan.root))
+        self._confirm_message_label.setText(message)
         self._stack.setCurrentIndex(self.PAGE_CONFIRM)
 
     def _start_apply(self) -> None:

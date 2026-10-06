@@ -254,7 +254,7 @@ stricte (notamment `gba_header` pour des homebrews non passés par
 ## Parcours et dossiers ignorés
 
 Récursif. **Jamais descendus** :
-- `_non_identifies`, `_doublons`, les dossiers cachés (`.xxx`) ;
+- `_non_identifies`, `_hors_filtre`, `_doublons`, les dossiers cachés (`.xxx`) ;
 - la liste par défaut du dédoublonnage (`config.py::DEFAULT_DOUBLONS_
   IGNORED_FOLDERS` : `bios`, `Imgs`, `media`, `.res`, `cubegm`…) -- sinon
   BIOS et jaquettes partiraient dans `_non_identifies` ;
@@ -270,11 +270,65 @@ système (le trier créerait `snes/snes/`), plus de 200 000 fichiers.
 Conséquence : le tri ne s'applique pas à la racine d'une carte SD ; il
 vise un dossier sur l'ordinateur, copié ensuite sur la carte.
 
+## Destination libre
+
+Par défaut les jeux sont rangés dans le dossier analysé lui-même. L'écran
+permet d'en choisir un autre, n'importe où (« Choisir une autre
+destination… », retour avec « Ranger sur place ») : les jeux rangés vont
+dans `<destination>/<système>/`, **tout ce qui est mis de côté reste près
+du dossier analysé** (`_non_identifies`, `_hors_filtre`), ainsi que le
+journal -- la destination, souvent une carte, ne reçoit que des jeux.
+- Toute destination acceptée, racine d'un disque comprise (les firmwares
+  EmulationStation rangent à la racine de leur partition de jeux), sauf
+  un dossier portant lui-même un nom de système (`snes/snes/`, motif
+  `destination_system_folder`).
+- Contrôle de casse fait sur les dossiers déjà présents dans la
+  destination (même règle `folder_case_conflict`).
+- Destination sur un autre disque (`doublons/move.py::is_cross_volume_
+  destination`) : place vérifiée avant tout déplacement (« Pas assez de
+  place… », rien n'est déplacé), puis chaque jeu copié, vérifié, et
+  seulement ensuite retiré de la source (`_move_one_file`, chemin
+  `cross_volume`).
+- Le firmware ne sert qu'aux noms de dossiers : aucune carte n'est exigée.
+
+## Filtre région / langue (facultatif)
+
+`tri/regions.py`, d'après la convention No-Intro des noms (« (Europe) »,
+« (USA, Europe) », « (En,Fr,De) » ; aussi les formes renommées par la
+règle des virgules, « (USA Europe) », « (En-Fr-De) »). Régions proposées :
+Europe, USA, Japon, Monde ; langues : Fr, En, De, Es, It. Rien de coché =
+pas de filtre. Ne s'applique qu'aux jeux identifiés (ceux qui seraient
+rangés) ; les non-identifiés suivent leur propre règle.
+
+Règle, dans cet ordre :
+1. langues écrites dans le nom + filtre langue actif → décidé par les
+   langues seules (« (USA) (En,Fr) » gardé pour Fr, même sans USA coché) ;
+2. **aucune région dans le nom → gardé et signalé** (catégorie « Sans
+   région dans le nom, gardés » de l'aperçu), jamais écarté ;
+3. filtre région → gardé si une région du nom est cochée ; World vaut
+   pour toutes ;
+4. filtre langue sans langue écrite → écarté seulement si chaque région
+   n'implique qu'une langue non cochée (USA/UK/Australia → En, Japan → Ja,
+   France → Fr…). **Europe, World, Asia n'impliquent aucune langue : un
+   « (Europe) » sans langue (souvent en français) est gardé.**
+
+Écartés : déplacés dans `<dossier>/_hors_filtre/<chemin d'origine>`
+(jamais parcouru ensuite), motif `region_excluded`/`language_excluded` et
+dossier qu'ils auraient eu, consignés au journal comme le reste --
+« Annuler le rangement » les remet en place. Aperçu : nombre de jeux
+écartés et sans région, groupes dédiés dans l'arbre.
+
+Non vérifié sur une vraie collection : le taux de noms sans région ou
+aux tags inhabituels (`(Europe) (Beta)`, traductions `[T-Fr]`…) est
+inconnu ; `[T-Fr]` (crochets, traduction de fan) n'est **pas** lu comme
+une langue.
+
 ## Déplacement et annulation
 
-- Destination : `<dossier>/<nom du système>/<fichier>` (à plat) ;
+- Destination : `<destination>/<nom du système>/<fichier>` (à plat) ;
   `<dossier>/_non_identifies/<chemin d'origine>` pour les non identifiés
-  (chemin conservé : un groupe `.cue`/`.bin` reste cohérent).
+  et `<dossier>/_hors_filtre/<chemin d'origine>` pour les écartés par le
+  filtre (chemin conservé : un groupe `.cue`/`.bin` reste cohérent).
 - **Déplacer, jamais supprimer.** Aucun écrasement : suffixe `_2` pour un
   jeu ; un groupe non identifié dont un fichier existe déjà dans
   `_non_identifies` reste en place (renommer un `.bin` casserait son

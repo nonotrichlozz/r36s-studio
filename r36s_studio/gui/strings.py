@@ -1004,7 +1004,44 @@ STRINGS = {
         "Noms de dossiers relevés dans la configuration officielle de ce système, "
         "pas encore vérifiés sur une vraie carte."
     ),
-    "tri_choose_folder_button": "Choisir le dossier…",
+    "tri_choose_folder_button": "Choisir le dossier à ranger…",
+    "tri_destination_label": "Où ranger les jeux :",
+    "tri_destination_same": "dans le dossier choisi lui-même",
+    "tri_destination_choose_button": "Choisir une autre destination…",
+    "tri_destination_reset_button": "Ranger sur place",
+    "tri_filter_title": "Garder seulement (facultatif)",
+    "tri_filter_hint": (
+        "Les jeux qui ne correspondent pas sont mis de côté dans « _hors_filtre », jamais "
+        "supprimés. Un jeu dont le nom n'indique aucune région est toujours gardé, et un jeu "
+        "européen sans langue indiquée aussi. Rien de coché : tout est gardé."
+    ),
+    "tri_filter_regions_label": "Régions :",
+    "tri_filter_languages_label": "Langues :",
+    "tri_region_europe": "Europe",
+    "tri_region_usa": "USA",
+    "tri_region_japan": "Japon",
+    "tri_region_world": "Monde",
+    "tri_language_fr": "Français",
+    "tri_language_en": "Anglais",
+    "tri_language_de": "Allemand",
+    "tri_language_es": "Espagnol",
+    "tri_language_it": "Italien",
+    "tri_preview_destination": "Destination des jeux rangés : {path}",
+    "tri_preview_filtered": "{count} jeu(x) mis de côté par le filtre dans « _hors_filtre ».",
+    "tri_preview_no_region": "{count} jeu(x) sans région dans leur nom : gardés, à vérifier.",
+    "tri_group_filtered": "_hors_filtre — {count} jeu(x) mis de côté (région ou langue)",
+    "tri_group_no_region": "Sans région dans le nom, gardés — {count} jeu(x)",
+    "tri_reason_region_excluded": "région non retenue (aurait été rangé dans « {detail} »)",
+    "tri_reason_language_excluded": "langue non retenue (aurait été rangé dans « {detail} »)",
+    "tri_confirm_message_destination": (
+        "{count} fichier(s) vont être déplacés : les jeux rangés dans « {destination} », le "
+        "reste mis de côté dans « {root} ». Rien ne sera supprimé, et tu pourras tout "
+        "remettre en place avec « Annuler le rangement »."
+    ),
+    "tri_error_root_destination_system_folder": (
+        "La destination porte déjà le nom d'une console : choisis le dossier qui la contient."
+    ),
+    "tri_error_no_space": "Pas assez de place dans la destination pour ces jeux. Rien n'a été déplacé.",
     "tri_scan_title": "Analyse de tes jeux",
     "tri_scan_count": "{count} fichier(s) examiné(s)",
     "tri_cancel_button": "Annuler",
@@ -1047,7 +1084,7 @@ STRINGS = {
         "a peut-être été retiré."
     ),
     "tri_result_skipped_existing": (
-        "{count} élément(s) laissé(s) à leur place : un fichier du même nom est déjà dans « _non_identifies »."
+        "{count} élément(s) laissé(s) à leur place : un fichier du même nom est déjà dans « _non_identifies » ou « _hors_filtre »."
     ),
     "tri_result_missing": "{count} fichier(s) avaient disparu depuis l'aperçu.",
     "tri_undo_button": "Annuler le rangement",
@@ -1181,6 +1218,7 @@ def tr_in(language: str, key: str, **kwargs) -> str:
 _ERROR_MESSAGE_KEYS = {
     "CANCELLED": "error_cancelled",
     "PARTITION_NOT_FOUND": "error_partition_not_found",
+    "CARD_SYSTEM_INCOMPATIBLE": "error_card_system_incompatible",
     "PARTITION_NOT_MOUNTED": "error_partition_not_mounted",
     "EASYROMS_NTFS_MACOS": "error_easyroms_ntfs_macos",
     "MOUNTPOINT_NOT_WRITABLE": "error_mountpoint_not_writable",

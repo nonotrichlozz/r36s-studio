@@ -170,3 +170,48 @@ def test_sort_row_of_expert_home_opens_the_tri_screen_and_back_returns_home(mock
 
     window._tri_screen.back_requested.emit()
     assert window._root_stack.currentWidget() is not window._tri_screen
+
+
+def test_destination_and_filter_choices_reach_the_scan_and_the_preview(qapp, tmp_path):
+    """Destination libre + filtre région/langue, de bout en bout : aperçu
+    avec le nombre par catégorie, confirmation qui nomme la destination,
+    puis rangement réel."""
+    source, destination = tmp_path / "telechargements", tmp_path / "bibliotheque"
+    fx.write(source / "Sonic (Europe).md", fx.megadrive())
+    fx.write(source / "Streets (Japan).md", fx.megadrive())
+    fx.write(source / "Pong homebrew.gba", fx.gba())
+    screen = TriScreen()
+    screen.set_default_firmware("rocknix")
+    screen.set_destination(str(destination))
+    screen._region_checks["Europe"].setChecked(True)
+
+    screen.start_scan(str(source))
+    _wait(screen._plan_runner)
+
+    summary = screen._preview_summary_label.text()
+    assert "1 jeu(x) mis de côté par le filtre" in summary
+    assert "1 jeu(x) sans région dans leur nom" in summary
+    assert str(destination.resolve()) in summary
+    groups = _top_level_texts(screen)
+    assert "_hors_filtre — 1 jeu(x) mis de côté (région ou langue)" in groups
+    assert "Sans région dans le nom, gardés — 1 jeu(x)" in groups
+
+    screen._sort_button.click()
+    assert str(destination.resolve()) in screen._confirm_message_label.text()
+    screen._confirm_button.click()
+    _wait(screen._apply_runner)
+
+    assert (destination / "megadrive/Sonic (Europe).md").exists()
+    assert (destination / "gba/Pong homebrew.gba").exists()
+    assert (source / "_hors_filtre/Streets (Japan).md").exists()
+
+
+def test_sort_in_place_resets_the_destination(qapp):
+    screen = TriScreen()
+    screen.set_destination("/somewhere")
+    assert not screen._destination_reset_button.isHidden()
+
+    screen._destination_reset_button.click()
+
+    assert screen._destination is None
+    assert screen._destination_reset_button.isHidden()

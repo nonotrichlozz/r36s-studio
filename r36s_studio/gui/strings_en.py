@@ -635,7 +635,44 @@ STRINGS_EN = {
     "tri_firmware_unverified": (
         "Folder names taken from this system's official configuration, not yet checked on a real card."
     ),
-    "tri_choose_folder_button": "Choose the folder…",
+    "tri_choose_folder_button": "Choose the folder to sort…",
+    "tri_destination_label": "Where to put the games:",
+    "tri_destination_same": "in the chosen folder itself",
+    "tri_destination_choose_button": "Choose another destination…",
+    "tri_destination_reset_button": "Sort in place",
+    "tri_filter_title": "Keep only (optional)",
+    "tri_filter_hint": (
+        "Games that don't match are set aside in \"_hors_filtre\", never deleted. A game whose "
+        "name shows no region is always kept, and so is a European game with no language "
+        "listed. Nothing checked: everything is kept."
+    ),
+    "tri_filter_regions_label": "Regions:",
+    "tri_filter_languages_label": "Languages:",
+    "tri_region_europe": "Europe",
+    "tri_region_usa": "USA",
+    "tri_region_japan": "Japan",
+    "tri_region_world": "World",
+    "tri_language_fr": "French",
+    "tri_language_en": "English",
+    "tri_language_de": "German",
+    "tri_language_es": "Spanish",
+    "tri_language_it": "Italian",
+    "tri_preview_destination": "Destination of the sorted games: {path}",
+    "tri_preview_filtered": "{count} game(s) set aside by the filter in \"_hors_filtre\".",
+    "tri_preview_no_region": "{count} game(s) with no region in their name: kept, worth checking.",
+    "tri_group_filtered": "_hors_filtre — {count} game(s) set aside (region or language)",
+    "tri_group_no_region": "No region in the name, kept — {count} game(s)",
+    "tri_reason_region_excluded": "region not selected (would have gone to \"{detail}\")",
+    "tri_reason_language_excluded": "language not selected (would have gone to \"{detail}\")",
+    "tri_confirm_message_destination": (
+        "{count} file(s) will be moved: sorted games to \"{destination}\", the rest set aside "
+        "in \"{root}\". Nothing will be deleted, and you can put everything back with \"Undo the"
+        " sorting\"."
+    ),
+    "tri_error_root_destination_system_folder": (
+        "The destination already has a console's name: choose the folder that contains it."
+    ),
+    "tri_error_no_space": "Not enough space in the destination for these games. Nothing was moved.",
     "tri_scan_title": "Scanning your games",
     "tri_scan_count": "{count} file(s) examined",
     "tri_cancel_button": "Cancel",
@@ -675,7 +712,7 @@ STRINGS_EN = {
         "The sorting stopped after several failures in a row. The card or drive may have been removed."
     ),
     "tri_result_skipped_existing": (
-        "{count} item(s) left where they are: a file with the same name is already in \"_non_identifies\"."
+        "{count} item(s) left where they are: a file with the same name is already in \"_non_identifies\" or \"_hors_filtre\"."
     ),
     "tri_result_missing": "{count} file(s) had disappeared since the preview.",
     "tri_undo_button": "Undo the sorting",

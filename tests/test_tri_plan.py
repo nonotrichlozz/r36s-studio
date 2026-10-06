@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from r36s_studio.tri.plan import SortCancelled, SortRootRefused, TooManyFiles, build_plan
+from r36s_studio.tri.regions import RegionFilter
 
 from . import tri_fixtures as fx
 
@@ -172,3 +173,52 @@ def test_progress_reports_every_file(tmp_path):
     seen = []
     build_plan(str(tmp_path), "rocknix", on_progress=seen.append)
     assert seen == [1, 2, 3]
+
+
+# --- destination libre et filtre région/langue ------------------------------
+
+
+def test_separate_destination_receives_sorted_games_and_is_checked_for_case_conflicts(tmp_path):
+    source, destination = tmp_path / "telechargements", tmp_path / "bibliotheque"
+    fx.write(source / "Mario.sfc", fx.raw())
+    fx.write(source / "Sonic.md", fx.megadrive())
+    (destination / "SNES").mkdir(parents=True)  # autre casse que « snes » attendu
+
+    plan = build_plan(str(source), "rocknix", destination=str(destination))
+
+    assert plan.destination == destination.resolve()
+    assert _names(plan.moves) == ["Sonic.md"]
+    assert _names(plan.left_in_place) == ["Mario.sfc"]
+    assert plan.case_warnings == [(str(destination.resolve() / "SNES"), "snes")]
+
+
+def test_destination_named_like_a_system_folder_is_refused(tmp_path):
+    fx.write(tmp_path / "jeux/Mario.sfc", fx.raw())
+
+    with pytest.raises(SortRootRefused) as excinfo:
+        build_plan(str(tmp_path / "jeux"), "rocknix", destination=str(tmp_path / "snes"))
+    assert excinfo.value.reason == "destination_system_folder"
+
+
+def test_region_filter_sets_games_aside_and_flags_names_without_region(tmp_path):
+    fx.write(tmp_path / "Sonic (Europe).md", fx.megadrive())
+    fx.write(tmp_path / "Streets (Japan).md", fx.megadrive())
+    fx.write(tmp_path / "Zelda (USA) (En,Fr).gba", fx.gba())
+    fx.write(tmp_path / "Pong homebrew.gba", fx.gba())
+
+    criteria = RegionFilter(regions=frozenset({"Europe"}), languages=frozenset({"Fr"}))
+    plan = build_plan(str(tmp_path), "rocknix", region_filter=criteria)
+
+    assert _names(plan.moves) == ["Pong homebrew.gba", "Sonic (Europe).md", "Zelda (USA) (En,Fr).gba"]
+    assert [(m.members[0].name, m.folder, m.reason, m.detail) for m in plan.filtered_out] == [
+        ("Streets (Japan).md", "_hors_filtre", "region_excluded", "megadrive")
+    ]
+    assert _names(plan.no_region) == ["Pong homebrew.gba"]
+
+
+def test_set_aside_folder_is_never_walked_again(tmp_path):
+    fx.write(tmp_path / "_hors_filtre/Streets (Japan).md", fx.megadrive())
+
+    plan = build_plan(str(tmp_path), "rocknix", region_filter=RegionFilter(regions=frozenset({"Europe"})))
+
+    assert plan.moves == [] and plan.filtered_out == []

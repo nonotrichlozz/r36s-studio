@@ -11,12 +11,18 @@ est un nom de système du firmware cible** -- pas seulement ceux que
 l'outil a créés : une collection déjà rangée à la main ne doit jamais
 être redéplacée.
 
-Trois issues pour chaque jeu (ou groupe de fichiers liés) :
-- rangé dans `<dossier>/<nom du système pour ce firmware>/` ;
+Issues pour chaque jeu (ou groupe de fichiers liés) :
+- rangé dans `<destination>/<nom du système pour ce firmware>/` -- la
+  destination est le dossier analysé lui-même, ou n'importe quel autre
+  dossier choisi ;
 - déplacé dans `<dossier>/_non_identifies/<chemin d'origine>`, avec un
   motif (jamais rangé au hasard) ;
+- écarté par le filtre région/langue (`tri/regions.py`), dans
+  `<dossier>/_hors_filtre/<chemin d'origine>` ;
 - laissé en place, avec un motif, quand le déplacer rendrait le jeu
-  invisible (dossier de destination existant avec une autre casse)."""
+  invisible (dossier de destination existant avec une autre casse).
+Ce qui est mis de côté reste toujours près du dossier analysé : la
+destination (souvent la carte) ne reçoit que des jeux rangés."""
 
 from __future__ import annotations
 
@@ -29,10 +35,13 @@ from r36s_studio.doublons.linked_files import resolve_manifest
 from r36s_studio.doublons.safety import LARGE_FOLDER_FILE_THRESHOLD, is_filesystem_root, is_whole_user_folder
 
 from .identify import MANIFEST_EXTENSIONS, identify_file
+from .regions import KEEP, NO_REGION, RegionFilter, evaluate
 from .tables import FirmwareFolders, load_firmware_tables
 
 __all__ = [
     "UNIDENTIFIED_DIR_NAME",
+    "FILTERED_DIR_NAME",
+    "SET_ASIDE_DIR_NAMES",
     "SORT_JOURNAL_FILENAME",
     "PlannedMove",
     "SortPlan",
@@ -43,8 +52,11 @@ __all__ = [
 ]
 
 UNIDENTIFIED_DIR_NAME = "_non_identifies"
+FILTERED_DIR_NAME = "_hors_filtre"
 SORT_JOURNAL_FILENAME = "_rangement_journal.json"
-_ALWAYS_IGNORED = frozenset({UNIDENTIFIED_DIR_NAME.lower(), "_doublons"})
+_ALWAYS_IGNORED = frozenset({UNIDENTIFIED_DIR_NAME.lower(), FILTERED_DIR_NAME.lower(), "_doublons"})
+# Dossiers de mise de côté : chemin d'origine conservé sous la racine analysée.
+SET_ASIDE_DIR_NAMES = (UNIDENTIFIED_DIR_NAME, FILTERED_DIR_NAME)
 
 
 class SortCancelled(Exception):
@@ -59,7 +71,7 @@ class SortRootRefused(Exception):
     def __init__(self, path: str, reason: str):
         super().__init__(f"{path} : {reason}")
         self.path = path
-        self.reason = reason  # "filesystem_root" | "user_folder" | "system_folder"
+        self.reason = reason  # "filesystem_root" | "user_folder" | "system_folder" | "destination_system_folder"
 
 
 class TooManyFiles(Exception):
@@ -84,8 +96,19 @@ class PlannedMove:
 class SortPlan:
     root: Path
     firmware_id: str
+    # Où les jeux rangés sont créés (`<destination>/<système>/`) -- la
+    # racine elle-même par défaut (`build_plan` la renseigne toujours).
+    destination: Optional[Path] = None
+    region_filter: RegionFilter = RegionFilter()
     moves: List[PlannedMove] = field(default_factory=list)
     unidentified: List[PlannedMove] = field(default_factory=list)
+    # Écartés par le filtre région/langue (`reason` = verdict de
+    # `tri/regions.py`, `detail` = dossier qu'ils auraient eu), mis de
+    # côté dans `_hors_filtre`.
+    filtered_out: List[PlannedMove] = field(default_factory=list)
+    # Rangés malgré un filtre actif, faute de région dans le nom : jamais
+    # écartés sans qu'on le voie (sous-ensemble de `moves`).
+    no_region: List[PlannedMove] = field(default_factory=list)
     left_in_place: List[PlannedMove] = field(default_factory=list)
     # Dossiers de système déjà présents, jamais parcourus (chemins
     # relatifs à la racine).
@@ -102,7 +125,7 @@ class SortPlan:
         return dict(sorted(grouped.items()))
 
     def file_count(self) -> int:
-        return sum(len(move.members) for move in self.moves + self.unidentified)
+        return sum(len(move.members) for move in self.moves + self.unidentified + self.filtered_out)
 
 
 def _size(paths: Iterable[Path]) -> int:
@@ -122,6 +145,31 @@ def check_root(root: str, table: FirmwareFolders) -> None:
         raise SortRootRefused(root, "user_folder")
     if Path(root).resolve().name.lower() in table.folder_names_lower():
         raise SortRootRefused(root, "system_folder")
+
+
+def check_destination(destination: str, table: FirmwareFolders) -> None:
+    """N'importe quel dossier, racine d'un disque comprise (une carte
+    EmulationStation range ses jeux à la racine de sa partition de jeux) --
+    sauf un dossier qui porte lui-même un nom de système : y ranger créerait
+    `snes/snes/`, invisible pour la console."""
+    if Path(destination).resolve().name.lower() in table.folder_names_lower():
+        raise SortRootRefused(destination, "destination_system_folder")
+
+
+def _destination_case_conflicts(destination: Path, system_names: Dict[str, str], plan: SortPlan) -> Set[str]:
+    """Même contrôle de casse qu'à la racine (voir `build_plan`), sur les
+    dossiers déjà présents dans une destination distincte."""
+    conflicts: Set[str] = set()
+    try:
+        entries = list(os.scandir(destination))
+    except OSError:  # destination pas encore créée : aucun conflit possible
+        return conflicts
+    for entry in entries:
+        expected = system_names.get(entry.name.lower())
+        if expected is not None and entry.name != expected and entry.is_dir(follow_symlinks=False):
+            plan.case_warnings.append((str(destination / entry.name), expected))
+            conflicts.add(expected.lower())
+    return conflicts
 
 
 def _walk(
@@ -210,11 +258,19 @@ def build_plan(
     ignored_dirs: Iterable[str] = (),
     on_progress: Optional[Callable[[int], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    destination: Optional[str] = None,
+    region_filter: RegionFilter = RegionFilter(),
 ) -> SortPlan:
+    """`destination` : dossier où créer les dossiers de système (la racine
+    si `None`). `region_filter` : critères région/langue, aucun par
+    défaut."""
     table = load_firmware_tables()[firmware_id]
     check_root(root, table)
+    if destination is not None:
+        check_destination(destination, table)
     root_path = Path(root).resolve()
-    plan = SortPlan(root=root_path, firmware_id=firmware_id)
+    destination_path = Path(destination).resolve() if destination is not None else root_path
+    plan = SortPlan(root=root_path, firmware_id=firmware_id, destination=destination_path, region_filter=region_filter)
 
     system_names = {folder.lower(): folder for folder in table.folders.values()}
     ignored_lower = frozenset(name.lower() for name in ignored_dirs)
@@ -250,7 +306,10 @@ def build_plan(
     # sur un système de fichiers insensible à la casse (Windows, cartes
     # FAT/exFAT), y « créer » `snes` écrirait en réalité dans `SNES` --
     # un dossier que la console risque de ne pas voir. Jamais rangé là.
-    case_conflicts = {expected.lower() for relative, expected in plan.case_warnings if "/" not in relative}
+    if destination_path == root_path:
+        case_conflicts = {expected.lower() for relative, expected in plan.case_warnings if "/" not in relative}
+    else:
+        case_conflicts = _destination_case_conflicts(destination_path, system_names, plan)
 
     for path in files:
         if path in grouped_files:
@@ -276,9 +335,16 @@ def build_plan(
                 PlannedMove([path], result.system_id, UNIDENTIFIED_DIR_NAME, "extension_not_accepted", path.suffix, size)
             )
             continue
+        verdict = evaluate(path.stem, region_filter)
+        if verdict not in (KEEP, NO_REGION):
+            plan.filtered_out.append(PlannedMove([path], result.system_id, FILTERED_DIR_NAME, verdict, folder, size))
+            continue
         if folder.lower() in case_conflicts:
             plan.left_in_place.append(PlannedMove([path], result.system_id, "", "folder_case_conflict", folder, size))
             continue
-        plan.moves.append(PlannedMove([path], result.system_id, folder, result.reason, result.detail, size))
+        move = PlannedMove([path], result.system_id, folder, result.reason, result.detail, size)
+        plan.moves.append(move)
+        if verdict == NO_REGION:
+            plan.no_region.append(move)
 
     return plan

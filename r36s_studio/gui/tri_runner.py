@@ -7,13 +7,14 @@ milliers de fichiers ne tournent jamais sur le thread Qt principal."""
 
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Optional
 
 from PySide6.QtCore import QThread, Signal
 
-from r36s_studio.doublons.move import DestinationNotWritable
+from r36s_studio.doublons.move import DestinationNotWritable, InsufficientDiskSpace
 from r36s_studio.tri.apply import apply_plan, undo_sort
 from r36s_studio.tri.plan import SortCancelled, SortPlan, SortRootRefused, TooManyFiles, build_plan
+from r36s_studio.tri.regions import RegionFilter
 
 __all__ = ["SortPlanRunner", "SortApplyRunner", "SortUndoRunner"]
 
@@ -24,11 +25,21 @@ class SortPlanRunner(QThread):
     cancelled = Signal()
     error = Signal(str, str)  # code, détail brut
 
-    def __init__(self, root: str, firmware_id: str, ignored_dirs: Iterable[str], parent=None):
+    def __init__(
+        self,
+        root: str,
+        firmware_id: str,
+        ignored_dirs: Iterable[str],
+        parent=None,
+        destination: Optional[str] = None,
+        region_filter: RegionFilter = RegionFilter(),
+    ):
         super().__init__(parent)
         self._root = root
         self._firmware_id = firmware_id
         self._ignored_dirs = list(ignored_dirs)
+        self._destination = destination
+        self._region_filter = region_filter
         self._cancel_requested = False
 
     def cancel(self) -> None:
@@ -42,6 +53,8 @@ class SortPlanRunner(QThread):
                 self._ignored_dirs,
                 on_progress=self.progress.emit,
                 should_cancel=lambda: self._cancel_requested,
+                destination=self._destination,
+                region_filter=self._region_filter,
             )
         except SortCancelled:
             self.cancelled.emit()
@@ -76,6 +89,9 @@ class SortApplyRunner(QThread):
             result = apply_plan(self._plan, on_progress=self.progress.emit, should_cancel=lambda: self._cancel_requested)
         except DestinationNotWritable as exc:
             self.error.emit("NOT_WRITABLE", str(exc))
+            return
+        except InsufficientDiskSpace as exc:
+            self.error.emit("NO_SPACE", str(exc))
             return
         except OSError as exc:
             self.error.emit("IO_ERROR", str(exc))

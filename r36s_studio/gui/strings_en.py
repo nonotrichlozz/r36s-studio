@@ -51,7 +51,7 @@ STRINGS_EN = {
     "home_tools_separator": "Tools",
     "home_tile_find_duplicates": "Find duplicates",
     "home_tile_find_duplicates_desc": "Finds duplicate games in a folder and sets them aside, without deleting anything.",
-    "home_tile_sort_games": "Sort my games",
+    "home_tile_sort_games": "Sort mixed games",
     "home_tile_sort_games_desc": "Sorts a folder of mixed games into one folder per console.",
     "status_available": "Available",
     "status_done": "Already done",
@@ -623,7 +623,7 @@ STRINGS_EN = {
     "android_uncheck_all_button": "Uncheck all",
     "android_checked_counter": "{checked}/{total} checked",
     "android_raw_output_title": "Technical output (adb)",
-    "tri_title": "Sort my games",
+    "tri_title": "Sort mixed games",
     "tri_hint": (
         "Choose a folder where your games are mixed together. Each game will be moved to its "
         "console's folder, with the name your console's system expects. Nothing is deleted, and "
@@ -640,30 +640,11 @@ STRINGS_EN = {
     "tri_destination_same": "in the chosen folder itself",
     "tri_destination_choose_button": "Choose another destination…",
     "tri_destination_reset_button": "Sort in place",
-    "tri_filter_title": "Keep only (optional)",
-    "tri_filter_hint": (
-        "Games that don't match are set aside in \"_hors_filtre\", never deleted. A game whose "
-        "name shows no region is always kept, and so is a European game with no language "
-        "listed. Nothing checked: everything is kept."
-    ),
-    "tri_filter_regions_label": "Regions:",
-    "tri_filter_languages_label": "Languages:",
-    "tri_region_europe": "Europe",
-    "tri_region_usa": "USA",
-    "tri_region_japan": "Japan",
-    "tri_region_world": "World",
-    "tri_language_fr": "French",
-    "tri_language_en": "English",
-    "tri_language_de": "German",
-    "tri_language_es": "Spanish",
-    "tri_language_it": "Italian",
     "tri_preview_destination": "Destination of the sorted games: {path}",
-    "tri_preview_filtered": "{count} game(s) set aside by the filter in \"_hors_filtre\".",
-    "tri_preview_no_region": "{count} game(s) with no region in their name: kept, worth checking.",
     "tri_group_filtered": "_hors_filtre — {count} game(s) set aside (region or language)",
     "tri_group_no_region": "No region in the name, kept — {count} game(s)",
-    "tri_reason_region_excluded": "region not selected (would have gone to \"{detail}\")",
-    "tri_reason_language_excluded": "language not selected (would have gone to \"{detail}\")",
+    "tri_reason_region_excluded": "region not selected",
+    "tri_reason_language_excluded": "language not selected",
     "tri_confirm_message_destination": (
         "{count} file(s) will be moved: sorted games to \"{destination}\", the rest set aside "
         "in \"{root}\". Nothing will be deleted, and you can put everything back with \"Undo the"
@@ -673,6 +654,60 @@ STRINGS_EN = {
         "The destination already has a console's name: choose the folder that contains it."
     ),
     "tri_error_no_space": "Not enough space in the destination for these games. Nothing was moved.",
+    "filter_title": "Filter by region and language",
+    "filter_hint": (
+        "Choose a games folder: a single console's folder (snes…) or your whole collection, "
+        "already sorted, whose subfolders will all be scanned. Nothing is reorganized: only "
+        "games that don't match your criteria are set aside in \"_hors_filtre\", never deleted."
+        " A game whose name shows no region is always kept, as is a European game with no "
+        "language listed."
+    ),
+    "filter_regions_label": "Regions:",
+    "filter_languages_label": "Languages:",
+    "filter_region_europe": "Europe",
+    "filter_region_usa": "USA",
+    "filter_region_japan": "Japan",
+    "filter_region_world": "World",
+    "filter_language_fr": "French",
+    "filter_language_en": "English",
+    "filter_language_de": "German",
+    "filter_language_es": "Spanish",
+    "filter_language_it": "Italian",
+    "filter_criteria_needed": "Check at least one region or language.",
+    "filter_choose_folder_button": "Choose the folder to filter…",
+    "filter_preview_summary": (
+        "{filtered} game(s) set aside in \"_hors_filtre\", {kept} kept -- including {no_region}"
+        " with no region in their name, worth checking."
+    ),
+    "filter_preview_nothing": (
+        "No game to set aside: {kept} game(s) kept, including {no_region} with no region in "
+        "their name."
+    ),
+    "filter_preview_card": "{card} — {count} game(s)",
+    "filter_preview_card_size": "{card}, {size} — {count} game(s)",
+    "filter_preview_no_games": "{files} file(s) examined, none of them is a recognized game.",
+    "filter_no_games_warning": (
+        "This folder contains no games: nothing to filter. Check that you chose the right "
+        "folder. If your card shows up as several drives, choose the one with your games "
+        "(often EASYROMS), not the system one."
+    ),
+    "filter_sort_button": "Set aside",
+    "filter_confirm_title": "Confirm the filtering",
+    "filter_confirm_message": (
+        "{count} file(s) will be moved to \"_hors_filtre\", inside \"{root}\". Nothing will be "
+        "deleted, and you can put everything back with \"Undo the filtering\"."
+    ),
+    "filter_move_title": "Filtering in progress",
+    "filter_result_title": "Filtering finished",
+    "filter_result_cancelled_title": "Filtering interrupted",
+    "filter_result_skipped_existing": (
+        "{count} item(s) left where they are: a file with the same name is already in "
+        "\"_hors_filtre\"."
+    ),
+    "filter_undo_button": "Undo the filtering",
+    "filter_undo_previous_button": "Undo the previous filtering of this folder",
+    "home_tile_filter_games": "Filter by region and language",
+    "home_tile_filter_games_desc": "Sets aside games from other regions or languages, in any folder.",
     "tri_scan_title": "Scanning your games",
     "tri_scan_count": "{count} file(s) examined",
     "tri_cancel_button": "Cancel",
@@ -712,7 +747,7 @@ STRINGS_EN = {
         "The sorting stopped after several failures in a row. The card or drive may have been removed."
     ),
     "tri_result_skipped_existing": (
-        "{count} item(s) left where they are: a file with the same name is already in \"_non_identifies\" or \"_hors_filtre\"."
+        "{count} item(s) left where they are: a file with the same name is already in \"_non_identifies\"."
     ),
     "tri_result_missing": "{count} file(s) had disappeared since the preview.",
     "tri_undo_button": "Undo the sorting",

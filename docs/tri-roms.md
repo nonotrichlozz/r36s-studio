@@ -1,14 +1,32 @@
-# Outil « Ranger mes jeux » (tri de ROMs par système)
+# Outils « Ranger des jeux mélangés » et « Filtrer par région et par langue »
 
-Objectif : répartir un dossier de ROMs mélangées dans des sous-dossiers
-par console, nommés comme le firmware cible les attend, prêts à copier
-sur la carte.
+Deux fonctions distinctes, deux lignes de la section « Outils » du mode
+expert, à côté de « Chercher les doublons » (retirées de l'accueil
+assisté, allégé pour le néophyte) :
 
-Code : `r36s_studio/tri/` (sans Qt), écran `gui/tri_screen.py` (autonome,
-pages et threads internes), threads `gui/tri_runner.py`. Ligne « Ranger
-mes jeux » de la section « Outils » du mode expert, à côté de « Chercher
-les doublons » (retirés de l'accueil assisté, allégé pour le néophyte).
-Tests : `tests/test_tri_*.py`, `tests/test_gui_tri_screen.py`.
+- **Ranger des jeux mélangés** (« tri ») : répartir un dossier de ROMs en
+  vrac dans des sous-dossiers par console, nommés comme le firmware cible
+  les attend. Exige le dossier parent : un dossier qui porte lui-même un
+  nom de console est refusé (le trier créerait `snes/snes/`).
+- **Filtrer par région et par langue** (§ « Filtre région / langue ») :
+  ne réorganise rien, écarte seulement ce qui ne correspond pas aux
+  critères. N'importe quel dossier -- un dossier de console seul (`SNES`)
+  ou une collection déjà rangée, dont chaque sous-dossier est parcouru.
+  Aucun firmware. Les mélanger produisait des refus sans raison (un
+  dossier `SNES` refusé alors qu'on voulait justement le filtrer).
+
+Principes communs : aperçu avant action, déplacement vers un dossier à
+part (jamais de suppression), annulation -- avec **un journal par
+fonction** (`_rangement_journal.json`, `_filtre_journal.json`) : annuler
+un filtrage ne défait jamais un rangement fait avant dans le même
+dossier.
+
+Code : `r36s_studio/tri/` (sans Qt ; `plan.py` tri, `filter.py` filtre,
+`regions.py` règle région/langue, `apply.py` déplacement et annulation
+communs), écrans `gui/tri_screen.py` (`TriScreen`, et `FilterScreen` qui
+n'en remplace que la page de choix, l'aperçu, quelques libellés
+`filter_*` et le journal), threads `gui/tri_runner.py`. Tests :
+`tests/test_tri_*.py`, `tests/test_gui_tri_screen.py`.
 
 ## ⚠️ Piège majeur TreeFrogUI : les ROM en `.7z`
 
@@ -20,7 +38,7 @@ jeu**. Rien n'avertit l'utilisateur. Vérifié sur carte réelle le
 démarrent dans `MD` (picodrive) comme dans `gpgx` (genesis_plus_gx), et
 FrogUI affiche alors l'icône de manette (vrai jeu reconnu). Détail et
 journaux au § « TreeFrogUI : alias et casse des dossiers ». Pour
-« Ranger mes jeux » : ne jamais ranger un `.7z` vers TreeFrogUI tel
+« Ranger des jeux mélangés » : ne jamais ranger un `.7z` vers TreeFrogUI tel
 quel (refuser, ou convertir en `.zip` après vérification du CRC).
 
 ## ⚠️ Les BIOS ne sont pas des ROMs
@@ -291,32 +309,111 @@ journal -- la destination, souvent une carte, ne reçoit que des jeux.
   `cross_volume`).
 - Le firmware ne sert qu'aux noms de dossiers : aucune carte n'est exigée.
 
-## Filtre région / langue (facultatif)
+## Filtre région / langue (fonction distincte)
 
-`tri/regions.py`, d'après la convention No-Intro des noms (« (Europe) »,
-« (USA, Europe) », « (En,Fr,De) » ; aussi les formes renommées par la
-règle des virgules, « (USA Europe) », « (En-Fr-De) »). Régions proposées :
-Europe, USA, Japon, Monde ; langues : Fr, En, De, Es, It. Rien de coché =
-pas de filtre. Ne s'applique qu'aux jeux identifiés (ceux qui seraient
-rangés) ; les non-identifiés suivent leur propre règle.
+`tri/filter.py` + `tri/regions.py`, d'après la convention No-Intro des noms
+(« (Europe) », « (USA, Europe) », « (En,Fr,De) » ; aussi les formes
+renommées par la règle des virgules, « (USA Europe) », « (En-Fr-De) »).
+Régions proposées : Europe, USA, Japon, Monde ; langues : Fr, En, De, Es,
+It. Au moins un critère exigé avant de parcourir le dossier.
+
+- **N'importe quel dossier**, nom de console compris, sauf le dossier
+  personnel entier. Récursif ; mêmes dossiers jamais descendus que le tri
+  (`_hors_filtre`, `_non_identifies`, `bios`, cachés…).
+- **Racine d'un lecteur** (`E:\`, partition de jeux d'une carte ArkOS) :
+  acceptée seulement si elle appartient à un périphérique retenu par
+  `safety.filter_devices` (§4.2 de `docs/claude/devices-safety.md` :
+  amovible, pas le disque système, sous le seuil de taille) --
+  `filter.safe_card_volume`, jamais sur l'apparence du contenu. Toute autre
+  racine reste refusée (disque système, gros disque externe, détection
+  impossible). L'aperçu nomme alors la carte : « EASYROMS (E:) — 1 437
+  jeu(x) » (étiquette de la partition, ou nom du lecteur si elle n'en a
+  pas). Vérifié sur ce PC le 2026-10-06 : `E:\` (EASYROMS, lecteur SD) →
+  acceptée ; `C:\` → refusée (carte système) ; `F:\` (disque USB de
+  931,5 Gio) → refusée (seuil de taille). Sur macOS/Linux, une carte est
+  montée dans un sous-dossier (`/media/…/EASYROMS`), déjà accepté ; son
+  nom s'affiche de la même façon.
+- **Taille à côté du nom** (« EASYROMS (E:), 71.5 Go — … ») : une carte
+  expose souvent plusieurs volumes, dont certains sans étiquette (le nom
+  du lecteur s'affiche alors) ; la taille permet de voir lequel est choisi.
+  Volume illisible depuis l'OS (partition Linux sous Windows) : nom seul.
+- **Aucun jeu reconnu** dans le dossier : avertissement (« Ce dossier ne
+  contient aucun jeu… choisis celui de tes jeux, souvent EASYROMS, pas
+  celui du système ») au lieu d'un aperçu vide ; « Écarter » désactivé.
+
+Essai réel (lecture seule, 2026-10-06, carte ArkOS à trois volumes, filtre
+Europe) : `I:` (512 Mo, sans étiquette) et `D:` (partition Linux,
+illisible) → 0 fichier, avertissement ; `E:` EASYROMS → 71 893 fichiers,
+39 017 jeux, 15 179 écartés, **18 220 sans région dans le nom** (gardés) :
+près de la moitié de cette collection n'a aucun tag No-Intro.
+- **Seuls les jeux sont jugés** (`filter.GAME_EXTENSIONS` : extensions de
+  `systems.json`, images de disque, `.bin`, `.zip`, `.7z`) : jaquettes,
+  `filelist.csv`, `.txt` ne sont jamais déplacés ni listés.
+- Un groupe `.m3u`/`.cue`/`.bin` est jugé sur le nom de son manifeste et
+  déplacé entier.
+- Aucun jeu gardé ne bouge ; aucun dossier de système n'est créé.
 
 Règle, dans cet ordre :
 1. langues écrites dans le nom + filtre langue actif → décidé par les
    langues seules (« (USA) (En,Fr) » gardé pour Fr, même sans USA coché) ;
 2. **aucune région dans le nom → gardé et signalé** (catégorie « Sans
    région dans le nom, gardés » de l'aperçu), jamais écarté ;
-3. filtre région → gardé si une région du nom est cochée ; World vaut
-   pour toutes ;
-4. filtre langue sans langue écrite → écarté seulement si chaque région
+3. filtre langue actif et **pays qui implique une langue cochée → gardé**
+   (« (France) » est en français, quelle que soit la région cochée) ;
+4. filtre région → gardé si une région du nom est cochée ; **un pays compte
+   pour sa région large** (France, Germany, Spain, Italy, Netherlands,
+   Sweden, Denmark, Portugal, UK, Russia → Europe) ; World vaut pour
+   toutes ;
+5. filtre langue sans langue écrite → écarté seulement si chaque région
    n'implique qu'une langue non cochée (USA/UK/Australia → En, Japan → Ja,
-   France → Fr…). **Europe, World, Asia n'impliquent aucune langue : un
+   Germany → De…). **Europe, World, Asia n'impliquent aucune langue : un
    « (Europe) » sans langue (souvent en français) est gardé.**
 
+> ⚠️ **Bug corrigé, constaté sur du vrai matériel** : avec Europe +
+> Français cochés, « Pokemon - Version Emeraude (France) », « Pitfall -
+> L'Expédition Perdue (France) »… partaient dans `_hors_filtre`. Cause :
+> le contrôle de région passait avant la langue, et un pays n'était pas
+> rattaché à sa région large -- « France » n'étant pas « Europe », le jeu
+> était écarté avant que « France → français » ne soit consulté. Sur la
+> carte SF3000 : 70 des 75 jeux « (France) » écartés avant, 0 après.
+
+**Formes reconnues = formes relevées**, pas une liste de mémoire. Relevé
+fait le 2026-10-06 sur la carte SF3000 (12 567 jeux, 225 mentions
+distinctes ; le `_hors_filtre` du test avait été annulé, vide) :
+
+| Mentions réelles | Lues comme |
+|---|---|
+| `(Japan)` 2 625, `(japan)` 277, `(Europe)` 1 362, `(USA)` 1 131, `(USA Europe)` 129, `(Asia)` 69, `(World)` 44, `(Australia)`, `(Europe Australia)`, `(Brazil)`, `(Russia)`, `(Hong Kong)` | régions |
+| `(France)` 75, `(Germany)` 30, `(Spain)` 22, `(Italy)` 13, `(Netherlands)` 5, `(Denmark)` 1, `(China)` 31, `(Korea)` 12, `(Taiwan)` 11 | pays |
+| GoodTools : `(J)` 76, `(JP)` 16, `(j)` 3, `(U)` 14, `(US)` 3, `(u)`, `(E)`, `(EU)`, `(Euro)`, `(K)`, `(FR)` 4, `(UE)` 51, `(JUE)` 27, `(jue)` | alias de régions/pays |
+| `(Europe and America)` 23, `(European and American)`, `(USA- Europe)` 6, `(Japan- USA)`, `(Asia- Australia)` | plusieurs régions |
+| `(En-Fr-De-Es-It)` 291, `(En)` 85… (64 combinaisons) | langues |
+| `(Chinese version)` 34 (aussi entre crochets), `(Chinese)` | langue chinoise |
+
+Second relevé le 2026-10-07 sur la carte ArkOS 256 Go (39 059 jeux,
+1 212 mentions distinctes) : codes GoodTools en plus `(JU)` 50, `(BR)` 131,
+`(F)` 7, `(R)` 7, `(W)` 6, `(G)`, `(A)`, `(EJ)`, `(CH)` ; langues `(eng)`,
+`(Simple Chinese)`. **Les codes d'une lettre ne sont reconnus que dans la
+casse observée** (`(A)` pays, mais `[a]`/`[b]`/`[f]` = marqueurs de dump
+alternatif/mauvais/corrigé) ; seuls `(j)`, `(u)`, `(jue)` ont été vus en
+minuscules. Résultat sur cette carte (Europe + Français) : 175 versions
+France, aucune écartée ; 6 205 gardés, 14 668 sans région, 17 303 écartés
+pour la région, 883 pour la langue.
+
+Non lues comme région (volontairement) : `(PAL)` 15 et `(NTSC)` 3
+(normes vidéo), `(Unl)`, `(Rev 1)`, `(Proto)`, `(Beta)`, `(NP)`…
+`(FR)` est un pays, `(Fr)` une langue : jamais d'alias pour une mention
+qui a la forme d'un code de langue. Une forme absente de ce relevé reste
+inconnue → jeu gardé et signalé « sans région ». Après correction, sur
+cette carte (Europe + Français) : 4 111 écartés pour la région, 237 pour
+la langue, 1 800 gardés, 6 419 sans région.
+
 Écartés : déplacés dans `<dossier>/_hors_filtre/<chemin d'origine>`
-(jamais parcouru ensuite), motif `region_excluded`/`language_excluded` et
-dossier qu'ils auraient eu, consignés au journal comme le reste --
-« Annuler le rangement » les remet en place. Aperçu : nombre de jeux
-écartés et sans région, groupes dédiés dans l'arbre.
+(jamais parcouru ensuite ; `F:\Jeux\snes\X` → `F:\Jeux\_hors_filtre\snes\X`),
+motif `region_excluded`/`language_excluded`, consignés dans
+`_filtre_journal.json` -- « Annuler le filtrage » les remet en place.
+Aperçu : nombre de jeux écartés, gardés, et sans région ; groupes dédiés
+dans l'arbre.
 
 Non vérifié sur une vraie collection : le taux de noms sans région ou
 aux tags inhabituels (`(Europe) (Beta)`, traductions `[T-Fr]`…) est
@@ -327,8 +424,7 @@ une langue.
 
 - Destination : `<destination>/<nom du système>/<fichier>` (à plat) ;
   `<dossier>/_non_identifies/<chemin d'origine>` pour les non identifiés
-  et `<dossier>/_hors_filtre/<chemin d'origine>` pour les écartés par le
-  filtre (chemin conservé : un groupe `.cue`/`.bin` reste cohérent).
+  (chemin conservé : un groupe `.cue`/`.bin` reste cohérent).
 - **Déplacer, jamais supprimer.** Aucun écrasement : suffixe `_2` pour un
   jeu ; un groupe non identifié dont un fichier existe déjà dans
   `_non_identifies` reste en place (renommer un `.bin` casserait son

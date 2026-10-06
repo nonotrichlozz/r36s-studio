@@ -1154,6 +1154,7 @@ class HomeScreen(Screen):
     # le néophyte (§1), ils ne vivent plus qu'ici.
     find_duplicates_requested = Signal()
     sort_games_requested = Signal()
+    filter_games_requested = Signal()
     # Choix de la langue (i18n.py) -- cet écran ne fait qu'émettre le
     # code choisi, main_window.py le mémorise.
     language_selected = Signal(str)
@@ -1321,6 +1322,11 @@ class HomeScreen(Screen):
         )
         sort_badge.setVisible(False)
         rows_layout.addWidget(self._sort_games_row)
+        self._filter_games_row, filter_badge = self._build_row(
+            "◆", tr("home_tile_filter_games"), tr("home_tile_filter_games_desc"), self.filter_games_requested
+        )
+        filter_badge.setVisible(False)
+        rows_layout.addWidget(self._filter_games_row)
 
         # Tuile personnelle « Web » -- construite inconditionnellement
         # (même principe que `HelpDialog`, dont le bouton déclencheur n'est
@@ -1368,6 +1374,7 @@ class HomeScreen(Screen):
         self._web_row.setEnabled(not busy)
         self._find_duplicates_row.setEnabled(not busy)
         self._sort_games_row.setEnabled(not busy)
+        self._filter_games_row.setEnabled(not busy)
 
     def set_web_tile_visible(self, visible: bool) -> None:
         self._web_row.setVisible(visible)

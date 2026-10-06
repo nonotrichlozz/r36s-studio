@@ -13,6 +13,7 @@ confirmation simple suffit, jamais sautée."""
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import List, Optional
 
@@ -37,16 +38,17 @@ from PySide6.QtWidgets import (
 from r36s_studio.config import DEFAULT_DOUBLONS_IGNORED_FOLDERS
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.tri.apply import ApplyResult, has_journal
-from r36s_studio.tri.plan import PlannedMove, SortPlan
+from r36s_studio.tri.filter import build_filter_plan
+from r36s_studio.tri.plan import FILTER_JOURNAL_FILENAME, SORT_JOURNAL_FILENAME, PlannedMove, SortPlan, build_plan
 from r36s_studio.tri.regions import LANGUAGE_CHOICES, REGION_CHOICES, RegionFilter
 from r36s_studio.tri.tables import SORT_FIRMWARE_IDS, load_firmware_tables, load_systems
 
 from . import reveal as reveal_module
 from .screens import Screen, _format_size
-from .strings import tr
+from .strings import STRINGS, tr
 from .tri_runner import SortApplyRunner, SortPlanRunner, SortUndoRunner
 
-__all__ = ["TriScreen", "firmware_display_name"]
+__all__ = ["TriScreen", "FilterScreen", "firmware_display_name"]
 
 DEFAULT_SORT_FIRMWARE = "rocknix"
 
@@ -99,9 +101,21 @@ def _warning_frame(label: QLabel) -> QFrame:
 
 
 class TriScreen(Screen):
+    """« Ranger des jeux mélangés ». `FilterScreen` (plus bas) réutilise
+    toutes les pages sauf le choix, en remplaçant seulement ce qui diffère
+    (`_t`, `_build_choose_options`, `_plan_builder`, aperçu, journal)."""
+
     back_requested = Signal()
 
     PAGE_CHOOSE, PAGE_SCAN, PAGE_PREVIEW, PAGE_CONFIRM, PAGE_MOVE, PAGE_RESULT = range(6)
+    TEXT_PREFIX = "tri_"
+    JOURNAL_NAME = SORT_JOURNAL_FILENAME
+
+    def _t(self, key: str, **kwargs) -> str:
+        """Texte propre à cet écran (`<TEXT_PREFIX><key>`) s'il existe,
+        sinon celui du tri (`tri_<key>`), commun aux deux."""
+        specific = self.TEXT_PREFIX + key
+        return tr(specific if specific in STRINGS else "tri_" + key, **kwargs)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -133,17 +147,31 @@ class TriScreen(Screen):
         page = QWidget()
         root = QVBoxLayout(page)
         header = QHBoxLayout()
-        back_button = QPushButton(tr("tri_back_button"))
+        back_button = QPushButton(self._t("back_button"))
         back_button.setProperty("role", "flat")
         back_button.clicked.connect(self.back_requested.emit)
         header.addWidget(back_button)
-        header.addWidget(_title(tr("tri_title")))
-        header.addStretch()
+        header.addWidget(_title(self._t("title")), 1)
         root.addLayout(header)
-        root.addWidget(_secondary(tr("tri_hint")))
+        root.addWidget(_secondary(self._t("hint")))
+        self._build_choose_options(root)
 
+        choose_button = QPushButton(self._t("choose_folder_button"))
+        choose_button.setProperty("role", "primary")
+        choose_button.clicked.connect(self._on_choose_folder_clicked)
+        root.addWidget(choose_button, 0, Qt.AlignLeft)
+
+        self._choose_error_label = _secondary()
+        self._choose_error_frame = _warning_frame(self._choose_error_label)
+        self._choose_error_frame.setVisible(False)
+        root.addWidget(self._choose_error_frame)
+        root.addStretch()
+        return page
+
+    def _build_choose_options(self, root: QVBoxLayout) -> None:
+        """Tri : firmware cible (noms des dossiers) et destination."""
         firmware_row = QHBoxLayout()
-        firmware_row.addWidget(QLabel(tr("tri_firmware_label")))
+        firmware_row.addWidget(QLabel(self._t("firmware_label")))
         self._firmware_combo = QComboBox()
         for firmware_id in SORT_FIRMWARE_IDS:
             self._firmware_combo.addItem(firmware_display_name(firmware_id), firmware_id)
@@ -156,64 +184,26 @@ class TriScreen(Screen):
         self._update_verification_label()
 
         destination_row = QHBoxLayout()
-        destination_row.addWidget(QLabel(tr("tri_destination_label")))
-        self._destination_label = QLabel(tr("tri_destination_same"))
+        destination_row.addWidget(QLabel(self._t("destination_label")))
+        self._destination_label = QLabel(self._t("destination_same"))
         destination_row.addWidget(self._destination_label, 1)
-        destination_button = QPushButton(tr("tri_destination_choose_button"))
+        destination_button = QPushButton(self._t("destination_choose_button"))
         destination_button.clicked.connect(self._on_choose_destination_clicked)
         destination_row.addWidget(destination_button)
-        self._destination_reset_button = QPushButton(tr("tri_destination_reset_button"))
+        self._destination_reset_button = QPushButton(self._t("destination_reset_button"))
         self._destination_reset_button.setProperty("role", "flat")
         self._destination_reset_button.clicked.connect(lambda: self.set_destination(None))
         self._destination_reset_button.setVisible(False)
         destination_row.addWidget(self._destination_reset_button)
         root.addLayout(destination_row)
 
-        root.addWidget(QLabel(tr("tri_filter_title")))
-        root.addWidget(_secondary(tr("tri_filter_hint")))
-        self._region_checks = self._add_check_row(root, "tri_filter_regions_label", "tri_region_", REGION_CHOICES)
-        self._language_checks = self._add_check_row(
-            root, "tri_filter_languages_label", "tri_language_", LANGUAGE_CHOICES
-        )
-
-        choose_button = QPushButton(tr("tri_choose_folder_button"))
-        choose_button.setProperty("role", "primary")
-        choose_button.clicked.connect(self._on_choose_folder_clicked)
-        root.addWidget(choose_button, 0, Qt.AlignLeft)
-
-        self._choose_error_label = _secondary()
-        self._choose_error_frame = _warning_frame(self._choose_error_label)
-        self._choose_error_frame.setVisible(False)
-        root.addWidget(self._choose_error_frame)
-        root.addStretch()
-        return page
-
-    @staticmethod
-    def _add_check_row(layout: QVBoxLayout, label_key: str, text_prefix: str, choices) -> dict:
-        row = QHBoxLayout()
-        row.addWidget(QLabel(tr(label_key)))
-        checks = {}
-        for choice in choices:
-            check = QCheckBox(tr(text_prefix + choice.lower()))
-            row.addWidget(check)
-            checks[choice] = check
-        row.addStretch()
-        layout.addLayout(row)
-        return checks
-
-    def region_filter(self) -> RegionFilter:
-        return RegionFilter(
-            regions=frozenset(choice for choice, check in self._region_checks.items() if check.isChecked()),
-            languages=frozenset(choice for choice, check in self._language_checks.items() if check.isChecked()),
-        )
-
     def set_destination(self, path: Optional[str]) -> None:
         self._destination = path or None
-        self._destination_label.setText(path or tr("tri_destination_same"))
+        self._destination_label.setText(path or self._t("destination_same"))
         self._destination_reset_button.setVisible(self._destination is not None)
 
     def _on_choose_destination_clicked(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, tr("tri_destination_choose_button"))
+        path = QFileDialog.getExistingDirectory(self, self._t("destination_choose_button"))
         if path:
             self.set_destination(path)
 
@@ -221,7 +211,7 @@ class TriScreen(Screen):
         page = QWidget()
         root = QVBoxLayout(page)
         root.addStretch()
-        title = _title(tr("tri_scan_title"))
+        title = _title(self._t("scan_title"))
         title.setAlignment(Qt.AlignCenter)
         root.addWidget(title)
         self._scan_count_label = _secondary()
@@ -230,7 +220,7 @@ class TriScreen(Screen):
         bar = QProgressBar()
         bar.setRange(0, 0)
         root.addWidget(bar)
-        cancel_button = QPushButton(tr("tri_cancel_button"))
+        cancel_button = QPushButton(self._t("cancel_button"))
         cancel_button.clicked.connect(self._on_scan_cancel_clicked)
         root.addWidget(cancel_button, 0, Qt.AlignCenter)
         root.addStretch()
@@ -239,7 +229,7 @@ class TriScreen(Screen):
     def _build_preview_page(self) -> QWidget:
         page = QWidget()
         root = QVBoxLayout(page)
-        root.addWidget(_title(tr("tri_preview_title")))
+        root.addWidget(_title(self._t("preview_title")))
         self._preview_summary_label = _secondary()
         root.addWidget(self._preview_summary_label)
         self._preview_verification_label = QLabel()
@@ -253,14 +243,14 @@ class TriScreen(Screen):
         root.addWidget(self._preview_tree, 1)
 
         buttons = QHBoxLayout()
-        back_button = QPushButton(tr("tri_back_button"))
+        back_button = QPushButton(self._t("back_button"))
         back_button.clicked.connect(self.show_choose_page)
         buttons.addWidget(back_button)
-        self._undo_previous_button = QPushButton(tr("tri_undo_previous_button"))
+        self._undo_previous_button = QPushButton(self._t("undo_previous_button"))
         self._undo_previous_button.clicked.connect(self._start_undo)
         buttons.addWidget(self._undo_previous_button)
         buttons.addStretch()
-        self._sort_button = QPushButton(tr("tri_sort_button"))
+        self._sort_button = QPushButton(self._t("sort_button"))
         self._sort_button.setProperty("role", "primary")
         self._sort_button.clicked.connect(self._show_confirm_page)
         buttons.addWidget(self._sort_button)
@@ -270,17 +260,17 @@ class TriScreen(Screen):
     def _build_confirm_page(self) -> QWidget:
         page = QWidget()
         root = QVBoxLayout(page)
-        root.addWidget(_title(tr("tri_confirm_title")))
+        root.addWidget(_title(self._t("confirm_title")))
         self._confirm_message_label = QLabel()
         self._confirm_message_label.setWordWrap(True)
         root.addWidget(self._confirm_message_label)
         root.addStretch()
         buttons = QHBoxLayout()
-        back_button = QPushButton(tr("tri_back_button"))
+        back_button = QPushButton(self._t("back_button"))
         back_button.clicked.connect(lambda: self._stack.setCurrentIndex(self.PAGE_PREVIEW))
         buttons.addWidget(back_button)
         buttons.addStretch()
-        self._confirm_button = QPushButton(tr("tri_confirm_button"))
+        self._confirm_button = QPushButton(self._t("confirm_button"))
         self._confirm_button.setProperty("role", "primary")
         self._confirm_button.clicked.connect(self._start_apply)
         buttons.addWidget(self._confirm_button)
@@ -291,7 +281,7 @@ class TriScreen(Screen):
         page = QWidget()
         root = QVBoxLayout(page)
         root.addStretch()
-        title = _title(tr("tri_move_title"))
+        title = _title(self._t("move_title"))
         title.setAlignment(Qt.AlignCenter)
         root.addWidget(title)
         self._move_count_label = _secondary()
@@ -299,7 +289,7 @@ class TriScreen(Screen):
         root.addWidget(self._move_count_label)
         self._move_bar = QProgressBar()
         root.addWidget(self._move_bar)
-        cancel_button = QPushButton(tr("tri_cancel_button"))
+        cancel_button = QPushButton(self._t("cancel_button"))
         cancel_button.clicked.connect(self._on_move_cancel_clicked)
         root.addWidget(cancel_button, 0, Qt.AlignCenter)
         root.addStretch()
@@ -316,14 +306,14 @@ class TriScreen(Screen):
         self._result_list = QListWidget()
         root.addWidget(self._result_list, 1)
         buttons = QHBoxLayout()
-        self._undo_button = QPushButton(tr("tri_undo_button"))
+        self._undo_button = QPushButton(self._t("undo_button"))
         self._undo_button.clicked.connect(self._start_undo)
         buttons.addWidget(self._undo_button)
         self._reveal_button = QPushButton(reveal_module.reveal_label())
         self._reveal_button.clicked.connect(self._on_reveal_clicked)
         buttons.addWidget(self._reveal_button)
         buttons.addStretch()
-        done_button = QPushButton(tr("tri_done_button"))
+        done_button = QPushButton(self._t("done_button"))
         done_button.setProperty("role", "primary")
         done_button.clicked.connect(self._on_done_clicked)
         buttons.addWidget(done_button)
@@ -356,7 +346,7 @@ class TriScreen(Screen):
             self._verification_label.setText(_verification_text(firmware_id))
 
     def _on_choose_folder_clicked(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, tr("tri_choose_folder_button"))
+        path = QFileDialog.getExistingDirectory(self, self._t("choose_folder_button"))
         if path:
             self.start_scan(path)
 
@@ -364,21 +354,19 @@ class TriScreen(Screen):
 
     def start_scan(self, path: str) -> None:
         self._root = path
-        self._scan_count_label.setText(tr("tri_scan_count", count=0))
+        self._scan_count_label.setText(self._t("scan_count", count=0))
         self._stack.setCurrentIndex(self.PAGE_SCAN)
-        self._plan_runner = SortPlanRunner(
-            path,
-            self.selected_firmware(),
-            DEFAULT_DOUBLONS_IGNORED_FOLDERS,
-            parent=self,
-            destination=self._destination,
-            region_filter=self.region_filter(),
-        )
-        self._plan_runner.progress.connect(lambda count: self._scan_count_label.setText(tr("tri_scan_count", count=count)))
+        self._plan_runner = SortPlanRunner(self._plan_builder(path), parent=self)
+        self._plan_runner.progress.connect(lambda count: self._scan_count_label.setText(self._t("scan_count", count=count)))
         self._plan_runner.finished_plan.connect(self._on_plan_ready)
         self._plan_runner.cancelled.connect(self.show_choose_page)
         self._plan_runner.error.connect(self._on_scan_error)
         self._plan_runner.start()
+
+    def _plan_builder(self, path: str):
+        return partial(
+            build_plan, path, self.selected_firmware(), DEFAULT_DOUBLONS_IGNORED_FOLDERS, destination=self._destination
+        )
 
     def _on_scan_cancel_clicked(self) -> None:
         if self._plan_runner is not None:
@@ -386,7 +374,7 @@ class TriScreen(Screen):
 
     def _on_scan_error(self, code: str, detail: str) -> None:
         self._stack.setCurrentIndex(self.PAGE_CHOOSE)
-        self._choose_error_label.setText(tr(f"tri_error_{code.lower()}"))
+        self._choose_error_label.setText(self._t(f"error_{code.lower()}"))
         self._choose_error_frame.setVisible(True)
 
     def _on_plan_ready(self, plan: SortPlan) -> None:
@@ -398,29 +386,10 @@ class TriScreen(Screen):
     def show_preview(self, plan: SortPlan) -> None:
         self._plan = plan
         self._root = str(plan.root)
-        sorted_count = len(plan.moves)
         folders = plan.moves_by_folder()
-        if sorted_count == 0 and not plan.unidentified and not plan.filtered_out:
-            self._preview_summary_label.setText(tr("tri_preview_nothing"))
-        else:
-            lines = [
-                tr(
-                    "tri_preview_summary",
-                    sorted=sorted_count,
-                    folders=len(folders),
-                    unidentified=sum(len(move.members) for move in plan.unidentified),
-                )
-            ]
-            if plan.region_filter.is_active():
-                lines.append(tr("tri_preview_filtered", count=len(plan.filtered_out)))
-                lines.append(tr("tri_preview_no_region", count=len(plan.no_region)))
-            if plan.destination is not None and plan.destination != plan.root:
-                lines.append(tr("tri_preview_destination", path=str(plan.destination)))
-            self._preview_summary_label.setText("\n".join(lines))
-        self._preview_verification_label.setText(
-            f"{firmware_display_name(plan.firmware_id)} : {_verification_text(plan.firmware_id)}\n{tr('tri_preview_risk')}"
-        )
-        case_lines = [tr("tri_case_warning", found=found, expected=expected) for found, expected in plan.case_warnings]
+        self._preview_summary_label.setText(self._preview_summary(plan))
+        self._show_preview_risk(plan)
+        case_lines = [self._t("case_warning", found=found, expected=expected) for found, expected in plan.case_warnings]
         self._case_warning_label.setText("\n\n".join(case_lines))
         self._case_warning_frame.setVisible(bool(case_lines))
 
@@ -428,27 +397,47 @@ class TriScreen(Screen):
         tree.clear()
         for folder, moves in folders.items():
             size = _format_size(sum(move.size_bytes for move in moves))
-            group = QTreeWidgetItem([tr("tri_group_folder", folder=folder, count=len(moves), size=size)])
+            group = QTreeWidgetItem([self._t("group_folder", folder=folder, count=len(moves), size=size)])
             for move in moves:
                 QTreeWidgetItem(group, [move.members[0].name])
             tree.addTopLevelItem(group)
         self._add_reason_group(tree, "tri_group_filtered", plan.filtered_out)
         if plan.no_region:
-            group = QTreeWidgetItem([tr("tri_group_no_region", count=len(plan.no_region))])
+            group = QTreeWidgetItem([self._t("group_no_region", count=len(plan.no_region))])
             for move in plan.no_region:
                 QTreeWidgetItem(group, [move.members[0].name])
             tree.addTopLevelItem(group)
         self._add_reason_group(tree, "tri_group_unidentified", plan.unidentified)
         self._add_reason_group(tree, "tri_group_left_in_place", plan.left_in_place)
         if plan.kept_folders:
-            kept = QTreeWidgetItem([tr("tri_group_kept_folders", count=len(plan.kept_folders))])
+            kept = QTreeWidgetItem([self._t("group_kept_folders", count=len(plan.kept_folders))])
             for relative in sorted(plan.kept_folders):
                 QTreeWidgetItem(kept, [relative])
             tree.addTopLevelItem(kept)
 
         self._sort_button.setEnabled(bool(plan.moves or plan.unidentified or plan.filtered_out))
-        self._undo_previous_button.setVisible(has_journal(self._root))
+        self._undo_previous_button.setVisible(has_journal(self._root, self.JOURNAL_NAME))
         self._stack.setCurrentIndex(self.PAGE_PREVIEW)
+
+    def _preview_summary(self, plan: SortPlan) -> str:
+        if not plan.moves and not plan.unidentified:
+            return self._t("preview_nothing")
+        lines = [
+            self._t(
+                "preview_summary",
+                sorted=len(plan.moves),
+                folders=len(plan.moves_by_folder()),
+                unidentified=sum(len(move.members) for move in plan.unidentified),
+            )
+        ]
+        if plan.destination is not None and plan.destination != plan.root:
+            lines.append(self._t("preview_destination", path=str(plan.destination)))
+        return "\n".join(lines)
+
+    def _show_preview_risk(self, plan: SortPlan) -> None:
+        self._preview_verification_label.setText(
+            f"{firmware_display_name(plan.firmware_id)} : {_verification_text(plan.firmware_id)}\n{self._t('preview_risk')}"
+        )
 
     def _add_reason_group(self, tree: QTreeWidget, title_key: str, moves: List[PlannedMove]) -> None:
         if not moves:
@@ -456,7 +445,7 @@ class TriScreen(Screen):
         group = QTreeWidgetItem([tr(title_key, count=len(moves))])
         for move in moves:
             name = " + ".join(member.name for member in move.members)
-            QTreeWidgetItem(group, [tr("tri_item_with_reason", name=name, reason=reason_text(move))])
+            QTreeWidgetItem(group, [self._t("item_with_reason", name=name, reason=reason_text(move))])
         tree.addTopLevelItem(group)
 
     # --- confirmation et déplacement ----------------------------------------
@@ -464,27 +453,29 @@ class TriScreen(Screen):
     def _show_confirm_page(self) -> None:
         if self._plan is None:
             return
-        plan = self._plan
+        self._confirm_message_label.setText(self._confirm_message(self._plan))
+        self._stack.setCurrentIndex(self.PAGE_CONFIRM)
+
+    def _confirm_message(self, plan: SortPlan) -> str:
         if plan.destination is not None and plan.destination != plan.root:
-            message = tr(
-                "tri_confirm_message_destination",
+            message = self._t(
+                "confirm_message_destination",
                 count=plan.file_count(),
                 destination=str(plan.destination),
                 root=str(plan.root),
             )
         else:
-            message = tr("tri_confirm_message", count=plan.file_count(), root=str(plan.root))
-        self._confirm_message_label.setText(message)
-        self._stack.setCurrentIndex(self.PAGE_CONFIRM)
+            message = self._t("confirm_message", count=plan.file_count(), root=str(plan.root))
+        return message
 
     def _start_apply(self) -> None:
         if self._plan is None:
             return
         self._move_bar.setRange(0, max(1, self._plan.file_count()))
         self._move_bar.setValue(0)
-        self._move_count_label.setText(tr("tri_move_count", done=0, total=self._plan.file_count()))
+        self._move_count_label.setText(self._t("move_count", done=0, total=self._plan.file_count()))
         self._stack.setCurrentIndex(self.PAGE_MOVE)
-        self._apply_runner = SortApplyRunner(self._plan, parent=self)
+        self._apply_runner = SortApplyRunner(self._plan, parent=self, journal_name=self.JOURNAL_NAME)
         self._apply_runner.progress.connect(self._on_move_progress)
         self._apply_runner.finished_apply.connect(self.show_apply_result)
         self._apply_runner.error.connect(self._on_apply_error)
@@ -493,30 +484,30 @@ class TriScreen(Screen):
     def _on_move_progress(self, done: int, total: int) -> None:
         self._move_bar.setRange(0, max(1, total))
         self._move_bar.setValue(done)
-        self._move_count_label.setText(tr("tri_move_count", done=done, total=total))
+        self._move_count_label.setText(self._t("move_count", done=done, total=total))
 
     def _on_move_cancel_clicked(self) -> None:
         if self._apply_runner is not None:
             self._apply_runner.cancel()
 
     def _on_apply_error(self, code: str, detail: str) -> None:
-        self._show_result(tr("tri_result_cancelled_title"), [tr(f"tri_error_{code.lower()}")], [detail])
+        self._show_result(self._t("result_cancelled_title"), [self._t(f"error_{code.lower()}")], [detail])
 
     def show_apply_result(self, result: ApplyResult) -> None:
         interrupted = result.cancelled or result.aborted
-        lines = [tr("tri_result_moved", count=result.moved_files)]
+        lines = [self._t("result_moved", count=result.moved_files)]
         details: List[str] = []
         if result.aborted:
-            lines.append(tr("tri_result_aborted"))
+            lines.append(self._t("result_aborted"))
         if result.failures:
-            lines.append(tr("tri_result_failures", count=len(result.failures)))
+            lines.append(self._t("result_failures", count=len(result.failures)))
             details.extend(str(path) for path, _reason in result.failures)
         if result.skipped_existing:
-            lines.append(tr("tri_result_skipped_existing", count=len(result.skipped_existing)))
+            lines.append(self._t("result_skipped_existing", count=len(result.skipped_existing)))
             details.extend(str(member) for move in result.skipped_existing for member in move.members)
         if result.missing_sources:
-            lines.append(tr("tri_result_missing", count=len(result.missing_sources)))
-        title = tr("tri_result_cancelled_title" if interrupted else "tri_result_title")
+            lines.append(self._t("result_missing", count=len(result.missing_sources)))
+        title = self._t("result_cancelled_title" if interrupted else "result_title")
         self._show_result(title, lines, details)
 
     # --- annulation ----------------------------------------------------------
@@ -526,19 +517,19 @@ class TriScreen(Screen):
             return
         self._undo_button.setEnabled(False)
         self._undo_previous_button.setEnabled(False)
-        self._undo_runner = SortUndoRunner(self._root, parent=self)
+        self._undo_runner = SortUndoRunner(self._root, parent=self, journal_name=self.JOURNAL_NAME)
         self._undo_runner.finished_undo.connect(self.show_undo_result)
         self._undo_runner.error.connect(self._on_apply_error)
         self._undo_runner.start()
 
     def show_undo_result(self, result) -> None:
-        lines = [tr("tri_undo_done", count=result.restored)]
+        lines = [self._t("undo_done", count=result.restored)]
         details = []
         if result.conflicts:
-            lines.append(tr("tri_undo_conflicts", count=len(result.conflicts)))
+            lines.append(self._t("undo_conflicts", count=len(result.conflicts)))
             details = [conflict.source for conflict in result.conflicts]
         self._undo_previous_button.setEnabled(True)
-        self._show_result(tr("tri_result_title"), lines, details, allow_undo=False)
+        self._show_result(self._t("result_title"), lines, details, allow_undo=False)
 
     # --- résultat ------------------------------------------------------------
 
@@ -549,7 +540,7 @@ class TriScreen(Screen):
         self._result_list.addItems(details)
         self._result_list.setVisible(bool(details))
         self._undo_button.setEnabled(True)
-        self._undo_button.setVisible(allow_undo and self._root is not None and has_journal(self._root))
+        self._undo_button.setVisible(allow_undo and self._root is not None and has_journal(self._root, self.JOURNAL_NAME))
         self._stack.setCurrentIndex(self.PAGE_RESULT)
 
     def _on_reveal_clicked(self) -> None:
@@ -563,3 +554,85 @@ class TriScreen(Screen):
 
     def root_path(self) -> Optional[Path]:
         return Path(self._root) if self._root is not None else None
+
+
+class FilterScreen(TriScreen):
+    """« Filtrer par région et par langue » (`tri/filter.py`) : n'importe
+    quel dossier, rien n'est réorganisé, aucun firmware -- seuls les jeux
+    hors critères partent dans `_hors_filtre`. Mêmes pages que le tri
+    (aperçu, confirmation, déplacement, annulation), journal distinct."""
+
+    TEXT_PREFIX = "filter_"
+    JOURNAL_NAME = FILTER_JOURNAL_FILENAME
+
+    def _build_choose_options(self, root: QVBoxLayout) -> None:
+        self._region_checks = self._add_check_row(root, "filter_regions_label", "filter_region_", REGION_CHOICES)
+        self._language_checks = self._add_check_row(root, "filter_languages_label", "filter_language_", LANGUAGE_CHOICES)
+
+    @staticmethod
+    def _add_check_row(layout: QVBoxLayout, label_key: str, text_prefix: str, choices) -> dict:
+        row = QHBoxLayout()
+        row.addWidget(QLabel(tr(label_key)))
+        checks = {}
+        for choice in choices:
+            check = QCheckBox(tr(text_prefix + choice.lower()))
+            row.addWidget(check)
+            checks[choice] = check
+        row.addStretch()
+        layout.addLayout(row)
+        return checks
+
+    def region_filter(self) -> RegionFilter:
+        return RegionFilter(
+            regions=frozenset(choice for choice, check in self._region_checks.items() if check.isChecked()),
+            languages=frozenset(choice for choice, check in self._language_checks.items() if check.isChecked()),
+        )
+
+    def _on_choose_folder_clicked(self) -> None:
+        # Sans critère, rien ne serait écarté : inutile de parcourir le dossier.
+        if not self.region_filter().is_active():
+            self._choose_error_label.setText(self._t("criteria_needed"))
+            self._choose_error_frame.setVisible(True)
+            return
+        super()._on_choose_folder_clicked()
+
+    def _plan_builder(self, path: str):
+        return partial(build_filter_plan, path, self.region_filter(), DEFAULT_DOUBLONS_IGNORED_FOLDERS)
+
+    @staticmethod
+    def _game_count(plan: SortPlan) -> int:
+        return plan.kept_count + len(plan.filtered_out)
+
+    def _preview_summary(self, plan: SortPlan) -> str:
+        if self._game_count(plan) == 0:
+            summary = self._t("preview_no_games", files=plan.files_seen)
+        elif not plan.filtered_out:
+            summary = self._t("preview_nothing", kept=plan.kept_count, no_region=len(plan.no_region))
+        else:
+            summary = self._t(
+                "preview_summary", filtered=len(plan.filtered_out), kept=plan.kept_count, no_region=len(plan.no_region)
+            )
+        if plan.card_volume is None:
+            return summary
+        # Racine d'une carte : dire sur quoi on agit, taille comprise --
+        # « EASYROMS (E:), 71.5 Go — 1 437 jeu(x) » ; une carte expose souvent
+        # plusieurs volumes et le nom seul ne dit pas toujours lequel.
+        count = f"{self._game_count(plan):,}".replace(",", "\u202f")
+        if plan.card_volume_bytes is None:
+            line = self._t("preview_card", card=plan.card_volume, count=count)
+        else:
+            line = self._t(
+                "preview_card_size", card=plan.card_volume, size=_format_size(plan.card_volume_bytes), count=count
+            )
+        return line + "\n" + summary
+
+    def _show_preview_risk(self, plan: SortPlan) -> None:
+        """Aucun jeu reconnu : prévenir plutôt qu'un aperçu vide sans
+        explication (mauvais dossier, ou volume système d'une carte)."""
+        no_games = self._game_count(plan) == 0
+        if no_games:
+            self._preview_verification_label.setText(self._t("no_games_warning"))
+        self._preview_risk_frame.setVisible(no_games)
+
+    def _confirm_message(self, plan: SortPlan) -> str:
+        return self._t("confirm_message", count=plan.file_count(), root=str(plan.root))

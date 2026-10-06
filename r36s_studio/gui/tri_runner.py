@@ -7,14 +7,14 @@ milliers de fichiers ne tournent jamais sur le thread Qt principal."""
 
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Callable
 
 from PySide6.QtCore import QThread, Signal
 
 from r36s_studio.doublons.move import DestinationNotWritable, InsufficientDiskSpace
 from r36s_studio.tri.apply import apply_plan, undo_sort
-from r36s_studio.tri.plan import SortCancelled, SortPlan, SortRootRefused, TooManyFiles, build_plan
-from r36s_studio.tri.regions import RegionFilter
+from r36s_studio.tri.plan import SORT_JOURNAL_FILENAME
+from r36s_studio.tri.plan import SortCancelled, SortPlan, SortRootRefused, TooManyFiles
 
 __all__ = ["SortPlanRunner", "SortApplyRunner", "SortUndoRunner"]
 
@@ -25,21 +25,11 @@ class SortPlanRunner(QThread):
     cancelled = Signal()
     error = Signal(str, str)  # code, détail brut
 
-    def __init__(
-        self,
-        root: str,
-        firmware_id: str,
-        ignored_dirs: Iterable[str],
-        parent=None,
-        destination: Optional[str] = None,
-        region_filter: RegionFilter = RegionFilter(),
-    ):
+    def __init__(self, build: Callable[..., SortPlan], parent=None):
+        """`build(on_progress=..., should_cancel=...)` : `tri.plan.build_plan`
+        ou `tri.filter.build_filter_plan`, arguments déjà liés."""
         super().__init__(parent)
-        self._root = root
-        self._firmware_id = firmware_id
-        self._ignored_dirs = list(ignored_dirs)
-        self._destination = destination
-        self._region_filter = region_filter
+        self._build = build
         self._cancel_requested = False
 
     def cancel(self) -> None:
@@ -47,15 +37,7 @@ class SortPlanRunner(QThread):
 
     def run(self) -> None:
         try:
-            plan = build_plan(
-                self._root,
-                self._firmware_id,
-                self._ignored_dirs,
-                on_progress=self.progress.emit,
-                should_cancel=lambda: self._cancel_requested,
-                destination=self._destination,
-                region_filter=self._region_filter,
-            )
+            plan = self._build(on_progress=self.progress.emit, should_cancel=lambda: self._cancel_requested)
         except SortCancelled:
             self.cancelled.emit()
             return
@@ -76,9 +58,10 @@ class SortApplyRunner(QThread):
     finished_apply = Signal(object)  # ApplyResult
     error = Signal(str, str)
 
-    def __init__(self, plan: SortPlan, parent=None):
+    def __init__(self, plan: SortPlan, parent=None, journal_name: str = SORT_JOURNAL_FILENAME):
         super().__init__(parent)
         self._plan = plan
+        self._journal_name = journal_name
         self._cancel_requested = False
 
     def cancel(self) -> None:
@@ -86,7 +69,12 @@ class SortApplyRunner(QThread):
 
     def run(self) -> None:
         try:
-            result = apply_plan(self._plan, on_progress=self.progress.emit, should_cancel=lambda: self._cancel_requested)
+            result = apply_plan(
+                self._plan,
+                on_progress=self.progress.emit,
+                should_cancel=lambda: self._cancel_requested,
+                journal_name=self._journal_name,
+            )
         except DestinationNotWritable as exc:
             self.error.emit("NOT_WRITABLE", str(exc))
             return
@@ -103,13 +91,14 @@ class SortUndoRunner(QThread):
     finished_undo = Signal(object)  # UndoResult
     error = Signal(str, str)
 
-    def __init__(self, root: str, parent=None):
+    def __init__(self, root: str, parent=None, journal_name: str = SORT_JOURNAL_FILENAME):
         super().__init__(parent)
         self._root = root
+        self._journal_name = journal_name
 
     def run(self) -> None:
         try:
-            result = undo_sort(self._root)
+            result = undo_sort(self._root, self._journal_name)
         except OSError as exc:
             self.error.emit("IO_ERROR", str(exc))
             return

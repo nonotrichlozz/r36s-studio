@@ -137,7 +137,7 @@ from .strings import (
     tr,
     tr_in,
 )
-from .tri_screen import TriScreen
+from .tri_screen import FilterScreen, TriScreen
 from .wizard_flow import WizardFlow, WizardJob
 from .worker_runner import WorkerRunner
 
@@ -519,6 +519,7 @@ class MainWindow(QMainWindow):
         # Outil « Ranger mes jeux » (docs/tri-roms.md) -- écran autonome qui
         # gère lui-même ses pages et ses threads : un seul point d'entrée ici.
         self._tri_screen = TriScreen()
+        self._filter_screen = FilterScreen()
         self._android_download_runner: Optional[AndroidPlatformToolsDownloadRunner] = None
         self._android_search_runner: Optional[ConsoleSearchRunner] = None
         # URL de la dernière recherche lancée depuis cet écran -- retenue
@@ -546,6 +547,7 @@ class MainWindow(QMainWindow):
         self._root_stack.addWidget(self._doublons_results_screen)
         self._root_stack.addWidget(self._doublons_move_progress_screen)
         self._root_stack.addWidget(self._tri_screen)
+        self._root_stack.addWidget(self._filter_screen)
         self.setCentralWidget(self._root_stack)
 
         # Fenêtres modales (§5, refonte navigation) : construites une fois,
@@ -725,9 +727,11 @@ class MainWindow(QMainWindow):
         self._assisted_landing.backup_requested.connect(self._on_assisted_backup_tile_clicked)
         self._home.find_duplicates_requested.connect(self._start_doublons_tool)
         self._home.sort_games_requested.connect(self._open_tri_screen)
+        self._home.filter_games_requested.connect(self._open_filter_screen)
         self._home.language_selected.connect(self._on_language_selected)
         self._assisted_landing.language_selected.connect(self._on_language_selected)
         self._tri_screen.back_requested.connect(self._show_startup_screen)
+        self._filter_screen.back_requested.connect(self._show_startup_screen)
         self._assisted_landing.eject_requested.connect(lambda: self._start_assisted_ad_hoc_job("eject"))
         self._assisted_landing.help_requested.connect(self._on_assisted_help_requested)
         self._assisted_backup_kind_dialog.full_copy_requested.connect(
@@ -2791,11 +2795,17 @@ class MainWindow(QMainWindow):
     # qui ne connaît elle-même ni adb ni le réseau. ----------------------
 
     def _open_tri_screen(self) -> None:
-        """Tuile « Ranger mes jeux » (docs/tri-roms.md). Le firmware choisi
-        pour le flash est proposé comme cible, toujours remplaçable."""
+        """Ligne « Ranger des jeux mélangés » (docs/tri-roms.md). Le firmware
+        choisi pour le flash est proposé comme cible, toujours remplaçable."""
         self._tri_screen.set_default_firmware(self._app_config.firmware)
         self._tri_screen.show_choose_page()
         self._root_stack.setCurrentWidget(self._tri_screen)
+
+    def _open_filter_screen(self) -> None:
+        """Ligne « Filtrer par région et par langue » (docs/tri-roms.md) --
+        aucun firmware, n'importe quel dossier."""
+        self._filter_screen.show_choose_page()
+        self._root_stack.setCurrentWidget(self._filter_screen)
 
     def _open_android_screen(self) -> None:
         self._root_stack.setCurrentWidget(self._android_screen)

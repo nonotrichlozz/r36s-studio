@@ -57,12 +57,14 @@ class ApplyResult:
     aborted: bool = False
 
 
-def journal_path(root: str) -> Path:
-    return Path(root).resolve() / SORT_JOURNAL_FILENAME
+def journal_path(root: str, name: str = SORT_JOURNAL_FILENAME) -> Path:
+    """`name` : `SORT_JOURNAL_FILENAME` (tri) ou `FILTER_JOURNAL_FILENAME`
+    (filtre) -- deux journaux, deux annulations indépendantes."""
+    return Path(root).resolve() / name
 
 
-def has_journal(root: str) -> bool:
-    return bool(_read_entries(journal_path(root)))
+def has_journal(root: str, name: str = SORT_JOURNAL_FILENAME) -> bool:
+    return bool(_read_entries(journal_path(root, name)))
 
 
 def _append_entry(path: Path, source: Path, destination: Path) -> None:
@@ -110,6 +112,7 @@ def apply_plan(
     plan: SortPlan,
     on_progress: Optional[Callable[[int, int], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    journal_name: str = SORT_JOURNAL_FILENAME,
 ) -> ApplyResult:
     """Lève `DestinationNotWritable` (`doublons/move.py`) avant tout
     déplacement si le dossier ou la destination n'est pas inscriptible, et
@@ -129,7 +132,7 @@ def apply_plan(
         _check_writable(destination_root)
     if cross_volume:
         _check_disk_space(destination_root, sum(move.size_bytes for move in plan.moves))
-    journal = journal_path(str(plan.root))
+    journal = journal_path(str(plan.root), journal_name)
     units = plan.moves + plan.unidentified + plan.filtered_out
     total = sum(len(unit.members) for unit in units)
     result = ApplyResult()
@@ -166,13 +169,13 @@ def apply_plan(
     return result
 
 
-def undo_sort(root: str) -> UndoResult:
+def undo_sort(root: str, journal_name: str = SORT_JOURNAL_FILENAME) -> UndoResult:
     """Remet chaque fichier à sa place d'origine d'après le journal -- du
     plus récent au plus ancien. Jamais d'écrasement : un conflit (fichier
     d'origine recréé entre-temps, fichier rangé introuvable) est signalé
     et son entrée reste dans le journal pour un futur essai. Les dossiers
     créés par le tri restent en place (vides) : rien n'est supprimé."""
-    path = journal_path(root)
+    path = journal_path(root, journal_name)
     entries = _read_entries(path)
     if not entries:
         return UndoResult()

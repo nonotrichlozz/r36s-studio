@@ -224,8 +224,8 @@ expert » reste en haut à droite.
 Déplacés vers le mode expert (`HomeScreen`) : « Installer un système »
 (étape C), « Copier mes jeux » (étape E), « Remettre la carte à zéro »
 (« Par sécurité »), « Console Android » (bouton d'en-tête), et une
-section « Outils » : « Chercher les doublons », « Ranger mes jeux »,
-« Web ». Aucun de ces signaux n'existe plus sur `AssistedLandingScreen`
+section « Outils » : « Chercher les doublons », « Ranger des jeux
+mélangés », « Filtrer par région et par langue », « Web ». Aucun de ces signaux n'existe plus sur `AssistedLandingScreen`
 (vérifié par `test_assisted_landing_screen_has_no_advanced_tool`).
 
 Retour à la ligne automatique dans les deux modes :

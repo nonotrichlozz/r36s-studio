@@ -84,7 +84,7 @@ STRINGS = {
     "home_tools_separator": "Outils",
     "home_tile_find_duplicates": "Chercher les doublons",
     "home_tile_find_duplicates_desc": "Trouve les jeux en double dans un dossier et les met de côté, sans rien supprimer.",
-    "home_tile_sort_games": "Ranger mes jeux",
+    "home_tile_sort_games": "Ranger des jeux mélangés",
     "home_tile_sort_games_desc": "Range un dossier de jeux mélangés dans un dossier par console.",
     "status_available": "Faisable",
     "status_done": "Déjà faite",
@@ -991,7 +991,7 @@ STRINGS = {
     # choisi l'attend. Risque principal : un nom de dossier faux, et la
     # console n'affiche rien -- d'où l'indication, pour chaque système,
     # de la façon dont ses noms ont été vérifiés.
-    "tri_title": "Ranger mes jeux",
+    "tri_title": "Ranger des jeux mélangés",
     "tri_hint": (
         "Choisis un dossier où tes jeux sont mélangés. Chaque jeu sera rangé dans le dossier "
         "de sa console, avec le nom que le système de ta console attend. Rien n'est supprimé, "
@@ -1009,30 +1009,11 @@ STRINGS = {
     "tri_destination_same": "dans le dossier choisi lui-même",
     "tri_destination_choose_button": "Choisir une autre destination…",
     "tri_destination_reset_button": "Ranger sur place",
-    "tri_filter_title": "Garder seulement (facultatif)",
-    "tri_filter_hint": (
-        "Les jeux qui ne correspondent pas sont mis de côté dans « _hors_filtre », jamais "
-        "supprimés. Un jeu dont le nom n'indique aucune région est toujours gardé, et un jeu "
-        "européen sans langue indiquée aussi. Rien de coché : tout est gardé."
-    ),
-    "tri_filter_regions_label": "Régions :",
-    "tri_filter_languages_label": "Langues :",
-    "tri_region_europe": "Europe",
-    "tri_region_usa": "USA",
-    "tri_region_japan": "Japon",
-    "tri_region_world": "Monde",
-    "tri_language_fr": "Français",
-    "tri_language_en": "Anglais",
-    "tri_language_de": "Allemand",
-    "tri_language_es": "Espagnol",
-    "tri_language_it": "Italien",
     "tri_preview_destination": "Destination des jeux rangés : {path}",
-    "tri_preview_filtered": "{count} jeu(x) mis de côté par le filtre dans « _hors_filtre ».",
-    "tri_preview_no_region": "{count} jeu(x) sans région dans leur nom : gardés, à vérifier.",
     "tri_group_filtered": "_hors_filtre — {count} jeu(x) mis de côté (région ou langue)",
     "tri_group_no_region": "Sans région dans le nom, gardés — {count} jeu(x)",
-    "tri_reason_region_excluded": "région non retenue (aurait été rangé dans « {detail} »)",
-    "tri_reason_language_excluded": "langue non retenue (aurait été rangé dans « {detail} »)",
+    "tri_reason_region_excluded": "région non retenue",
+    "tri_reason_language_excluded": "langue non retenue",
     "tri_confirm_message_destination": (
         "{count} fichier(s) vont être déplacés : les jeux rangés dans « {destination} », le "
         "reste mis de côté dans « {root} ». Rien ne sera supprimé, et tu pourras tout "
@@ -1042,6 +1023,63 @@ STRINGS = {
         "La destination porte déjà le nom d'une console : choisis le dossier qui la contient."
     ),
     "tri_error_no_space": "Pas assez de place dans la destination pour ces jeux. Rien n'a été déplacé.",
+    "filter_title": "Filtrer par région et par langue",
+    "filter_hint": (
+        "Choisis un dossier de jeux : le dossier d'une seule console (snes…) ou toute ta "
+        "collection déjà rangée, dont chaque sous-dossier sera parcouru. Rien n'est "
+        "réorganisé : seuls les jeux qui ne correspondent pas à tes critères sont mis de côté"
+        " dans « _hors_filtre », jamais supprimés. Un jeu dont le nom n'indique aucune région"
+        " est toujours gardé, comme un jeu européen sans langue indiquée."
+    ),
+    "filter_regions_label": "Régions :",
+    "filter_languages_label": "Langues :",
+    "filter_region_europe": "Europe",
+    "filter_region_usa": "USA",
+    "filter_region_japan": "Japon",
+    "filter_region_world": "Monde",
+    "filter_language_fr": "Français",
+    "filter_language_en": "Anglais",
+    "filter_language_de": "Allemand",
+    "filter_language_es": "Espagnol",
+    "filter_language_it": "Italien",
+    "filter_criteria_needed": "Coche au moins une région ou une langue.",
+    "filter_choose_folder_button": "Choisir le dossier à filtrer…",
+    "filter_preview_summary": (
+        "{filtered} jeu(x) mis de côté dans « _hors_filtre », {kept} gardé(s) -- dont "
+        "{no_region} sans région dans leur nom, à vérifier."
+    ),
+    "filter_preview_nothing": (
+        "Aucun jeu à écarter : {kept} jeu(x) gardé(s), dont {no_region} sans région dans leur"
+        " nom."
+    ),
+    "filter_preview_card": "{card} — {count} jeu(x)",
+    "filter_preview_card_size": "{card}, {size} — {count} jeu(x)",
+    "filter_preview_no_games": "{files} fichier(s) examiné(s), aucun n'est un jeu reconnu.",
+    "filter_no_games_warning": (
+        "Ce dossier ne contient aucun jeu : rien à filtrer. Vérifie que tu as choisi le bon "
+        "dossier. Si ta carte apparaît comme plusieurs lecteurs, choisis celui de tes jeux "
+        "(souvent EASYROMS), pas celui du système."
+    ),
+    "filter_sort_button": "Écarter",
+    "filter_confirm_title": "Confirmer le filtrage",
+    "filter_confirm_message": (
+        "{count} fichier(s) vont être déplacés dans « _hors_filtre », à l'intérieur de « "
+        "{root} ». Rien ne sera supprimé, et tu pourras tout remettre en place avec « Annuler"
+        " le filtrage »."
+    ),
+    "filter_move_title": "Filtrage en cours",
+    "filter_result_title": "Filtrage terminé",
+    "filter_result_cancelled_title": "Filtrage interrompu",
+    "filter_result_skipped_existing": (
+        "{count} élément(s) laissé(s) à leur place : un fichier du même nom est déjà dans « "
+        "_hors_filtre »."
+    ),
+    "filter_undo_button": "Annuler le filtrage",
+    "filter_undo_previous_button": "Annuler le filtrage précédent de ce dossier",
+    "home_tile_filter_games": "Filtrer par région et par langue",
+    "home_tile_filter_games_desc": (
+        "Écarte les jeux d'autres régions ou langues, dans n'importe quel dossier."
+    ),
     "tri_scan_title": "Analyse de tes jeux",
     "tri_scan_count": "{count} fichier(s) examiné(s)",
     "tri_cancel_button": "Annuler",
@@ -1084,7 +1122,7 @@ STRINGS = {
         "a peut-être été retiré."
     ),
     "tri_result_skipped_existing": (
-        "{count} élément(s) laissé(s) à leur place : un fichier du même nom est déjà dans « _non_identifies » ou « _hors_filtre »."
+        "{count} élément(s) laissé(s) à leur place : un fichier du même nom est déjà dans « _non_identifies »."
     ),
     "tri_result_missing": "{count} fichier(s) avaient disparu depuis l'aperçu.",
     "tri_undo_button": "Annuler le rangement",

@@ -172,38 +172,17 @@ def test_sort_row_of_expert_home_opens_the_tri_screen_and_back_returns_home(mock
     assert window._root_stack.currentWidget() is not window._tri_screen
 
 
-def test_destination_and_filter_choices_reach_the_scan_and_the_preview(qapp, tmp_path):
-    """Destination libre + filtre région/langue, de bout en bout : aperçu
-    avec le nombre par catégorie, confirmation qui nomme la destination,
-    puis rangement réel."""
-    source, destination = tmp_path / "telechargements", tmp_path / "bibliotheque"
-    fx.write(source / "Sonic (Europe).md", fx.megadrive())
-    fx.write(source / "Streets (Japan).md", fx.megadrive())
-    fx.write(source / "Pong homebrew.gba", fx.gba())
-    screen = TriScreen()
-    screen.set_default_firmware("rocknix")
-    screen.set_destination(str(destination))
-    screen._region_checks["Europe"].setChecked(True)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_filter_row_of_expert_home_opens_its_own_screen(mock_list, mock_filter, qapp):
+    window = MainWindow()
 
-    screen.start_scan(str(source))
-    _wait(screen._plan_runner)
+    window._home.filter_games_requested.emit()
 
-    summary = screen._preview_summary_label.text()
-    assert "1 jeu(x) mis de côté par le filtre" in summary
-    assert "1 jeu(x) sans région dans leur nom" in summary
-    assert str(destination.resolve()) in summary
-    groups = _top_level_texts(screen)
-    assert "_hors_filtre — 1 jeu(x) mis de côté (région ou langue)" in groups
-    assert "Sans région dans le nom, gardés — 1 jeu(x)" in groups
-
-    screen._sort_button.click()
-    assert str(destination.resolve()) in screen._confirm_message_label.text()
-    screen._confirm_button.click()
-    _wait(screen._apply_runner)
-
-    assert (destination / "megadrive/Sonic (Europe).md").exists()
-    assert (destination / "gba/Pong homebrew.gba").exists()
-    assert (source / "_hors_filtre/Streets (Japan).md").exists()
+    assert window._root_stack.currentWidget() is window._filter_screen
+    assert window._root_stack.currentWidget() is not window._tri_screen
+    window._filter_screen.back_requested.emit()
+    assert window._root_stack.currentWidget() is not window._filter_screen
 
 
 def test_sort_in_place_resets_the_destination(qapp):
@@ -215,3 +194,96 @@ def test_sort_in_place_resets_the_destination(qapp):
 
     assert screen._destination is None
     assert screen._destination_reset_button.isHidden()
+
+
+def test_filter_screen_end_to_end_on_a_console_folder(qapp, tmp_path):
+    """Écran distinct : critères, aperçu par catégorie, confirmation, puis
+    annulation -- sur un dossier « SNES » que le tri refuserait."""
+    from r36s_studio.gui.tri_screen import FilterScreen
+
+    snes = tmp_path / "SNES"
+    fx.write(snes / "Mario (Europe).sfc", fx.raw())
+    fx.write(snes / "Mario (Japan).sfc", fx.raw())
+    fx.write(snes / "Pong homebrew.sfc", fx.raw())
+    screen = FilterScreen()
+    screen._region_checks["Europe"].setChecked(True)
+
+    screen.start_scan(str(snes))
+    _wait(screen._plan_runner)
+
+    assert screen.current_page() == FilterScreen.PAGE_PREVIEW
+    assert "1 jeu(x) mis de côté" in screen._preview_summary_label.text()
+    assert "2 gardé(s)" in screen._preview_summary_label.text()
+    assert screen._preview_risk_frame.isHidden()
+    assert "_hors_filtre — 1 jeu(x) mis de côté (région ou langue)" in _top_level_texts(screen)
+    assert screen._sort_button.text() == "Écarter"
+
+    screen._sort_button.click()
+    screen._confirm_button.click()
+    _wait(screen._apply_runner)
+
+    assert (snes / "_hors_filtre/Mario (Japan).sfc").exists()
+    assert screen._undo_button.text() == "Annuler le filtrage"
+    screen._undo_button.click()
+    _wait(screen._undo_runner)
+    assert (snes / "Mario (Japan).sfc").exists()
+
+
+def test_filter_screen_asks_for_a_criterion_before_scanning(qapp):
+    from r36s_studio.gui.tri_screen import FilterScreen
+
+    screen = FilterScreen()
+    with patch("r36s_studio.gui.tri_screen.QFileDialog.getExistingDirectory") as mock_dialog:
+        screen._on_choose_folder_clicked()
+
+    mock_dialog.assert_not_called()
+    assert not screen._choose_error_frame.isHidden()
+
+
+def test_filter_preview_names_the_card_when_working_at_its_root(qapp, tmp_path):
+    from r36s_studio.gui.tri_screen import FilterScreen
+    from r36s_studio.tri.plan import SortPlan
+    from r36s_studio.tri.regions import RegionFilter
+
+    plan = SortPlan(root=tmp_path, firmware_id="", region_filter=RegionFilter(regions=frozenset({"Europe"})))
+    plan.kept_count = 1437
+    plan.card_volume = "EASYROMS (E:)"
+    screen = FilterScreen()
+
+    screen.show_preview(plan)
+
+    assert screen._preview_summary_label.text().splitlines()[0] == "EASYROMS (E:) — 1 437 jeu(x)"
+
+
+def test_filter_preview_shows_the_volume_size_next_to_the_card_name(qapp, tmp_path):
+    from r36s_studio.gui.tri_screen import FilterScreen
+    from r36s_studio.tri.plan import SortPlan
+
+    plan = SortPlan(root=tmp_path, firmware_id="")
+    plan.kept_count = 12
+    plan.card_volume = "EASYROMS (E:)"
+    plan.card_volume_bytes = 76_805_570_560
+    screen = FilterScreen()
+
+    screen.show_preview(plan)
+
+    assert screen._preview_summary_label.text().splitlines()[0] == "EASYROMS (E:), 71.5 Go — 12 jeu(x)"
+
+
+def test_filter_warns_when_the_folder_contains_no_game(qapp, tmp_path):
+    """Mauvais dossier (ou volume système d'une carte) : un avertissement
+    clair plutôt qu'un aperçu vide sans explication."""
+    from r36s_studio.gui.tri_screen import FilterScreen
+
+    fx.write(tmp_path / "extlinux/extlinux.conf", b"conf")
+    fx.write(tmp_path / "Image.png", b"png")
+    screen = FilterScreen()
+    screen._region_checks["Europe"].setChecked(True)
+
+    screen.start_scan(str(tmp_path))
+    _wait(screen._plan_runner)
+
+    assert "2 fichier(s) examiné(s), aucun n'est un jeu reconnu." in screen._preview_summary_label.text()
+    assert not screen._preview_risk_frame.isHidden()
+    assert "aucun jeu" in screen._preview_verification_label.text()
+    assert not screen._sort_button.isEnabled()

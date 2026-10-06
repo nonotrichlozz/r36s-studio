@@ -10,6 +10,53 @@ mes jeux » de la section « Outils » du mode expert, à côté de « Chercher
 les doublons » (retirés de l'accueil assisté, allégé pour le néophyte).
 Tests : `tests/test_tri_*.py`, `tests/test_gui_tri_screen.py`.
 
+## ⚠️ Piège majeur TreeFrogUI : les ROM en `.7z`
+
+Sur TreeFrogUI, une ROM en **`.7z` donne un écran noir ou un plantage** :
+le jeu apparaît dans la liste et se lance, mais `picoarch` ne sait
+décompresser que le `.zip` et **le cœur reçoit l'archive au lieu du
+jeu**. Rien n'avertit l'utilisateur. Vérifié sur carte réelle le
+2026-09-27 : les mêmes jeux Mega Drive, reconvertis en `.zip` (deflate),
+démarrent dans `MD` (picodrive) comme dans `gpgx` (genesis_plus_gx), et
+FrogUI affiche alors l'icône de manette (vrai jeu reconnu). Détail et
+journaux au § « TreeFrogUI : alias et casse des dossiers ». Pour
+« Ranger mes jeux » : ne jamais ranger un `.7z` vers TreeFrogUI tel
+quel (refuser, ou convertir en `.zip` après vérification du CRC).
+
+## ⚠️ Les BIOS ne sont pas des ROMs
+
+Un BIOS (ou boot ROM, firmware de lecteur CD, d'adaptateur) ne doit
+**jamais** être rangé vers un dossier de système : la console l'affiche
+comme un jeu, qui ne démarre pas ou affiche n'importe quoi. « Ranger mes
+jeux » doit les reconnaître et soit les laisser où ils sont, soit les
+envoyer vers le dossier BIOS du firmware cible -- jamais les traiter
+comme des jeux.
+
+**Dossier BIOS de TreeFrogUI : `cubegm/bios/`**, et nulle part ailleurs
+(README § « BIOS files required », `docs/cores/ps1.md`, et le seul
+chemin `system` présent dans `cubegm/picoarch` : `/mnt/sdcard/cubegm/bios`).
+PS1 (`ps1r`, pcsx_rearmed) exige un `scph*.bin` à cet endroit.
+
+**Piège No-Intro** : le tag `[BIOS]` marque aussi des **jeux intégrés à
+une console** (Master System II : *Alex Kidd in Miracle World*,
+*Hang On*, *Sonic The Hedgehog (Europe)*, *Missile Defense 3-D* -- ROM
+de 128 à 256 Kio, jouables). Le tag seul ne suffit donc pas : il faut
+une liste des BIOS connus (nom et/ou CRC), pas un simple motif.
+
+Cas réel (carte SF3000 HD, 2026-09-27) : 39 fichiers `[BIOS]` dans
+`roms/` ; 32 vrais BIOS (Game Boy, GBA bêta, Mega-CD, TMSS, Master
+System, adaptateurs NES, SNES CD) déplacés vers `cubegm/bios/`, 7 jeux
+intégrés laissés dans `sega/SMS/`. Déplacés tels quels (`.zip`,
+noms No-Intro) : ils ne sont **pas utilisés** par les cœurs, qui
+attendent des noms exacts non compressés (`bios_CD_E.bin`,
+`bios_E.sms`, `gba_bios.bin`…) ; ils ne s'affichent simplement plus
+comme des jeux.
+
+**État actuel de l'outil** : un dossier nommé `bios` n'est jamais
+parcouru (`config.py::DEFAULT_DOUBLONS_IGNORED_FOLDERS`), mais un BIOS
+**mélangé aux jeux** est identifié par son en-tête (ex. `TMR SEGA`) et
+rangé comme un jeu. À corriger (point ouvert ci-dessous).
+
 ## ⚠️ Risque principal : un nom de dossier faux
 
 Si un nom de dossier est faux, la console n'affiche **aucun** jeu de ce
@@ -85,6 +132,56 @@ EmulationStation, `col` sur TreeFrogUI ; TreeFrogUI range Mega Drive et
 Master System ensemble dans `sega`, Game Boy Color dans `gb`, Neo Geo
 Pocket dans `ngpc`, WonderSwan (Color) dans `wswan`. Les trois firmwares
 ont aussi un dossier `genesis` : `megadrive` est retenu (présent partout).
+
+### TreeFrogUI : alias et casse des dossiers (carte réelle, 2026-09-26)
+
+Sources sur la carte (TreeFrogUI v1.5.0_l) : `README.md` § « ROM folder
+setup » et `docs/cores.md` § Sega, concordants ; table des cœurs de
+`cubegm/cores/frogui_libretro.so` (chaînes).
+
+- **Mega Drive / Master System** : trois noms acceptés, `sega`, `MD`,
+  `SMS` (→ `picodrive_libretro.so`) ; `gpgx` → `genesis_plus_gx`.
+  **`md` en minuscules n'est pas dans la liste documentée**. (Les chaînes
+  du binaire ne tranchent pas : chaque chaîne n'y figure qu'une fois,
+  partagée entre tables.) `megadrive` et `genesis` n'existent pas sur ce
+  firmware. L'archive officielle ne crée ni `MD` ni `md` dans `roms/` :
+  le nom livré est `sega` ; `MD` n'a ni fond ni icône (`sega`, `gpgx` en
+  ont).
+- **`gpgx`** (→ `genesis_plus_gx`) : dossier livré par l'archive
+  officielle, en minuscules, avec fond `frogui/gpgx.jpg` et icônes.
+- **La casse change le système, pas seulement la visibilité** :
+  « Folders are case-sensitive » (`docs/cores.md`), et `nes` → fceumm
+  mais `NES` → quicknes, `FC` → fceumm. Ne jamais « corriger » un
+  dossier majuscule existant (`MD`, `SMS`, `GG`, `GBA`, `FC`, `SFC`, `PS`)
+  sans vérifier la table : c'est souvent un alias valide.
+- L'outil range dans `sega` (nom canonique) ; un `MD` déjà présent sur la
+  carte est un alias valide, pas une erreur à signaler.
+- **`D:\MD\` (racine) ≠ `roms\MD\`** : le `MD` de la racine contient
+  `dummy.md` + `filelist.csv`, que l'autorun du menu d'origine
+  (`cubegm/setting.xml`) lance pour démarrer TreeFrogUI. Cas réel : ces
+  deux fichiers retrouvés dans `roms\MD\` (très probablement déplacés avec
+  les jeux) → logo puis écran noir, **aucun journal écrit**
+  (`tfhijack.log` et `log.txt` inchangés). Un outil qui range ou copie
+  vers la carte ne doit jamais toucher au `MD` de la racine.
+- **`.7z` NON supportés** (vérifié le 2026-09-26 avec les journaux
+  picoarch) : FrogUI **liste** les `.7z` et les lance, mais `picoarch` ne
+  décompresse que le `.zip` (inflate/zlib seulement, « Unsupported zip
+  file ») ; un `.7z` est passé brut au cœur (`retro_load_game
+  path=….7z`, `cores.log` : « Loading 362398 bytes », taille du `.7z`
+  et non de la ROM de 524 288 octets). Résultat : écran noir, sur
+  `picodrive` comme sur `genesis_plus_gx` (le cœur, ne reconnaissant
+  pas les données, se met en mode Master System : `Screen: 256x192`).
+  Un `.7z` qui « démarre » n'est donc pas une preuve qu'il est lu.
+  **Piège pour l'outil** : le jeu apparaît dans la liste, l'utilisateur
+  ne comprend pas l'écran noir. Toujours `.zip` (deflate) ou ROM nue.
+  Confirmé le 2026-09-27 : Sonic, Aladdin, Gunstar Heroes reconvertis en
+  `.zip` fonctionnent dans `MD` et `gpgx` ; `picodrive` n'était pas en
+  cause.
+- Journaux utiles : créer un dossier vide `logs/` à la racine de la carte
+  (+ `log.txt` existant) → `logs/picoarch.log` et `logs/cores.log`.
+- Un jeu pirate (en-tête non standard) lancé depuis `MD` a fait planter
+  FrogUI (`log.txt` : `frogui exited rc=139`) -- probablement la même
+  cause (`.7z` brut), pas le jeu lui-même.
 
 ### Validation de la table ArkOS sur une vraie carte
 
@@ -204,5 +301,13 @@ vise un dossier sur l'ordinateur, copié ensuite sur la carte.
 
 - Table dArkOS non vérifiée sur une vraie carte (validation ArkOS en
   attente) ; ROCKNIX et EmuELEC non vérifiées.
-- TreeFrogUI : affichage des jeux confirmé pour `gba`/`snes` seulement.
+- TreeFrogUI : affichage des jeux confirmé pour `gba`/`snes` seulement ;
+  les `.7z` sont listés mais jamais lus (écran noir) : un rangement vers
+  TreeFrogUI devrait refuser ou convertir les `.7z` (motif
+  `extension_not_accepted`), à décider.
 - Aucun essai sur une vraie collection de ROMs (signatures d'en-tête).
+- BIOS mélangés aux jeux : non détectés, rangés comme des jeux. Il faut
+  une liste de BIOS connus (nom/CRC), en excluant les jeux intégrés tagués
+  `[BIOS]` (voir § « Les BIOS ne sont pas des ROMs »), puis les laisser en
+  place ou les envoyer vers le dossier BIOS du firmware (`cubegm/bios/`
+  pour TreeFrogUI ; à relever pour les autres firmwares).

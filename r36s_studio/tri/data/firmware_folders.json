@@ -641,7 +641,7 @@
    }
   },
   "treefrogui": {
-   "source": "Carte SF3000 HD reelle (D:\roms) + docs/cores.md present sur la carte",
+   "source": "Carte SF3000 HD reelle (roms/ sur la carte) + docs/cores.md present sur la carte",
    "source_date": "2026-09-25",
    "verified_on_hardware": true,
    "systems": {

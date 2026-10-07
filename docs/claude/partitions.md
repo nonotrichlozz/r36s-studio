@@ -137,6 +137,27 @@ exception n'a été levée. `_force_mount_macos` n'appelle ce repli qu'en
 tout dernier recours, après l'échec du montage forcé non élevé — jamais
 d'invite avant d'en avoir réellement besoin (§5).
 
+⚠️ **Même cas sous Windows, bug corrigé (confirmé sur du vrai matériel,
+carte ArkOS 256 Go GPT, 2026-10-07)** : Windows attribue une lettre à la
+partition EFI (`I:`) mais **`Get-Volume` ne renvoie aucun volume** pour
+elle. `_list_windows` ne gardait que les partitions avec volume : la BOOT
+disparaissait de la liste, la carte s'affichait « Carte non préparée »
+(A et D « non pertinentes », flash non marqué fait) et les positions
+étaient décalées d'un cran. Corrigé : une partition sans volume est gardée
+**seulement si son `GptType` est EFI** (`_EFI_SYSTEM_PARTITION_GPT_TYPE`),
+avec `partition_type="efi"` (comme `_macos_partition_type`) --
+`_looks_like_efi_boot` l'accepte alors comme BOOT. Jamais les autres
+partitions sans volume : une partition réservée Microsoft (MSR, type
+`{e3c9e316-…}`) n'en a pas non plus et fausserait la détection par
+position. **Lecture** : sans élévation, Windows refuse l'accès à cette
+partition (`I:\` comme son chemin GUID : « accès refusé ») ; **en
+administrateur, elle se lit normalement** (vérifié : `Image`, `extlinux/`,
+`.bmp`, `.dtb`) -- les étapes A/D, qui passent par le worker élevé, en
+ont l'usage. ⚠️ **Non couvert** : l'identification sans élévation
+(« Identifier ma console », lecture des `.dtb`) ne peut pas lire cette
+partition sous Windows -- pas d'équivalent Windows à
+`set_privileged_mount_hook` (macOS uniquement) à ce jour.
+
 **Vérifié séparément** : la reconnaissance d'EASYROMS fonctionne aussi
 sur ce schéma GPT, où son type de partition est « Microsoft Basic Data »
 (confirmé sur du vrai matériel) plutôt que « Windows_NTFS » comme sur les

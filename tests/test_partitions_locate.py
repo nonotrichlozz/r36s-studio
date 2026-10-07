@@ -35,6 +35,7 @@ from r36s_studio.partitions.locate import (
     _select_boot,
     _select_easyroms,
     find_partition,
+    has_boot_partition,
     locate_mounted,
     looks_like_arkos,
     selected_easyroms_partition,
@@ -954,6 +955,39 @@ def test_list_windows_single_volume_result_is_not_a_bare_dict(mock_run):
 
     assert len(partitions) == 1
     assert partitions[0].mountpoint == "E:\\"
+
+
+# Relevé réel (carte ArkOS 256 Go, GPT, 2026-10-07) : Windows ne rapporte
+# aucun volume pour la partition EFI (BOOT) -- seule la partition elle-même.
+_EFI = "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}"
+_ARKOS_GPT_WINDOWS = [
+    {"PartitionNumber": 1, "GptType": _EFI, "DriveLetter": "I", "FileSystem": None, "FileSystemLabel": "", "Size": 536870912},
+    {"PartitionNumber": 2, "GptType": "{0fc63daf-8483-4772-8e79-3d69d8477de4}", "DriveLetter": "D", "FileSystem": "", "FileSystemLabel": "", "Size": 0},
+    {"PartitionNumber": 3, "GptType": "{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}", "DriveLetter": "E", "FileSystem": "exFAT", "FileSystemLabel": "EASYROMS", "Size": 246716170240},
+]
+
+
+@patch("r36s_studio.partitions.locate.subprocess.run")
+def test_list_windows_keeps_the_efi_boot_partition_and_marks_it_efi(mock_run):
+    """Bug corrigé : la BOOT EFI disparaissait (aucun volume côté Windows),
+    la carte n'était plus reconnue comme ArkOS."""
+    mock_run.return_value = _run_result(json.dumps(_ARKOS_GPT_WINDOWS))
+
+    partitions = _list_windows(r"\\.\PhysicalDrive9902")
+
+    assert [(p.mountpoint, p.partition_type) for p in partitions] == [("I:\\", "efi"), ("D:\\", ""), ("E:\\", "")]
+    assert has_boot_partition(partitions) and looks_like_arkos(partitions)
+
+
+def test_list_windows_asks_powershell_to_keep_only_efi_partitions_without_volume():
+    """Une partition réservée Microsoft (MSR) n'a pas de volume non plus :
+    la garder décalerait la détection par position. Seul le type EFI passe."""
+    with patch("r36s_studio.partitions.locate.subprocess.run", return_value=_run_result("")) as mock_run:
+        _list_windows(r"\\.\PhysicalDrive9902")
+
+    command = mock_run.call_args.args[0][-1]
+    assert "elseif ($p.GptType -eq '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}')" in command
+    assert "e3c9e316" not in command  # jamais la partition MSR
 
 
 def test_list_windows_rejects_invalid_device_path():

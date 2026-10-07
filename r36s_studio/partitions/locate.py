@@ -521,6 +521,11 @@ def _windows_disk_number(device_path: str) -> str:
     return match.group(1)
 
 
+# GPT : « EFI System Partition » (casse minuscule, entre accolades comme
+# `Get-Partition` l'écrit).
+_EFI_SYSTEM_PARTITION_GPT_TYPE = "{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}"
+
+
 def _list_windows(device_path: str) -> list[PartitionInfo]:
     disk_number = _windows_disk_number(device_path)
     # Confirmé sur du vrai matériel (bug rapporté : « Aucune partition de
@@ -543,13 +548,27 @@ def _list_windows(device_path: str) -> list[PartitionInfo]:
     # vrai matériel (`os.listdir`/`open`, sans élévation) : une partition
     # `BOOT` sans lettre n'est donc *pas* forcément illisible, voir note de
     # module plus bas (repli `mountpoint`).
+    # Bug corrigé, confirmé sur du vrai matériel (carte ArkOS 256 Go, GPT) :
+    # Windows ne rapporte **aucun volume** (`Get-Volume` vide) pour une
+    # partition de type « EFI System Partition », alors que c'est la BOOT
+    # FAT de certaines cartes (note de module, cas déjà connu sur macOS).
+    # Elle disparaissait de la liste : BOOT introuvable, carte non reconnue
+    # comme ArkOS, et toutes les positions décalées d'un cran. Une partition
+    # sans volume est désormais gardée **si et seulement si** son type est
+    # EFI -- pas les autres (une partition réservée Microsoft, MSR, n'a pas
+    # de volume non plus et fausserait la détection par position).
     command = (
         f"Get-Partition -DiskNumber {disk_number} | Sort-Object PartitionNumber | "
         "ForEach-Object { $p = $_; $vol = $p | Get-Volume -ErrorAction SilentlyContinue; "
-        "if ($vol) { $volPath = ($p.AccessPaths | Where-Object { $_.StartsWith('\\\\?\\Volume') } "
-        "| Select-Object -First 1); $vol | Add-Member -NotePropertyName PartitionNumber "
-        "-NotePropertyValue $p.PartitionNumber -Force; $vol | Add-Member -NotePropertyName "
-        "VolumeGuidPath -NotePropertyValue $volPath -PassThru } } | ConvertTo-Json -Depth 3"
+        "$volPath = ($p.AccessPaths | Where-Object { $_.StartsWith('\\\\?\\Volume') } | Select-Object -First 1); "
+        "if ($vol) { $vol | Add-Member -NotePropertyName PartitionNumber -NotePropertyValue $p.PartitionNumber -Force; "
+        "$vol | Add-Member -NotePropertyName GptType -NotePropertyValue $p.GptType -Force; "
+        "$vol | Add-Member -NotePropertyName VolumeGuidPath -NotePropertyValue $volPath -PassThru } "
+        f"elseif ($p.GptType -eq '{_EFI_SYSTEM_PARTITION_GPT_TYPE}') {{ [pscustomobject]@{{ "
+        "PartitionNumber = $p.PartitionNumber; GptType = $p.GptType; "
+        "DriveLetter = $(if ([int][char]$p.DriveLetter) { [string]$p.DriveLetter } else { $null }); "
+        "FileSystem = $null; FileSystemLabel = ''; Size = $p.Size; VolumeGuidPath = $volPath } } } "
+        "| ConvertTo-Json -Depth 3"
     )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", command],
@@ -588,12 +607,17 @@ def _list_windows(device_path: str) -> list[PartitionInfo]:
         # carte dont une partition système garder n'est pas montable par
         # Windows, au lieu de retomber sur le repli élevé prévu pour ce cas.
         size_bytes = int(size) if size else None
+        # Même valeur que `_macos_partition_type` : `_select_boot` accepte
+        # alors la première partition EFI comme BOOT (`_looks_like_efi_
+        # boot`), système de fichiers inconnu compris.
+        is_efi = (volume.get("GptType") or "").lower() == _EFI_SYSTEM_PARTITION_GPT_TYPE
         partitions.append(
             PartitionInfo(
                 device_path=mountpoint or "",
                 label=volume.get("FileSystemLabel") or "",
                 filesystem=(volume.get("FileSystem") or "").lower(),
                 mountpoint=mountpoint,
+                partition_type="efi" if is_efi else "",
                 size_bytes=size_bytes,
             )
         )

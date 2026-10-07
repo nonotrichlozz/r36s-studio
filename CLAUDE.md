@@ -208,8 +208,9 @@ Détail et bancs de test : `docs/claude/testing.md`.
   carte : ligne « Espace de jeux recréé… » attendue dans le journal (`imaging.md`).
 - Avertissement de formatage Windows après un flash « Linux » (`firmwares-flash.md`).
 - Tour complet UAC depuis le binaire Windows empaqueté ; paquets `apt` du job
-  CI Linux ; `release.yml` (installeur Inno Setup, `.dmg`, test de fumée
-  `--version`) jamais exécuté : aucun tag `v*` créé à ce jour (`packaging.md`).
+  CI Linux ; `release.yml` (installeur Inno Setup, test de fumée `_internal`
+  + `--version`) : Release Windows seule depuis le 2026-10-07, jamais
+  encore publiée (`packaging.md`).
 - « Utiliser toute la carte » (`clone-sf3000`, carte SF3000, Windows) :
   jamais lancé depuis l'app sur une vraie carte ; durées estimées à
   recaler au premier essai (`imaging.md`).

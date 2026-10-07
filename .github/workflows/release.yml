@@ -1,7 +1,10 @@
 name: Release
 
 # Crée une Release BROUILLON à chaque tag vX.Y.Z (docs/claude/packaging.md),
-# avec R36S-Studio-Setup.exe, R36S-Studio-macOS.dmg, R36S-Studio-Linux.tar.gz.
+# avec R36S-Studio-Setup.exe -- WINDOWS UNIQUEMENT pour l'instant : la
+# publication n'attend que le job Windows. macOS et Linux sont toujours
+# construits (retour de CI) mais ne bloquent pas et ne sont pas joints ;
+# ils rejoindront la Release quand leurs constructions passeront.
 # Ces installeurs sont vendus sur la boutique : scripts/publish_release.sh
 # les retire avant de publier la Release (code et notes seulement).
 # Aucun secret : seul GITHUB_TOKEN (fourni par GitHub) est utilisé.
@@ -87,6 +90,14 @@ jobs:
           if ($setup.ExitCode -ne 0) { throw "Installation : code $($setup.ExitCode)" }
           $exe = "$env:LOCALAPPDATA\Programs\R36S Studio\R36S Studio.exe"
           if (-not (Test-Path $exe)) { throw "Introuvable apres installation : $exe" }
+          # Dossier complet : un exe sans _internal donne « Failed to load
+          # Python DLL » au lancement (signalé par un testeur).
+          $internal = Join-Path (Split-Path $exe) '_internal'
+          if (-not (Test-Path $internal)) { throw "Dossier _internal absent : $internal" }
+          # python3XX.dll (l'interpreteur), pas python3.dll (simple redirection).
+          $dll = Get-ChildItem $internal -Filter 'python3*.dll' | Where-Object { $_.Name -match '^python3\d+\.dll$' } | Select-Object -First 1
+          if (-not $dll) { throw "DLL Python absente de $internal" }
+          Write-Host "Installe : $exe + _internal ($((Get-ChildItem $internal -Recurse -File).Count) fichiers, $($dll.Name))"
           $run = Start-Process $exe -ArgumentList '--version' -Wait -PassThru
           if ($run.ExitCode -ne 0) { throw "--version : code $($run.ExitCode)" }
 
@@ -96,6 +107,7 @@ jobs:
           path: dist/R36S-Studio-Setup.exe
           retention-days: 1
 
+  # Pas encore joint à la Release (publish n'attend que Windows).
   macos:
     name: macOS (.dmg)
     needs: version
@@ -116,7 +128,7 @@ jobs:
           retention-days: 1
 
   # ponytail: .tar.gz du dossier onedir, AppImage quand une entrée .desktop
-  # existera. Un échec ici ne bloque jamais la Release (continue-on-error).
+  # existera. Pas encore joint à la Release (publish n'attend que Windows).
   linux:
     name: Linux (.tar.gz)
     needs: version
@@ -144,8 +156,10 @@ jobs:
 
   publish:
     name: Publier la Release
-    needs: [version, windows, macos, linux]
-    if: ${{ !cancelled() && needs.version.outputs.build == 'true' && needs.windows.result == 'success' && needs.macos.result == 'success' }}
+    # Windows seul : macOS et Linux échouent encore et bloquaient toute
+    # publication. Les rajouter ici (needs + download) quand ils passeront.
+    needs: [version, windows]
+    if: ${{ !cancelled() && needs.version.outputs.build == 'true' && needs.windows.result == 'success' }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -153,7 +167,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: windows
+          path: artifacts/windows
       - uses: softprops/action-gh-release@v2
         with:
           # Brouillon : visible des seuls membres du dépôt. Publié par
@@ -162,6 +177,7 @@ jobs:
           draft: true
           tag_name: v${{ needs.version.outputs.app_version }}
           target_commitish: ${{ github.sha }}
-          name: R36S Studio v${{ needs.version.outputs.app_version }}
+          name: R36S Studio v${{ needs.version.outputs.app_version }} (Windows)
           body_path: packaging/RELEASE_NOTES.md
-          files: artifacts/**/*
+          files: artifacts/windows/R36S-Studio-Setup.exe
+          fail_on_unmatched_files: true

@@ -9,10 +9,18 @@ rien n'est construit si ce tag ou une Release de ce nom existe déjà) crée une
 seuls membres du dépôt) avec `R36S-Studio-Setup.exe` (Inno Setup,
 `packaging/windows_installer.iss` : sans UAC, `{localappdata}\Programs`,
 `AppId` fixe — ne jamais le changer, sinon une mise à jour s'installe à
-côté de l'ancienne), `R36S-Studio-macOS.dmg` (`build_macos.sh dmg`) et
-`R36S-Studio-Linux.tar.gz` (non bloquant, pas encore d'AppImage). Test de
-fumée Windows : installation `/VERYSILENT` puis `R36S Studio.exe
---version`. Artefacts Actions : passage entre jobs uniquement, rétention
+côté de l'ancienne). **Windows uniquement pour l'instant** (2026-10-07) :
+le job `publish` n'attend que le job Windows et ne joint que son
+installeur -- il attendait aussi macOS, qui échoue, si bien que rien
+n'était jamais publié. `R36S-Studio-macOS.dmg` (`build_macos.sh dmg`) et
+`R36S-Studio-Linux.tar.gz` (pas encore d'AppImage) sont toujours
+construits pour le retour de CI, sans bloquer ni être joints ; les
+rajouter à `publish` (`needs` + `download-artifact`) et remettre leurs
+instructions (commentées dans `packaging/RELEASE_NOTES.md`) quand ils
+passeront. Test de fumée Windows : installation `/VERYSILENT`, présence
+de `_internal` et de `python3XX.dll` (un exe sans son dossier donne
+« Failed to load Python DLL », signalé par un testeur), puis
+`R36S Studio.exe --version`. Artefacts Actions : passage entre jobs uniquement, rétention
 1 jour (sur un dépôt public, tout compte connecté peut les télécharger) ;
 `build.yml` n'en produit plus. `scripts/publish_release.sh <tag>` retire
 tous les fichiers du brouillon, refuse de continuer s'il en reste, puis

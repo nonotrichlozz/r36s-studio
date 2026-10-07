@@ -29,14 +29,29 @@ class SafetyConfig:
     app_path: str = field(default_factory=_default_app_path)
 
 
+def _realpath_or_none(path: str) -> str | None:
+    """`os.path.realpath`, ou `None` si le volume est illisible. Bug corrigé,
+    constaté sur le binaire installé : un lecteur de carte **vide** lève
+    `[WinError 1005] Le volume ne contient pas de système de fichiers connu`
+    (1005 n'est pas dans les erreurs tolérées par `realpath` sous Windows) --
+    l'application ne démarrait plus du tout, dès le premier filtrage."""
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return None
+
+
 def _contains_app_path(device: Device, app_path: str) -> bool:
     """Vrai si un des points de montage du périphérique est un ancêtre (ou
-    l'égal) du dossier de l'application."""
-    app_real = os.path.realpath(app_path)
+    l'égal) du dossier de l'application. Un volume illisible est ignoré :
+    l'application, qui s'exécute, ne peut pas être dessus."""
+    app_real = _realpath_or_none(app_path) or os.path.abspath(app_path)
     for mountpoint in device.mountpoints:
         if not mountpoint:
             continue
-        mount_real = os.path.realpath(mountpoint)
+        mount_real = _realpath_or_none(mountpoint)
+        if mount_real is None:
+            continue
         try:
             common = os.path.commonpath([app_real, mount_real])
         except ValueError:

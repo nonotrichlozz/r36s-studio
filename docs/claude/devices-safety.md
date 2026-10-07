@@ -56,6 +56,21 @@ Un périphérique est **refusé** si l'une de ces conditions est vraie :
 Un périphérique refusé n'apparaît pas dans la liste — il ne suffit pas de le griser.
 Aucune sélection par défaut : l'utilisateur choisit toujours activement.
 
+⚠️ **Bug corrigé, constaté sur le binaire installé (2026-10-07) : un
+lecteur de carte vide empêchait l'application de démarrer.**
+`_contains_app_path` appelait `os.path.realpath` sur chaque point de montage ;
+pour un lecteur sans carte, Windows lève `[WinError 1005] Le volume ne
+contient pas de système de fichiers connu`, code absent des erreurs que
+`realpath` tolère (`ntpath.allowed_winerror`) -- exception non rattrapée dès
+`_refresh_home_state`. Désormais `_realpath_or_none` : un volume illisible est
+ignoré (l'application, qui s'exécute, ne peut pas être dessus) ; un autre
+volume du même périphérique qui contient l'application le fait toujours
+refuser. Non reproduit sur la machine de dev (Python 3.14 : `realpath('D:\\')`
+d'une partition Linux y répond normalement) ; le binaire de la CI utilise
+Python 3.11 -- d'où un test qui simule l'erreur (`tests/test_safety.py`). Seul
+appel de ce genre dans `safety/` et `devices/` (ce dernier n'interroge le
+système que par des commandes, jamais un chemin de volume).
+
 **Diagnostic dans le journal** : `safety.describe_rejection` (nouveau,
 mêmes règles que `is_allowed` mais avec la raison) permet à
 `_list_devices_with_diagnostics` de tracer, à chaque sondage dont le

@@ -183,3 +183,51 @@ def test_describe_rejection_flags_oversized(config):
     reason = describe_rejection(device, config)
     assert reason is not None
     assert "taille" in reason
+
+
+# --- volume illisible (lecteur de carte vide) -------------------------------
+#
+# Bug corrigé, constaté sur le binaire installé : `realpath` d'un lecteur de
+# carte vide lève `[WinError 1005] Le volume ne contient pas de système de
+# fichiers connu` -- l'application ne démarrait plus (filter_devices dès
+# _refresh_home_state).
+
+
+def _realpath_failing_on(unreadable):
+    import os
+
+    real_realpath = os.path.realpath
+
+    def fake(path, *args, **kwargs):
+        if str(path) == unreadable:
+            raise OSError(22, "Le volume ne contient pas de système de fichiers connu", unreadable, 1005)
+        return real_realpath(path, *args, **kwargs)
+
+    return fake
+
+
+def test_unreadable_volume_never_crashes_the_filter(config, monkeypatch):
+    monkeypatch.setattr("r36s_studio.safety.os.path.realpath", _realpath_failing_on("D:\\"))
+    empty_reader = make_device(display="Lecteur de carte vide", mountpoints=["D:\\"])
+    card = make_device(display="Carte", mountpoints=["/media/sdcard"])
+
+    assert describe_rejection(empty_reader, config) is None  # ignoré, pas d'exception
+    assert filter_devices([empty_reader, card], config) == [empty_reader, card]
+
+
+def test_unreadable_volume_does_not_hide_the_app_on_another_volume(tmp_path, monkeypatch):
+    """Un volume illisible est ignoré, pas le périphérique : un autre de ses
+    volumes qui contient l'application le fait toujours refuser."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    monkeypatch.setattr("r36s_studio.safety.os.path.realpath", _realpath_failing_on("D:\\"))
+    device = make_device(mountpoints=["D:\\", str(tmp_path)])
+
+    assert describe_rejection(device, SafetyConfig(app_path=str(app_dir))) == "contient le dossier de l'application"
+
+
+def test_unresolvable_app_path_falls_back_to_abspath(tmp_path, monkeypatch):
+    app_dir = str(tmp_path / "app")
+    monkeypatch.setattr("r36s_studio.safety.os.path.realpath", _realpath_failing_on(app_dir))
+
+    assert is_allowed(make_device(), SafetyConfig(app_path=app_dir)) is True

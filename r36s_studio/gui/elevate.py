@@ -51,12 +51,14 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import json
 import os
 import platform
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from ctypes import wintypes
@@ -904,3 +906,46 @@ def has_full_disk_access() -> bool:
         return True
     except OSError:
         return False
+
+
+# --- identification élevée (Windows, BOOT EFI -- §4.4) ---------------------
+#
+# Équivalent Windows de `run_privileged_mount` (macOS) : confirmé sur du vrai
+# matériel (carte ArkOS GPT, 2026-10-07), Windows refuse la lecture d'une
+# partition EFI sans élévation -- `I:\` comme son chemin GUID (« accès
+# refusé ») -- mais la lit normalement en administrateur. Plutôt qu'un
+# montage, c'est l'identification elle-même qui passe par le worker élevé
+# (`__main__.py::cmd_identify`, événement `identify_result`), de façon
+# synchrone : une lecture de quelques `.dtb` n'a besoin ni de progression ni
+# d'annulation.
+
+
+def run_elevated_identify(boot_dir: str, parent_hwnd: Optional[int] = None) -> Optional[dict]:
+    """Lance `identify --boot-dir boot_dir` dans le worker élevé (invite UAC)
+    et attend sa fin. Retourne le dictionnaire de l'événement
+    `identify_result` (`identify.result_from_dict`), ou `None` si le worker
+    s'est arrêté sans en émettre. Lève `ElevationRefusedError` si
+    l'utilisateur refuse l'invite, `OSError` si l'élévation échoue
+    autrement. À appeler hors du thread Qt principal : bloque jusqu'à la
+    fin du worker."""
+    fd, progress_path = tempfile.mkstemp(prefix="r36s_identify_", suffix=".jsonl")
+    os.close(fd)
+    try:
+        process = launch_elevated_worker(
+            ["identify", "--boot-dir", boot_dir, "--worker", "--progress-file", progress_path],
+            parent_hwnd=parent_hwnd,
+        )
+        process.wait()
+        for line in Path(progress_path).read_text(encoding="utf-8").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and event.get("type") == "identify_result":
+                return event.get("result")
+        return None
+    finally:
+        try:
+            os.unlink(progress_path)
+        except OSError:
+            pass

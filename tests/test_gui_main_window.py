@@ -913,7 +913,9 @@ def test_start_assisted_identify_single_device_runs_identify_and_shows_result(
         mock_runner_class.return_value = instance
         window._assisted_landing.identify_requested.emit()
 
-        mock_runner_class.assert_called_once_with(device.path, parent=window)
+        mock_runner_class.assert_called_once()
+        assert mock_runner_class.call_args.args == (device.path,)
+        assert mock_runner_class.call_args.kwargs["parent"] is window
         instance.start.assert_called_once()
         callback = instance.finished_identify.connect.call_args[0][0]
         callback(IdentifyResult(info=DtbInfo(board_compatible="rk3326-r35s", panel_compatible=None)))
@@ -6290,3 +6292,42 @@ def test_update_dialog_button_opens_store(mock_list, mock_filter, mock_load, qap
         dialog = window.findChild(UpdateDialog)
         dialog.download_requested.emit()
     mock_open.assert_called_once_with(update_check.STORE_URL)
+
+
+# --- identification élevée sous Windows (BOOT EFI) ---------------------------
+
+
+def test_windows_elevated_identify_turns_a_refused_uac_prompt_into_a_clear_result():
+    from r36s_studio.gui import elevate
+    from r36s_studio.gui.main_window import _identify_with_windows_elevation
+    from r36s_studio.identify import IdentifyFailureReason
+
+    with patch("r36s_studio.gui.main_window.elevate.run_elevated_identify", side_effect=elevate.ElevationRefusedError("refus")):
+        refused = _identify_with_windows_elevation("I:\\", None)
+    with patch("r36s_studio.gui.main_window.elevate.run_elevated_identify", return_value=None):
+        silent = _identify_with_windows_elevation("I:\\", None)
+    with patch(
+        "r36s_studio.gui.main_window.elevate.run_elevated_identify",
+        return_value={"info": {"board_compatible": "rockchip,rk3326-evb-lp3-v12-linux", "panel_compatible": None, "timings": {}}, "failure_reason": None, "is_clone": True},
+    ):
+        ok = _identify_with_windows_elevation("I:\\", None)
+
+    assert refused.failure_reason == IdentifyFailureReason.ELEVATION_REFUSED
+    assert silent.failure_reason == IdentifyFailureReason.ACCESS_DENIED
+    assert ok.ok and ok.is_clone and ok.info.board_compatible == "rockchip,rk3326-evb-lp3-v12-linux"
+
+
+@patch("r36s_studio.gui.main_window.platform.system", return_value="Windows")
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_identify_on_windows_gives_the_runner_an_elevated_reader(mock_list, mock_filter, mock_detect, mock_system, qapp):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    window = MainWindow()
+
+    with patch("r36s_studio.gui.main_window.IdentifyRunner") as mock_runner_class:
+        window._run_identify(device)
+
+    assert callable(mock_runner_class.call_args.kwargs["elevated_identify"])

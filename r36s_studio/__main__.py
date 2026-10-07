@@ -83,7 +83,7 @@ from r36s_studio import APP_VERSION
 from r36s_studio.detect import COPY_GAMES, EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, arkos_step_refusal
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons.journal_check import verify_journal
-from r36s_studio.identify import identify_from_boot_directory
+from r36s_studio.identify import identify_from_boot_directory, result_to_dict
 from r36s_studio.imaging import (
     DEFAULT_RESET_LABEL,
     CardTooSmallForReset,
@@ -128,6 +128,7 @@ from r36s_studio.protocol import configure as configure_protocol
 from r36s_studio.protocol import (
     emit_done,
     emit_eject_result,
+    emit_identify_result,
     emit_error,
     emit_estimate,
     emit_log,
@@ -1128,8 +1129,20 @@ def cmd_identify(args: argparse.Namespace) -> int:
     valider le parseur DTB et la future table de correspondance sur des
     variantes de console fournies par d'autres utilisateurs (un dossier
     de `.dtb` reçu par e-mail, une archive déjà extraite...), pas
-    seulement sur la propre carte du développeur."""
+    seulement sur la propre carte du développeur.
+
+    Avec `--progress-file` (worker élevé, Windows : BOOT EFI lisible
+    seulement en administrateur, `gui/elevate.py::run_elevated_identify`),
+    le résultat part en un événement `identify_result` dans ce fichier."""
     result = identify_from_boot_directory(args.boot_dir)
+    progress_file = _open_progress_file(args)
+    if progress_file is not None:
+        try:
+            emit_identify_result(result_to_dict(result))
+            emit_done(True)
+        finally:
+            progress_file.close()
+        return 0
 
     print(f"Dossier examiné : {result.scanned_directory}")
     if result.examined_files:
@@ -1501,6 +1514,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Dossier contenant des .dtb à analyser (BOOT déjà extrait, ou fourni par un autre utilisateur)",
     )
+    _add_worker_args(identify_parser)
     identify_parser.set_defaults(func=cmd_identify)
 
     doublons_verify_journal_parser = subparsers.add_parser(

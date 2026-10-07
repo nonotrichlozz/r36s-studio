@@ -65,7 +65,8 @@ sans interface (c'est un CLI : `python -m r36s_studio <commande>`).
 **Protocole GUI ↔ worker** — une ligne JSON par événement (`protocol.py`) :
 `progress` (`done`/`total`/`speed`), `log` (`level`/`msg`), `error`
 (`code`/`msg`), `done` (`ok`), plus `estimate` (`size_bytes`), `step_progress`
-(`step_index`/`step_count`/`step_name`) et `eject_result`.
+(`step_index`/`step_count`/`step_name`), `eject_result` et `identify_result`
+(`result`, identification élevée sous Windows).
 
 **Élévation, par OS** (détail et pièges macOS : `docs/claude/elevation-macos.md`) :
 
@@ -214,6 +215,10 @@ Détail et bancs de test : `docs/claude/testing.md`.
   recaler au premier essai (`imaging.md`).
 - Chien de garde du sondage : ne détecte qu'un ralentissement, jamais un arrêt
   complet du minuteur (`assisted-wizard.md`).
+- « Identifier ma console » sur une carte à BOOT EFI : vérifié sous Windows
+  (worker élevé) ; sous Linux, montage `udisksctl` d'une partition EFI non
+  vérifié -- un refus donnerait le message « protection de l'ordinateur »,
+  sans relecture élevée (`elevation-macos.md`).
 
 ---
 

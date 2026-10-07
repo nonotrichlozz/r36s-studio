@@ -1147,3 +1147,47 @@ def test_has_full_disk_access_true_on_non_macos_without_filesystem_check(mock_sy
     toujours `True`, sans même tenter de lire le système de fichiers."""
     assert elevate.has_full_disk_access() is True
     mock_listdir.assert_not_called()
+
+
+# --- run_elevated_identify (Windows, BOOT EFI) -------------------------------
+
+
+def test_run_elevated_identify_returns_the_worker_result_and_cleans_up(tmp_path):
+    import json
+
+    seen = {}
+
+    class _Process:
+        def wait(self):
+            return 0
+
+    def fake_launch(argv, parent_hwnd=None, **kwargs):
+        progress = argv[argv.index("--progress-file") + 1]
+        seen["argv"], seen["progress"], seen["hwnd"] = argv, progress, parent_hwnd
+        with open(progress, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "identify_result", "result": {"failure_reason": None, "is_clone": True}}) + "\n")
+            f.write(json.dumps({"type": "done", "ok": True}) + "\n")
+        return _Process()
+
+    with patch("r36s_studio.gui.elevate.launch_elevated_worker", side_effect=fake_launch):
+        result = elevate.run_elevated_identify("I:\\", parent_hwnd=42)
+
+    assert result == {"failure_reason": None, "is_clone": True}
+    assert seen["argv"][:3] == ["identify", "--boot-dir", "I:\\"] and "--worker" in seen["argv"]
+    assert seen["hwnd"] == 42
+    assert not os.path.exists(seen["progress"])
+
+
+def test_run_elevated_identify_returns_none_when_worker_emits_nothing():
+    class _Process:
+        def wait(self):
+            return 1
+
+    with patch("r36s_studio.gui.elevate.launch_elevated_worker", return_value=_Process()):
+        assert elevate.run_elevated_identify("I:\\") is None
+
+
+def test_run_elevated_identify_lets_a_refused_uac_prompt_through():
+    with patch("r36s_studio.gui.elevate.launch_elevated_worker", side_effect=elevate.ElevationRefusedError("refus")):
+        with pytest.raises(elevate.ElevationRefusedError):
+            elevate.run_elevated_identify("I:\\")

@@ -16,7 +16,8 @@ EMUELEC_R36S_RELEASES_URL`, §5)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import os
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Union
@@ -30,6 +31,8 @@ __all__ = [
     "IdentifyResult",
     "IdentifyFailureReason",
     "CLONE_DTB_FILENAMES",
+    "result_to_dict",
+    "result_from_dict",
 ]
 
 # Noms de fichier `.dtb` connus pour désigner une console clone plutôt
@@ -49,6 +52,13 @@ class IdentifyFailureReason(Enum):
     MOUNT_FAILED = "mount_failed"  # BOOT non montable -- carte illisible/défaillante, courant sur les cartes fournies avec la console
     NO_DTB_FOUND = "no_dtb_found"  # partition lisible, aucun .dtb dessus (ex. carte fraîchement flashée)
     ALL_DTB_INVALID = "all_dtb_invalid"  # .dtb présents mais tous illisibles, corrompus, ou sans compatible racine exploitable
+    # Le système d'exploitation refuse de lire la partition (Windows : BOOT
+    # EFI, lisible seulement en administrateur, docs/claude/partitions.md) --
+    # jamais confondu avec NO_DTB_FOUND, qui ferait croire à une carte vide.
+    ACCESS_DENIED = "access_denied"
+    # L'autorisation demandée pour lire quand même (invite UAC) a été
+    # refusée ou fermée par l'utilisateur.
+    ELEVATION_REFUSED = "elevation_refused"
 
 
 @dataclass
@@ -87,6 +97,17 @@ def identify_from_boot_directory(directory: Union[str, Path]) -> IdentifyResult:
     les cas le chemin monté et la liste des fichiers examinés »)."""
     root = Path(directory)
     scanned_directory = str(root)
+    # Accès refusé à la racine : la partition existe mais l'OS en interdit
+    # la lecture (`rglob` ci-dessous avalerait l'erreur et ferait croire à
+    # une carte sans `.dtb`).
+    try:
+        os.listdir(root)
+    except PermissionError as exc:
+        return IdentifyResult(
+            failure_reason=IdentifyFailureReason.ACCESS_DENIED, scanned_directory=scanned_directory, detail=str(exc)
+        )
+    except OSError:
+        pass
     try:
         candidates = sorted(root.rglob("*.dtb"))
     except OSError:
@@ -123,4 +144,25 @@ def identify_from_boot_directory(directory: Union[str, Path]) -> IdentifyResult:
         scanned_directory=scanned_directory,
         examined_files=examined_files,
         is_clone=is_clone,
+    )
+
+
+def result_to_dict(result: IdentifyResult) -> dict:
+    """Forme JSON d'un `IdentifyResult` -- transport depuis le worker élevé
+    (`__main__.py::cmd_identify`, événement `identify_result`)."""
+    data = asdict(result)
+    data["failure_reason"] = result.failure_reason.value if result.failure_reason else None
+    return data
+
+
+def result_from_dict(data: dict) -> IdentifyResult:
+    info = data.get("info")
+    reason = data.get("failure_reason")
+    return IdentifyResult(
+        info=DtbInfo(**info) if info else None,
+        failure_reason=IdentifyFailureReason(reason) if reason else None,
+        scanned_directory=data.get("scanned_directory"),
+        examined_files=list(data.get("examined_files") or []),
+        detail=data.get("detail"),
+        is_clone=bool(data.get("is_clone")),
     )

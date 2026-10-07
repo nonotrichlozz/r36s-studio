@@ -100,3 +100,28 @@ def test_cmd_identify_handles_nonexistent_directory_without_crashing(tmp_path, c
     code = args.func(args)
 
     assert code == 1
+
+
+def test_cmd_identify_in_worker_mode_writes_the_result_to_the_progress_file(tmp_path):
+    """Worker élevé (Windows, BOOT EFI) : le résultat part en un événement
+    `identify_result` que `gui/elevate.py::run_elevated_identify` relit."""
+    import json
+
+    from tests.test_identify_dtb import _build_fake_dtb
+
+    (tmp_path / "board.dtb").write_bytes(_build_fake_dtb())
+    progress = tmp_path / "progress.jsonl"
+
+    args = _parse(["identify", "--boot-dir", str(tmp_path), "--worker", "--progress-file", str(progress)])
+    try:
+        code = args.func(args)
+    finally:
+        from r36s_studio import protocol
+
+        protocol.configure(None)
+
+    events = [json.loads(line) for line in progress.read_text(encoding="utf-8").splitlines()]
+    assert code == 0
+    assert events[0]["type"] == "identify_result"
+    assert events[0]["result"]["info"]["board_compatible"] == "rk3326-evb-lp3-v12"
+    assert events[-1] == {"type": "done", "ok": True}

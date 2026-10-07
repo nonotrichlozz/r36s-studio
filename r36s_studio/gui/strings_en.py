@@ -99,6 +99,15 @@ STRINGS_EN = {
         "No model information found on this card -- this is normal for a card that was just flashed."
     ),
     "identify_failed_all_dtb_invalid": "The model information on this card is unreadable or corrupted.",
+    "identify_failed_access_denied": (
+        "Your computer refused to read the card's system. Your card is not the problem: this is a "
+        "protection of the computer. Try again, and accept the permission request if it appears."
+    ),
+    "identify_failed_elevation_refused": (
+        "To read your console's model, Windows needs your permission (\"Do you want to allow this app "
+        "to make changes to your device?\" window). It was refused or closed. Nothing is wrong with "
+        "your card: start the identification again and answer \"Yes\"."
+    ),
     "doublons_back_button": "Back",
     "doublons_folder_title": "Choose a folder",
     "doublons_folder_hint": "Choose the folder to scan -- on your computer, an SD card or an external drive.",

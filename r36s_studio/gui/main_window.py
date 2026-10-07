@@ -61,7 +61,7 @@ from r36s_studio.doublons.move import (
 from r36s_studio.doublons.report import build_report
 from r36s_studio.doublons.safety import is_filesystem_root, is_whole_user_folder
 from r36s_studio.doublons.scan import Unit
-from r36s_studio.identify import IdentifyResult
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, result_from_dict
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.imaging import (
     DEFAULT_RESET_LABEL,
@@ -301,6 +301,29 @@ def _journaliser_android_erreur_recherche(url: str, code: str, message: str) -> 
             )
     except OSError:
         pass
+
+
+def _identify_with_windows_elevation(boot_dir: str, parent_hwnd: Optional[int]) -> IdentifyResult:
+    """Relecture du BOOT par le worker élevé (`elevate.run_elevated_
+    identify`) quand Windows en refuse l'accès sans élévation (partition
+    EFI, docs/claude/partitions.md). Une invite UAC refusée devient
+    `ELEVATION_REFUSED` (message : « autorisation Windows nécessaire »),
+    jamais une carte illisible ou mal préparée."""
+    try:
+        data = elevate.run_elevated_identify(boot_dir, parent_hwnd=parent_hwnd)
+    except elevate.ElevationRefusedError as exc:
+        return IdentifyResult(
+            failure_reason=IdentifyFailureReason.ELEVATION_REFUSED, scanned_directory=boot_dir, detail=str(exc)
+        )
+    except OSError as exc:
+        return IdentifyResult(failure_reason=IdentifyFailureReason.ACCESS_DENIED, scanned_directory=boot_dir, detail=str(exc))
+    if data is None:
+        return IdentifyResult(
+            failure_reason=IdentifyFailureReason.ACCESS_DENIED,
+            scanned_directory=boot_dir,
+            detail="le worker élevé s'est arrêté sans renvoyer de résultat d'identification",
+        )
+    return result_from_dict(data)
 
 
 class MainWindow(QMainWindow):
@@ -2182,7 +2205,16 @@ class MainWindow(QMainWindow):
     def _run_identify(self, device: Device) -> None:
         self._home.set_busy(True)
         self._assisted_landing.set_busy(True)
-        self._identify_runner = IdentifyRunner(device.path, parent=self)
+        elevated = None
+        if platform.system() == "Windows":
+            # Handle lu ici, sur le thread Qt principal : la fonction tourne
+            # ensuite sur le thread de `IdentifyRunner`.
+            try:
+                parent_hwnd: Optional[int] = int(self.winId())
+            except (RuntimeError, TypeError, ValueError):
+                parent_hwnd = None
+            elevated = lambda boot_dir: _identify_with_windows_elevation(boot_dir, parent_hwnd)  # noqa: E731
+        self._identify_runner = IdentifyRunner(device.path, parent=self, elevated_identify=elevated)
         self._identify_runner.finished_identify.connect(self._on_identify_finished)
         self._identify_runner.start()
 

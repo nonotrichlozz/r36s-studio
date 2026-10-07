@@ -3227,6 +3227,8 @@ _IDENTIFY_FAILURE_MESSAGE_KEYS = {
     IdentifyFailureReason.MOUNT_FAILED: "identify_failed_mount_failed",
     IdentifyFailureReason.NO_DTB_FOUND: "identify_failed_no_dtb_found",
     IdentifyFailureReason.ALL_DTB_INVALID: "identify_failed_all_dtb_invalid",
+    IdentifyFailureReason.ACCESS_DENIED: "identify_failed_access_denied",
+    IdentifyFailureReason.ELEVATION_REFUSED: "identify_failed_elevation_refused",
 }
 
 

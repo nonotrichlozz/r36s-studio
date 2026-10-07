@@ -153,10 +153,10 @@ position. **Lecture** : sans élévation, Windows refuse l'accès à cette
 partition (`I:\` comme son chemin GUID : « accès refusé ») ; **en
 administrateur, elle se lit normalement** (vérifié : `Image`, `extlinux/`,
 `.bmp`, `.dtb`) -- les étapes A/D, qui passent par le worker élevé, en
-ont l'usage. ⚠️ **Non couvert** : l'identification sans élévation
-(« Identifier ma console », lecture des `.dtb`) ne peut pas lire cette
-partition sous Windows -- pas d'équivalent Windows à
-`set_privileged_mount_hook` (macOS uniquement) à ce jour.
+ont l'usage. **« Identifier ma console »** (sans élévation) : corrigé
+aussi, voir `elevation-macos.md` (« Identification élevée sous Windows ») --
+l'accès refusé n'est plus confondu avec « aucun `.dtb` » (`IdentifyFailure
+Reason.ACCESS_DENIED`) et la lecture repasse par le worker élevé.
 
 **Vérifié séparément** : la reconnaissance d'EASYROMS fonctionne aussi
 sur ce schéma GPT, où son type de partition est « Microsoft Basic Data »

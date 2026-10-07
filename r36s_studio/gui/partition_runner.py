@@ -18,7 +18,7 @@ import platform
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import QThread, Signal
 
@@ -311,9 +311,19 @@ class IdentifyRunner(QThread):
 
     finished_identify = Signal(object)  # IdentifyResult
 
-    def __init__(self, device_path: str, parent=None):
+    def __init__(
+        self,
+        device_path: str,
+        parent=None,
+        elevated_identify: Optional[Callable[[str], IdentifyResult]] = None,
+    ):
+        """`elevated_identify(boot_dir)` : relecture avec élévation quand
+        l'OS refuse l'accès au BOOT (`ACCESS_DENIED` -- Windows, partition
+        EFI), fournie par `main_window.py` sur Windows uniquement ; `None`
+        ailleurs, le refus est alors rapporté tel quel."""
         super().__init__(parent)
         self._device_path = device_path
+        self._elevated_identify = elevated_identify
 
     def run(self) -> None:
         try:
@@ -328,6 +338,8 @@ class IdentifyRunner(QThread):
             return
         try:
             result = identify_from_boot_directory(boot.mountpoint)
+            if result.failure_reason == IdentifyFailureReason.ACCESS_DENIED and self._elevated_identify is not None:
+                result = self._elevated_identify(boot.mountpoint)
         finally:
             unmount_forced(boot)
         self.finished_identify.emit(result)

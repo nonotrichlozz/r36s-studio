@@ -475,3 +475,49 @@ def test_system_backup_estimate_runner_requests_elevation_when_light_estimate_un
     # Déjà tentée à ce stade -- l'appelant n'a pas besoin de la refaire
     # après le repli élevé.
     assert results[0].board_compatible == "rk3326-r35s"
+
+
+# --- IdentifyRunner : relecture élevée quand l'OS refuse l'accès au BOOT -----
+
+
+def _boot(mountpoint="I:\\"):
+    from r36s_studio.partitions.locate import PartitionInfo
+
+    return PartitionInfo(mountpoint, "", "", mountpoint, partition_type="efi")
+
+
+def test_identify_runner_uses_the_elevated_reader_when_access_is_denied(qapp):
+    from r36s_studio.gui.partition_runner import IdentifyRunner
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+    from r36s_studio.identify.dtb import DtbInfo
+
+    denied = IdentifyResult(failure_reason=IdentifyFailureReason.ACCESS_DENIED)
+    elevated_result = IdentifyResult(info=DtbInfo(board_compatible="rockchip,rk3326-evb-lp3-v12-linux", panel_compatible=None))
+    calls, results = [], []
+    runner = IdentifyRunner("/dev/fake-disk-test-9", elevated_identify=lambda boot_dir: calls.append(boot_dir) or elevated_result)
+    runner.finished_identify.connect(results.append)
+
+    with patch("r36s_studio.gui.partition_runner.locate_mounted", return_value=_boot()), patch(
+        "r36s_studio.gui.partition_runner.identify_from_boot_directory", return_value=denied
+    ), patch("r36s_studio.gui.partition_runner.unmount_forced"):
+        runner.run()
+
+    assert calls == ["I:\\"]
+    assert results == [elevated_result]
+
+
+def test_identify_runner_without_elevated_reader_reports_access_denied(qapp):
+    from r36s_studio.gui.partition_runner import IdentifyRunner
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+
+    denied = IdentifyResult(failure_reason=IdentifyFailureReason.ACCESS_DENIED)
+    results = []
+    runner = IdentifyRunner("/dev/fake-disk-test-9")
+    runner.finished_identify.connect(results.append)
+
+    with patch("r36s_studio.gui.partition_runner.locate_mounted", return_value=_boot()), patch(
+        "r36s_studio.gui.partition_runner.identify_from_boot_directory", return_value=denied
+    ), patch("r36s_studio.gui.partition_runner.unmount_forced"):
+        runner.run()
+
+    assert results == [denied]

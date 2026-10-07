@@ -3471,3 +3471,19 @@ def test_home_screen_row_titles_wrap_instead_of_being_clipped(qapp):
     wrapped = [label for label in labels if label.property("role") in ("rowTitle", "rowDesc")]
     assert len(wrapped) == 2
     assert all(label.wordWrap() for label in wrapped)
+
+
+def test_identify_result_dialog_explains_windows_permission_never_a_bad_card(qapp):
+    """Accès refusé / autorisation Windows refusée : l'utilisateur doit
+    comprendre qu'une autorisation est nécessaire, jamais que sa carte est
+    illisible, vide ou mal préparée."""
+    from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+
+    dialog = IdentifyResultDialog()
+    for reason in (IdentifyFailureReason.ACCESS_DENIED, IdentifyFailureReason.ELEVATION_REFUSED):
+        dialog.set_result(IdentifyResult(failure_reason=reason))
+        text = dialog._message.text()
+        assert "autorisation" in text
+        assert "carte n" in text  # « Ta carte n'est pas en cause » / « n'a rien d'anormal »
+        assert "flashée" not in text and "Débranche" not in text
+    assert "Windows" in dialog._message.text()

@@ -99,6 +99,35 @@ structure et les attributs étendus d'un vrai bundle `.app`) ; la CI
 plutôt que de dupliquer la logique d'empaquetage — une seule source de
 vérité sur le contenu de l'archive distribuée, locale comme CI.
 
+✅ **Identification élevée sous Windows (BOOT EFI), équivalent de
+`set_privileged_mount_hook`** -- confirmé sur du vrai matériel (carte
+ArkOS GPT, 2026-10-07) : Windows refuse sans élévation la lecture d'une
+partition EFI (`I:\` comme son chemin GUID, `WinError 5`). « Identifier
+ma console » affichait alors « Aucune information de modèle -- normal
+pour une carte tout juste flashée » : `identify_from_boot_directory`
+avalait l'erreur comme une absence de `.dtb`.
+- `identify_from_boot_directory` sonde la racine (`os.listdir`) : un
+  `PermissionError` donne `IdentifyFailureReason.ACCESS_DENIED`, jamais
+  `NO_DTB_FOUND`.
+- `gui/elevate.py::run_elevated_identify(boot_dir, parent_hwnd)` :
+  synchrone, comme `run_privileged_mount` (macOS) -- lance le worker élevé
+  `identify --boot-dir … --worker --progress-file …` (invite UAC), attend
+  sa fin, relit l'événement `identify_result`
+  (`protocol.emit_identify_result`, `identify.result_to_dict`/
+  `result_from_dict`). Lève `ElevationRefusedError` si l'invite est
+  refusée.
+- `IdentifyRunner(…, elevated_identify=…)` ne l'appelle que sur
+  `ACCESS_DENIED` ; `main_window.py` ne la fournit que sous Windows
+  (`_identify_with_windows_elevation`, handle de fenêtre lu sur le thread
+  Qt principal). Invite refusée → `ELEVATION_REFUSED`, message « Windows a
+  besoin de ton autorisation… Ta carte n'a rien d'anormal » ; accès refusé
+  sinon → « Ton ordinateur a refusé de lire… c'est une protection de
+  l'ordinateur » -- jamais « carte illisible » ni « tout juste flashée ».
+- Vérifié de bout en bout sur la vraie carte (mode développement) :
+  `ACCESS_DENIED` sans élévation, puis après UAC (~1 s) carte identifiée
+  `rockchip,rk3326-evb-lp3-v12-linux`, écran `sitronix,st7703`, console
+  clone détectée.
+
 ✅ **Fenêtre de console du worker élevé masquée sur Windows** (§1/§3) --
 `ShellExecuteExW` (`gui/elevate.py::_launch_windows`) ouvrait jusqu'ici
 le worker élevé avec `nShow=SW_SHOWNORMAL` : une fenêtre de console

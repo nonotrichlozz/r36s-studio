@@ -191,3 +191,37 @@ def test_clone_detection_does_not_require_a_valid_dtb_parse(tmp_path):
 
     assert result.failure_reason == IdentifyFailureReason.ALL_DTB_INVALID
     assert result.is_clone is True
+
+
+# --- accès refusé (Windows, BOOT EFI) et transport depuis le worker élevé ----
+
+
+def test_access_denied_is_never_reported_as_no_dtb_found(tmp_path, monkeypatch):
+    """Bug corrigé, carte ArkOS GPT réelle : sans élévation, Windows refuse
+    de lire la partition EFI ; le message disait « aucune information de
+    modèle -- normal pour une carte tout juste flashée »."""
+
+    def denied(path):
+        raise PermissionError(5, "Accès refusé", str(path))
+
+    monkeypatch.setattr("r36s_studio.identify.os.listdir", denied)
+
+    result = identify_from_boot_directory(tmp_path)
+
+    assert result.failure_reason == IdentifyFailureReason.ACCESS_DENIED
+    assert "Accès refusé" in result.detail
+
+
+def test_result_survives_the_trip_through_the_worker():
+    from r36s_studio.identify import result_from_dict, result_to_dict
+
+    original = IdentifyResult(
+        info=DtbInfo(board_compatible="rockchip,rk3326-evb-lp3-v12-linux", panel_compatible="sitronix,st7703", timings={"hactive": 640}),
+        scanned_directory="I:\\",
+        examined_files=["I:\\a.dtb"],
+        is_clone=True,
+    )
+    failure = IdentifyResult(failure_reason=IdentifyFailureReason.ACCESS_DENIED, detail="refus")
+
+    assert result_from_dict(result_to_dict(original)) == original
+    assert result_from_dict(result_to_dict(failure)) == failure

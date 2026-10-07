@@ -171,6 +171,19 @@ STRINGS = {
     "identify_failed_all_dtb_invalid": (
         "Les informations de modèle présentes sur cette carte sont illisibles ou corrompues."
     ),
+    # Lecture du système de la carte refusée par l'ordinateur (Windows :
+    # partition protégée, lisible seulement avec autorisation) -- jamais
+    # présenté comme une carte abîmée ou mal préparée.
+    "identify_failed_access_denied": (
+        "Ton ordinateur a refusé de lire le système de la carte. Ta carte n'est pas en cause : "
+        "c'est une protection de l'ordinateur. Réessaie, et accepte la demande d'autorisation "
+        "si elle apparaît."
+    ),
+    "identify_failed_elevation_refused": (
+        "Pour lire le modèle de ta console, Windows a besoin de ton autorisation (fenêtre "
+        "« Voulez-vous autoriser cette application à apporter des modifications ? »). Elle a été "
+        "refusée ou fermée. Ta carte n'a rien d'anormal : relance l'identification et réponds « Oui »."
+    ),
     # Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien flux
     # carte-SD-uniquement) -- déplacement vers un dossier _doublons/,
     # jamais une suppression : le vocabulaire choisi ("écarter") reflète

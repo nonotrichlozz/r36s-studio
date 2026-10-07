@@ -86,3 +86,10 @@ def emit_eject_result(ok: bool, msg: str = "") -> None:
     guidé ou de retomber sur un worker d'éjection dédié -- sans jamais
     refaire toute la sauvegarde juste pour réessayer l'éjection seule."""
     emit({"type": "eject_result", "ok": ok, "msg": msg})
+
+
+def emit_identify_result(result: dict) -> None:
+    """Résultat d'identification de la console (`identify.result_to_dict`)
+    lu par un worker élevé -- Windows, BOOT EFI lisible seulement en
+    administrateur (`gui/elevate.py::run_elevated_identify`)."""
+    emit({"type": "identify_result", "result": result})

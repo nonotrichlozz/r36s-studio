@@ -757,6 +757,31 @@ STRINGS = {
     "error_source_not_found": "Le dossier choisi est introuvable.",
     "error_verify_failed": "La vérification après écriture a échoué. Réessaie avec une carte neuve.",
     "error_cancelled": "L'opération a été annulée avant la fin.",
+    # Double lecture de la source et empreintes par bloc
+    # (`imaging/source_verify.py`) -- incident réel : une carte dégradée a
+    # renvoyé des données fausses sans erreur, l'image fausse a été flashée.
+    "error_source_unstable": (
+        "Carte source instable : elle renvoie des données différentes à chaque lecture. "
+        "Cette sauvegarde n'est pas fiable. Recommandation : installer une image neuve "
+        "plutôt que cloner cette carte."
+    ),
+    "error_image_modified": (
+        "Le fichier image a été modifié ou abîmé depuis la sauvegarde. Rien n'a été écrit "
+        "sur ta carte SD. Utilise une autre sauvegarde ou une image neuve."
+    ),
+    "error_unstable_image": (
+        "Ce fichier est la sauvegarde d'une carte instable : il n'est pas fiable et ne peut "
+        "pas être installé. Choisis une autre sauvegarde ou une image neuve."
+    ),
+    "unstable_image_expert_confirm": (
+        "Ce fichier est la sauvegarde d'une carte instable : certaines parties peuvent être "
+        "fausses, et la console risque de mal fonctionner.\n\nL'installer quand même ?"
+    ),
+    "unstable_image_expert_log": "Installation d'une sauvegarde instable confirmée explicitement (mode expert).",
+    "backup_verify_source_checkbox": "Vérifier la source par double lecture (recommandé)",
+    "progress_phase_copy": "Copie…",
+    "progress_phase_verify_source": "Vérification de la source…",
+    "progress_phase_verify_image": "Vérification de l'image…",
     "error_eject_failed": (
         "Impossible d'éjecter la carte. Ferme les fichiers ouverts dessus, puis réessaie, "
         "ou retire-la manuellement."
@@ -1297,6 +1322,9 @@ _ERROR_MESSAGE_KEYS = {
     "IMAGE_NOT_FOUND": "error_image_not_found",
     "IO_ERROR": "error_io_error",
     "VOLUME_IN_USE": "error_volume_in_use",
+    "SOURCE_UNSTABLE": "error_source_unstable",
+    "IMAGE_MODIFIED": "error_image_modified",
+    "UNSTABLE_IMAGE": "error_unstable_image",
     "UNSUPPORTED_OS": "error_unsupported_os",
     "CONFIRMATION_REFUSED": "error_confirmation_refused",
     "INVALID_ARGS": "error_invalid_args",

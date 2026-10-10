@@ -12,15 +12,21 @@ from __future__ import annotations
 import hashlib
 import platform
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from r36s_studio.devices import Device
 
 from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
-from .image_source import check_image_format, estimate_total_bytes, open_image_source
+from .image_source import check_image_format, estimate_total_bytes, is_unstable_image, open_image_source
+from .source_verify import check_image_digests, check_sidecar_matches_size
 from .write_target import WINDOWS_SECTOR_SIZE, prepared_write_target, reunmount_before_verify
 
 HASH_CHUNK_SIZE = 4 * 1024 * 1024
+
+
+class UnstableImageRefused(Exception):
+    """Image `.img.instable` (sauvegarde d'une carte source instable) sans
+    autorisation explicite (`allow_unstable`, mode expert seulement)."""
 
 
 @dataclass
@@ -81,6 +87,8 @@ def flash_device(
     on_progress: Optional[ProgressCallback] = None,
     block_size: int = BLOCK_SIZE,
     should_cancel: Optional[CancelCheck] = None,
+    allow_unstable: bool = False,
+    on_warning: Optional[Callable[[str], None]] = None,
 ) -> FlashResult:
     """Écrit `image_path` (`.img`, `.img.gz` ou `.img.xz`) sur `device`,
     puis relit ce qui a été écrit et compare son SHA-256 à celui de la
@@ -93,9 +101,29 @@ def flash_device(
     (`check_image_format`, appelé en tout premier ici -- avant
     `prepared_write_target`) si `image_path` n'est pas une image flashable :
     ne jamais démonter/préparer la carte pour une source qu'on sait déjà
-    inutilisable (règle §2 n°6)."""
+    inutilisable (règle §2 n°6).
+
+    Toujours avant `prepared_write_target` aussi : refus d'une image
+    `.img.instable` sans `allow_unstable` (`UnstableImageRefused`), puis,
+    si `<image>.sha256blocks` existe, recalcul des empreintes par bloc de
+    l'image (phase de progression `verify_image`) -- `ImageModified` au
+    moindre écart, la carte n'est jamais touchée. Sans compagnon (image
+    ancienne ou téléchargée) : `on_warning` est appelé et le flash se
+    poursuit comme avant."""
     check_image_format(image_path)
+    if is_unstable_image(image_path) and not allow_unstable:
+        raise UnstableImageRefused(f"{image_path} est la sauvegarde d'une carte instable, non fiable.")
     total_hint = estimate_total_bytes(image_path)
+    sidecar = check_sidecar_matches_size(image_path)
+    if sidecar is None:
+        if on_warning is not None:
+            on_warning(
+                "Pas d'empreintes de sauvegarde à côté de cette image (image ancienne ou téléchargée) : "
+                "son intégrité ne peut pas être contrôlée avant l'écriture."
+            )
+    else:
+        with open_image_source(image_path) as image_stream:
+            check_image_digests(image_stream, sidecar, on_progress, should_cancel)
     if total_hint is None:
         # Pied d'archive illisible (fichier tronqué, format non standard) :
         # repli sur la taille du périphérique cible plutôt que de traiter la

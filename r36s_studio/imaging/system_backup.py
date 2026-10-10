@@ -80,6 +80,7 @@ from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
 from .gpt import GptHeader, GptPartitionEntry, build_gpt_entries, build_gpt_header, parse_gpt_entries, parse_gpt_header
 from .mbr import GPT_PROTECTIVE_TYPE, PARTITION_ENTRY_SIZE, PARTITION_TABLE_OFFSET, SECTOR_SIZE, is_gpt_protective, parse_mbr
 from .source import prepared_source
+from .source_verify import SourceUnstable, quarantine_unstable_image, rehash_blocks, verify_source, write_block_digests
 
 # Étiquettes reconnues pour la partition de jeux (§4.4) -- EASYROMS sur
 # ArkOS/dArkOS/ROCKNIX-avec-jeux-séparés, STORAGE sur EmuELEC.
@@ -374,12 +375,27 @@ def estimate_system_backup_size(device_path: str) -> int:
     return boundary.end_bytes
 
 
+def _rewritten_block_indices(boundary: SystemBoundary, final_size: int, block_size: int) -> List[int]:
+    """Blocs du fichier produit qui ne sont plus les octets lus sur la
+    source : le début (LBA0, et pour GPT l'en-tête primaire et son tableau
+    d'entrées) et tout ce qui suit `end_bytes` (table secondaire GPT
+    ajoutée)."""
+    head_end = SECTOR_SIZE
+    if boundary.is_gpt:
+        entries_bytes = _gpt_secondary_table_size(boundary.gpt_header) - SECTOR_SIZE
+        head_end = max(2 * SECTOR_SIZE, boundary.gpt_header.partition_entry_lba * SECTOR_SIZE + entries_bytes)
+    head = range(0, -(-head_end // block_size))
+    tail = range(boundary.end_bytes // block_size, -(-final_size // block_size))
+    return [*head, *tail]
+
+
 def backup_system_only(
     device: Device,
     output_path: str,
     on_progress: Optional[ProgressCallback] = None,
     block_size: int = BLOCK_SIZE,
     should_cancel: Optional[CancelCheck] = None,
+    double_read: bool = True,
 ) -> int:
     """Sauvegarde `device` (lecture seule) dans `output_path`, jusqu'à la
     fin de la dernière partition système -- sans la partition de jeux
@@ -389,26 +405,45 @@ def backup_system_only(
     `copy_range`, qui ne compte que les octets lus depuis la source).
     Lève `GamesPartitionNotFound` si cette carte n'a pas de partition de
     jeux identifiable ; `OperationCancelled` si `should_cancel` répond
-    True en cours de copie (même comportement que `backup_device`)."""
-    boundary = compute_system_boundary(device.path)
-    with prepared_source(device.path) as raw_path:
-        with open(raw_path, "rb") as source, open(output_path, "wb") as destination:
-            copy_range(
-                source,
-                destination,
-                boundary.end_bytes,
-                on_progress=on_progress,
-                block_size=block_size,
-                should_cancel=should_cancel,
-            )
-            if boundary.is_gpt:
-                _rewrite_gpt_tables_after_truncation(destination, boundary)
-                _repair_protective_mbr_after_truncation(source, destination, boundary)
-            else:
-                _repair_mbr_table_after_truncation(source, destination, boundary)
-            destination.flush()
-            os.fsync(destination.fileno())
+    True en cours de copie ou de relecture (même comportement que
+    `backup_device`) ; `SourceUnstable` si `double_read` et que la source
+    ne relit pas un bloc à l'identique (image renommée en `.instable`).
 
+    `<image>.sha256blocks` porte sur le fichier FINAL, tables MBR/GPT
+    réécrites comprises : les blocs touchés par la réparation sont relus
+    dans le `.img` produit (`_rewritten_block_indices`), les autres sont
+    les empreintes de la copie -- identiques aux octets du fichier."""
+    boundary = compute_system_boundary(device.path)
+    digests: List[str] = []
+    with prepared_source(device.path) as raw_path:
+        try:
+            with open(raw_path, "rb") as source, open(output_path, "wb") as destination:
+                copy_range(
+                    source,
+                    destination,
+                    boundary.end_bytes,
+                    on_progress=on_progress,
+                    block_size=block_size,
+                    should_cancel=should_cancel,
+                    block_digests=digests,
+                )
+                if double_read:
+                    verify_source(source, digests, boundary.end_bytes, block_size, on_progress, should_cancel)
+                if boundary.is_gpt:
+                    _rewrite_gpt_tables_after_truncation(destination, boundary)
+                    _repair_protective_mbr_after_truncation(source, destination, boundary)
+                else:
+                    _repair_mbr_table_after_truncation(source, destination, boundary)
+                destination.flush()
+                os.fsync(destination.fileno())
+        except SourceUnstable as exc:
+            exc.image_path = quarantine_unstable_image(output_path, exc.ranges)
+            raise
+
+    final_size = boundary.end_bytes
     if boundary.is_gpt:
-        return boundary.end_bytes + _gpt_secondary_table_size(boundary.gpt_header)
-    return boundary.end_bytes
+        final_size += _gpt_secondary_table_size(boundary.gpt_header)
+    with open(output_path, "rb") as produced:
+        rehash_blocks(produced, digests, _rewritten_block_indices(boundary, final_size, block_size), final_size, block_size)
+    write_block_digests(output_path, digests, block_size, final_size)
+    return final_size

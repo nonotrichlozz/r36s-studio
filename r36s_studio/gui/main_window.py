@@ -74,6 +74,8 @@ from r36s_studio.imaging import (
 )
 from r36s_studio.imaging import sf3000_clone
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
+from r36s_studio.imaging.image_source import is_unstable_image
+from r36s_studio.imaging.source_verify import ImageModified, check_sidecar_matches_size
 from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, list_partitions, set_privileged_mount_hook
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
@@ -425,6 +427,9 @@ class MainWindow(QMainWindow):
         # mode expert uniquement) -- mémorisé comme `firmware`/`ui_mode`,
         # choisi via `ResetCardLabelDialog`.
         self._reset_card_filesystem: str = self._app_config.reset_card_filesystem
+        # Image `.img.instable` acceptée explicitement (mode expert,
+        # `_check_flash_image_integrity_or_warn`) -- `--allow-unstable`.
+        self._allow_unstable_image = False
         self._wizard_active = False
         self._wizard_flow = WizardFlow()
         self._wizard_poll_timer = QTimer(self)
@@ -728,6 +733,7 @@ class MainWindow(QMainWindow):
         self._file_dialog.file_chosen.connect(self._on_file_chosen)
         self._file_dialog.releases_requested.connect(self._on_releases_requested)
         self._file_dialog.firmware_changed.connect(self._on_firmware_changed)
+        self._file_dialog.source_verify_toggled.connect(self._on_source_verify_toggled)
         self._file_dialog.rocknix_download_requested.connect(self._on_rocknix_download_requested)
         self._rocknix_variant_dialog.variant_chosen.connect(self._on_rocknix_variant_chosen)
         self._backup_kind_dialog.full_copy_requested.connect(lambda: self._on_backup_kind_chosen("full"))
@@ -969,6 +975,7 @@ class MainWindow(QMainWindow):
         # reproposer ArkOS par défaut.
         firmware = self._app_config.firmware if self._mode == "flash" else None
         self._file_dialog.set_mode(self._mode, archive_choices=archive_choices, firmware=firmware)
+        self._offer_source_verify_option()
         self._file_dialog.open()
 
     def _refuse_non_arkos_card(self, device: Device, step: str) -> bool:
@@ -1061,6 +1068,7 @@ class MainWindow(QMainWindow):
         # `set_mode`, qui masque systématiquement cette étiquette (§5,
         # `FileDialog.set_mode`).
         self._file_dialog.set_estimated_size(tr("file_system_backup_size", size=size_text))
+        self._offer_source_verify_option()
         self._file_dialog.open()
 
     def _start_elevated_system_backup_estimate(self, board_compatible: Optional[str]) -> None:
@@ -1176,6 +1184,8 @@ class MainWindow(QMainWindow):
             return
         except UnsupportedImageFormatError:
             QMessageBox.warning(self, tr("app_title"), friendly_error_message("UNSUPPORTED_IMAGE_FORMAT"))
+            return
+        if not self._check_flash_image_integrity_or_warn():
             return
         self._whole_card = False
         used_bytes = sf3000_clone.whole_card_used_bytes(self._file_path, self._device)
@@ -1350,6 +1360,12 @@ class MainWindow(QMainWindow):
             # le worker d'éjection dédié existant, sans jamais avoir à
             # refaire toute la copie pour ça.
             argv.append("--eject-after")
+        if self._mode in ("backup", "backup_system") and not self._app_config.verify_backup_source:
+            # Le worker élevé ne lit pas forcément le même config.json
+            # (root sous macOS) : la GUI transmet le réglage elle-même.
+            argv.append("--no-source-verify")
+        if argv[0] == "flash" and self._allow_unstable_image:
+            argv.append("--allow-unstable")
 
         # Journalise la ligne de commande complète au lancement de tout
         # worker élevé (backup/flash) -- signalé sur du vrai matériel :
@@ -1364,6 +1380,7 @@ class MainWindow(QMainWindow):
         self._runner = WorkerRunner(argv, parent=self, macos_auth_session=self._get_or_create_macos_auth_session())
         self._runner.progress.connect(self._on_progress)
         self._runner.step_progress.connect(self._on_step_progress)
+        self._runner.phase.connect(lambda name: self._log_panel.set_phase(tr(f"progress_phase_{name}")))
         self._runner.log.connect(lambda level, msg: self._log_panel.append_log(msg))
         self._runner.error.connect(self._on_worker_error)
         self._runner.finished.connect(self._on_worker_finished)
@@ -1854,6 +1871,52 @@ class MainWindow(QMainWindow):
             webbrowser.open(entry.releases_url)
         except Exception as exc:
             QMessageBox.warning(self, tr("app_title"), str(exc))
+
+    def _is_expert_context(self) -> bool:
+        """Mode expert, hors parcours guidés du mode assisté."""
+        return self._app_config.ui_mode == "expert" and not self._wizard_active and not self._assisted_ad_hoc_active
+
+    def _offer_source_verify_option(self) -> None:
+        """Case « Vérifier la source par double lecture » sur la fenêtre
+        Choix du fichier : sauvegardes du mode expert seulement. En mode
+        assisté, `config.json::verify_backup_source` s'applique sans case."""
+        if self._mode in ("backup", "backup_system") and self._is_expert_context():
+            self._file_dialog.set_source_verify_option(self._app_config.verify_backup_source)
+
+    def _on_source_verify_toggled(self, checked: bool) -> None:
+        self._app_config.verify_backup_source = checked
+        app_config.save_config(self._app_config)
+
+    def _check_flash_image_integrity_or_warn(self) -> bool:
+        """Contrôles gratuits avant toute élévation (§3, voir CLAUDE.md §5) :
+        refus d'une image `.img.instable` (sauf mode expert, après
+        confirmation explicite), puis, si `<image>.sha256blocks` existe,
+        en-tête lisible et taille annoncée égale à celle de l'image. Le
+        recalcul complet des empreintes (plusieurs Go à relire) reste au
+        worker élevé (`flash_device`), autorité réelle."""
+        self._allow_unstable_image = False
+        if is_unstable_image(self._file_path):
+            if not self._is_expert_context():
+                QMessageBox.warning(self, tr("app_title"), friendly_error_message("UNSTABLE_IMAGE"))
+                return False
+            answer = QMessageBox.question(
+                self,
+                tr("app_title"),
+                tr("unstable_image_expert_confirm"),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return False
+            self._allow_unstable_image = True
+            self._log_panel.append_log(tr("unstable_image_expert_log"))
+        try:
+            check_sidecar_matches_size(self._file_path)
+        except ImageModified as exc:
+            QMessageBox.warning(self, tr("app_title"), friendly_error_message("IMAGE_MODIFIED"))
+            self._log_panel.append_log(error_log_detail("IMAGE_MODIFIED", str(exc)))
+            return False
+        return True
 
     def _on_firmware_changed(self, firmware: str) -> None:
         """Choix de firmware (`FileDialog`, flash uniquement, §4.6) --

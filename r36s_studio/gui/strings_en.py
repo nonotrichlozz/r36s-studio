@@ -478,6 +478,28 @@ STRINGS_EN = {
     "error_source_not_found": "The chosen folder cannot be found.",
     "error_verify_failed": "The check after writing failed. Try again with a new card.",
     "error_cancelled": "The operation was cancelled before it finished.",
+    "error_source_unstable": (
+        "Unstable source card: it returns different data every time it is read. "
+        "This backup is not reliable. Recommendation: install a fresh image "
+        "rather than cloning this card."
+    ),
+    "error_image_modified": (
+        "The image file has been modified or damaged since the backup. Nothing was written "
+        "to your SD card. Use another backup or a fresh image."
+    ),
+    "error_unstable_image": (
+        "This file is the backup of an unstable card: it is not reliable and cannot "
+        "be installed. Choose another backup or a fresh image."
+    ),
+    "unstable_image_expert_confirm": (
+        "This file is the backup of an unstable card: some parts may be wrong, and the "
+        "console may not work properly.\n\nInstall it anyway?"
+    ),
+    "unstable_image_expert_log": "Installation of an unstable backup explicitly confirmed (expert mode).",
+    "backup_verify_source_checkbox": "Verify the source by reading it twice (recommended)",
+    "progress_phase_copy": "Copying…",
+    "progress_phase_verify_source": "Verifying the source…",
+    "progress_phase_verify_image": "Verifying the image…",
     "error_eject_failed": (
         "Could not eject the card. Close the files open on it, then try again, or remove it manually."
     ),

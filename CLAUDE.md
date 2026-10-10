@@ -65,8 +65,9 @@ sans interface (c'est un CLI : `python -m r36s_studio <commande>`).
 **Protocole GUI ↔ worker** — une ligne JSON par événement (`protocol.py`) :
 `progress` (`done`/`total`/`speed`), `log` (`level`/`msg`), `error`
 (`code`/`msg`), `done` (`ok`), plus `estimate` (`size_bytes`), `step_progress`
-(`step_index`/`step_count`/`step_name`), `eject_result` et `identify_result`
-(`result`, identification élevée sous Windows).
+(`step_index`/`step_count`/`step_name`), `eject_result`, `identify_result`
+(`result`, identification élevée sous Windows) et `phase` (`name` :
+`verify_source`/`verify_image` -- les `progress` suivants repartent de 0).
 
 **Élévation, par OS** (détail et pièges macOS : `docs/claude/elevation-macos.md`) :
 
@@ -130,6 +131,19 @@ sauvegarde système sans les jeux, remise à zéro).
 - **Vérifications avant élévation** : ce qui peut être refusé d'avance (format
   d'image `.7z`, carte trop petite, espace disque) est vérifié côté GUI *avant*
   toute demande de mot de passe, puis revérifié par le worker (autorité réelle).
+  **Écart assumé, `.sha256blocks`** : côté GUI, seuls les contrôles gratuits
+  (compagnon présent, en-tête lisible, taille annoncée = taille de l'image ;
+  refus d'un `.img.instable` hors mode expert) ; le recalcul complet des
+  empreintes (plusieurs Go à relire) se fait seulement dans le worker, après
+  l'élévation -- le faire deux fois doublerait une minute de lecture.
+- **Double lecture de la source** (`imaging/source_verify.py`, incident réel :
+  carte dégradée renvoyant des octets faux sans erreur d'E/S) : toute
+  sauvegarde relit la source et compare les empreintes par bloc
+  (`config.json::verify_backup_source`, case en mode expert seulement,
+  `--no-source-verify`). Source instable : image renommée en `.img.instable`
+  (jamais supprimée) + `.instable.txt`, code `SOURCE_UNSTABLE`. Chaque
+  sauvegarde réussie écrit `<image>.sha256blocks`, recontrôlé avant tout
+  flash (`IMAGE_MODIFIED`, carte jamais touchée). Format : `imaging.md`.
 - **Codes d'erreur** : tout `emit_error("CODE", …)` de `__main__.py` doit avoir
   un message dans `gui/strings.py::_ERROR_MESSAGE_KEYS` (vérifié par
   `tests/test_gui_strings.py`). Les détails passent par `error_log_detail`.
@@ -216,6 +230,12 @@ Détail et bancs de test : `docs/claude/testing.md`.
   recaler au premier essai (`imaging.md`).
 - Chien de garde du sondage : ne détecte qu'un ralentissement, jamais un arrêt
   complet du minuteur (`assisted-wizard.md`).
+- Double lecture de la source : jamais lancée sur la carte noname (0xFE) de
+  l'incident ; `posix_fadvise(DONTNEED)` (Linux) et l'absence de cache sur
+  `\\.\PhysicalDriveN` (Windows) supposés, non mesurés (`imaging.md`).
+- **TODO** : `clone-sf3000` (« Utiliser toute la carte ») ne contrôle pas
+  encore le `.sha256blocks` de l'image avant d'écrire -- même contrôle que
+  `flash_device` à ajouter.
 - « Identifier ma console » sur une carte à BOOT EFI : vérifié sous Windows
   (worker élevé) ; sous Linux, montage `udisksctl` d'une partition EFI non
   vérifié -- un refus donnerait le message « protection de l'ordinateur »,

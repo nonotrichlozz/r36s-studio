@@ -34,6 +34,14 @@ def emit_progress(done: int, total: int, speed: float) -> None:
     emit({"type": "progress", "done": done, "total": total, "speed": round(speed)})
 
 
+def emit_phase(name: str) -> None:
+    """Début d'une nouvelle passe d'une opération qui en a plusieurs
+    (`copy`, `verify_source`, `verify_image`, `copy.ProgressEvent.phase`) :
+    les événements `progress` qui suivent repartent de 0 pour cette passe
+    -- une vraie relecture, jamais une barre simulée (§2 n°5)."""
+    emit({"type": "phase", "name": name})
+
+
 def emit_log(msg: str, level: str = "info") -> None:
     emit({"type": "log", "level": level, "msg": msg})
 

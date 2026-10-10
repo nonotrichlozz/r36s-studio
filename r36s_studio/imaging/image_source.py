@@ -14,6 +14,14 @@ import struct
 from typing import BinaryIO, Optional
 
 SUPPORTED_EXTENSIONS = (".img", ".img.gz", ".img.xz")
+# Sauvegarde d'une carte source instable, mise de côté plutôt que
+# supprimée (`source_verify.quarantine_unstable_image`) : flashable
+# seulement en mode expert, après confirmation explicite.
+UNSTABLE_IMAGE_SUFFIX = ".img.instable"
+
+
+def is_unstable_image(path: str) -> bool:
+    return path.lower().endswith(UNSTABLE_IMAGE_SUFFIX)
 
 # Détection par octets d'en-tête (pas seulement l'extension, §5) : un
 # fichier renommé ou mal étiqueté doit être reconnu pour ce qu'il est
@@ -96,7 +104,7 @@ def open_image_source(path: str) -> BinaryIO:
         return gzip.open(path, "rb")
     if lower.endswith(".xz"):
         return lzma.open(path, "rb")
-    if lower.endswith(".img"):
+    if lower.endswith(".img") or is_unstable_image(path):
         return open(path, "rb")
     raise UnsupportedImageFormatError(
         f"format d'image non supporté : {path} (formats acceptés : {', '.join(SUPPORTED_EXTENSIONS)})"

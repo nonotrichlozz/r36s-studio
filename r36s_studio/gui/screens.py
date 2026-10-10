@@ -1694,6 +1694,7 @@ class FileDialog(Dialog):
     releases_requested = Signal(str)  # firmware sélectionné à l'instant du clic (arkos/emuelec)
     rocknix_download_requested = Signal()
     firmware_changed = Signal(str)
+    source_verify_toggled = Signal(bool)  # case « double lecture », mode expert
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1717,6 +1718,15 @@ class FileDialog(Dialog):
         self._system_backup_size_label.setProperty("role", "secondary")
         self._system_backup_size_label.setVisible(False)
         layout.addWidget(self._system_backup_size_label)
+
+        # Double lecture de la source (`imaging/source_verify.py`),
+        # sauvegardes en mode expert seulement (`set_source_verify_option`,
+        # appelé par `MainWindow`) -- jamais proposée en mode assisté, où
+        # `config.json::verify_backup_source` s'applique sans case.
+        self._source_verify_check = QCheckBox(tr("backup_verify_source_checkbox"))
+        self._source_verify_check.setVisible(False)
+        self._source_verify_check.toggled.connect(self.source_verify_toggled.emit)
+        layout.addWidget(self._source_verify_check)
 
         # Choix du firmware, flash uniquement (§5, étape de flash) --
         # une ligne par entrée du catalogue (§4.6), construite
@@ -1858,6 +1868,7 @@ class FileDialog(Dialog):
         # au suivant (`set_estimated_size` la renseigne à nouveau une fois
         # prête, §4.3).
         self._system_backup_size_label.setVisible(False)
+        self._source_verify_check.setVisible(False)
 
         is_flash = mode == "flash"
         self._firmware_scroll.setVisible(is_flash)
@@ -1885,6 +1896,14 @@ class FileDialog(Dialog):
         self._archive_list.setVisible(is_archive_mode)
         self._archive_empty_label.setVisible(is_archive_mode and not archive_choices)
         self._destination_hint_label.setVisible(mode in _DESTINATION_MODES)
+
+    def set_source_verify_option(self, checked: bool) -> None:
+        """Affiche la case « Vérifier la source par double lecture » (mode
+        expert, sauvegardes) -- masquée à nouveau par chaque `set_mode`."""
+        self._source_verify_check.blockSignals(True)
+        self._source_verify_check.setChecked(checked)
+        self._source_verify_check.blockSignals(False)
+        self._source_verify_check.setVisible(True)
 
     def set_estimated_size(self, text: str) -> None:
         """Affiche `text` (déjà formaté, ex. « Taille estimée : environ
@@ -1928,7 +1947,7 @@ class FileDialog(Dialog):
             # peut le remplacer entièrement, y compris l'emplacement.
             path, _ = QFileDialog.getSaveFileName(self, title, self._path_label.text(), "Image (*.img)")
         elif self._mode == "flash":
-            path, _ = QFileDialog.getOpenFileName(self, title, "", "Image disque (*.img *.img.gz *.img.xz)")
+            path, _ = QFileDialog.getOpenFileName(self, title, "", "Image disque (*.img *.img.gz *.img.xz);;*.img.instable")
         elif self._mode in _DESTINATION_MODES:
             # Démarre sur l'emplacement déjà affiché (le défaut proposé,
             # ou le dernier choisi) plutôt que de repartir de zéro.
@@ -2418,6 +2437,7 @@ class LogPanel(QFrame):
 
     def start_operation(self, title: str) -> None:
         self._operation_active = True
+        self._operation_title = title
         self._header_label.setText(tr("log_header_active", title=title))
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
@@ -2448,6 +2468,17 @@ class LogPanel(QFrame):
             self._eta_label.setText(tr("execute_eta", eta=_format_duration(remaining_seconds)))
         else:
             self._eta_label.setText(tr("execute_eta_unknown"))
+
+    def set_phase(self, phase_text: str) -> None:
+        """Nouvelle passe d'une opération qui en a plusieurs (copie puis
+        vérification de la source, vérification de l'image avant un flash)
+        : affichée dans l'en-tête et le journal, la barre repart de 0 --
+        une vraie relecture, jamais une progression simulée (§2 n°5)."""
+        title = getattr(self, "_operation_title", "")
+        self._header_label.setText(tr("log_header_active", title=f"{title} — {phase_text}" if title else phase_text))
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self.append_log(phase_text)
 
     def update_step_progress(self, step_index: int, step_count: int, step_name: str) -> None:
         """Progression par étapes réelles plutôt que par octets (§2 n°5 :

@@ -429,3 +429,50 @@ source, cf. `copy_range`) — jamais sur l'espace non alloué au-delà, que
 ce soit la fin d'une carte plus grande que l'image ou un reste d'un
 flash précédent. C'était déjà correct avant ce correctif ; couvert
 explicitement par un test depuis (`test_flash.py`).
+
+**Double lecture de la source et `.sha256blocks` (2026-10-10, `imaging/source_verify.py`).**
+Incident réel : une carte d'origine noname (fabricant SD 0xFE) a renvoyé,
+sans erreur d'E/S, des bits inversés (blocs isolés de 1 à 4 Ko, flash
+dégradée) pendant une sauvegarde système ; l'image fausse a été flashée sur
+une SanDisk et la vérification SHA-256 du flash est passée (elle compare la
+carte à l'image, déjà fausse) -- libcairo corrompue, RetroArch qui plante.
+- **Pendant la copie** : `copy_range(..., block_digests=liste)` ajoute le
+  SHA-256 de chaque bloc réellement lu (4 Mio). Autres appelants inchangés.
+- **Relecture** (`verify_source`, phase de progression `verify_source`,
+  annulable bloc par bloc) : même plage, mêmes décalages (multiples de
+  4 Mio, donc alignés sur le secteur sous Windows). Bloc différent : relu
+  jusqu'à 3 fois, accepté dès 2 relectures égales à la copie, instable
+  sinon. Linux : `posix_fadvise(DONTNEED)` avant chaque relecture (sinon le
+  cache de pages de `/dev/sdX` servirait la relecture). Une carte qui renvoie
+  *toujours* les mêmes octets faux n'est pas détectable ainsi.
+- **Source instable** (`SourceUnstable`, code `SOURCE_UNSTABLE`) : l'image
+  n'est jamais supprimée (peut-être la seule copie d'une carte qui meurt) --
+  renommée en `<nom>.img.instable`, plages dans `<nom>.img.instable.txt`,
+  pas de `.sha256blocks`. Le flash la refuse (`UNSTABLE_IMAGE`), sauf mode
+  expert après une confirmation explicite (`--allow-unstable`) ; le
+  sélecteur d'image ne la propose que via un filtre secondaire.
+- **Option** : `config.json::verify_backup_source` (vrai par défaut), case
+  « Vérifier la source par double lecture (recommandé) » sur la fenêtre
+  Choix du fichier des sauvegardes, mode expert seulement ; la GUI passe
+  `--no-source-verify` au worker (qui ne lit pas forcément le même
+  `config.json`, root sous macOS). Désactivée : environ deux fois plus
+  rapide, `.sha256blocks` toujours écrit.
+- **Format `<image>.sha256blocks`** (ASCII, `\n`) : en-tête
+  `R36S-SHA256BLOCKS 1 block_size=4194304 total_size=<octets>`, puis une
+  empreinte hex par bloc, dans l'ordre ; le dernier bloc peut être plus
+  court. Sauvegarde complète : empreintes de la copie (fichier = octets lus).
+  Sauvegarde système : sur le fichier FINAL -- les blocs réécrits après la
+  copie (LBA0, en-tête et tableau primaires GPT, tout ce qui suit
+  `end_bytes`) sont relus dans le `.img` produit (`_rewritten_block_indices`),
+  les autres reprennent les empreintes de la copie. Format des `.img`
+  inchangé.
+- **Avant le flash** (`flash_device`, avant `prepared_write_target`) :
+  compagnon présent -> recalcul des empreintes de l'image (phase
+  `verify_image`, `.gz`/`.xz` compris) ; un écart lève `ImageModified`
+  (`IMAGE_MODIFIED`, liste des blocs), la carte n'est pas touchée. Pas de
+  compagnon (image ancienne ou téléchargée) : avertissement dans le journal,
+  flash comme avant. GUI : contrôles gratuits seulement avant l'élévation
+  (écart à l'invariant documenté dans `CLAUDE.md` §5). La vérification
+  SHA-256 après écriture (`FlashResult.verified`) est inchangée.
+- **Non fait** : `clone-sf3000` ne contrôle pas encore le compagnon (TODO,
+  `CLAUDE.md` §7).

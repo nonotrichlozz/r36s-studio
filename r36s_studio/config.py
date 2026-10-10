@@ -132,6 +132,12 @@ class AppConfig:
     # APP_VERSION la rattrape. Lien non stocké : nom de fichier stable.
     latest_update_tag: str = ""
     latest_update_notes: str = ""
+    # Double lecture de la source pendant une sauvegarde
+    # (`imaging/source_verify.py`) : une carte dégradée peut renvoyer des
+    # données fausses sans erreur d'E/S (incident réel). Activée par
+    # défaut ; la désactiver (case du mode expert) divise environ par deux
+    # le temps de lecture.
+    verify_backup_source: bool = True
 
 
 def config_dir() -> Path:
@@ -196,6 +202,9 @@ def load_config() -> AppConfig:
     latest_update_notes = raw.get("latest_update_notes")
     if not isinstance(latest_update_tag, str) or not isinstance(latest_update_notes, str):
         latest_update_tag = latest_update_notes = ""
+    verify_backup_source = raw.get("verify_backup_source")
+    if not isinstance(verify_backup_source, bool):
+        verify_backup_source = True
     return AppConfig(
         ui_mode=ui_mode,
         language=language,
@@ -210,6 +219,7 @@ def load_config() -> AppConfig:
         last_update_check=last_update_check,
         latest_update_tag=latest_update_tag,
         latest_update_notes=latest_update_notes,
+        verify_backup_source=verify_backup_source,
     )
 
 

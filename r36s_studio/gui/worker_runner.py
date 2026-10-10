@@ -93,6 +93,9 @@ class WorkerRunner(QObject):
     # séparément pour décider d'enchaîner ou de retomber sur un worker
     # d'éjection dédié.
     eject_result = Signal(bool, str)  # ok, msg
+    # Début d'une nouvelle passe (`copy`/`verify_source`/`verify_image`,
+    # `protocol.emit_phase`) -- les `progress` suivants repartent de 0.
+    phase = Signal(str)  # nom de la passe
 
     def __init__(self, argv: List[str], parent=None, macos_auth_session=None):
         """`argv` : la commande worker sans `--worker`/`--progress-file`/
@@ -283,6 +286,8 @@ class WorkerRunner(QObject):
             self.estimate.emit(event.get("size_bytes", 0))
         elif etype == "step_progress":
             self.step_progress.emit(event.get("step_index", 0), event.get("step_count", 0), event.get("step_name", ""))
+        elif etype == "phase":
+            self.phase.emit(event.get("name", ""))
         elif etype == "eject_result":
             self.eject_result.emit(bool(event.get("ok")), event.get("msg", ""))
         elif etype == "done":

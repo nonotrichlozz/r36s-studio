@@ -803,3 +803,47 @@ def test_backup_system_only_gpt_output_survives_fully_independent_structural_ver
         assert (end_lba + 1) * SECTOR_SIZE <= len(data)
         kept.append(start_lba)
     assert kept == [34, 134]
+
+
+# --- Empreintes par bloc (.sha256blocks) sur le fichier FINAL ---------------
+#
+# Les tables MBR/GPT sont réécrites après la copie tronquée : les empreintes
+# doivent porter sur le fichier produit, pas sur les octets lus à la source
+# (sinon le contrôle avant flash refuserait toute sauvegarde système).
+# Plusieurs tailles de bloc pour couvrir un bloc à cheval sur `end_bytes`.
+
+
+def _sidecar_matches_whole_file(output_path, block_size: int) -> bool:
+    from r36s_studio.imaging.source_verify import read_block_digests, sidecar_path
+    import hashlib
+
+    data = output_path.read_bytes()
+    sidecar_block, total, digests = read_block_digests(sidecar_path(str(output_path)))
+    expected = [hashlib.sha256(data[i : i + block_size]).hexdigest() for i in range(0, len(data), block_size)]
+    return sidecar_block == block_size and total == len(data) and digests == expected
+
+
+@pytest.mark.parametrize("block_size", [1024, 4096, 4 * 1024 * 1024])
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+@patch("r36s_studio.imaging.system_backup.prepared_source", side_effect=_no_prep)
+def test_backup_system_only_gpt_sidecar_covers_rewritten_tables(mock_prep, mock_list, tmp_path, block_size):
+    source_path, total_sectors = _build_fake_gpt_image(tmp_path)
+    mock_list.return_value = _gpt_partition_labels(source_path)
+    output_path = tmp_path / "system_backup.img"
+
+    backup_system_only(_make_device(source_path, total_sectors * SECTOR_SIZE), str(output_path), block_size=block_size)
+
+    assert _sidecar_matches_whole_file(output_path, block_size)
+
+
+@pytest.mark.parametrize("block_size", [1024, 4 * 1024 * 1024])
+@patch("r36s_studio.imaging.system_backup.list_partitions")
+@patch("r36s_studio.imaging.system_backup.prepared_source", side_effect=_no_prep)
+def test_backup_system_only_mbr_sidecar_covers_rewritten_table(mock_prep, mock_list, tmp_path, block_size):
+    source_path, total_sectors = _build_fake_mbr_image(tmp_path)
+    mock_list.return_value = _mbr_partition_labels(source_path)
+    output_path = tmp_path / "system_backup.img"
+
+    backup_system_only(_make_device(source_path, total_sectors * SECTOR_SIZE), str(output_path), block_size=block_size)
+
+    assert _sidecar_matches_whole_file(output_path, block_size)

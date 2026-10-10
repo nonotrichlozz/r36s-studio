@@ -108,6 +108,8 @@ from r36s_studio.imaging import sf3000_clone
 from r36s_studio.imaging.card_probe import is_sf3000_card
 from r36s_studio.imaging.exfat_reader import ExFatError
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
+from r36s_studio.imaging.flash import UnstableImageRefused
+from r36s_studio.imaging.source_verify import ImageModified, SourceUnstable
 from r36s_studio.imaging.mbr import SECTOR_SIZE
 from r36s_studio.imaging.winlock import VolumeInUseError
 from r36s_studio.partitions import (
@@ -132,6 +134,7 @@ from r36s_studio.protocol import (
     emit_error,
     emit_estimate,
     emit_log,
+    emit_phase,
     emit_progress,
     emit_step_progress,
 )
@@ -269,6 +272,22 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _make_progress_emitter():
+    """`on_progress` des commandes à plusieurs passes (copie puis
+    relecture, `source_verify.py`) : émet un événement `phase` à chaque
+    changement de passe, pour que la GUI affiche « Vérification de la
+    source… » plutôt qu'une barre qui repart de zéro sans explication."""
+    current = {"phase": "copy"}
+
+    def on_progress(event: ProgressEvent) -> None:
+        if event.phase != current["phase"]:
+            current["phase"] = event.phase
+            emit_phase(event.phase)
+        emit_progress(event.done, event.total, event.speed)
+
+    return on_progress
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     progress_file = _open_progress_file(args)
     try:
@@ -360,17 +379,25 @@ def cmd_backup(args: argparse.Namespace) -> int:
         else:
             emit_log(f"Sauvegarde de {device.display} ({device.path}) vers {args.output}")
 
-        def on_progress(event: ProgressEvent) -> None:
-            emit_progress(event.done, event.total, event.speed)
+        if args.no_source_verify:
+            emit_log("Double lecture de la source désactivée (réglage) : la sauvegarde sera deux fois plus rapide mais non vérifiée.", level="warning")
 
         backup_function = backup_system_only if args.system_only else backup_device
         try:
             copied = backup_function(
                 device,
                 args.output,
-                on_progress=on_progress,
+                on_progress=_make_progress_emitter(),
                 should_cancel=_make_should_cancel(args),
+                double_read=not args.no_source_verify,
             )
+        except SourceUnstable as exc:
+            # L'image n'est jamais supprimée (peut-être la seule copie d'une
+            # carte en train de mourir) : renommée en `.instable` par
+            # `quarantine_unstable_image`, plages listées à côté.
+            emit_error("SOURCE_UNSTABLE", f"{exc} -- image mise de côté : {exc.image_path}")
+            emit_done(False)
+            return 1
         except GamesPartitionNotFound as exc:
             emit_error("GAMES_PARTITION_NOT_FOUND", str(exc))
             return 1
@@ -496,16 +523,22 @@ def cmd_flash(args: argparse.Namespace) -> int:
 
         emit_log(f"Écriture de {args.image} sur {device.display} ({device.path})")
 
-        def on_progress(event: ProgressEvent) -> None:
-            emit_progress(event.done, event.total, event.speed)
-
         try:
             result = flash_device(
                 device,
                 args.image,
-                on_progress=on_progress,
+                on_progress=_make_progress_emitter(),
                 should_cancel=_make_should_cancel(args),
+                allow_unstable=args.allow_unstable,
+                on_warning=lambda msg: emit_log(msg, level="warning"),
             )
+        except UnstableImageRefused as exc:
+            emit_error("UNSTABLE_IMAGE", str(exc))
+            return 1
+        except ImageModified as exc:
+            # Refusé avant `prepared_write_target` : la carte n'a pas été touchée.
+            emit_error("IMAGE_MODIFIED", str(exc))
+            return 1
         except OperationCancelled as exc:
             emit_error("CANCELLED", f"Écriture annulée après {exc.done} octets")
             emit_done(False)
@@ -1327,6 +1360,15 @@ def build_parser() -> argparse.ArgumentParser:
             "faire échouer la sauvegarde elle-même, déjà réussie à ce stade"
         ),
     )
+    backup_parser.add_argument(
+        "--no-source-verify",
+        action="store_true",
+        help=(
+            "Ne relit pas la source après la copie (double lecture, activée par défaut, "
+            "`config.json::verify_backup_source`) -- deux fois plus rapide, mais une carte "
+            "qui renvoie des données fausses sans erreur ne sera pas détectée"
+        ),
+    )
     _add_worker_args(backup_parser)
     _add_dev_args(backup_parser)
     backup_parser.set_defaults(func=cmd_backup)
@@ -1354,6 +1396,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Éjecte la carte automatiquement après l'écriture et la vérification (§4.6 -- "
             "au moins une partition de tout firmware du catalogue est illisible pour "
             "Windows, qui propose sinon de la formater)"
+        ),
+    )
+    flash_parser.add_argument(
+        "--allow-unstable",
+        action="store_true",
+        help=(
+            "Autorise l'écriture d'une image .img.instable (sauvegarde d'une carte source "
+            "instable, non fiable) -- mode expert seulement, après confirmation explicite"
         ),
     )
     _add_worker_args(flash_parser)

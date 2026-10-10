@@ -7,10 +7,11 @@ négociable n°5), au maximum ~4 fois par seconde."""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from dataclasses import dataclass
-from typing import BinaryIO, Callable, Optional
+from typing import BinaryIO, Callable, List, Optional
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB
 PROGRESS_INTERVAL = 0.25  # secondes -> au plus ~4 événements/seconde
@@ -31,10 +32,43 @@ class ProgressEvent:
     done: int
     total: int
     speed: float  # octets/seconde
+    # Passe en cours quand une opération en a plusieurs (« copy » par
+    # défaut ; « verify_source »/« verify_image », `source_verify.py`) --
+    # chaque passe a sa propre progression réelle, de 0 à `total`.
+    phase: str = "copy"
 
 
 ProgressCallback = Callable[[ProgressEvent], None]
 CancelCheck = Callable[[], bool]
+
+
+class ProgressThrottle:
+    """Émission limitée à ~4/seconde pour les passes de relecture
+    (`source_verify.py`), même cadence que `copy_range`. `total=None` :
+    taille inconnue, `done` rapporté comme `total` (jamais une estimation
+    trompeuse, règle §2 n°5)."""
+
+    def __init__(self, on_progress: Optional[ProgressCallback], total: Optional[int], phase: str):
+        self._on_progress = on_progress
+        self._total = total
+        self._phase = phase
+        self._start = self._last_emit = time.monotonic()
+
+    def _emit(self, done: int) -> None:
+        elapsed = time.monotonic() - self._start
+        speed = done / elapsed if elapsed > 0 else 0.0
+        total = self._total if self._total is not None else done
+        self._on_progress(ProgressEvent(done=done, total=total, speed=speed, phase=self._phase))
+
+    def update(self, done: int) -> None:
+        now = time.monotonic()
+        if self._on_progress is not None and now - self._last_emit >= PROGRESS_INTERVAL:
+            self._emit(done)
+            self._last_emit = now
+
+    def finish(self, done: int) -> None:
+        if self._on_progress is not None:
+            self._emit(done)
 
 
 def copy_range(
@@ -45,6 +79,7 @@ def copy_range(
     block_size: int = BLOCK_SIZE,
     sector_size: Optional[int] = None,
     should_cancel: Optional[CancelCheck] = None,
+    block_digests: Optional[List[str]] = None,
 ) -> int:
     """Copie `source` vers `destination`, par blocs de `block_size`.
 
@@ -66,6 +101,10 @@ def copy_range(
     répond True, lève `OperationCancelled` (avec `done` déjà écrit et
     fsync-é) plutôt que de s'arrêter silencieusement — l'appelant doit
     pouvoir distinguer une annulation d'une copie terminée normalement.
+
+    Si `block_digests` est fourni, le SHA-256 de chaque bloc *réellement
+    lu* (avant tout remplissage) y est ajouté, dans l'ordre -- la première
+    lecture de la double lecture de la source (`source_verify.py`).
 
     Termine par `flush` + `fsync`. Retourne le nombre d'octets réellement
     copiés (lus depuis `source`)."""
@@ -91,6 +130,8 @@ def copy_range(
         chunk = source.read(read_size)
         if not chunk:
             break
+        if block_digests is not None:
+            block_digests.append(hashlib.sha256(chunk).hexdigest())
 
         write_chunk = chunk
         if sector_size and len(chunk) % sector_size != 0:

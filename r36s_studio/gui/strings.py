@@ -782,6 +782,14 @@ STRINGS = {
     "progress_phase_copy": "Copie…",
     "progress_phase_verify_source": "Vérification de la source…",
     "progress_phase_verify_image": "Vérification de l'image…",
+    # Chien de garde de lecture (`imaging/source.py::StallWatchedReader`) --
+    # cas réel : carte noname bloquée des heures sans erreur ni donnée.
+    "error_source_not_responding": (
+        "La carte source ne répond plus : elle est probablement défaillante. "
+        "Recommandation : installer une image neuve plutôt que cloner cette carte."
+    ),
+    "execute_source_stalled": "⚠ La carte ne répond plus depuis {seconds} s (arrêt à {limit} s)…",
+    "log_source_stalled_start": "La carte source ne répond plus -- attente de ses données…",
     "error_eject_failed": (
         "Impossible d'éjecter la carte. Ferme les fichiers ouverts dessus, puis réessaie, "
         "ou retire-la manuellement."
@@ -1325,6 +1333,7 @@ _ERROR_MESSAGE_KEYS = {
     "SOURCE_UNSTABLE": "error_source_unstable",
     "IMAGE_MODIFIED": "error_image_modified",
     "UNSTABLE_IMAGE": "error_unstable_image",
+    "SOURCE_NOT_RESPONDING": "error_source_not_responding",
     "UNSUPPORTED_OS": "error_unsupported_os",
     "CONFIRMATION_REFUSED": "error_confirmation_refused",
     "INVALID_ARGS": "error_invalid_args",

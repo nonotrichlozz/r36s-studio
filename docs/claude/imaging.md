@@ -476,3 +476,32 @@ carte à l'image, déjà fausse) -- libcairo corrompue, RetroArch qui plante.
   SHA-256 après écriture (`FlashResult.verified`) est inchangée.
 - **Non fait** : `clone-sf3000` ne contrôle pas encore le compagnon (TODO,
   `CLAUDE.md` §7).
+
+**Chien de garde de lecture (2026-10-10, `imaging/source.py::StallWatchedReader`).**
+Cas réel : la même carte noname bloque parfois une lecture pendant des
+heures, sans erreur ni donnée -- barre figée en silence.
+- **Lectures surveillées** : copie et relecture de `backup_device`/
+  `backup_system_only`, et lecture initiale des tables (`compute_backup_size`,
+  `compute_system_boundary`, donc aussi `estimate_system_backup_size`).
+  Chaque `read()` part dans un thread **daemon** (`r36s-source-read`) ; le
+  thread appelant attend par tranches d'une seconde et reste annulable.
+- **Signalement** : au-delà de 5 s sans données (`STALL_NOTICE_SECONDS`),
+  événement `stalled` (`seconds`/`limit`) environ chaque seconde ; la GUI
+  (`LogPanel.show_stalled`) affiche en rouge « La carte ne répond plus depuis
+  N s (arrêt à M s) », une seule ligne au journal par blocage, effacé au
+  prochain `progress`.
+- **Abandon** : aucun octet pendant `config.json::source_stall_timeout_seconds`
+  (60 s par défaut, minimum 10, invalide -> 60 ; la GUI ne passe
+  `--stall-timeout` que si la valeur diffère du défaut) -> `SourceNotResponding`
+  (sous-classe d'`OSError`, attrapée avant), code `SOURCE_NOT_RESPONDING`.
+- **Sortie du worker** : le flux bloqué n'est jamais refermé (le thread
+  coincé tient son verrou, `close()` bloquerait aussi). Si un thread de
+  lecture est encore vivant à la fin d'une commande `--worker`
+  (`has_stuck_reads`), `__main__.main` quitte par `os._exit(code)`, après
+  les événements finaux et la fermeture du fichier de progression -- jamais
+  bloqué par la finalisation de l'interpréteur. Un `ReadFile` Windows coincé
+  dans le pilote peut encore retarder la disparition du processus ; la GUI
+  n'en dépend pas (elle s'arrête sur l'événement `done`).
+- **Non surveillé** : `list_partitions` (avant la lecture des tables
+  système), l'écriture du flash (**TODO**, `CLAUDE.md` §7). Après un
+  abandon, image partielle laissée sans `.sha256blocks`.

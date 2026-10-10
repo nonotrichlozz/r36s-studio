@@ -42,6 +42,15 @@ def emit_phase(name: str) -> None:
     emit({"type": "phase", "name": name})
 
 
+def emit_stalled(seconds: float, limit: float) -> None:
+    """La carte source ne renvoie plus rien depuis `seconds` secondes
+    (abandon à `limit`, `imaging/source.py::StallWatchedReader`) -- émis
+    environ chaque seconde pendant l'attente : la GUI montre qu'on est
+    bloqué plutôt qu'une barre figée en silence. Le prochain `progress`
+    signifie que les données reviennent."""
+    emit({"type": "stalled", "seconds": round(seconds), "limit": round(limit)})
+
+
 def emit_log(msg: str, level: str = "info") -> None:
     emit({"type": "log", "level": level, "msg": msg})
 

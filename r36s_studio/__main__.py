@@ -109,6 +109,7 @@ from r36s_studio.imaging.card_probe import is_sf3000_card
 from r36s_studio.imaging.exfat_reader import ExFatError
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.flash import UnstableImageRefused
+from r36s_studio.imaging.source import DEFAULT_STALL_TIMEOUT_SECONDS, SourceNotResponding, has_stuck_reads
 from r36s_studio.imaging.source_verify import ImageModified, SourceUnstable
 from r36s_studio.imaging.mbr import SECTOR_SIZE
 from r36s_studio.imaging.winlock import VolumeInUseError
@@ -136,6 +137,7 @@ from r36s_studio.protocol import (
     emit_log,
     emit_phase,
     emit_progress,
+    emit_stalled,
     emit_step_progress,
 )
 from r36s_studio.safety import DEFAULT_MAX_SIZE_BYTES, SafetyConfig, filter_devices
@@ -272,6 +274,13 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _positive_seconds(value: str) -> int:
+    seconds = int(value)
+    if seconds < 1:
+        raise argparse.ArgumentTypeError("doit être un nombre de secondes positif")
+    return seconds
+
+
 def _make_progress_emitter():
     """`on_progress` des commandes à plusieurs passes (copie puis
     relecture, `source_verify.py`) : émet un événement `phase` à chaque
@@ -321,6 +330,9 @@ def cmd_backup(args: argparse.Namespace) -> int:
             except GamesPartitionNotFound as exc:
                 emit_error("GAMES_PARTITION_NOT_FOUND", str(exc))
                 return 1
+            except SourceNotResponding as exc:  # avant `OSError` (sous-classe)
+                emit_error("SOURCE_NOT_RESPONDING", str(exc))
+                return 1
             except (OSError, subprocess.CalledProcessError) as exc:
                 emit_error("IO_ERROR", str(exc))
                 return 1
@@ -359,6 +371,9 @@ def cmd_backup(args: argparse.Namespace) -> int:
         except GamesPartitionNotFound as exc:
             emit_error("GAMES_PARTITION_NOT_FOUND", str(exc))
             return 1
+        except SourceNotResponding as exc:
+            emit_error("SOURCE_NOT_RESPONDING", str(exc))
+            return 1
         try:
             free_bytes = shutil.disk_usage(Path(args.output).resolve().parent).free
         except OSError as exc:
@@ -390,7 +405,15 @@ def cmd_backup(args: argparse.Namespace) -> int:
                 on_progress=_make_progress_emitter(),
                 should_cancel=_make_should_cancel(args),
                 double_read=not args.no_source_verify,
+                stall_timeout=args.stall_timeout,
+                on_stall=emit_stalled,
             )
+        except SourceNotResponding as exc:
+            # Avant `OSError` ci-dessous (sous-classe) : cas réel, une carte
+            # dégradée qui bloque une lecture pendant des heures sans erreur.
+            emit_error("SOURCE_NOT_RESPONDING", str(exc))
+            emit_done(False)
+            return 1
         except SourceUnstable as exc:
             # L'image n'est jamais supprimée (peut-être la seule copie d'une
             # carte en train de mourir) : renommée en `.instable` par
@@ -1369,6 +1392,16 @@ def build_parser() -> argparse.ArgumentParser:
             "qui renvoie des données fausses sans erreur ne sera pas détectée"
         ),
     )
+    backup_parser.add_argument(
+        "--stall-timeout",
+        type=_positive_seconds,
+        default=DEFAULT_STALL_TIMEOUT_SECONDS,
+        help=(
+            "Abandonne si la carte source ne renvoie plus aucune donnée pendant ce nombre "
+            f"de secondes (défaut : {DEFAULT_STALL_TIMEOUT_SECONDS}, "
+            "`config.json::source_stall_timeout_seconds`)"
+        ),
+    )
     _add_worker_args(backup_parser)
     _add_dev_args(backup_parser)
     backup_parser.set_defaults(func=cmd_backup)
@@ -1612,7 +1645,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         effective_argv = ["gui"]
     parser = build_parser()
     args = parser.parse_args(effective_argv)
-    return args.func(args)
+    code = args.func(args)
+    if getattr(args, "worker", False) and has_stuck_reads():
+        # Carte qui ne répond plus (`SOURCE_NOT_RESPONDING`) : le thread de
+        # lecture peut rester coincé dans le noyau (`ReadFile` Windows) et
+        # ne jamais rendre la main. Événements finaux déjà écrits et
+        # fichier de progression refermé (`finally` des commandes) : on
+        # quitte sans la finalisation de l'interpréteur, qui pourrait
+        # attendre ce thread ou le verrou de son flux.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
+    return code
 
 
 if __name__ == "__main__":

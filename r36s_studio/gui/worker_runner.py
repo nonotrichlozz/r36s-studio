@@ -96,6 +96,9 @@ class WorkerRunner(QObject):
     # Début d'une nouvelle passe (`copy`/`verify_source`/`verify_image`,
     # `protocol.emit_phase`) -- les `progress` suivants repartent de 0.
     phase = Signal(str)  # nom de la passe
+    # La carte source ne renvoie plus rien (`protocol.emit_stalled`), émis
+    # environ chaque seconde pendant l'attente.
+    stalled = Signal(float, float)  # secondes d'attente, délai d'abandon
 
     def __init__(self, argv: List[str], parent=None, macos_auth_session=None):
         """`argv` : la commande worker sans `--worker`/`--progress-file`/
@@ -286,6 +289,8 @@ class WorkerRunner(QObject):
             self.estimate.emit(event.get("size_bytes", 0))
         elif etype == "step_progress":
             self.step_progress.emit(event.get("step_index", 0), event.get("step_count", 0), event.get("step_name", ""))
+        elif etype == "stalled":
+            self.stalled.emit(float(event.get("seconds", 0)), float(event.get("limit", 0)))
         elif etype == "phase":
             self.phase.emit(event.get("name", ""))
         elif etype == "eject_result":

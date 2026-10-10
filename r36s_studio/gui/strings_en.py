@@ -500,6 +500,12 @@ STRINGS_EN = {
     "progress_phase_copy": "Copying…",
     "progress_phase_verify_source": "Verifying the source…",
     "progress_phase_verify_image": "Verifying the image…",
+    "error_source_not_responding": (
+        "The source card is no longer responding: it is probably failing. "
+        "Recommendation: install a fresh image rather than cloning this card."
+    ),
+    "execute_source_stalled": "⚠ The card has not responded for {seconds} s (stopping at {limit} s)…",
+    "log_source_stalled_start": "The source card is no longer responding -- waiting for its data…",
     "error_eject_failed": (
         "Could not eject the card. Close the files open on it, then try again, or remove it manually."
     ),

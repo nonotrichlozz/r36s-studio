@@ -111,6 +111,12 @@ DEFAULT_DOUBLONS_SIMULATION_MODE = True
 # jamais grossir sans limite, le plus récent en tête.
 _MAX_DOUBLONS_RECENT_DESTINATIONS = 10
 
+# Même valeur que `imaging/source.py::DEFAULT_STALL_TIMEOUT_SECONDS`
+# (dupliquée : `config.py` n'importe rien d'`imaging/`). En dessous de
+# 10 s, une carte simplement lente (~6 Mo/s) pourrait être abandonnée à tort.
+DEFAULT_SOURCE_STALL_TIMEOUT_SECONDS = 60
+_MIN_SOURCE_STALL_TIMEOUT_SECONDS = 10
+
 
 @dataclass
 class AppConfig:
@@ -138,6 +144,10 @@ class AppConfig:
     # défaut ; la désactiver (case du mode expert) divise environ par deux
     # le temps de lecture.
     verify_backup_source: bool = True
+    # Chien de garde de lecture (`imaging/source.py::StallWatchedReader`) :
+    # cas réel, une carte noname qui bloque une lecture pendant des heures
+    # sans erreur. Abandon si aucune donnée n'arrive pendant ce délai.
+    source_stall_timeout_seconds: int = DEFAULT_SOURCE_STALL_TIMEOUT_SECONDS
 
 
 def config_dir() -> Path:
@@ -205,6 +215,14 @@ def load_config() -> AppConfig:
     verify_backup_source = raw.get("verify_backup_source")
     if not isinstance(verify_backup_source, bool):
         verify_backup_source = True
+    source_stall_timeout_seconds = raw.get("source_stall_timeout_seconds")
+    # `bool` est une sous-classe d'`int` : `true` dans le JSON ne doit pas valoir 1 s.
+    if (
+        not isinstance(source_stall_timeout_seconds, int)
+        or isinstance(source_stall_timeout_seconds, bool)
+        or source_stall_timeout_seconds < _MIN_SOURCE_STALL_TIMEOUT_SECONDS
+    ):
+        source_stall_timeout_seconds = DEFAULT_SOURCE_STALL_TIMEOUT_SECONDS
     return AppConfig(
         ui_mode=ui_mode,
         language=language,
@@ -220,6 +238,7 @@ def load_config() -> AppConfig:
         latest_update_tag=latest_update_tag,
         latest_update_notes=latest_update_notes,
         verify_backup_source=verify_backup_source,
+        source_stall_timeout_seconds=source_stall_timeout_seconds,
     )
 
 

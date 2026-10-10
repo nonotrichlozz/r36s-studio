@@ -2370,6 +2370,7 @@ class LogPanel(QFrame):
         # hors écran qui ne l'affiche jamais. `is_operation_active()` doit
         # rester fiable même dans ce cas (`MainWindow.closeEvent`, §2).
         self._operation_active = False
+        self._stalled = False  # `show_stalled` : carte source qui ne répond plus
         layout = QVBoxLayout(self)
 
         header_row = QHBoxLayout()
@@ -2453,6 +2454,7 @@ class LogPanel(QFrame):
         self._log_view.clear()  # ne conserve l'historique que de l'opération qui démarre (§5)
 
     def update_progress(self, done: int, total: int, speed: float) -> None:
+        self._clear_stalled()
         if total > 0:
             self._bar.setRange(0, 100)
             self._bar.setValue(int(done * 100 / total))
@@ -2468,6 +2470,26 @@ class LogPanel(QFrame):
             self._eta_label.setText(tr("execute_eta", eta=_format_duration(remaining_seconds)))
         else:
             self._eta_label.setText(tr("execute_eta_unknown"))
+
+    def show_stalled(self, seconds: float, limit: float) -> None:
+        """La carte source ne renvoie plus rien (chien de garde, cas réel
+        d'une carte noname bloquée des heures sans erreur) : message en
+        rouge à la place du débit, temps restant inconnu, une ligne au
+        journal au début de l'attente -- jamais une barre figée en
+        silence. Le prochain `update_progress` efface cet état."""
+        if not self._stalled:
+            self._stalled = True
+            self._speed_label.setProperty("role", "dangerMessage")
+            theme.repolish(self._speed_label)
+            self.append_log(tr("log_source_stalled_start"))
+        self._speed_label.setText(tr("execute_source_stalled", seconds=int(seconds), limit=int(limit)))
+        self._eta_label.setText(tr("execute_eta_unknown"))
+
+    def _clear_stalled(self) -> None:
+        if self._stalled:
+            self._stalled = False
+            self._speed_label.setProperty("role", "secondary")
+            theme.repolish(self._speed_label)
 
     def set_phase(self, phase_text: str) -> None:
         """Nouvelle passe d'une opération qui en a plusieurs (copie puis

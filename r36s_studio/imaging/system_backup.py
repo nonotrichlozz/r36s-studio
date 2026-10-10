@@ -79,7 +79,7 @@ from r36s_studio.partitions.locate import PartitionInfo, list_partitions
 from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
 from .gpt import GptHeader, GptPartitionEntry, build_gpt_entries, build_gpt_header, parse_gpt_entries, parse_gpt_header
 from .mbr import GPT_PROTECTIVE_TYPE, PARTITION_ENTRY_SIZE, PARTITION_TABLE_OFFSET, SECTOR_SIZE, is_gpt_protective, parse_mbr
-from .source import prepared_source
+from .source import DEFAULT_STALL_TIMEOUT_SECONDS, StallCallback, StallWatchedReader, prepared_source
 from .source_verify import SourceUnstable, quarantine_unstable_image, rehash_blocks, verify_source, write_block_digests
 
 # Étiquettes reconnues pour la partition de jeux (§4.4) -- EASYROMS sur
@@ -192,16 +192,23 @@ def estimate_system_backup_size_unprivileged(device_path: str) -> Optional[int]:
     return sum(kept_sizes)
 
 
-def compute_system_boundary(device_path: str) -> SystemBoundary:
+def compute_system_boundary(
+    device_path: str,
+    stall_timeout: float = DEFAULT_STALL_TIMEOUT_SECONDS,
+    on_stall: Optional[StallCallback] = None,
+    should_cancel: Optional[CancelCheck] = None,
+) -> SystemBoundary:
     """Détermine jusqu'où copier pour une sauvegarde système sans les jeux
     -- schéma MBR ou GPT détecté automatiquement (même critère que `mbr.
     is_gpt_protective`, déjà utilisé par `imaging/backup.py`). Lève
     `GamesPartitionNotFound` si aucune partition de jeux n'est
     identifiable sur cette carte, ou si elle est la toute première
-    partition (rien à garder avant elle)."""
+    partition (rien à garder avant elle). Lecture des tables surveillée
+    comme la copie (`StallWatchedReader`) : la carte de l'incident peut
+    bloquer dès le premier secteur."""
     partitions = list_partitions(device_path)
 
-    with open(device_path, "rb") as f:
+    with StallWatchedReader(open(device_path, "rb"), stall_timeout, on_stall, should_cancel) as f:
         first_sector = f.read(SECTOR_SIZE)
         mbr_partitions = parse_mbr(first_sector)
 
@@ -396,6 +403,8 @@ def backup_system_only(
     block_size: int = BLOCK_SIZE,
     should_cancel: Optional[CancelCheck] = None,
     double_read: bool = True,
+    stall_timeout: float = DEFAULT_STALL_TIMEOUT_SECONDS,
+    on_stall: Optional[StallCallback] = None,
 ) -> int:
     """Sauvegarde `device` (lecture seule) dans `output_path`, jusqu'à la
     fin de la dernière partition système -- sans la partition de jeux
@@ -412,12 +421,16 @@ def backup_system_only(
     `<image>.sha256blocks` porte sur le fichier FINAL, tables MBR/GPT
     réécrites comprises : les blocs touchés par la réparation sont relus
     dans le `.img` produit (`_rewritten_block_indices`), les autres sont
-    les empreintes de la copie -- identiques aux octets du fichier."""
-    boundary = compute_system_boundary(device.path)
+    les empreintes de la copie -- identiques aux octets du fichier.
+
+    Même chien de garde que `backup_device` (`SourceNotResponding`)."""
+    boundary = compute_system_boundary(device.path, stall_timeout, on_stall, should_cancel)
     digests: List[str] = []
     with prepared_source(device.path) as raw_path:
         try:
-            with open(raw_path, "rb") as source, open(output_path, "wb") as destination:
+            with StallWatchedReader(open(raw_path, "rb"), stall_timeout, on_stall, should_cancel) as source, open(
+                output_path, "wb"
+            ) as destination:
                 copy_range(
                     source,
                     destination,

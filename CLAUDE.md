@@ -66,8 +66,9 @@ sans interface (c'est un CLI : `python -m r36s_studio <commande>`).
 `progress` (`done`/`total`/`speed`), `log` (`level`/`msg`), `error`
 (`code`/`msg`), `done` (`ok`), plus `estimate` (`size_bytes`), `step_progress`
 (`step_index`/`step_count`/`step_name`), `eject_result`, `identify_result`
-(`result`, identification élevée sous Windows) et `phase` (`name` :
-`verify_source`/`verify_image` -- les `progress` suivants repartent de 0).
+(`result`, identification élevée sous Windows), `phase` (`name` :
+`verify_source`/`verify_image` -- les `progress` suivants repartent de 0) et
+`stalled` (`seconds`/`limit` : la carte source ne renvoie plus rien).
 
 **Élévation, par OS** (détail et pièges macOS : `docs/claude/elevation-macos.md`) :
 
@@ -144,6 +145,12 @@ sauvegarde système sans les jeux, remise à zéro).
   (jamais supprimée) + `.instable.txt`, code `SOURCE_UNSTABLE`. Chaque
   sauvegarde réussie écrit `<image>.sha256blocks`, recontrôlé avant tout
   flash (`IMAGE_MODIFIED`, carte jamais touchée). Format : `imaging.md`.
+- **Chien de garde de lecture** (`imaging/source.py::StallWatchedReader`,
+  incident réel : lecture bloquée des heures sans erreur) : toute lecture de
+  la carte source d'une sauvegarde passe par lui. Événement `stalled` après
+  5 s, abandon `SOURCE_NOT_RESPONDING` après
+  `config.json::source_stall_timeout_seconds` (60 s, `--stall-timeout`) ;
+  un worker qui garde un thread de lecture coincé quitte par `os._exit`.
 - **Codes d'erreur** : tout `emit_error("CODE", …)` de `__main__.py` doit avoir
   un message dans `gui/strings.py::_ERROR_MESSAGE_KEYS` (vérifié par
   `tests/test_gui_strings.py`). Les détails passent par `error_log_detail`.
@@ -233,6 +240,10 @@ Détail et bancs de test : `docs/claude/testing.md`.
 - Double lecture de la source : jamais lancée sur la carte noname (0xFE) de
   l'incident ; `posix_fadvise(DONTNEED)` (Linux) et l'absence de cache sur
   `\\.\PhysicalDriveN` (Windows) supposés, non mesurés (`imaging.md`).
+- Chien de garde de lecture : jamais déclenché sur la vraie carte ; sortie
+  d'un worker dont le `ReadFile` reste coincé dans le pilote non vérifiée.
+  **TODO** : l'écriture du flash (carte cible qui cesse de répondre) n'est
+  pas surveillée (`imaging.md`).
 - **TODO** : `clone-sf3000` (« Utiliser toute la carte ») ne contrôle pas
   encore le `.sha256blocks` de l'image avant d'écrire -- même contrôle que
   `flash_device` à ajouter.

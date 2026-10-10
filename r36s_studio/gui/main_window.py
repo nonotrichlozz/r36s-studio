@@ -1364,6 +1364,11 @@ class MainWindow(QMainWindow):
             # Le worker élevé ne lit pas forcément le même config.json
             # (root sous macOS) : la GUI transmet le réglage elle-même.
             argv.append("--no-source-verify")
+        if (
+            self._mode in ("backup", "backup_system")
+            and self._app_config.source_stall_timeout_seconds != app_config.DEFAULT_SOURCE_STALL_TIMEOUT_SECONDS
+        ):
+            argv += ["--stall-timeout", str(self._app_config.source_stall_timeout_seconds)]
         if argv[0] == "flash" and self._allow_unstable_image:
             argv.append("--allow-unstable")
 
@@ -1381,6 +1386,7 @@ class MainWindow(QMainWindow):
         self._runner.progress.connect(self._on_progress)
         self._runner.step_progress.connect(self._on_step_progress)
         self._runner.phase.connect(lambda name: self._log_panel.set_phase(tr(f"progress_phase_{name}")))
+        self._runner.stalled.connect(self._log_panel.show_stalled)
         self._runner.log.connect(lambda level, msg: self._log_panel.append_log(msg))
         self._runner.error.connect(self._on_worker_error)
         self._runner.finished.connect(self._on_worker_finished)

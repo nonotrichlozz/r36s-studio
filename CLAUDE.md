@@ -198,8 +198,12 @@ Détail et bancs de test : `docs/claude/testing.md`.
   mocké lève `UnmockedSubprocessError`. Exceptions déclarées par marqueur :
   `@pytest.mark.real_subprocess`, `@pytest.mark.real_fda_probe`
   (`has_full_disk_access` est stubée à `True` par défaut).
-- `config.json` est redirigé vers `tmp_path` en autouse (`conftest.py`) : un
-  test ne doit jamais écrire le vrai fichier de la machine.
+- `config.json` est redirigé vers `tmp_path` en autouse (`conftest.py`, et
+  `APPDATA` aussi) : un test ne doit jamais écrire le vrai fichier de la
+  machine. `_real_config_dir_guard` (hook d'audit) fait échouer tout test qui
+  ouvre, crée ou renomme quoi que ce soit dans le vrai dossier de config,
+  même par une copie importée (`from r36s_studio.config import config_path`,
+  incident du 2026-10-10).
 - Chemins de périphérique factices impossibles à confondre avec du matériel
   réel : `/dev/fake-disk-test-*`, ou numéro implausible quand le format compte
   (`disk9903`, `PhysicalDrive9902`).

@@ -18,10 +18,16 @@ sur aucun OS, quel que soit le nombre de niveaux internes traversés."""
 
 from __future__ import annotations
 
+import os
 import platform
 import subprocess
 
 import pytest
+
+# Importées au chargement du module, avant les patchs de `conftest.py` :
+# exactement la copie de l'incident du 2026-10-10.
+from r36s_studio.config import config_path as _stale_config_path
+from r36s_studio.gui.logs import log_dir as _stale_log_dir
 
 
 def test_platform_system_result_is_cached_before_tests_run():
@@ -53,3 +59,38 @@ def test_forbid_real_subprocess_still_blocks_application_code():
         subprocess.run(["r36s-studio-test-probe-inexistant"], capture_output=True)
 
     assert type(exc_info.value).__name__ == "UnmockedSubprocessError"
+
+
+# --- Vrai dossier de config (`conftest.py::_real_config_dir_guard`) ---------
+#
+# Incident du 2026-10-10 : un test importait `config_path` directement
+# (`from r36s_studio.config import config_path`), ce qui contournait la
+# redirection de `config.config_path`, et a écrasé le vrai config.json.
+
+
+@pytest.mark.skipif(platform.system() != "Windows", reason="APPDATA n'est lu que sous Windows")
+def test_stale_import_of_config_path_now_lands_in_tmp_path(tmp_path):
+    assert _stale_config_path() == tmp_path / "appdata" / "r36s-studio" / "config.json"
+    assert _stale_log_dir() == tmp_path / "appdata" / "r36s-studio" / "logs"
+
+
+def test_writing_into_the_real_config_dir_fails(_real_config_dir_guard):
+    from tests.conftest import _REAL_CONFIG_DIR, RealConfigDirTouched
+
+    target = os.path.join(_REAL_CONFIG_DIR, "config.json")
+    with pytest.raises(RealConfigDirTouched):
+        open(target, "w")  # bloqué avant même l'ouverture
+    with pytest.raises(RealConfigDirTouched):
+        os.replace(os.path.join(_REAL_CONFIG_DIR, "absent"), target)
+    # Relevé même si le code testé avait avalé l'exception : le test
+    # échouerait au démontage. Vidé ici, l'échec est le comportement attendu.
+    assert len(_real_config_dir_guard.violations) == 2
+    _real_config_dir_guard.violations.clear()
+
+
+def test_reading_the_real_config_dir_fails_too(_real_config_dir_guard):
+    from tests.conftest import _REAL_CONFIG_DIR, RealConfigDirTouched
+
+    with pytest.raises(RealConfigDirTouched):
+        open(os.path.join(_REAL_CONFIG_DIR, "config.json"), "rb")
+    _real_config_dir_guard.violations.clear()

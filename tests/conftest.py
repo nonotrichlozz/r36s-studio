@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
+import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -261,8 +262,82 @@ def _reset_privileged_mount_hook():
 def _config_json_isolated(tmp_path, monkeypatch):
     """Jamais le vrai `config.json` de la machine : un test qui déclenche
     `save_config` sans le mocker (ex. `_on_update_available`) l'écrasait
-    avec les valeurs par défaut d'`AppConfig` (constaté le 2026-10-03)."""
+    avec les valeurs par défaut d'`AppConfig` (constaté le 2026-10-03).
+    `APPDATA` est redirigé aussi : une copie importée de `config_path`
+    (`from r36s_studio.config import config_path`) échappe au patch et a
+    écrasé le vrai fichier le 2026-10-10 ; `gui/logs.py::log_dir` n'était
+    redirigé par personne. Les deux lisent `APPDATA` à chaque appel sous
+    Windows. Ailleurs (`~/.config`), `_real_config_dir_guard` fait échouer
+    le test avant toute écriture."""
     from r36s_studio import config
 
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config.json")
     yield
+
+
+# Vrai dossier de données de l'app (`config.json`, `logs/`, `doublons_scans/`),
+# relevé avant tout patch. Le garde ci-dessous fait échouer tout test qui y
+# ouvre, crée, renomme ou supprime quoi que ce soit, quel que soit le chemin
+# par lequel il y arrive (copie importée d'une fonction, chemin écrit en dur,
+# sous-module non redirigé) -- les redirections ci-dessus ne couvrent que les
+# chemins connus.
+def _real_config_dir() -> str:
+    from r36s_studio import config
+
+    return os.path.normcase(os.path.realpath(config.config_dir()))
+
+
+_REAL_CONFIG_DIR = _real_config_dir()
+_GUARDED_AUDIT_EVENTS = {
+    "open", "os.rename", "os.remove", "os.mkdir", "os.rmdir", "os.truncate",
+    "shutil.copyfile", "shutil.copytree", "shutil.move", "shutil.rmtree",
+}
+
+
+class RealConfigDirTouched(AssertionError):
+    """Hérite d'`AssertionError`, pas d'`OSError` : un `except OSError` du
+    code applicatif ne doit pas l'avaler."""
+
+
+class _RealConfigDirGuard:
+    def __init__(self):
+        self.active = False
+        self.violations: list = []
+
+    def audit(self, event, args):
+        if not self.active or event not in _GUARDED_AUDIT_EVENTS:
+            return
+        for arg in args:
+            if not isinstance(arg, (str, bytes, os.PathLike)):
+                continue
+            try:
+                path = os.path.normcase(os.path.realpath(os.fsdecode(arg)))
+            except (TypeError, ValueError):
+                continue
+            if path == _REAL_CONFIG_DIR or path.startswith(_REAL_CONFIG_DIR + os.sep):
+                message = f"{event}({path!r}) : un test a touché au vrai dossier de config de la machine"
+                self.violations.append(message)
+                raise RealConfigDirTouched(message)
+
+
+_real_config_dir_guard_state = _RealConfigDirGuard()
+# Un hook d'audit ne se retire pas : il reste installé, actif seulement
+# pendant le corps et le démontage de chaque test.
+sys.addaudithook(_real_config_dir_guard_state.audit)
+
+
+@pytest.fixture(autouse=True)
+def _real_config_dir_guard():
+    """Échoue même si le code testé avale l'exception (`except Exception`) :
+    la violation est relevée au démontage."""
+    _real_config_dir_guard_state.violations.clear()
+    _real_config_dir_guard_state.active = True
+    try:
+        yield _real_config_dir_guard_state
+    finally:
+        _real_config_dir_guard_state.active = False
+    violations = list(_real_config_dir_guard_state.violations)
+    _real_config_dir_guard_state.violations.clear()
+    if violations:
+        pytest.fail("\n".join(violations), pytrace=False)

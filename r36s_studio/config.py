@@ -20,7 +20,7 @@ import os
 import platform
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from r36s_studio.i18n import DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
@@ -117,6 +117,12 @@ _MAX_DOUBLONS_RECENT_DESTINATIONS = 10
 DEFAULT_SOURCE_STALL_TIMEOUT_SECONDS = 60
 _MIN_SOURCE_STALL_TIMEOUT_SECONDS = 10
 
+# Essais de jeux de fichiers du BOOT (`partitions/boot_sets.py`, écran d'une
+# image clone...) : identifiant de carte (`carte.json` sur le BOOT) -> liste
+# d'essais. « tried » au moment de l'essai ; « failed »/« booted » seulement
+# sur la réponse de l'utilisateur -- l'app ne conclut jamais seule.
+BOOT_SET_OUTCOMES = ("tried", "failed", "booted")
+
 
 @dataclass
 class AppConfig:
@@ -148,6 +154,8 @@ class AppConfig:
     # cas réel, une carte noname qui bloque une lecture pendant des heures
     # sans erreur. Abandon si aucune donnée n'arrive pendant ce délai.
     source_stall_timeout_seconds: int = DEFAULT_SOURCE_STALL_TIMEOUT_SECONDS
+    # {card_id: [{"set_id", "name", "date" (AAAA-MM-JJ), "outcome"}]}
+    boot_set_trials: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
 
 
 def config_dir() -> Path:
@@ -239,7 +247,29 @@ def load_config() -> AppConfig:
         latest_update_notes=latest_update_notes,
         verify_backup_source=verify_backup_source,
         source_stall_timeout_seconds=source_stall_timeout_seconds,
+        boot_set_trials=_valid_boot_set_trials(raw.get("boot_set_trials")),
     )
+
+
+def _valid_boot_set_trials(raw) -> Dict[str, List[Dict[str, str]]]:
+    """Garde les essais bien formés, jette le reste sans lever."""
+    if not isinstance(raw, dict):
+        return {}
+    keys = ("set_id", "name", "date", "outcome")
+    result = {}
+    for card_id, trials in raw.items():
+        if not isinstance(card_id, str) or not isinstance(trials, list):
+            continue
+        kept = [
+            {k: t[k] for k in keys}
+            for t in trials
+            if isinstance(t, dict)
+            and all(isinstance(t.get(k), str) for k in keys)
+            and t["outcome"] in BOOT_SET_OUTCOMES
+        ]
+        if kept:
+            result[card_id] = kept
+    return result
 
 
 def save_config(config: AppConfig) -> None:
@@ -259,6 +289,23 @@ def record_doublons_destination(config: AppConfig, destination: str) -> None:
     config.doublons_last_destination = destination
     remaining = [path for path in config.doublons_recent_destinations if path != destination]
     config.doublons_recent_destinations = [destination, *remaining][:_MAX_DOUBLONS_RECENT_DESTINATIONS]
+
+
+def record_boot_set_trial(config: AppConfig, card_id: str, set_id: str, name: str, date: str) -> None:
+    """Note un essai (« tried », daté) ; un jeu déjà essayé remonte en fin
+    de liste avec la nouvelle date. Ne sauvegarde pas (`save_config`)."""
+    trials = [t for t in config.boot_set_trials.get(card_id, []) if t["set_id"] != set_id]
+    trials.append({"set_id": set_id, "name": name, "date": date, "outcome": "tried"})
+    config.boot_set_trials[card_id] = trials
+
+
+def set_boot_set_outcome(config: AppConfig, card_id: str, set_id: str, outcome: str) -> None:
+    """Réponse de l'utilisateur après le démarrage (« failed »/« booted »)."""
+    if outcome not in BOOT_SET_OUTCOMES:
+        raise ValueError(outcome)
+    for trial in config.boot_set_trials.get(card_id, []):
+        if trial["set_id"] == set_id:
+            trial["outcome"] = outcome
 
 
 # Tuile « Web » personnelle (accueil, réservée à l'auteur du projet --

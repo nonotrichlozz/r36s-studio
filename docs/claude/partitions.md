@@ -283,3 +283,38 @@ renforcé (journalisation en tout premier, avant toute autre action) a été
 ajouté en attendant, mais n'a pas encore été retesté sur le matériel en cause.
 
 **Retiré, ne pas réintroduire** : `AppConfig.archive_records`/`get_archive_record`/`set_archive_record` et `ArchiveReuseDialog` (propres à l'ancien parcours guidé à sept étapes). Les étapes A/B, `_EXTRACTION_MODES`, `archives.default_archives_dir()`/`list_archives` restent en place pour le mode expert. Détail dans `docs/claude/archive-obsolete.md`.
+
+## Jeux de fichiers de rechange du BOOT (`partitions/boot_sets.py`, 2026-10-11)
+
+Brique commune aux réglages faits à la main sur le BOOT pour qu'une console
+démarre (choix de l'écran surtout). **Ne dit jamais quel jeu est le bon** :
+seul un démarrage réel le dit.
+- **Jeux reconnus** : sous `Panels/` à la racine (casse ignorée), **tout
+  dossier, à n'importe quelle profondeur, qui contient directement des
+  fichiers** ; ces fichiers vont à la racine du BOOT. Aucun nom supposé :
+  relevé R36Droid = `Panel0` à `Panel8` + « Clone type 3 panel 1 », deux
+  `.dtb` chacun ; **ArkOS-K36 supposé identique, non vérifié** (pas d'image
+  sous la main le 2026-10-11). Et les fichiers
+  `overlays/panels/mipi-panel.dtbo.*` de ROCKNIX (-> `overlays/mipi-panel.dtbo`,
+  posés par `identify/rocknix_r36s.py`). dArkOSen (« SELECT MODEL.bat ») :
+  pas encore, le `.bat` est dans l'image, non téléchargée.
+- **Retour en arrière, sur le BOOT lui-même** (`r36s-studio/`) :
+  `origine/` garde chaque fichier avant sa première modification (jamais
+  écrasé par un essai suivant) et `manifest.json` (le fichier existait-il ?),
+  écrit **avant** toute modification ; copies par fichier temporaire puis
+  `os.replace`. `restore_original` refuse tout si une copie manque, retire
+  les fichiers ajoutés, puis supprime `origine/`.
+- **Historique des essais** : `config.json::boot_set_trials`, clé =
+  identifiant aléatoire de `r36s-studio/carte.json` (créé au premier
+  essai). Pas `compute_boot_fingerprint` : il hache les fichiers du BOOT,
+  donc change à chaque essai. Un reflash efface l'identifiant (nouvel
+  historique) en même temps qu'il remet l'origine. Statuts : `tried`
+  (daté) à l'essai, `failed`/`booted` seulement sur la réponse de
+  l'utilisateur. Écrit par la GUI, jamais par le worker.
+- **CLI / worker** : `boot-sets --device X [--apply ID | --restore]`,
+  événement `boot_sets_result`. Confirmation avant écriture côté GUI (comme
+  `inject-boot`). Sous Windows, un BOOT EFI ne se lit qu'en administrateur :
+  passer par le worker élevé, comme « Identifier ma console ».
+- **Pas encore d'interface** : prévue dans le parcours assisté « Ma console
+  ne démarre plus » (`assisted-wizard.md`).
+

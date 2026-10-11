@@ -68,7 +68,9 @@ sans interface (c'est un CLI : `python -m r36s_studio <commande>`).
 (`step_index`/`step_count`/`step_name`), `eject_result`, `identify_result`
 (`result`, identification élevée sous Windows), `phase` (`name` :
 `verify_source`/`verify_image` -- les `progress` suivants repartent de 0) et
-`stalled` (`seconds`/`limit` : la carte source ne renvoie plus rien).
+`stalled` (`seconds`/`limit` : la carte source ne renvoie plus rien),
+`boot_sets_result` (`result` : jeux de fichiers du BOOT et état de la carte,
+`boot-sets`).
 
 **Élévation, par OS** (détail et pièges macOS : `docs/claude/elevation-macos.md`) :
 

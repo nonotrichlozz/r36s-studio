@@ -63,7 +63,7 @@ import threading
 import time
 from ctypes import wintypes
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 # Ces déclarations ne font qu'annoncer la forme de la structure Win32 aux
 # ctypes ; elles ne touchent aucune DLL et restent donc importables sur
@@ -928,22 +928,39 @@ def run_elevated_identify(boot_dir: str, parent_hwnd: Optional[int] = None) -> O
     l'utilisateur refuse l'invite, `OSError` si l'élévation échoue
     autrement. À appeler hors du thread Qt principal : bloque jusqu'à la
     fin du worker."""
-    fd, progress_path = tempfile.mkstemp(prefix="r36s_identify_", suffix=".jsonl")
+    return _run_elevated_for_result(["identify", "--boot-dir", boot_dir], "identify_result", parent_hwnd)
+
+
+def run_elevated_boot_sets(device_path: str, action: List[str], parent_hwnd: Optional[int] = None) -> Tuple[Optional[dict], Optional[str]]:
+    """Même principe pour `boot-sets --device … [action]` (jeux de fichiers
+    du BOOT, BOOT EFI lisible seulement en administrateur). Retourne
+    `(résultat boot_sets_result, code d'erreur du worker)`."""
+    errors: List[str] = []
+    result = _run_elevated_for_result(["boot-sets", "--device", device_path, *action], "boot_sets_result", parent_hwnd, errors)
+    return result, (errors[0] if errors else None)
+
+
+def _run_elevated_for_result(
+    argv: List[str], event_type: str, parent_hwnd: Optional[int], errors: Optional[List[str]] = None
+) -> Optional[dict]:
+    fd, progress_path = tempfile.mkstemp(prefix="r36s_elevated_", suffix=".jsonl")
     os.close(fd)
     try:
-        process = launch_elevated_worker(
-            ["identify", "--boot-dir", boot_dir, "--worker", "--progress-file", progress_path],
-            parent_hwnd=parent_hwnd,
-        )
+        process = launch_elevated_worker([*argv, "--worker", "--progress-file", progress_path], parent_hwnd=parent_hwnd)
         process.wait()
+        result = None
         for line in Path(progress_path).read_text(encoding="utf-8").splitlines():
             try:
                 event = json.loads(line)
             except ValueError:
                 continue
-            if isinstance(event, dict) and event.get("type") == "identify_result":
-                return event.get("result")
-        return None
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == event_type and result is None:
+                result = event.get("result")
+            elif event.get("type") == "error" and errors is not None:
+                errors.append(str(event.get("code")))
+        return result
     finally:
         try:
             os.unlink(progress_path)

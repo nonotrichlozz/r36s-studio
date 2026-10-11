@@ -125,10 +125,14 @@ from r36s_studio.partitions import (
     extract_boot,
     extract_easyroms,
     inject_boot,
+    locate_mounted,
+    unmount_forced,
 )
+from r36s_studio.partitions import boot_sets
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.protocol import configure as configure_protocol
 from r36s_studio.protocol import (
+    emit_boot_sets_result,
     emit_done,
     emit_eject_result,
     emit_identify_result,
@@ -1227,6 +1231,58 @@ def cmd_identify(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_boot_sets(args: argparse.Namespace) -> int:
+    """Jeux de fichiers de rechange du BOOT (`partitions/boot_sets.py`) :
+    liste par défaut, `--apply ID` ou `--restore`. Le résultat (état de la
+    carte + jeux) part en un événement `boot_sets_result`. La confirmation
+    avant d'écrire est côté GUI, comme pour `inject-boot`."""
+    progress_file = _open_progress_file(args)
+    try:
+        return _run_boot_sets(args)
+    finally:
+        if progress_file is not None:
+            progress_file.close()
+
+
+def _run_boot_sets(args: argparse.Namespace) -> int:
+    device = _resolve_device_or_report(args)
+    if device is None:
+        return 1
+    try:
+        partition = locate_mounted(device.path, BOOT_LABEL)
+    except PartitionNotFound as exc:
+        emit_error("PARTITION_NOT_FOUND", str(exc))
+        return 1
+    except PartitionNotMounted as exc:
+        emit_error("PARTITION_NOT_MOUNTED", str(exc))
+        return 1
+    except (OSError, subprocess.CalledProcessError) as exc:
+        emit_error("IO_ERROR", str(exc))
+        return 1
+
+    root = partition.mountpoint
+    try:
+        if args.apply:
+            emit_log(f"Essai du jeu « {args.apply} » sur le BOOT de {device.display}")
+            boot_sets.apply_set(root, args.apply)
+        elif args.restore:
+            emit_log(f"Retour aux fichiers d'origine du BOOT de {device.display}")
+            boot_sets.restore_original(root)
+        result = boot_sets.describe(root)
+    except (boot_sets.UnknownBootSet, boot_sets.OriginalsMissing) as exc:
+        emit_error("SOURCE_NOT_FOUND", str(exc))
+        return 1
+    except (OSError, ValueError) as exc:
+        emit_error("IO_ERROR", str(exc))
+        return 1
+    finally:
+        unmount_forced(partition)
+
+    emit_boot_sets_result(result)
+    emit_done(True)
+    return 0
+
+
 def cmd_doublons_verify_journal(args: argparse.Namespace) -> int:
     """Signalé explicitement : « donne-moi une commande pour comparer le
     journal avec ce qui existe réellement à la source et à destination,
@@ -1599,6 +1655,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_worker_args(identify_parser)
     identify_parser.set_defaults(func=cmd_identify)
+
+    boot_sets_parser = subparsers.add_parser(
+        "boot-sets",
+        help="Liste, applique ou annule un jeu de fichiers de rechange du BOOT (écran...)",
+    )
+    boot_sets_parser.add_argument("--device", required=True, help="Chemin du périphérique (voir `list`)")
+    boot_sets_action = boot_sets_parser.add_mutually_exclusive_group()
+    boot_sets_action.add_argument("--apply", metavar="ID", help="Jeu à appliquer (identifiant donné par la liste)")
+    boot_sets_action.add_argument("--restore", action="store_true", help="Remet les fichiers d'origine")
+    boot_sets_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    _add_worker_args(boot_sets_parser)
+    _add_dev_args(boot_sets_parser)
+    boot_sets_parser.set_defaults(func=cmd_boot_sets)
 
     doublons_verify_journal_parser = subparsers.add_parser(
         "doublons-verify-journal",

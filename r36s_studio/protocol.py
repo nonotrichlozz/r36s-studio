@@ -110,3 +110,9 @@ def emit_identify_result(result: dict) -> None:
     lu par un worker élevé -- Windows, BOOT EFI lisible seulement en
     administrateur (`gui/elevate.py::run_elevated_identify`)."""
     emit({"type": "identify_result", "result": result})
+
+
+def emit_boot_sets_result(result: dict) -> None:
+    """Jeux de fichiers du BOOT et état de la carte (`boot-sets`) -- lu par
+    un worker élevé quand le BOOT n'est lisible qu'en administrateur."""
+    emit({"type": "boot_sets_result", "result": result})

@@ -22,6 +22,11 @@
   commits ou de soupçonner `imaging/copy.py`, comparer le débit obtenu
   avec une carte connue bonne (SanDisk ou équivalent) sur le même port et
   la même machine.
+  **L'app le signale désormais** (`main_window._slow_card_read_speed`) :
+  après une sauvegarde, débit de lecture médian < 12 Mio/s sur au moins 10
+  mesures -> `card_slow_read_warning` dans le journal. Lecture seulement
+  (une écriture lente est normale). La capacité inhabituelle n'est pas
+  encore vérifiée.
 - **Banc de test Linux CLI disponible : l'Eee PC i686 (§6, déjà utilisé pour
   la limite de compilation croisée) tourne antiX** — pas de GUI possible
   (PySide6 n'a pas de roue pour i686), mais le worker élevé (`backup`/

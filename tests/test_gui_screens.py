@@ -919,22 +919,20 @@ def test_full_disk_access_screen_set_still_not_detected_shows_label(qapp):
 # d'origine » (inject_boot) retirée de cette grille (§5, deuxième
 # correctif visuel) -- déjà couverte par le mode expert et le parcours
 # guidé, plus de tuile ni de signal correspondants ici.
+# Refonte par situations (2026-10-11) : trois situations en langage courant.
 _ASSISTED_TILE_SIGNAL_INDEX = {
-    "prepare_requested": 0,
-    "identify_requested": 1,
+    "not_booting_requested": 0,
+    "new_card_requested": 1,
     "backup_requested": 2,
-    "eject_requested": 3,
-    "help_requested": 4,
 }
 
 
-def test_assisted_landing_screen_has_five_tiles(qapp):
-    """Accueil allégé pour le néophyte (§1) : seulement ce qui sert à
-    préparer une première carte."""
+def test_assisted_landing_screen_has_three_situation_tiles(qapp):
+    """Accueil par situations (§1) : trois choix en langage courant."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
 
-    assert len(screen._all_tiles) == 5
+    assert len(screen._all_tiles) == 3
     for tile in screen._all_tiles:
         label_bottom = tile._label.geometry().y() + tile._label.geometry().height()
         assert label_bottom <= tile.height()
@@ -986,7 +984,7 @@ def test_assisted_landing_screen_grid_and_panel_never_stretch_with_window(qapp):
 
     from r36s_studio.gui.screens import Tile
 
-    assert screen._grid_scroll.size().width() == Tile.SIZE * 4 + Tile.SPACING * 3
+    assert screen._grid_scroll.size().width() == Tile.SIZE * 2 + Tile.SPACING
     assert screen._grid_scroll.size().height() == Tile.SIZE * 2 + Tile.SPACING
     assert screen._panel.size().width() == 308
     assert screen._panel.size().height() == screen._grid_scroll.size().height()
@@ -1025,7 +1023,7 @@ def test_assisted_landing_screen_content_block_is_horizontally_centered(qapp):
     assert left_margin == right_margin
     # La grille et le panneau gardent leur largeur fixe -- seul le vide de
     # part et d'autre doit avoir grandi avec la fenêtre.
-    assert screen._grid_scroll.size().width() == 676
+    assert screen._grid_scroll.size().width() == 332  # 2 x 160 + 12
     assert screen._panel.size().width() == 308
 
 
@@ -1100,7 +1098,7 @@ def test_assisted_landing_screen_fits_within_a_1366x728_screen(qapp):
     from r36s_studio.gui.screens import Tile
 
     assert Tile.SIZE == 160
-    assert screen._grid_scroll.size().width() == 676
+    assert screen._grid_scroll.size().width() == 332  # 2 x 160 + 12
     grid_bottom = screen._grid_scroll.geometry().y() + screen._grid_scroll.geometry().height()
     panel_bottom = screen._panel.geometry().y() + screen._panel.geometry().height()
     assert grid_bottom <= 728
@@ -1199,30 +1197,15 @@ def test_assisted_landing_screen_set_busy_disables_all_tiles_and_expert_button(q
     assert screen._expert_button.isEnabled() is True
 
 
-def test_assisted_landing_screen_set_status_pushes_badges_to_the_right_tiles(qapp):
+def test_assisted_landing_screen_set_status_has_no_badged_tile(qapp):
+    """Les trois situations ne portent aucun badge de statut : seul le
+    panneau « Carte détectée » reflète la carte branchée."""
     with patch("r36s_studio.gui.screens.asset_paths.asset_path", return_value=None):
         screen = AssistedLandingScreen()
-    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
-    status = {
-        "identify": StepStatus.DONE,
-        "eject": StepStatus.NOT_RELEVANT,
-    }
 
-    screen.set_status(status)
+    screen.set_status({"identify": StepStatus.DONE, "eject": StepStatus.NOT_RELEVANT})
 
-    assert screen._tiles_by_status_key["identify"]._badge.isVisible() is True
-    assert screen._tiles_by_status_key["identify"]._badge.property("badgeKind") == "done"
-    # NOT_RELEVANT (§5, correctif visuel) : aucun texte, aucun badgeKind
-    # -- mais le widget reste visible pour réserver sa hauteur (jamais
-    # `setVisible(False)`, contrairement à avant ce correctif).
-    not_relevant_badge = screen._tiles_by_status_key["eject"]._badge
-    assert not_relevant_badge.text() == ""
-    assert not_relevant_badge.property("badgeKind") is None
-    assert not_relevant_badge.isVisible() is True
-    # « Chercher les doublons » (§ outil « Doublons de jeux ») n'a plus de
-    # clé de statut : c'est un outil autonome, sans rapport avec la carte
-    # détectée -- comme la tuile Aide, jamais dans ce dict.
-    assert set(screen._tiles_by_status_key) == {"identify", "eject"}
+    assert screen._tiles_by_status_key == {}
 
 
 def test_tile_set_badge_none_reserves_height_without_showing_a_pill(qapp):

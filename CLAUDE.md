@@ -112,8 +112,10 @@ partition de démarrage ; contient le dossier d'où l'app s'exécute ;
 `removable` faux **et** bus non USB ; taille > seuil (défaut 1 To) ; taille
 nulle ou inconnue. Aucune sélection par défaut, jamais.
 
-**Deux modes d'interface** : *assisté* (défaut, `ui_mode` persisté) — parcours
-de clonage en 5 étapes par image disque brute, indépendant du firmware ; et
+**Deux modes d'interface** : *assisté* (défaut, `ui_mode` persisté) — accueil
+par situations (« Ma console ne démarre plus », carte neuve, sauvegarde ;
+`assisted-wizard.md`) ; le parcours de clonage en 5 étapes reste dans le code
+mais n'a plus de tuile ; et
 *expert* — six étapes A→F (extraire BOOT, extraire EASYROMS, flasher, injecter
 BOOT, copier les jeux, éjecter) + « Par sécurité » (sauvegarde complète,
 sauvegarde système sans les jeux, remise à zéro).
@@ -214,7 +216,8 @@ Détail et bancs de test : `docs/claude/testing.md`.
   `--worker`.
 - **Débit anormalement bas : vérifier la carte SD avant de suspecter le
   code** (cartes d'origine non-marque ~6 Mo/s contre ~88 Mo/s pour une SanDisk ;
-  capacité exposée très inférieure à l'annoncée = carte falsifiée). Ne jamais
+  capacité exposée très inférieure à l'annoncée = carte falsifiée ; l'app le
+  signale après une sauvegarde, `_slow_card_read_speed`). Ne jamais
   accuser un changement récent sur une simple corrélation temporelle.
 - Test manuel obligatoire avant chaque release : un disque dur externe
   branché ne doit **pas** apparaître comme carte SD.

@@ -635,8 +635,14 @@ class Tile(ClickableFrame):
         # de l'application (qui ne reflète pas la taille QSS avant que le
         # style ne soit appliqué).
         self._label.setFixedHeight(_tile_label_reserved_height(label_role, label_lines))
-        label_row.addWidget(self._label)
-        label_row.addStretch()
+        if width and width > self.SIZE:
+            # Tuile large (tuile 1 de l'accueil assisté) : le libellé prend
+            # toute la largeur, sinon le retour à la ligne se cale sur la
+            # largeur naturelle du texte et coupe un titre qui tient.
+            label_row.addWidget(self._label, 1)
+        else:
+            label_row.addWidget(self._label)
+            label_row.addStretch()
         layout.addLayout(label_row)
 
         if description:
@@ -2829,11 +2835,15 @@ class FullDiskAccessScreen(Screen):
 # reste pleinement fonctionnelle ailleurs -- seule cette tuile disparaît,
 # avec son signal (`inject_boot_requested`) et l'entrée correspondante
 # des tables ad-hoc de `main_window.py`.
+#
+# Refonte par situations (2026-10-11, docs/claude/assisted-wizard.md) : la
+# tuile 1 est « Ma console ne démarre plus », suivie de deux situations en
+# langage courant. Les anciennes tuiles (identifier, éjecter, aide, cloner)
+# ont disparu de l'accueil ; tout reste en mode expert. Leurs signaux restent
+# déclarés (branchements existants de `main_window.py`).
 _ASSISTED_TILE_SPECS = [
-    ("identify", "assisted_tile_identify", "tile", "identify_requested", IDENTIFY, 1),
-    ("backup", "assisted_tile_backup", "tile", "backup_requested", None, 1),
-    ("eject", "assisted_tile_eject", "tile", "eject_requested", EJECT, 1),
-    ("help", "assisted_tile_help", "tile", "help_requested", None, 1),
+    ("prepare", "assisted_tile_new_card", "tile", "new_card_requested", None, 1),
+    ("backup", "assisted_tile_backup_working", "tile", "backup_requested", None, 1),
 ]
 # Accueil allégé pour le néophyte (§1) : seulement ce qui sert à préparer
 # une première carte. « Installer un système », « Copier mes jeux »,
@@ -2841,7 +2851,7 @@ _ASSISTED_TILE_SPECS = [
 # zéro », « Console Android » et « Web » vivent désormais uniquement en
 # mode expert (`HomeScreen`), à un clic via le bouton « Mode expert ».
 
-_ASSISTED_TILE_GRID_COLUMNS = 4
+_ASSISTED_TILE_GRID_COLUMNS = 2
 
 _ICON_COLOR_BY_ROLE = {
     "tileEmphasized": "BG_DARK",
@@ -2929,6 +2939,8 @@ class AssistedLandingScreen(Screen):
     place et utilisés ailleurs, simplement jamais instanciés ici."""
 
     prepare_requested = Signal()
+    not_booting_requested = Signal()
+    new_card_requested = Signal()
     identify_requested = Signal()
     backup_requested = Signal()
     eject_requested = Signal()
@@ -3048,8 +3060,8 @@ class AssistedLandingScreen(Screen):
         # que par une entrée de plus dans `_ASSISTED_TILE_SPECS`, dont les
         # champs ne varient sinon jamais d'une tuile à l'autre.
         tile1 = Tile(
-            "prepare",
-            tr("assisted_tile_prepare"),
+            "help",
+            tr("assisted_tile_not_booting"),
             role="tileEmphasized",
             icon_color=theme.BG_DARK,
             icon_size=60,
@@ -3057,19 +3069,19 @@ class AssistedLandingScreen(Screen):
             # Une seule ligne réservée, pas les 3 par défaut (§5, deuxième
             # correctif de taille) : contrairement aux 8 autres tuiles,
             # celle-ci a un texte de titre fixe et toujours court
-            # ("Préparer ma carte") -- réserver 3 lignes ici gaspillerait
+            # (« Ma console ne démarre plus ») -- réserver 3 lignes ici gaspillerait
             # de la place au détriment de la description en dessous, sans
             # jamais servir (rien ne rallonge ce texte précis).
             label_lines=1,
-            description=tr("assisted_tile_prepare_desc"),
+            description=tr("assisted_tile_not_booting_desc"),
             width=Tile.SIZE * 2 + Tile.SPACING,
         )
-        tile1.clicked.connect(self.prepare_requested.emit)
+        tile1.clicked.connect(self.not_booting_requested.emit)
         grid.addWidget(tile1, 0, 0, 1, 2)
         self._all_tiles.append(tile1)
 
-        row_index = 0
-        col_index = 2
+        row_index = 1
+        col_index = 0
         for glyph, label_key, role, signal_name, status_key, span in _ASSISTED_TILE_SPECS:
             icon_color = getattr(theme, _ICON_COLOR_BY_ROLE.get(role, "ACCENT_CYAN"))
             tile = Tile(glyph, tr(label_key), role=role, icon_color=icon_color)

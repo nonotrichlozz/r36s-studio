@@ -1,0 +1,76 @@
+"""Parcours « Ma console ne démarre plus » / « carte neuve » : profil de
+console (`identify/console_profile.py`), fenêtre (`gui/journey_ui.py`) et
+branchement dans `MainWindow`."""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from r36s_studio.config import AppConfig
+from r36s_studio.gui.journey_ui import ConsoleJourneyDialog
+from r36s_studio.gui.main_window import MainWindow
+from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
+from r36s_studio.identify import console_profile as cp
+from r36s_studio.identify.releases import ARKOS_K36_RELEASES_URL, DARKOS_R36S_RELEASES_URL
+
+
+def test_profiles_and_recommendation():
+    assert cp.profile_from_identify(IdentifyResult(is_clone=True)) == cp.CLONE
+    assert cp.profile_from_identify(IdentifyResult(failure_reason=IdentifyFailureReason.NO_DTB_FOUND)) is None
+    assert cp.profile_from_reference("g80ca-mb v1.2-20250422") == cp.CLONE
+    assert cp.profile_from_reference("R36S-V21 2023") == cp.UNKNOWN  # saisie libre, jamais refusée
+    assert cp.recommended_releases_url(cp.ORIGIN) == DARKOS_R36S_RELEASES_URL
+    assert cp.recommended_releases_url(cp.UNKNOWN) == ARKOS_K36_RELEASES_URL  # « je ne sais pas » -> image clone
+
+
+def test_dialog_reference_then_file(qapp):
+    dialog = ConsoleJourneyDialog()
+    dialog.start(not_booting=False)
+    assert dialog._pages.currentWidget() is dialog._console_page
+    assert not dialog.reference_button.isEnabled()
+
+    dialog.reference_edit.setText("G80CA-MB V1.2-20250422")
+    dialog.reference_button.click()
+    assert dialog._pages.currentWidget() is dialog._system_page
+    assert dialog.recommended_url() == ARKOS_K36_RELEASES_URL
+
+    chosen = []
+    dialog.image_chosen.connect(lambda *args: chosen.append(args))
+    with patch.object(dialog, "_ask_file", return_value="C:/fake/k36.img.xz"):
+        dialog._choose_file()
+    assert chosen == [("C:/fake/k36.img.xz", cp.CLONE, "G80CA-MB V1.2-20250422")]
+
+
+def test_dialog_unreadable_card_stays_on_console_page(qapp):
+    dialog = ConsoleJourneyDialog()
+    dialog.start(not_booting=True)
+    assert dialog._pages.currentWidget() is dialog._start_page
+    dialog._show_console_page()
+    dialog.set_identify_result(IdentifyResult(failure_reason=IdentifyFailureReason.MOUNT_FAILED))
+    assert dialog._pages.currentWidget() is dialog._console_page
+    assert dialog._status.text()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_main_window_routes_journey(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+
+    with patch.object(window, "_start_boot_sets") as boot_sets:
+        window._assisted_landing.not_booting_requested.emit()
+        window._journey_dialog.screens_requested.emit()
+    boot_sets.assert_called_once()
+
+    # Identification : le résultat va au parcours, pas à IdentifyResultDialog.
+    with patch.object(window, "_start_assisted_identify"):
+        window._on_journey_identify_requested()
+    with patch.object(window._identify_result_dialog, "open") as result_dialog:
+        window._on_identify_finished(IdentifyResult(is_clone=True))
+    result_dialog.assert_not_called()
+    assert window._journey_dialog._profile == cp.CLONE
+
+    with patch.object(window, "_on_prepare_card_requested") as prepare:
+        window._on_journey_image_chosen("C:/fake/k36.img.xz", cp.CLONE, "")
+    prepare.assert_called_once()
+    assert window._file_path == "C:/fake/k36.img.xz" and window._journey_flash and window._assisted_ad_hoc_active

@@ -35,3 +35,11 @@ EMUELEC_R36S_RELEASES_URL = "https://github.com/EmuELEC/EmuELEC/releases"
 # R36 d'origine uniquement (README : incompatible avec tout clone, G80CA et
 # « Soy Sauce » compris).
 DARKOSEN_R36S_RELEASES_URL = "https://github.com/djparentx/dArkOSen-R36S/releases"
+
+# ArkOS-K36 (AeolusUX) : image pour les clones, recommandée par le parcours
+# « Ma console ne démarre plus » (docs/claude/assisted-wizard.md). Dépôt
+# archivé depuis le 2026-03-24, dernière image du 2025-08-11, vérifiée sur
+# deux clones différents. Images hors GitHub (Drive, Mediafire, MEGA), en
+# .img.xz : lien manuel, variante « K36 and Similar Clones ». Pas dans
+# FIRMWARE_CATALOG : le mode expert reste inchangé.
+ARKOS_K36_RELEASES_URL = "https://github.com/AeolusUX/ArkOS-K36/releases"

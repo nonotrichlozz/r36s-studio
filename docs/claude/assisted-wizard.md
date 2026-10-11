@@ -294,3 +294,58 @@ arrêté ne rappellerait plus jamais cette fonction, donc ce chien de garde ne
 peut détecter (ni corriger) qu'un ralentissement, jamais un arrêt complet.
 Aucun cas réel de ce genre n'a été confirmé une fois le vrai ralentissement
 identifié.
+
+## Refonte par situations (en cours, décisions du 2026-10-11)
+
+L'accueil assisté part de la situation, en langage courant : « Ma console ne
+démarre plus », « Je veux préparer une carte neuve », « Je veux sauvegarder
+ce qui marche ». **Les tuiles actuelles disparaissent** (identifier,
+sauvegarder, éjecter, aide) ; tout reste accessible en mode expert,
+**inchangé**, bouton « Mode expert » toujours présent.
+
+- **Console d'origine ou clone** : la carte quand elle est lisible
+  (`identify`), sinon la référence de carte mère imprimée dans la console,
+  **en saisie libre** (pas de liste fermée : la base s'enrichira avec les
+  consoles des clients). Un seul cas documenté : `G80CA-MB V1.2-20250422` =
+  clone.
+- **« Je ne sais pas » -> l'image clone** (ArkOS-K36) : c'est elle qui a
+  sauvé le testeur, et elle embarque les écrans (`Panels/`) -- bonnes chances
+  de démarrer même sur une console d'origine. Console d'origine connue ->
+  dArkOS.
+- **ArkOS-K36** : <https://github.com/AeolusUX/ArkOS-K36/releases>. Dépôt
+  archivé depuis le 2026-03-24, dernière image du 2025-08-11, **fonctionne**
+  (vérifiée sur deux clones différents). Images hors GitHub (Google Drive,
+  Mediafire, MEGA), en `.img.xz` ; plusieurs variantes selon la console :
+  **« K36 and Similar Clones »** pour une R36S clone. Lien manuel : on ouvre
+  la page, l'utilisateur télécharge, puis le flash habituel.
+- **Écran figé** : la carte revient sur l'ordinateur, brique
+  `partitions/boot_sets.py` (`partitions.md`) ; essais barrés et datés ;
+  jamais « c'est le bon écran » -- seul un démarrage le dit.
+
+**Fait (2026-10-11)** :
+- Accueil : trois tuiles (`_ASSISTED_TILE_SPECS`, grille de 2 colonnes) --
+  « Ma console ne démarre plus » (grande tuile, `not_booting_requested`),
+  « Préparer une carte neuve » (`new_card_requested`), « Sauvegarder ce qui
+  marche » (`backup_requested`, choix complète/système puis « Préparer une
+  carte avec cette sauvegarde » comme avant). Les anciens signaux
+  (`prepare_requested`, `identify_requested`...) restent déclarés et
+  branchés, sans tuile. Le parcours de clonage en 5 étapes n'a plus de
+  tuile : la sauvegarde suivie de « Préparer une carte avec cette
+  sauvegarde » le remplace.
+- `gui/journey_ui.py::ConsoleJourneyDialog` : (« ne démarre plus »
+  seulement) remettre un système / écran noir ou figé -> console (lire la
+  carte via `IdentifyRunner`, résultat routé par
+  `MainWindow._identify_consumer` ; ou référence en saisie libre ; ou « je
+  ne sais pas ») -> système conseillé (`identify/console_profile.py`,
+  page ouverte dans le navigateur) -> fichier choisi -> flash assisté
+  existant (`_on_prepare_card_requested` : choix de la carte, Confirmation,
+  `--eject-after`). Fin : `journey_flash_done_*` (allumer, et que faire si
+  l'écran reste figé). Référence tapée journalisée (`[diagnostic]`).
+- `gui/boot_sets_ui.py` : écran « Choisir l'écran de la console » (voir
+  `partitions.md`), ouvert par « écran noir ou figé ».
+- ArkOS-K36 n'est **pas** dans `FIRMWARE_CATALOG` (le mode expert reste
+  inchangé) : URL dans `identify/releases.py::ARKOS_K36_RELEASES_URL`.
+
+**Non vérifié** : tout le parcours sur une vraie console ; la structure
+`Panels/` de K36 ; le rendu de la grande tuile en anglais.
+

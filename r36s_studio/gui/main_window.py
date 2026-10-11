@@ -95,6 +95,8 @@ from .partition_runner import (
     WizardFingerprintRunner,
 )
 from .reveal import reveal
+from .boot_sets_ui import BootSetsDialog, BootSetsRunner, action_argv
+from .journey_ui import ConsoleJourneyDialog
 from .screens import (
     AboutDialog,
     AndroidScreen,
@@ -199,6 +201,27 @@ _ALLOW_EJECT_AFTER_MODES = {
     # -- un bouton en plus serait redondant, même principe qu'un flash
     # Android (`android_flash`, ci-dessous).
 }
+# Avertissement « carte lente » : cas réel, une carte d'origine de console à
+# ~6 Mo/s en lecture contre ~88 Mo/s pour une SanDisk sur le même port
+# (docs/claude/testing.md), une investigation entière menée à tort sur le
+# code. Lecture brute seulement (sauvegardes) : une écriture lente est
+# normale même sur une bonne carte. Seuil sous le plafond d'un lecteur USB 2
+# (~20-35 Mo/s), médiane pour ignorer les à-coups.
+_READ_SPEED_MODES = {"backup", "backup_system"}
+_SLOW_CARD_READ_BYTES_PER_S = 12 * 1024 * 1024
+_SLOW_CARD_MIN_SAMPLES = 10
+
+
+def _slow_card_read_speed(speeds: List[float]) -> Optional[float]:
+    """Débit médian si la carte lit anormalement lentement, `None` sinon
+    (ou trop peu de mesures pour juger)."""
+    measured = sorted(v for v in speeds if v > 0)
+    if len(measured) < _SLOW_CARD_MIN_SAMPLES:
+        return None
+    median = measured[len(measured) // 2]
+    return median if median < _SLOW_CARD_READ_BYTES_PER_S else None
+
+
 _PARTITION_JOB_MODES = {"extract_boot", "extract_easyroms", "inject_boot", "copy_games"}
 _ARCHIVE_LABEL_BY_MODE = {
     "extract_boot": BOOT_LABEL,
@@ -328,6 +351,19 @@ def _identify_with_windows_elevation(boot_dir: str, parent_hwnd: Optional[int]) 
     return result_from_dict(data)
 
 
+def _boot_sets_with_windows_elevation(
+    device_path: str, action: List[str], parent_hwnd: Optional[int]
+) -> Tuple[Optional[dict], Optional[str]]:
+    """BOOT EFI illisible sans élévation (Windows) : `boot-sets` dans le
+    worker élevé. Invite refusée -> `ELEVATION_REFUSED`."""
+    try:
+        return elevate.run_elevated_boot_sets(device_path, action, parent_hwnd=parent_hwnd)
+    except elevate.ElevationRefusedError:
+        return None, "ELEVATION_REFUSED"
+    except OSError:
+        return None, "IO_ERROR"
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -365,6 +401,7 @@ class MainWindow(QMainWindow):
         self._last_error_code: Optional[str] = None
         self._last_error_msg: Optional[str] = None
         self._last_progress_bytes = 0  # taille de l'archive créée (étapes A/B, journal de bord)
+        self._read_speeds: List[float] = []  # débits lus pendant une sauvegarde (carte lente)
 
         # Sauvegarde système lancée depuis l'accueil assisté (§4.3), puis
         # éventuellement le flash qui la réutilise (« Préparer une carte
@@ -608,6 +645,14 @@ class MainWindow(QMainWindow):
         # cas de plus dans ce dispatcher déjà chargé).
         self._identify_device_dialog = DeviceDialog(self)
         self._identify_result_dialog = IdentifyResultDialog(self)
+        self._boot_sets_device_dialog = DeviceDialog(self)
+        self._boot_sets_dialog = BootSetsDialog(self)
+        self._journey_dialog = ConsoleJourneyDialog(self)
+        self._journey_flash = False  # flash lancé par le parcours « ne démarre plus » / « carte neuve »
+        self._identify_consumer = None  # destinataire d'une identification autre que IdentifyResultDialog
+        self._boot_sets_device: Optional[Device] = None
+        self._boot_sets_result: dict = {}
+        self._boot_sets_runner: Optional[BootSetsRunner] = None
         self._identify_runner: Optional[IdentifyRunner] = None
         # Outil « Doublons de jeux » -- deux instances de la même fenêtre
         # de confirmation, jamais une seule reconnectée dynamiquement
@@ -754,6 +799,12 @@ class MainWindow(QMainWindow):
         self._assisted_landing.refresh_requested.connect(self._refresh_home_state)
         self._assisted_landing.identify_requested.connect(self._start_assisted_identify)
         self._assisted_landing.backup_requested.connect(self._on_assisted_backup_tile_clicked)
+        self._assisted_landing.not_booting_requested.connect(lambda: self._open_journey(not_booting=True))
+        self._assisted_landing.new_card_requested.connect(lambda: self._open_journey(not_booting=False))
+        self._journey_dialog.identify_requested.connect(self._on_journey_identify_requested)
+        self._journey_dialog.screens_requested.connect(self._on_journey_screens_requested)
+        self._journey_dialog.open_url_requested.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
+        self._journey_dialog.image_chosen.connect(self._on_journey_image_chosen)
         self._home.find_duplicates_requested.connect(self._start_doublons_tool)
         self._home.sort_games_requested.connect(self._open_tri_screen)
         self._home.filter_games_requested.connect(self._open_filter_screen)
@@ -777,6 +828,14 @@ class MainWindow(QMainWindow):
         # Tuile fusionnée « Identifier ma console » (§5, refonte menu de
         # tuiles) : accès au catalogue depuis l'écran de résultat.
         self._identify_result_dialog.catalog_requested.connect(self._open_consoles_diverses)
+        self._boot_sets_device_dialog.device_chosen.connect(self._on_boot_sets_device_chosen)
+        self._boot_sets_device_dialog.refresh_requested.connect(
+            lambda: self._boot_sets_device_dialog.set_devices(self._list_safe_devices())
+        )
+        self._boot_sets_dialog.apply_requested.connect(lambda set_id: self._run_boot_sets(action_argv(apply=set_id)))
+        self._boot_sets_dialog.restore_requested.connect(lambda: self._run_boot_sets(action_argv(restore=True)))
+        self._boot_sets_dialog.outcome_answered.connect(self._on_boot_set_outcome)
+        self._boot_sets_dialog.eject_requested.connect(self._eject_boot_sets_device)
 
         self._doublons_folder_screen.back_requested.connect(self._show_startup_screen)
         self._doublons_folder_screen.refresh_requested.connect(self._refresh_doublons_shortcuts)
@@ -1264,6 +1323,7 @@ class MainWindow(QMainWindow):
 
     def _start_worker(self) -> None:
         self._flash_ejected = None
+        self._read_speeds = []
         self._log_panel.start_operation(tr(_OPERATION_TITLE_KEYS[self._mode]))
         if self._mode in _EXTRACTION_MODES:
             # Annoncé dès le début de la copie, pas seulement à la fin
@@ -1556,6 +1616,8 @@ class MainWindow(QMainWindow):
         # `copy_range`/`copy_tree`) -- utilisé comme taille de l'archive
         # créée par les étapes A/B (journal de bord).
         self._last_progress_bytes = done
+        if self._mode in _READ_SPEED_MODES:
+            self._read_speeds.append(speed)
         self._log_panel.update_progress(done, total, speed)
 
     def _on_step_progress(self, step_index: int, step_count: int, step_name: str) -> None:
@@ -1652,6 +1714,10 @@ class MainWindow(QMainWindow):
         self._assisted_landing.set_busy(False)
         if self._console_stage is not None:
             self._console_stage.stop_activity()
+        slow = _slow_card_read_speed(self._read_speeds)
+        self._read_speeds = []
+        if slow is not None:
+            self._log_panel.append_log(tr("card_slow_read_warning", speed=_format_size(slow)))
         if self._wizard_active:
             # Mode assisté (§5 mode assisté) : la suite (avancer/erreur)
             # est décidée par `WizardFlow`, pas par le mode expert
@@ -1769,6 +1835,11 @@ class MainWindow(QMainWindow):
         title_key, instruction_key, offers_prepare_card = _ASSISTED_AD_HOC_DONE_STRINGS.get(
             self._mode, ("assisted_prepare_card_done_title", "assisted_prepare_card_done_instruction", False)
         )
+        if self._journey_flash and self._mode == "flash":
+            title_key, instruction_key = ("journey_flash_done_title", "journey_flash_done_instruction")
+            if not ok:
+                title_key, instruction_key = ("assisted_prepare_card_done_title", "assisted_prepare_card_done_instruction")
+        self._journey_flash = False
         self._wizard_panel.show_next_step_choice(
             tr(title_key), tr(instruction_key), show_prepare_card=offers_prepare_card and ok
         )
@@ -1847,6 +1918,7 @@ class MainWindow(QMainWindow):
             self._prepare_card_poll_timer.stop()
         self._prepare_card_candidate = None
         self._assisted_ad_hoc_active = False
+        self._journey_flash = False
         self._log_panel.set_idle()
         self._root_stack.setCurrentWidget(self._assisted_landing)
 
@@ -2291,8 +2363,120 @@ class MainWindow(QMainWindow):
         self._home.set_busy(False)
         self._assisted_landing.set_busy(False)
         self._identify_runner = None
+        if self._identify_consumer is not None:
+            consumer, self._identify_consumer = self._identify_consumer, None
+            consumer(result)
+            return
         self._identify_result_dialog.set_result(result)
         self._identify_result_dialog.open()
+
+    # --- parcours « ne démarre plus » / « carte neuve » (journey_ui.py) ------
+
+    def _open_journey(self, not_booting: bool) -> None:
+        self._identify_consumer = None
+        self._journey_dialog.start(not_booting)
+        self._journey_dialog.open()
+
+    def _on_journey_identify_requested(self) -> None:
+        self._identify_consumer = self._journey_dialog.set_identify_result
+        self._start_assisted_identify()
+
+    def _on_journey_screens_requested(self) -> None:
+        self._journey_dialog.close()
+        self._start_boot_sets()
+
+    def _on_journey_image_chosen(self, path: str, profile: str, reference: str) -> None:
+        """Le fichier téléchargé part dans le flash assisté existant (choix
+        de la carte, Confirmation jamais sautée, éjection après)."""
+        self._journey_dialog.close()
+        if reference:
+            # Base de références à enrichir avec les consoles des clients.
+            self._log_panel.append_log(f"[diagnostic] référence de carte mère saisie : {reference} ({profile})")
+        self._journey_flash = True
+        self._file_path = path
+        self._assisted_ad_hoc_active = True
+        self._main_view.show_wizard_panel()
+        self._root_stack.setCurrentWidget(self._main_view)
+        self._on_prepare_card_requested()
+
+    # --- écran de la console : jeux de fichiers du BOOT (boot_sets_ui.py) ----
+
+    def _start_boot_sets(self) -> None:
+        """« Choisir l'écran de la console » : même choix de carte que
+        `_start_assisted_identify`."""
+        devices = self._list_safe_devices()
+        if len(devices) == 1:
+            self._open_boot_sets(devices[0])
+            return
+        self._boot_sets_device_dialog.set_devices(devices)
+        self._boot_sets_device_dialog.open()
+
+    def _on_boot_sets_device_chosen(self, device: Device) -> None:
+        self._boot_sets_device_dialog.close()
+        self._open_boot_sets(device)
+
+    def _open_boot_sets(self, device: Device) -> None:
+        self._boot_sets_device = device
+        self._boot_sets_dialog.open()
+        self._run_boot_sets([])
+
+    def _run_boot_sets(self, action: List[str]) -> None:
+        device = self._boot_sets_device
+        if device is None or self._boot_sets_runner is not None:
+            return
+        elevated = None
+        if platform.system() == "Windows":
+            try:
+                parent_hwnd: Optional[int] = int(self.winId())
+            except (RuntimeError, TypeError, ValueError):
+                parent_hwnd = None
+            elevated = lambda argv: _boot_sets_with_windows_elevation(device.path, argv, parent_hwnd)  # noqa: E731
+        if action:
+            self._log_panel.append_log(f"[diagnostic] écran de la console : {' '.join(action)}")
+        self._boot_sets_dialog.set_busy(True)
+        self._boot_sets_runner = BootSetsRunner(device.path, action, elevated=elevated, parent=self)
+        self._boot_sets_runner.finished_boot_sets.connect(
+            lambda result, error: self._on_boot_sets_finished(result, error, action)
+        )
+        self._boot_sets_runner.start()
+
+    def _on_boot_sets_finished(self, result: Optional[dict], error: Optional[str], action: List[str]) -> None:
+        self._boot_sets_runner = None
+        if result is None:
+            self._log_panel.append_log(tr(f"boot_sets_error_{error}"))
+            self._boot_sets_dialog.set_error(error or "io")
+            return
+        self._boot_sets_result = result
+        card_id = result.get("card_id")
+        just_applied = action[:1] == ["--apply"]
+        if just_applied and card_id:
+            name = next((e["name"] for e in result.get("sets", []) if e["set_id"] == action[1]), action[1])
+            app_config.record_boot_set_trial(self._app_config, card_id, action[1], name, datetime.now().date().isoformat())
+            app_config.save_config(self._app_config)
+            self._log_panel.append_log(tr("boot_sets_applied_log", name=name))
+        elif action == ["--restore"]:
+            self._log_panel.append_log(tr("boot_sets_restored_log"))
+        trials = self._app_config.boot_set_trials.get(card_id, []) if card_id else []
+        self._boot_sets_dialog.set_result(result, trials, just_applied=just_applied)
+
+    def _on_boot_set_outcome(self, set_id: str, outcome: str) -> None:
+        card_id = self._boot_sets_result.get("card_id")
+        if card_id and set_id:
+            app_config.set_boot_set_outcome(self._app_config, card_id, set_id, outcome)
+            app_config.save_config(self._app_config)
+        trials = self._app_config.boot_set_trials.get(card_id, []) if card_id else []
+        self._boot_sets_dialog.set_result(self._boot_sets_result, trials)
+
+    def _eject_boot_sets_device(self) -> None:
+        device = self._boot_sets_device
+        self._boot_sets_dialog.close()
+        if device is None:
+            return
+
+        def done(ok: bool, code: Optional[str] = None, msg: str = "") -> None:
+            self._log_panel.append_log(tr("boot_sets_ejected") if ok else tr("boot_sets_eject_failed"))
+
+        self._start_eject(device, done)
 
     def _start_doublons_tool(self) -> None:
         """Tuile « Chercher les doublons » (docs/doublons.md, remplace

@@ -302,9 +302,16 @@ def test_assisted_tile_labels_are_never_clipped(qapp, language):
     la hauteur d'une ligne mesurée avec la police par défaut de Qt, pas
     celle du thème -- le bas de « Prepare my card » était coupé
     (« Préparer ma carte » aussi, moins visiblement)."""
+    from PySide6.QtGui import QFontDatabase
+
     from r36s_studio.gui import theme
     from r36s_studio.gui.screens import AssistedLandingScreen
 
+    # Le retour à la ligne dépend des largeurs de texte : sans police, chaque
+    # caractère est une boîte large et un titre qui tient sur une ligne
+    # (« Ma console ne démarre plus », mesuré en Segoe UI) passerait sur deux.
+    if not QFontDatabase.families():
+        pytest.skip("aucune police disponible pour Qt : largeurs de texte non significatives")
     i18n.set_language(language)
     qapp.setStyleSheet(theme.STYLESHEET)
     try:

@@ -389,3 +389,29 @@ def test_default_firmware_downloads_dir_is_under_documents(monkeypatch, tmp_path
     result = rocknix.default_firmware_downloads_dir()
 
     assert result == tmp_path / "Documents" / "R36S Studio" / "Firmwares"
+
+
+# --- tableau des consoles de la release (-a / -b) --------------------------
+
+# Deux lignes réelles de la release 20261001 (liens raccourcis).
+_TABLE_BODY = (
+    "| Device | Download | Docs |\n"
+    "| **Anbernic Rg351m, Anbernic Rg351v, Gameconsole R33s, Gameconsole R36s, Odroid Go2** "
+    "| [ROCKNIX-RK3326.aarch64-20261001-a.img.gz](https://example.invalid/a) | |\n"
+    "| **Powkiddy Rgb10x, Powkiddy Rgb20s, Magicx Xu Mini M, Gameconsole Eeclone, Batlexp G350** "
+    "| [ROCKNIX-RK3326.aarch64-20261001-b.img.gz](https://example.invalid/b) | |\n"
+)
+
+
+def test_resolve_marks_the_variant_the_release_table_gives_to_the_r36s():
+    assets = [_asset("ROCKNIX-RK3326.aarch64-20261001-a.img.gz"), _asset("ROCKNIX-RK3326.aarch64-20261001-b.img.gz")]
+    payload = json.dumps({"assets": assets, "body": _TABLE_BODY}).encode("utf-8")
+    opener = MagicMock(return_value=_FakeResponse(payload))
+
+    (a, _), (b, _) = rocknix.resolve_latest_r36s_assets(opener=opener)
+
+    assert a.is_for_r36s and not b.is_for_r36s
+    assert "Gameconsole Eeclone" in b.consoles
+    # Sans tableau (ou format changé) : aucune recommandation, jamais une devinette.
+    assert rocknix.consoles_by_asset("pas de tableau") == {}
+    assert not rocknix.RocknixAsset("x", "", 0, ("Gameconsole R36sPro",)).is_for_r36s

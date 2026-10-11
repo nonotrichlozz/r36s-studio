@@ -659,10 +659,12 @@ STRINGS = {
     # Fenêtre de choix entre plusieurs variantes ROCKNIX (§5, étape de
     # flash) -- une vraie release peut en publier plusieurs (ex. -a/-b),
     # jamais de sélection automatique entre elles.
+    "rocknix_variant_consoles": "Pour : {consoles}",
+    "rocknix_variant_r36s": "★ Conseillée pour une R36S",
     "rocknix_variant_title": "Choisis une version de ROCKNIX",
     "rocknix_variant_hint": (
-        "Plusieurs versions sont disponibles. Si tu ne sais pas laquelle choisir, "
-        "prends la première de la liste."
+        "Plusieurs versions sont disponibles, chacune pour d'autres consoles. "
+        "Pour une R36S, prends celle marquée « conseillée pour une R36S »."
     ),
     # Choix du périphérique
     "device_title": "Choisis ta carte SD",

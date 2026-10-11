@@ -428,9 +428,12 @@ STRINGS_EN = {
         "choose here the .img file it contains."
     ),
     "file_rocknix_download_button": "Download the latest version",
+    "rocknix_variant_consoles": "For: {consoles}",
+    "rocknix_variant_r36s": "★ Recommended for an R36S",
     "rocknix_variant_title": "Choose a version of ROCKNIX",
     "rocknix_variant_hint": (
-        "Several versions are available. If you don't know which one to choose, take the first one in the list."
+        "Several versions are available, each for other consoles. "
+        "For an R36S, take the one marked “recommended for an R36S”."
     ),
     "device_title": "Choose your SD card",
     "device_refresh": "Refresh",

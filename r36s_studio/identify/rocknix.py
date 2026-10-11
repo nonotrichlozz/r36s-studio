@@ -23,7 +23,7 @@ import re
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 ROCKNIX_RELEASES_API_URL = "https://api.github.com/repos/ROCKNIX/distribution/releases/latest"
 ROCKNIX_RELEASES_PAGE_URL = "https://github.com/ROCKNIX/distribution/releases"
@@ -81,6 +81,32 @@ class RocknixAsset:
     name: str
     download_url: str
     size_bytes: int
+    # Consoles annoncées pour ce fichier dans le tableau de la release
+    # (`consoles_by_asset`) ; vide si la release ne le dit pas.
+    consoles: Tuple[str, ...] = ()
+
+    @property
+    def is_for_r36s(self) -> bool:
+        return any(_R36S_CONSOLE_PATTERN.search(console) for console in self.consoles)
+
+
+# Tableau des releases ROCKNIX (vérifié le 2026-10-09 et sur 20261001) :
+# « | **Console A, Console B** | [fichier.img.gz](lien) | ... ». Depuis mai
+# 2025, « Gameconsole R36s » est sur la variante -a. Relu à chaque release
+# plutôt que figé ici : la répartition peut changer.
+_TABLE_ROW_PATTERN = re.compile(r"^\s*\|\s*\*\*(?P<consoles>[^*]+)\*\*\s*\|\s*\[(?P<name>[^\]]+)\]")
+_R36S_CONSOLE_PATTERN = re.compile(r"\bR36S\b", re.IGNORECASE)
+
+
+def consoles_by_asset(body: str) -> Dict[str, Tuple[str, ...]]:
+    """Nom de fichier -> consoles annoncées, d'après le texte de la release."""
+    result: Dict[str, Tuple[str, ...]] = {}
+    for line in (body or "").splitlines():
+        match = _TABLE_ROW_PATTERN.match(line)
+        if match:
+            consoles = tuple(c.strip() for c in match.group("consoles").split(",") if c.strip())
+            result[match.group("name").strip()] = consoles
+    return result
 
 
 def _default_opener(url: str):
@@ -170,6 +196,11 @@ def parse_checksum(text: str, filename: str) -> Optional[str]:
 
 
 def fetch_latest_release_assets(opener: Opener = _default_opener) -> List[dict]:
+    return fetch_latest_release(opener)["assets"]
+
+
+def fetch_latest_release(opener: Opener = _default_opener) -> dict:
+    """Réponse de l'API (dernière release), avec au moins `assets` (liste)."""
     try:
         with opener(ROCKNIX_RELEASES_API_URL) as response:
             raw = response.read()
@@ -181,10 +212,9 @@ def fetch_latest_release_assets(opener: Opener = _default_opener) -> List[dict]:
     except ValueError as exc:
         raise RocknixReleaseError(f"Réponse GitHub illisible : {exc}") from exc
 
-    assets = payload.get("assets")
-    if not isinstance(assets, list):
+    if not isinstance(payload, dict) or not isinstance(payload.get("assets"), list):
         raise RocknixReleaseError("Réponse GitHub sans liste d'assets.")
-    return assets
+    return payload
 
 
 def resolve_latest_r36s_assets(opener: Opener = _default_opener) -> List[Tuple[RocknixAsset, Optional[str]]]:
@@ -195,8 +225,12 @@ def resolve_latest_r36s_assets(opener: Opener = _default_opener) -> List[Tuple[R
     `.sha256` du même nom, pas un fichier de sommes partagé. Retourne une
     liste de `(asset, expected_sha256_ou_None)`, dans le même ordre que
     `select_r36s_assets`."""
-    assets = fetch_latest_release_assets(opener)
+    release = fetch_latest_release(opener)
+    assets = release["assets"]
     candidates = select_r36s_assets(assets)
+    table = consoles_by_asset(release.get("body") if isinstance(release.get("body"), str) else "")
+    for candidate in candidates:
+        candidate.consoles = table.get(candidate.name, ())
 
     results: List[Tuple[RocknixAsset, Optional[str]]] = []
     for candidate in candidates:

@@ -1568,10 +1568,10 @@ class DeviceDialog(Dialog):
 class RocknixVariantDialog(Dialog):
     """Choix entre plusieurs variantes ROCKNIX pour la R36S (§5, étape de
     flash) : une vraie release peut publier plusieurs images RK3326 à la
-    fois (suffixes `-a`/`-b` observés en pratique, dont la différence
-    reste à élucider, CLAUDE.md) — jamais de sélection automatique entre
-    elles, chaque variante est affichée avec son nom de fichier complet
-    pour que l'utilisateur choisisse en connaissance de cause."""
+    fois (suffixes `-a`/`-b`). Chaque variante est affichée avec son nom de
+    fichier et les consoles que lui attribue le tableau de la release
+    (`-a` pour la R36S, marquée « conseillée ») -- jamais de sélection
+    automatique : la même image sert à d'autres consoles."""
 
     variant_chosen = Signal(object, object)  # RocknixAsset, Optional[str] (sha256 attendu)
 
@@ -1612,7 +1612,16 @@ class RocknixVariantDialog(Dialog):
         self._variants = list(variants)
         self._list.clear()
         for asset, _expected_sha256 in self._variants:
-            self._list.addItem(QListWidgetItem(asset.name))
+            # Consoles lues dans le tableau de la release (identify/rocknix.py,
+            # `-a` pour la R36S depuis mai 2025) : un repère, jamais un choix
+            # automatique -- la même image sert à d'autres consoles.
+            label = asset.name
+            consoles = getattr(asset, "consoles", ())
+            if consoles:
+                label += "\n" + tr("rocknix_variant_consoles", consoles=", ".join(consoles))
+            if getattr(asset, "is_for_r36s", False):
+                label += "\n" + tr("rocknix_variant_r36s")
+            self._list.addItem(QListWidgetItem(label))
         self._update_next_enabled()
 
     def _update_next_enabled(self) -> None:

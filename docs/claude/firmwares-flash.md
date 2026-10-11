@@ -155,12 +155,21 @@ conséquence** :
   affiche le nom de fichier complet de chaque variante trouvée pour que
   l'utilisateur choisisse en connaissance de cause — `MainWindow`
   enchaîne alors sur `RocknixDownloadRunner` avec l'asset et la somme
-  de contrôle correspondants à ce choix précis. **Idée future, pas
-  implémentée** : élucider la différence entre `-a` et `-b` (à partir
-  des notes de release ROCKNIX, ou en la demandant directement au
-  projet) pour, si elle s'avère pertinente pour la R36S précisément,
-  remplacer ce choix manuel par une sélection automatique ou une
-  description plus parlante que le nom de fichier brut.
+  de contrôle correspondants à ce choix précis.
+
+**Différence `-a` / `-b`, vérifiée le 2026-10-09** sur la page des
+releases ROCKNIX : le tableau des consoles de chaque version associe
+« Gameconsole R36s » à la variante **`-a`** ; la **`-b`** vise Powkiddy
+RGB10X/RGB20S, Magicx XU Mini M, Gameconsole Eeclone, Batlexp G350 et
+GKD Pixel2. Répartition constante depuis mai 2025. Pour une R36S, c'est
+donc `-a` (la R36S d'origine du 2026-10-11 a démarré avec `-a`).
+**Exploité** : `identify/rocknix.py::consoles_by_asset` relit
+ce tableau dans le texte de chaque release (ligne « | **consoles** |
+[fichier](lien) | ») -> `RocknixAsset.consoles`/`is_for_r36s` ;
+`RocknixVariantDialog` affiche les consoles de chaque variante et marque
+« ★ Conseillée pour une R36S ». Jamais de sélection automatique (la même
+image sert à d'autres consoles). Tableau absent ou changé : noms bruts,
+comme avant.
 
 **Consoles clones et EmuELEC (phase 9), critère validé par l'outil
 officiel ArkOS.** Certaines cartes vendues comme R36S sont en réalité

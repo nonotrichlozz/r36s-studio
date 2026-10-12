@@ -9,5 +9,5 @@ Phase 1 : détection des périphériques (`devices`) et garde-fou de sécurité
 
 # Source de vérité unique : --version, vérification des mises à jour
 # (update_check.py) et tag de release (vX.Y.Z, contrôlé par release.yml).
-APP_VERSION = "0.1.2"
+APP_VERSION = "0.1.3"
 __version__ = APP_VERSION

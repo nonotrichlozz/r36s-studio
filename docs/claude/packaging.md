@@ -44,8 +44,11 @@ désactivable (`check_updates`). Toute erreur réseau = silence. Dernière
 version trouvée mémorisée (`latest_update_tag`/`latest_update_notes`) :
 badge aux lancements suivants sans réseau, jusqu'à ce qu'`APP_VERSION` la
 rattrape. Bouton « Obtenir la nouvelle version » → `update_check.
-STORE_URL` (page GitHub Pages `docs/site/`, publiée par `pages.yml`, qui
-redirigera vers la boutique), jamais un lien de téléchargement GitHub. Badge
+STORE_URL` = page de la dernière Release GitHub (2026-10-12 : la boutique
+n'existe pas encore et les Releases 0.1.2+ sont publiées avec
+l'installeur ; `docs/site/` affichait « Bientôt disponible », sans
+téléchargement). À remplacer par l'adresse de la boutique quand elle
+existera. Badge
 masqué tant qu'une opération est en cours, réévalué à chaque
 `_on_worker_finished`.
 

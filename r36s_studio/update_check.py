@@ -16,11 +16,11 @@ from r36s_studio import APP_VERSION
 
 _REPO = "nonotrichlozz/r36s-studio"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{_REPO}/releases/latest"
-# Boutique où sont vendus les installeurs (les Releases GitHub sont publiées
-# sans fichiers, scripts/publish_release.sh) : seule destination du bouton
-# de la fenêtre « Nouvelle version ».
-# Page GitHub Pages (docs/site/index.html), qui redirigera vers la boutique.
-STORE_URL = "https://nonotrichlozz.github.io/r36s-studio/"
+# Destination du bouton « Obtenir la nouvelle version » : la page de la
+# dernière Release, où l'installeur est joint (depuis 0.1.2). Quand la
+# boutique sera en ligne, y mettre son adresse (ou docs/site/, qui y
+# redirigera) -- rien d'autre à changer.
+STORE_URL = f"https://github.com/{_REPO}/releases/latest"
 
 
 def _version_tuple(version: str) -> Optional[Tuple[int, ...]]:

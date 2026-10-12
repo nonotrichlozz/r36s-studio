@@ -77,6 +77,23 @@ def test_any_panels_tree_without_assumed_names(tmp_path):
     assert (root / "x.dtb").read_bytes() == b"x"
 
 
+def test_screen_folder_found_by_dtb_whatever_its_name(tmp_path):
+    """Clone ArkOS relevé : `ScreenFiles/` à côté de `BMPs/` et `extlinux/`.
+    Les .dtb de ROCKNIX (`device_trees/`) et la copie d'origine
+    (`r36s-studio/`) ne sont jamais des écrans."""
+    root = tmp_path / "BOOT"
+    for folder in ("ScreenFiles/Panel 1", "BMPs", "extlinux", "device_trees", "r36s-studio/origine"):
+        (root / folder).mkdir(parents=True)
+    (root / "rk3326-r35s-linux.dtb").write_bytes(b"origine")
+    (root / "ScreenFiles" / "Panel 1" / "rk3326-r35s-linux.dtb").write_bytes(b"ecran1")
+    (root / "BMPs" / "logo.bmp").write_bytes(b"x")
+    (root / "extlinux" / "extlinux.conf").write_bytes(b"x")
+    (root / "device_trees" / "rk3326-a.dtb").write_bytes(b"x")
+    (root / "r36s-studio" / "origine" / "rk3326-r35s-linux.dtb").write_bytes(b"x")
+
+    assert [(s.set_id, s.name) for s in boot_sets.list_sets(root)] == [("ScreenFiles/Panel 1", "Panel 1")]
+
+
 def test_apply_then_restore_returns_to_original(tmp_path):
     root = _boot(tmp_path)
     assert boot_sets.read_state(root) == boot_sets.BootSetState(None, None, False)

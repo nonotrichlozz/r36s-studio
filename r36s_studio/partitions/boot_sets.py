@@ -3,7 +3,8 @@
 
 """Jeux de fichiers de rechange du BOOT : les lister, en appliquer un, revenir
 à l'origine. Cas réels faits à la main avant ce module : choisir l'écran d'une
-image (dossier `Panels/` des portages Android, d'ArkOS-K36...), changer le
+image (dossier `Panels/` des portages Android, `ScreenFiles/` d'un clone
+ArkOS...), changer le
 fichier d'écran de ROCKNIX (`overlays/panels/`, posé par
 `identify/rocknix_r36s.py`). Ce module ne dit jamais quel jeu est le bon :
 seul un démarrage de la console le dit.
@@ -41,10 +42,13 @@ CARD_FILE = "carte.json"
 ORIGINALS_DIR = "origine"
 MANIFEST_FILE = "manifest.json"
 
-# Dossier d'écrans des portages Android (relevé sur une vraie carte,
-# docs/claude/firmwares-flash.md) : un sous-dossier par écran, son contenu
-# va à la racine du BOOT. Même nom attendu pour ArkOS-K36 -- non vérifié.
-PANELS_DIR_NAME = "panels"  # comparé sans la casse
+# Dossiers d'écrans : le nom change d'une image à l'autre (`Panels/` des
+# portages Android, `ScreenFiles/` d'un clone ArkOS, relevés sur de vraies
+# cartes) -- on cherche donc les .dtb, jamais un nom de dossier. Sauf ces
+# dossiers, propres au firmware (comparés sans la casse) : `device_trees/`
+# de ROCKNIX contient tous ses .dtb, lus en place par extlinux.
+SCREEN_FILE_SUFFIX = ".dtb"
+NOT_SCREEN_DIRS = ("device_trees",)
 # ROCKNIX : mêmes noms que `identify/rocknix_r36s.py` (dupliqués :
 # `partitions/` n'importe pas `identify/`, qui dépend du réseau).
 ROCKNIX_PANELS_DIR = "overlays/panels"
@@ -79,27 +83,30 @@ class BootSetState:
 def list_sets(boot_root: PathLike) -> List[BootFileSet]:
     root = Path(boot_root)
     os.listdir(root)  # BOOT illisible (EFI sous Windows) : PermissionError, jamais « aucun jeu »
-    return _panels_folder_sets(root) + _rocknix_overlay_sets(root)
+    return _screen_folder_sets(root) + _rocknix_overlay_sets(root)
 
 
-def _panels_folder_sets(root: Path) -> List[BootFileSet]:
-    """Aucun nom supposé sous `Panels/` (relevé R36Droid : `Panel0` à
-    `Panel8` et « Clone type 3 panel 1 », deux .dtb chacun) : tout dossier,
-    à n'importe quelle profondeur, qui contient directement des fichiers est
-    un jeu ; ces fichiers vont à la racine du BOOT."""
+def _screen_folder_sets(root: Path) -> List[BootFileSet]:
+    """Tout dossier du BOOT, à n'importe quelle profondeur, qui contient
+    directement un .dtb est un jeu ; tous ses fichiers vont à la racine du
+    BOOT (relevé R36Droid : `Panels/Panel0` à `Panel8`, deux .dtb chacun).
+    Nom affiché : chemin sous le dossier de premier niveau (« Panel 1 »),
+    ou ce dossier lui-même s'il contient les .dtb."""
     sets = []
-    for panels in _sorted_dirs(root):
-        if panels.name.lower() != PANELS_DIR_NAME:
+    for top in _sorted_dirs(root):
+        if top.name.lower() == STATE_DIR or top.name.lower() in NOT_SCREEN_DIRS:
             continue
-        pending = _sorted_dirs(panels)
+        pending = [top]
         while pending:
             variant = pending.pop(0)
             pending[:0] = _sorted_dirs(variant)
-            files = tuple(
-                (_rel(path, root), path.name) for path in sorted(variant.iterdir(), key=lambda p: p.name.lower()) if path.is_file()
-            )
-            if files:
-                sets.append(BootFileSet(_rel(variant, root), _rel(variant, panels).replace("/", " / "), files))
+            try:  # ex. « System Volume Information » sous Windows
+                files = [path for path in sorted(variant.iterdir(), key=lambda p: p.name.lower()) if path.is_file()]
+            except OSError:
+                continue
+            if any(path.suffix.lower() == SCREEN_FILE_SUFFIX for path in files):
+                name = _rel(variant, top).replace("/", " / ") if variant != top else top.name
+                sets.append(BootFileSet(_rel(variant, root), name, tuple((_rel(path, root), path.name) for path in files)))
     return sets
 
 

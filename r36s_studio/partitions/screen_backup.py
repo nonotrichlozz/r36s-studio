@@ -101,11 +101,17 @@ def _family(name: str) -> str:
     return lower
 
 
+def _model(name: str) -> str:
+    return name.lower().split("-", 1)[0]  # « rg351mp » de rg351mp-kernel.dtb
+
+
 def target_names(saved: List[str], target: List[str]) -> Dict[str, str]:
     """Nom à donner à chaque `.dtb` sauvegardé sur la carte flashée : celui
-    du `.dtb` de même rôle du firmware écrit, s'il y en a exactement un de
-    chaque côté ; sinon le nom d'origine (jamais deux fichiers vers le même
-    nom)."""
+    du `.dtb` de même rôle du firmware écrit, s'il y en a exactement un ;
+    à plusieurs, celui du même modèle (dArkOSen a `rg351mp-uboot.dtb` pour
+    les R36S **et** `rg351v-uboot.dtb` pour les clones, relevé le
+    2026-10-14 sur une vraie carte). Sinon le nom d'origine (jamais deux
+    fichiers vers le même nom)."""
     by_family: Dict[str, List[str]] = {}
     for name in target:
         by_family.setdefault(_family(name), []).append(name)
@@ -116,6 +122,8 @@ def target_names(saved: List[str], target: List[str]) -> Dict[str, str]:
     for name in saved:
         family = _family(name)
         candidates = by_family.get(family, [])
+        if len(candidates) > 1:
+            candidates = [c for c in candidates if _model(c) == _model(name)]
         result[name] = candidates[0] if len(candidates) == 1 and saved_counts[family] == 1 else name
     return result
 

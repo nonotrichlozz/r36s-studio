@@ -346,9 +346,12 @@ seul un démarrage réel le dit.
 - `boot_sets.list_sets` met `ecran-d-origine` en premier ; « Choisir l'écran
   de la console » l'affiche « Écran d'origine de cette console ».
 - Vérifié sur le BOOT réel d'une R36S d'usine (`rg351mp-kernel.dtb`,
-  `rk3326-r35s-linux.dtb` → noms dArkOSen). **Non vérifié** : qu'une carte
-  dArkOSen fraîchement flashée a bien ces deux `.dtb` à la racine (sinon
-  noms d'origine gardés) ; démarrage réel de la console avec ce jeu.
+  `rk3326-r35s-linux.dtb` → noms dArkOSen). Racine d'une vraie carte
+  dArkOSen relevée le 2026-10-14 : `rg351mp-uboot.dtb` (R36S) **et**
+  `rg351v-uboot.dtb` (clones) pour u-boot, `rk3326-r36s-linux.dtb` pour le
+  noyau (`boot.ini`) -- à plusieurs candidats, on départage par le modèle
+  (`rg351mp`), bug de la 0.1.5 corrigé. **Non vérifié** : démarrage réel
+  de la console avec ce jeu.
 - Non couvert : flash d'une carte *neuve* (rien à sauvegarder dessus) --
   aucune sauvegarde d'une autre carte n'est proposée à la place, faute de
   savoir de quelle console elle vient.

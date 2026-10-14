@@ -75,9 +75,19 @@ def test_install_skips_firmware_without_root_dtb(tmp_path):
     assert not (rocknix / "ecran-d-origine").exists()
 
 
+def test_target_names_on_a_real_darkosen_boot():
+    """Racine du BOOT d'une vraie carte dArkOSen (2026-10-14) : deux .dtb
+    pour u-boot, celui des R36S et celui des clones."""
+    darkosen = ["rg351mp-uboot.dtb", "rg351v-uboot.dtb", "rk3326-r36s-linux.dtb"]
+    assert screen_backup.target_names(["rg351mp-kernel.dtb", "rk3326-r35s-linux.dtb"], darkosen) == {
+        "rg351mp-kernel.dtb": "rg351mp-uboot.dtb",
+        "rk3326-r35s-linux.dtb": "rk3326-r36s-linux.dtb",
+    }
+
+
 def test_target_names_never_guess_when_ambiguous():
-    assert screen_backup.target_names(["rg351mp-kernel.dtb"], ["rg351v-uboot.dtb", "rg351mp-uboot.dtb"]) == {
-        "rg351mp-kernel.dtb": "rg351mp-kernel.dtb"
+    assert screen_backup.target_names(["rg351x-kernel.dtb"], ["rg351v-uboot.dtb", "rg351mp-uboot.dtb"]) == {
+        "rg351x-kernel.dtb": "rg351x-kernel.dtb"
     }
     assert screen_backup.target_names(["custom.dtb"], ["rg351mp-uboot.dtb"]) == {"custom.dtb": "custom.dtb"}
 

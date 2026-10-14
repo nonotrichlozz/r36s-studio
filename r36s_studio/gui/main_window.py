@@ -842,6 +842,7 @@ class MainWindow(QMainWindow):
         )
         self._boot_sets_dialog.apply_requested.connect(lambda set_id: self._run_boot_sets(action_argv(apply=set_id)))
         self._boot_sets_dialog.restore_requested.connect(lambda: self._run_boot_sets(action_argv(restore=True)))
+        self._boot_sets_dialog.import_requested.connect(lambda folder: self._run_boot_sets(action_argv(import_dir=folder)))
         self._boot_sets_dialog.outcome_answered.connect(self._on_boot_set_outcome)
         self._boot_sets_dialog.eject_requested.connect(self._eject_boot_sets_device)
 
@@ -2549,8 +2550,13 @@ class MainWindow(QMainWindow):
             self._log_panel.append_log(tr("boot_sets_applied_log", name=name))
         elif action == ["--restore"]:
             self._log_panel.append_log(tr("boot_sets_restored_log"))
+        elif action[:1] == ["--import"]:
+            self._log_panel.append_log(tr("boot_sets_imported_log"))
+            self._log_panel.append_log(action[1])
         trials = self._app_config.boot_set_trials.get(card_id, []) if card_id else []
         self._boot_sets_dialog.set_result(result, trials, just_applied=just_applied)
+        if action[:1] == ["--import"]:
+            self._boot_sets_dialog.show_imported()
 
     def _on_boot_set_outcome(self, set_id: str, outcome: str) -> None:
         card_id = self._boot_sets_result.get("card_id")

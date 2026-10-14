@@ -353,7 +353,19 @@ seul un démarrage réel le dit.
   (`rg351mp`), bug de la 0.1.5 corrigé. **Vérifié le 2026-10-14** : une
   R36S noire (`R36S-V12 2023-08-18`) qu'aucun autre système ne lançait a
   démarré sous dArkOSen avec ce jeu, appliqué depuis « Choisir l'écran ».
-- Non couvert : flash d'une carte *neuve* (rien à sauvegarder dessus) --
-  aucune sauvegarde d'une autre carte n'est proposée à la place, faute de
-  savoir de quelle console elle vient.
+- Flash d'une carte *neuve* (rien à sauvegarder dessus) : aucune sauvegarde
+  d'une autre carte n'est proposée automatiquement, faute de savoir de quelle
+  console elle vient -- d'où l'import ci-dessous.
+- **« Utiliser des fichiers d'écran de mon ordinateur… »** (2026-10-14, bouton
+  de « Choisir l'écran de la console ») : l'utilisateur choisit un dossier
+  (copie d'un ancien BOOT...), mêmes `.dtb` posés et renommés que ci-dessus
+  (`boot-sets --import DOSSIER`, direct ou worker élevé sous Windows comme
+  `--apply`). `ecran-d-origine/` est vidé avant chaque pose (aucun reste
+  d'un import précédent). Refus avant écriture : dossier sans `.dtb` à sa
+  racine (`IMPORT_NO_DTB`, vérifié avant le BOOT, donc jamais d'élévation
+  pour rien) ; BOOT sans `.dtb` à la racine, ex. ROCKNIX
+  (`IMPORT_UNSUPPORTED`). Un import n'est pas un essai : rien dans
+  `boot_set_trials` tant que le jeu n'est pas appliqué. Limite connue : un
+  essai déjà noté sur `ecran-d-origine` reste attaché à ce nom si un autre
+  dossier est importé ensuite.
 

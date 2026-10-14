@@ -15,6 +15,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -25,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from r36s_studio.partitions import boot_sets
+from r36s_studio.partitions import boot_sets, screen_backup
 from r36s_studio.partitions.locate import BOOT_LABEL, PartitionNotFound, PartitionNotMounted, locate_mounted, unmount_forced
 
 from .screens import Dialog
@@ -35,10 +36,20 @@ from .strings import tr
 ElevatedBootSets = Callable[[List[str]], Tuple[Optional[dict], Optional[str]]]
 
 
-def action_argv(apply: Optional[str] = None, restore: bool = False) -> List[str]:
+def action_argv(apply: Optional[str] = None, restore: bool = False, import_dir: Optional[str] = None) -> List[str]:
     if apply is not None:
         return ["--apply", apply]
+    if import_dir is not None:
+        return ["--import", import_dir]
     return ["--restore"] if restore else []
+
+
+class _ImportRefused(Exception):
+    """Import refusé avant toute écriture ; `args[0]` = clé d'erreur."""
+
+
+# Codes du worker élevé -> clés d'erreur de la fenêtre.
+_ELEVATED_IMPORT_ERRORS = {"IMPORT_NO_DTB": "import_no_dtb", "IMPORT_UNSUPPORTED": "import_unsupported"}
 
 
 class BootSetsRunner(QThread):
@@ -72,6 +83,8 @@ class BootSetsRunner(QThread):
             return None, "unknown_set"
         except boot_sets.OriginalsMissing:
             return None, "originals_missing"
+        except _ImportRefused as exc:
+            return None, exc.args[0]
         except (OSError, ValueError):
             return None, "io"
         finally:
@@ -83,6 +96,8 @@ class BootSetsRunner(QThread):
             return result, None
         if code == "ELEVATION_REFUSED":
             return None, "elevation_refused"
+        if code in _ELEVATED_IMPORT_ERRORS:
+            return None, _ELEVATED_IMPORT_ERRORS[code]
         if code == "SOURCE_NOT_FOUND":
             return None, "unknown_set" if self._action[:1] == ["--apply"] else "originals_missing"
         return None, "io"
@@ -92,6 +107,12 @@ class BootSetsRunner(QThread):
             boot_sets.apply_set(root, self._action[1])
         elif self._action == ["--restore"]:
             boot_sets.restore_original(root)
+        elif self._action[:1] == ["--import"]:
+            folder = self._action[1]
+            if not screen_backup.has_screen_files(folder):
+                raise _ImportRefused("import_no_dtb")  # dossier vérifié avant le BOOT : jamais d'élévation pour rien
+            if screen_backup.install_original_screen(folder, root) is None:
+                raise _ImportRefused("import_unsupported")
         return boot_sets.describe(root)
 
 
@@ -106,6 +127,7 @@ class BootSetsDialog(Dialog):
 
     apply_requested = Signal(str)  # set_id
     restore_requested = Signal()
+    import_requested = Signal(str)  # dossier de l'ordinateur
     outcome_answered = Signal(str, str)  # set_id, "booted" | "failed"
     eject_requested = Signal()
 
@@ -150,6 +172,10 @@ class BootSetsDialog(Dialog):
         self._list = QListWidget()
         self._list.itemSelectionChanged.connect(self._update_buttons)
         box.addWidget(self._list)
+        self.import_button = QPushButton(tr("boot_sets_import_button"))
+        self.import_button.setAutoDefault(False)
+        self.import_button.clicked.connect(self._on_import)
+        box.addWidget(self.import_button)
         row = QHBoxLayout()
         self.try_button = QPushButton(tr("boot_sets_try_button"))
         self.restore_button = QPushButton(tr("boot_sets_restore_button"))
@@ -260,6 +286,17 @@ class BootSetsDialog(Dialog):
         self._confirm_text.setText(tr("boot_sets_restore_confirm"))
         self._message.setText("")
         self._pages.setCurrentWidget(self._confirm_page)
+
+    def _on_import(self) -> None:
+        folder = self._ask_folder()
+        if folder:
+            self.import_requested.emit(folder)
+
+    def _ask_folder(self) -> Optional[str]:
+        return QFileDialog.getExistingDirectory(self, tr("boot_sets_import_choose")) or None
+
+    def show_imported(self) -> None:
+        self._message.setText(tr("boot_sets_imported"))
 
     def _on_confirmed(self) -> None:
         if self._restore_pending:

@@ -2505,7 +2505,7 @@ def test_file_dialog_releases_button_emits_signal(qapp):
 
     dialog._releases_button.click()
 
-    assert received == ["arkos"]
+    assert received == ["darkosen"]  # première entrée du catalogue depuis le 2026-10-14
 
 
 def test_file_dialog_releases_button_emits_emuelec_when_selected(qapp):
@@ -2545,13 +2545,13 @@ def test_file_dialog_builds_one_radio_per_catalog_entry(qapp):
     assert len(dialog._firmware_rows) == len(FIRMWARE_CATALOG)
 
 
-def test_file_dialog_defaults_to_arkos_when_no_firmware_given(qapp):
+def test_file_dialog_defaults_to_darkosen_when_no_firmware_given(qapp):
     dialog = FileDialog()
     dialog.show()
 
     dialog.set_mode("flash")
 
-    assert dialog._firmware_radios["arkos"].isChecked() is True
+    assert dialog._firmware_radios["darkosen"].isChecked() is True
     assert dialog._releases_button.isVisible() is True
     assert dialog._rocknix_download_button.isVisible() is False
 
@@ -2585,7 +2585,7 @@ def test_file_dialog_set_mode_unknown_firmware_falls_back_to_first_catalog_entry
 
     dialog.set_mode("flash", firmware="n'importe quoi")
 
-    assert dialog._firmware_radios["arkos"].isChecked() is True
+    assert dialog._firmware_radios["darkosen"].isChecked() is True
 
 
 def test_file_dialog_selecting_rocknix_swaps_buttons_and_emits_firmware_changed(qapp):

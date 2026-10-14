@@ -1231,7 +1231,8 @@ def cmd_identify(args: argparse.Namespace) -> int:
 
 def cmd_boot_sets(args: argparse.Namespace) -> int:
     """Jeux de fichiers de rechange du BOOT (`partitions/boot_sets.py`) :
-    liste par défaut, `--apply ID` ou `--restore`. Le résultat (état de la
+    liste par défaut, `--apply ID`, `--restore` ou `--import DOSSIER`
+    (fichiers d'écran de l'ordinateur, `partitions/screen_backup.py`). Le résultat (état de la
     carte + jeux) part en un événement `boot_sets_result`. La confirmation
     avant d'écrire est côté GUI, comme pour `copy-games`."""
     progress_file = _open_progress_file(args)
@@ -1266,6 +1267,17 @@ def _run_boot_sets(args: argparse.Namespace) -> int:
         elif args.restore:
             emit_log(f"Retour aux fichiers d'origine du BOOT de {device.display}")
             boot_sets.restore_original(root)
+        elif args.import_dir:
+            emit_log(f"Fichiers d'écran de {args.import_dir} posés sur le BOOT de {device.display}")
+            if not screen_backup.has_screen_files(args.import_dir):
+                emit_error("IMPORT_NO_DTB", f"Aucun .dtb à la racine de {args.import_dir}")
+                return 1
+            names = screen_backup.install_original_screen(args.import_dir, root)
+            if names is None:
+                emit_error("IMPORT_UNSUPPORTED", f"Aucun .dtb à la racine du BOOT de {device.display}")
+                return 1
+            for original, placed in names.items():
+                emit_log(f"{original} -> {screen_backup.ORIGINAL_SCREEN_DIR}/{placed}")
         result = boot_sets.describe(root)
     except (boot_sets.UnknownBootSet, boot_sets.OriginalsMissing) as exc:
         emit_error("SOURCE_NOT_FOUND", str(exc))
@@ -1645,6 +1657,12 @@ def build_parser() -> argparse.ArgumentParser:
     boot_sets_action = boot_sets_parser.add_mutually_exclusive_group()
     boot_sets_action.add_argument("--apply", metavar="ID", help="Jeu à appliquer (identifiant donné par la liste)")
     boot_sets_action.add_argument("--restore", action="store_true", help="Remet les fichiers d'origine")
+    boot_sets_action.add_argument(
+        "--import",
+        dest="import_dir",
+        metavar="DOSSIER",
+        help="Pose les .dtb de ce dossier dans ecran-d-origine/, renommés comme ceux du firmware",
+    )
     boot_sets_parser.add_argument(
         "--max-size",
         type=int,

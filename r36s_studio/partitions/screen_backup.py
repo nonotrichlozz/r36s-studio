@@ -20,6 +20,11 @@ démarrer cette console.
    d'origine n'y va pas : il désigne le noyau d'usine, l'appliquer sur un
    autre firmware empêcherait le démarrage -- il reste sur l'ordinateur.
 
+3. Import depuis l'ordinateur (« Utiliser des fichiers d'écran de mon
+   ordinateur… » dans « Choisir l'écran de la console ») : même pose que 2,
+   à partir d'un dossier choisi -- cas fréquent d'un BOOT sauvegardé à la
+   main un jour, puis la carte reflashée ou perdue.
+
 Les doublons macOS (`._*`) sont ignorés."""
 
 from __future__ import annotations
@@ -128,6 +133,15 @@ def target_names(saved: List[str], target: List[str]) -> Dict[str, str]:
     return result
 
 
+def has_screen_files(folder: PathLike) -> bool:
+    """Le dossier choisi contient-il des `.dtb` à sa racine ? (import depuis
+    l'ordinateur : refus clair plutôt qu'un jeu vide)."""
+    try:
+        return bool(_screen_files(folder))
+    except OSError:
+        return False
+
+
 def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optional[Dict[str, str]]:
     """Pose les `.dtb` sauvegardés dans `ecran-d-origine/` du BOOT flashé.
     `None` si le firmware écrit n'a aucun `.dtb` à la racine de son BOOT
@@ -139,7 +153,8 @@ def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optiona
         return None
     names = target_names(saved, target)
     folder = Path(boot_root) / ORIGINAL_SCREEN_DIR
-    folder.mkdir(exist_ok=True)
+    shutil.rmtree(folder, ignore_errors=True)  # un import précédent ne laisse aucun reste dans le jeu
+    folder.mkdir()
     for original, placed in names.items():
         shutil.copyfile(Path(saved_dir) / original, folder / placed)
     return names
@@ -148,6 +163,7 @@ def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optiona
 __all__ = [
     "BACKUPS_DIR_NAME",
     "ORIGINAL_SCREEN_DIR",
+    "has_screen_files",
     "install_original_screen",
     "save_original_screen",
     "target_names",

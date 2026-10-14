@@ -249,3 +249,33 @@ def test_cli_apply_restore_and_errors(tmp_path, capsys):
 
     assert _run_cli(["--apply", "nope"], root) == 1
     assert '"code": "SOURCE_NOT_FOUND"' in capsys.readouterr().out
+
+
+def test_cli_import_from_computer_folder(tmp_path, capsys):
+    """« Utiliser des fichiers d'écran de mon ordinateur… » via le worker
+    élevé : renommés comme ceux du firmware, en tête de liste."""
+    root = tmp_path / "BOOT"
+    root.mkdir()
+    for name in ("rg351mp-uboot.dtb", "rg351v-uboot.dtb", "rk3326-r36s-linux.dtb"):
+        (root / name).write_bytes(b"darkosen")
+    saved = tmp_path / "sd original"
+    saved.mkdir()
+    (saved / "rg351mp-kernel.dtb").write_bytes(b"usine-uboot")
+    (saved / "rk3326-r35s-linux.dtb").write_bytes(b"usine-noyau")
+    (saved / "._rg351mp-kernel.dtb").write_bytes(b"macos")
+
+    assert _run_cli(["--import", str(saved)], root) == 0
+    result = _result(capsys.readouterr().out)
+    assert result["sets"][0]["set_id"] == boot_sets.ORIGINAL_SCREEN_DIR
+    assert (root / "ecran-d-origine" / "rg351mp-uboot.dtb").read_bytes() == b"usine-uboot"
+    assert sorted(p.name for p in (root / "ecran-d-origine").iterdir()) == ["rg351mp-uboot.dtb", "rk3326-r36s-linux.dtb"]
+
+    empty = tmp_path / "vide"
+    empty.mkdir()
+    assert _run_cli(["--import", str(empty)], root) == 1
+    assert '"code": "IMPORT_NO_DTB"' in capsys.readouterr().out
+
+    rocknix = tmp_path / "ROCKNIX"
+    (rocknix / "device_trees").mkdir(parents=True)
+    assert _run_cli(["--import", str(saved)], rocknix) == 1
+    assert '"code": "IMPORT_UNSUPPORTED"' in capsys.readouterr().out

@@ -128,3 +128,40 @@ def test_worker_installs_after_flash_and_skips_rocknix(tmp_path, capsys):
     out = capsys.readouterr().out
     assert (target / "ecran-d-origine" / "rg351mp-uboot.dtb").read_bytes() == b"uboot-usine"
     assert "Écran d'origine reposé" in out and "ROCKNIX choisit son écran autrement" in out
+
+
+def test_dialog_import_button_asks_a_folder_then_emits_it(qapp, tmp_path):
+    from r36s_studio.gui.boot_sets_ui import BootSetsDialog
+
+    dialog = BootSetsDialog()
+    emitted = []
+    dialog.import_requested.connect(emitted.append)
+    with patch.object(dialog, "_ask_folder", return_value=str(tmp_path)):
+        dialog.import_button.click()
+    with patch.object(dialog, "_ask_folder", return_value=None):
+        dialog.import_button.click()  # annulé : rien
+    assert emitted == [str(tmp_path)]
+
+
+def test_runner_import_refuses_folder_without_dtb_before_any_elevation(qapp, tmp_path):
+    from r36s_studio.gui.boot_sets_ui import BootSetsRunner, action_argv
+
+    boot = tmp_path / "boot"
+    boot.mkdir()
+    (boot / "rg351mp-uboot.dtb").write_bytes(b"x")
+    elevated = MagicMock()
+    runner = BootSetsRunner("/dev/fake-disk-test-5", action_argv(import_dir=str(tmp_path / "vide")), elevated=elevated)
+    (tmp_path / "vide").mkdir()
+    with patch("r36s_studio.gui.boot_sets_ui.locate_mounted", return_value=MagicMock(mountpoint=str(boot))), patch(
+        "r36s_studio.gui.boot_sets_ui.unmount_forced"
+    ):
+        assert runner._run() == (None, "import_no_dtb")
+    elevated.assert_not_called()
+
+    folder, _ = screen_backup.save_original_screen(_factory_boot(tmp_path / "usine"), tmp_path / "b", "45" * 32)
+    runner = BootSetsRunner("/dev/fake-disk-test-5", action_argv(import_dir=str(folder)))
+    with patch("r36s_studio.gui.boot_sets_ui.locate_mounted", return_value=MagicMock(mountpoint=str(boot))), patch(
+        "r36s_studio.gui.boot_sets_ui.unmount_forced"
+    ):
+        result, error = runner._run()
+    assert error is None and result["sets"][0]["set_id"] == "ecran-d-origine"

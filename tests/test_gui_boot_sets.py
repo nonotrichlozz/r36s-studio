@@ -122,3 +122,21 @@ def test_main_window_records_trial_then_outcome(mock_list, mock_filter, mock_loa
 
     window._on_boot_sets_finished(None, "io", [])
     assert window._boot_sets_dialog._message.text()  # message d'erreur affiché
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_main_window_import_shows_original_screen_first(mock_list, mock_filter, mock_load, qapp):
+    window = MainWindow()
+    window._boot_sets_device = _DEVICE
+    result = _result()
+    result["sets"].insert(0, {"set_id": "ecran-d-origine", "name": "ecran-d-origine"})
+
+    window._on_boot_sets_finished(result, None, ["--import", "F:/sd original"])
+
+    dialog = window._boot_sets_dialog
+    assert dialog._list.item(0).text().startswith("Écran d'origine de cette console")
+    assert "en tête de liste" in dialog._message.text()
+    assert "F:/sd original" in window._log_panel._log_view.toPlainText()
+    assert window._app_config.boot_set_trials == {}  # un import n'est pas un essai

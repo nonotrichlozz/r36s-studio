@@ -315,12 +315,15 @@ sauvegarder, éjecter, aide) ; tout reste accessible en mode expert,
   le `.dtb` y est un choix, pas la console), et la référence tapée passe par
   la même table. Correspondance par préfixe à un mot près ; `R36S-V12
   2023-08-18` seul reste ambigu (R36S et clones) : profil `AMBIGUOUS`,
-  même image que UNKNOWN mais message qui dit pourquoi (sinon l'utilisateur
-  croit que sa saisie n'a servi à rien) ; soysauce -> UNKNOWN.
+  message qui dit pourquoi (sinon l'utilisateur croit que sa saisie n'a
+  servi à rien) ; depuis le 2026-10-14 dArkOSen conseillé, ArkOS-K36 en
+  second bouton (« Ma console est un clone ») ; soysauce -> UNKNOWN.
 - **« Je ne sais pas » -> l'image clone** (ArkOS-K36) : c'est elle qui a
   sauvé le testeur, et elle embarque les écrans (`Panels/`) -- bonnes chances
   de démarrer même sur une console d'origine. Console d'origine connue ->
-  dArkOS.
+  dArkOSen depuis le 2026-10-14 (avant : dArkOS) : il a fait redémarrer une
+  R36S noire qu'aucun autre système ne lançait, avec l'écran d'origine
+  reposé (`partitions.md`).
 - **ArkOS-K36** : <https://github.com/AeolusUX/ArkOS-K36/releases>. Dépôt
   archivé depuis le 2026-03-24, dernière image du 2025-08-11, **fonctionne**
   (vérifiée sur deux clones différents). Images hors GitHub (Google Drive,

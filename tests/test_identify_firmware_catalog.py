@@ -82,3 +82,9 @@ def test_android_entries_are_exactly_r36droid_and_andr36oid():
     après un flash (§5)."""
     android = {entry.id for entry in FIRMWARE_CATALOG if entry.is_android}
     assert android == {"r36droid", "andr36oid"}
+
+
+def test_darkosen_comes_first():
+    """2026-10-14 : seul firmware actif aux images sur GitHub, sélecteur de
+    .dtb intégré, a fait redémarrer une R36S d'origine."""
+    assert FIRMWARE_CATALOG[0].id == "darkosen"

@@ -11,7 +11,7 @@ from r36s_studio.gui.journey_ui import ConsoleJourneyDialog
 from r36s_studio.gui.main_window import MainWindow
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify import console_profile as cp
-from r36s_studio.identify.releases import ARKOS_K36_RELEASES_URL, DARKOS_R36S_RELEASES_URL
+from r36s_studio.identify.releases import ARKOS_K36_RELEASES_URL, DARKOSEN_R36S_RELEASES_URL
 
 
 def test_profiles_and_recommendation():
@@ -19,7 +19,7 @@ def test_profiles_and_recommendation():
     assert cp.profile_from_identify(IdentifyResult(failure_reason=IdentifyFailureReason.NO_DTB_FOUND)) is None
     assert cp.profile_from_reference("g80ca-mb v1.2-20250422") == cp.CLONE
     assert cp.profile_from_reference("R36S-V21 2023") == cp.UNKNOWN  # saisie libre, jamais refusée
-    assert cp.recommended_releases_url(cp.ORIGIN) == DARKOS_R36S_RELEASES_URL
+    assert cp.recommended_releases_url(cp.ORIGIN) == DARKOSEN_R36S_RELEASES_URL
     assert cp.recommended_releases_url(cp.UNKNOWN) == ARKOS_K36_RELEASES_URL  # « je ne sais pas » -> image clone
 
 
@@ -104,3 +104,25 @@ def test_dialog_pages_never_squash_at_any_window_size(qapp):
         dialog.close()
     finally:
         qapp.setStyleSheet("")
+
+
+def test_ambiguous_reference_offers_darkosen_then_k36(qapp):
+    """2026-10-14 : dArkOSen a fait redémarrer une R36S `R36S-V12
+    2023-08-18` ; K36 reste à un clic pour un clone de même référence."""
+    dialog = ConsoleJourneyDialog()
+    opened = []
+    dialog.open_url_requested.connect(opened.append)
+    dialog.start(not_booting=False)
+    dialog.reference_edit.setText("R36S-V12 2023-08-18")
+    dialog.reference_button.click()
+    dialog.show()
+
+    assert dialog.recommended_url() == DARKOSEN_R36S_RELEASES_URL
+    assert dialog.clone_page_button.isVisible()
+    dialog.clone_page_button.click()
+    assert opened == [ARKOS_K36_RELEASES_URL]
+
+    dialog._show_system_page(cp.CLONE)
+    assert not dialog.clone_page_button.isVisible()
+    assert dialog.recommended_url() == ARKOS_K36_RELEASES_URL
+    dialog.close()

@@ -86,14 +86,11 @@ class FirmwareEntry:
 # d'où « maintenu ». Toujours en lien manuel : aucune image attachée aux
 # releases (Mega, Google Drive, OneDrive, torrent).
 FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
-    FirmwareEntry(
-        "arkos",
-        "file_firmware_arkos_title",
-        "file_firmware_arkos_desc",
-        status="maintained",
-        releases_url=DARKOS_R36S_RELEASES_URL,
-    ),
-    # dArkOSen : « maintenu » (vérifié le 2026-09-29, voir `identify/
+    # dArkOSen en tête (2026-10-14) : seul firmware actif dont les images
+    # sont sur GitHub, sélecteur de .dtb intégré (repris de dArkOSRE), et il
+    # a fait redémarrer une R36S d'origine qu'aucun autre système ne
+    # lançait, avec l'écran d'origine reposé (`partitions/screen_backup.py`).
+    # « maintenu » (vérifié le 2026-09-29, voir `identify/
     # releases.py::DARKOSEN_R36S_RELEASES_URL`). Jamais `is_clone_safe` :
     # son README l'exclut explicitement de tout clone. Lien manuel : l'image
     # est attachée à la release mais en 7-Zip découpé, que l'app ne
@@ -105,6 +102,13 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
         status="maintained",
         post_flash_log_key="flash_darkosen_model_selection_note",
         releases_url=DARKOSEN_R36S_RELEASES_URL,
+    ),
+    FirmwareEntry(
+        "arkos",
+        "file_firmware_arkos_title",
+        "file_firmware_arkos_desc",
+        status="maintained",
+        releases_url=DARKOS_R36S_RELEASES_URL,
     ),
     FirmwareEntry(
         "rocknix",

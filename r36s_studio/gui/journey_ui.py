@@ -66,8 +66,10 @@ class ConsoleJourneyDialog(Dialog):
         self._console_page = self._build_console_page()
         self._system_page = self._buttons_page(
             (tr("journey_system_open_page"), lambda: self.open_url_requested.emit(self.recommended_url())),
+            (tr("journey_system_open_clone_page"), self._open_clone_page),
             (tr("journey_system_choose_file"), self._choose_file),
         )
+        self.clone_page_button = self._system_page.buttons[1]
         for page in (self._start_page, self._console_page, self._system_page):
             self._pages.addWidget(page)
 
@@ -83,11 +85,13 @@ class ConsoleJourneyDialog(Dialog):
         page = QWidget()
         box = QVBoxLayout(page)
         box.setContentsMargins(0, 0, 0, 0)
+        page.buttons = []
         for label, slot in buttons:
             button = QPushButton(label)
             button.setAutoDefault(False)
             button.clicked.connect(slot)
             box.addWidget(button)
+            page.buttons.append(button)
         return page
 
     def _build_console_page(self) -> QWidget:
@@ -157,8 +161,14 @@ class ConsoleJourneyDialog(Dialog):
         self._reference = self.reference_edit.text().strip()
         self._show_system_page(console_profile.profile_from_reference(self._reference))
 
+    def _open_clone_page(self) -> None:
+        url = console_profile.clone_fallback_url(self._profile)
+        if url:
+            self.open_url_requested.emit(url)
+
     def _show_system_page(self, profile: str) -> None:
         self._profile = profile
+        self.clone_page_button.setVisible(console_profile.clone_fallback_url(profile) is not None)
         self._title.setText(tr("journey_system_title"))
         self._text.setText(tr(f"journey_system_{profile}"))
         self._status.setText("")

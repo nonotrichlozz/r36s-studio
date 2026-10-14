@@ -542,11 +542,12 @@ STRINGS = {
     "journey_console_reference_continue": "Continuer avec cette référence",
     "journey_console_unknown": "Je ne sais pas",
     "journey_system_title": "Le système à mettre sur la carte",
-    "journey_system_origin": "C'est une console d'origine : le système conseillé est dArkOS. Ouvre la page de téléchargement, prends la dernière version pour la R36S, puis reviens ici et choisis le fichier.",
-    "journey_system_clone": "C'est une console « clone » : le système conseillé est ArkOS-K36. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz, sur Google Drive, Mediafire ou MEGA), puis reviens ici et choisis le fichier.",
-    "journey_system_ambiguous": "Cette référence existe à la fois sur des consoles d'origine et sur des clones : elle ne suffit pas à trancher. On te propose donc ArkOS-K36, l'image qui contient plusieurs écrans de rechange et a de bonnes chances de démarrer dans les deux cas. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz), puis reviens ici et choisis le fichier.",
-    "journey_system_unknown": "Sans savoir quelle console c'est, le plus sûr est ArkOS-K36 : il contient plusieurs écrans de rechange, il a de bonnes chances de démarrer sur la plupart des consoles. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz), puis reviens ici et choisis le fichier.",
+    "journey_system_origin": "C'est une console d'origine : le système conseillé est dArkOSen. Ouvre la page de téléchargement, prends la dernière version et ses deux fichiers .7z.001 et .7z.002, extrais-les avec 7-Zip pour obtenir le fichier .img, puis reviens ici et choisis-le. Après l'installation, si l'écran reste noir, ouvre « Choisir l'écran de la console ».",
+    "journey_system_clone": "C'est une console « clone » : le système conseillé est ArkOS-K36. Il n'est plus mis à jour depuis mars 2026, mais reste le seul prévu pour les clones. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz, sur Google Drive, Mediafire ou MEGA), puis reviens ici et choisis le fichier.",
+    "journey_system_ambiguous": "Cette référence existe à la fois sur des consoles d'origine et sur des clones : elle ne suffit pas à trancher. Essaie d'abord dArkOSen : il a fait redémarrer une R36S avec cette référence. Prends la dernière version et ses deux fichiers .7z.001 et .7z.002, extrais-les avec 7-Zip pour obtenir le fichier .img, puis reviens ici et choisis-le. Si la console ne démarre pas, c'est sans doute un clone : prends alors ArkOS-K36 (bouton ci-dessous).",
+    "journey_system_unknown": "Sans savoir quelle console c'est, le plus sûr est ArkOS-K36 : il contient plusieurs écrans de rechange, il a de bonnes chances de démarrer sur la plupart des consoles. Il n'est plus mis à jour depuis mars 2026. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz), puis reviens ici et choisis le fichier.",
     "journey_system_open_page": "Ouvrir la page de téléchargement",
+    "journey_system_open_clone_page": "Ma console est un clone : page d'ArkOS-K36",
     "journey_system_choose_file": "J'ai téléchargé le fichier : le choisir",
     "journey_file_filter": "Fichiers du système de la console",
     "journey_flash_done_title": "La carte est prête",
@@ -582,7 +583,8 @@ STRINGS = {
     # d'origine seulement, archive à extraire avant, modèle à choisir après.
     "file_firmware_darkosen_title": "dArkOSen",
     "file_firmware_darkosen_desc": (
-        "Version enrichie de dArkOS, mise à jour environ toutes les deux semaines. Uniquement pour "
+        "Conseillé pour une R36S d'origine. Version enrichie de dArkOS, mise à jour environ toutes "
+        "les deux semaines. Uniquement pour "
         "les R36 d'origine (R36S, R36S Plus, R36H, R36H ProMax) : ne fonctionne sur aucune console "
         "clone. Le téléchargement se fait en deux fichiers .7z.001 et .7z.002 : extrais-les avec "
         "7-Zip pour obtenir le fichier .img. Après l'installation, choisis le modèle de ta console "

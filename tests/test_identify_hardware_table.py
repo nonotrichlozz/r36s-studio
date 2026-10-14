@@ -55,5 +55,5 @@ def test_reference_typed_by_user_goes_through_the_table():
 
 def test_ambiguous_reference_is_told_to_the_user():
     assert cp.profile_from_reference("R36S-V12 2023-08-18") == cp.AMBIGUOUS  # saisie du 2026-10-14
-    assert cp.recommended_releases_url(cp.AMBIGUOUS) == cp.recommended_releases_url(cp.UNKNOWN)
+    assert cp.recommended_releases_url(cp.AMBIGUOUS) == cp.recommended_releases_url(cp.ORIGIN)  # dArkOSen, K36 en second
     assert cp.profile_from_reference("R36S-V12 2023-08-18 Panel 0") == cp.ORIGIN

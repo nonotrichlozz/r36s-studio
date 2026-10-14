@@ -15,7 +15,7 @@ from typing import Optional
 
 from . import IdentifyResult
 from .hardware_table import CLONE as TABLE_CLONE, R36S as TABLE_R36S, families_for_hardware, family_for_hardware
-from .releases import ARKOS_K36_RELEASES_URL, DARKOS_R36S_RELEASES_URL
+from .releases import ARKOS_K36_RELEASES_URL, DARKOSEN_R36S_RELEASES_URL
 
 ORIGIN = "origin"
 CLONE = "clone"
@@ -52,4 +52,13 @@ def profile_from_reference(reference: str) -> str:
 
 
 def recommended_releases_url(profile: str) -> str:
-    return DARKOS_R36S_RELEASES_URL if profile == ORIGIN else ARKOS_K36_RELEASES_URL
+    """dArkOSen pour une console d'origine et pour une référence ambiguë
+    (2026-10-14 : il a fait redémarrer une R36S `R36S-V12 2023-08-18` avec
+    l'écran d'origine reposé) ; ArkOS-K36 (archivé depuis mars 2026, mais
+    le seul fait pour les clones) sinon -- le README de dArkOSen exclut tout
+    clone. Ambiguë : K36 reste proposé en second (`clone_fallback_url`)."""
+    return DARKOSEN_R36S_RELEASES_URL if profile in (ORIGIN, AMBIGUOUS) else ARKOS_K36_RELEASES_URL
+
+
+def clone_fallback_url(profile: str) -> Optional[str]:
+    return ARKOS_K36_RELEASES_URL if profile == AMBIGUOUS else None

@@ -363,11 +363,12 @@ STRINGS_EN = {
     "journey_console_reference_continue": "Continue with this reference",
     "journey_console_unknown": "I don't know",
     "journey_system_title": "The system to put on the card",
-    "journey_system_origin": "It's an original console: the recommended system is dArkOS. Open the download page, take the latest version for the R36S, then come back here and choose the file.",
-    "journey_system_clone": "It's a “clone” console: the recommended system is ArkOS-K36. Open the download page and take the “K36 and Similar Clones” version (.img.xz file, on Google Drive, Mediafire or MEGA), then come back here and choose the file.",
-    "journey_system_ambiguous": "This reference exists on both original consoles and clones: it isn't enough to tell them apart. So we suggest ArkOS-K36, the image that includes several spare screens and has a good chance of starting in both cases. Open the download page and take the “K36 and Similar Clones” version (.img.xz file), then come back here and choose the file.",
-    "journey_system_unknown": "Without knowing which console it is, the safest choice is ArkOS-K36: it includes several spare screens and has a good chance of starting on most consoles. Open the download page and take the “K36 and Similar Clones” version (.img.xz file), then come back here and choose the file.",
+    "journey_system_origin": "It's an original console: the recommended system is dArkOSen. Open the download page, take the latest version and its two files .7z.001 and .7z.002, extract them with 7-Zip to get the .img file, then come back here and choose it. After installing, if the screen stays black, open “Choose the console's screen”.",
+    "journey_system_clone": "It's a “clone” console: the recommended system is ArkOS-K36. It hasn't been updated since March 2026, but it's still the only one made for clones. Open the download page and take the “K36 and Similar Clones” version (.img.xz file, on Google Drive, Mediafire or MEGA), then come back here and choose the file.",
+    "journey_system_ambiguous": "This reference exists on both original consoles and clones: it isn't enough to tell them apart. Try dArkOSen first: it got an R36S with this reference to start again. Take the latest version and its two files .7z.001 and .7z.002, extract them with 7-Zip to get the .img file, then come back here and choose it. If the console doesn't start, it's probably a clone: take ArkOS-K36 instead (button below).",
+    "journey_system_unknown": "Without knowing which console it is, the safest choice is ArkOS-K36: it includes several spare screens and has a good chance of starting on most consoles. It hasn't been updated since March 2026. Open the download page and take the “K36 and Similar Clones” version (.img.xz file), then come back here and choose the file.",
     "journey_system_open_page": "Open the download page",
+    "journey_system_open_clone_page": "My console is a clone: ArkOS-K36 page",
     "journey_system_choose_file": "I downloaded the file: choose it",
     "journey_file_filter": "Console system files",
     "journey_flash_done_title": "The card is ready",
@@ -389,7 +390,8 @@ STRINGS_EN = {
     ),
     "file_firmware_darkosen_title": "dArkOSen",
     "file_firmware_darkosen_desc": (
-        "An enhanced version of dArkOS, updated about every two weeks. Only for genuine R36 consoles "
+        "Recommended for an original R36S. An enhanced version of dArkOS, updated about every two "
+        "weeks. Only for genuine R36 consoles "
         "(R36S, R36S Plus, R36H, R36H ProMax): it does not work on any clone console. The download "
         "comes as two files, .7z.001 and .7z.002: extract them with 7-Zip to get the .img file. "
         "After installing, choose your console's model (tool provided on the card)."

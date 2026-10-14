@@ -268,9 +268,10 @@ Détail et bancs de test : `docs/claude/testing.md`.
   les `.dtb` de dArkOSRE, jamais sur un `.dtb` de carte d'usine -- que son
   `model` porte bien ces chaînes reste supposé (`assisted-wizard.md`).
 - Écran d'origine mis de côté avant un flash et reposé après
-  (`partitions/screen_backup.py`) : vérifié sur le BOOT réel d'une R36S
-  d'usine, jamais sur une carte dArkOSen flashée ni au démarrage
-  (`partitions.md`).
+  (`partitions/screen_backup.py`) : pose + renommage + application vérifiés
+  sur une R36S noire avec dArkOSen (démarrage OK, 2026-10-14), à partir de
+  fichiers copiés à la main ; la sauvegarde automatique avant flash, elle,
+  jamais lancée sur une vraie carte d'usine (`partitions.md`).
 - ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,

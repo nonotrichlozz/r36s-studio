@@ -350,8 +350,9 @@ seul un démarrage réel le dit.
   dArkOSen relevée le 2026-10-14 : `rg351mp-uboot.dtb` (R36S) **et**
   `rg351v-uboot.dtb` (clones) pour u-boot, `rk3326-r36s-linux.dtb` pour le
   noyau (`boot.ini`) -- à plusieurs candidats, on départage par le modèle
-  (`rg351mp`), bug de la 0.1.5 corrigé. **Non vérifié** : démarrage réel
-  de la console avec ce jeu.
+  (`rg351mp`), bug de la 0.1.5 corrigé. **Vérifié le 2026-10-14** : une
+  R36S noire (`R36S-V12 2023-08-18`) qu'aucun autre système ne lançait a
+  démarré sous dArkOSen avec ce jeu, appliqué depuis « Choisir l'écran ».
 - Non couvert : flash d'une carte *neuve* (rien à sauvegarder dessus) --
   aucune sauvegarde d'une autre carte n'est proposée à la place, faute de
   savoir de quelle console elle vient.

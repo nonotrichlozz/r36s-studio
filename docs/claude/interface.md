@@ -6,7 +6,7 @@
 
 > 📚 Historique détaillé (bugs corrigés, investigations) : `docs/bugs-interface.md`
 
-1. **Colonne gauche (bandeau + six étapes + sauvegarde)** — un bandeau en
+1. **Colonne gauche (bandeau + étapes + sauvegarde)** — *depuis le 2026-10-14 : quatre étapes sans lettres, repère « ◆ » comme « Par sécurité » ; les lettres A→F ci-dessous sont historiques* — un bandeau en
    haut (bordure cyan, coins arrondis) résume la carte détectée : icône de
    console dessinée au `QPainter` (`_ConsoleIcon`, pas une image), modèle et
    taille, bouton « Rafraîchir » aligné à droite, tous sur une seule ligne ;

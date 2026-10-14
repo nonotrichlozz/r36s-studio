@@ -1,6 +1,6 @@
-# `jobs` et firmwares — les opérations A→F et le choix du firmware
+# `jobs` et firmwares — les opérations du mode expert et le choix du firmware
 
-À lire quand tu touches aux six opérations A→F, au catalogue de firmwares (`identify/firmware_catalog.py`), au téléchargement ROCKNIX, à la détection des consoles clones ou aux avertissements après flash.
+À lire quand tu touches aux opérations du mode expert, au catalogue de firmwares (`identify/firmware_catalog.py`), au téléchargement ROCKNIX, à la détection des consoles clones ou aux avertissements après flash.
 
 > Les renvois « §N » de ce texte désignent les sections de l'ancien `CLAUDE.md` monolithique (commit `930f3c9`) : §3 → `elevation-macos.md`, §4.1/§4.2 → `devices-safety.md`, §4.3 → `imaging.md`/`reset-card.md`, §4.4 → `partitions.md`, §4.5 → `detect.md`, §4.6 → `firmwares-flash.md`, §5 → `interface.md`/`assisted-wizard.md`, §6 → `packaging.md`, §8 → `testing.md` ; §1/§2/§9 restent dans `CLAUDE.md`.
 
@@ -8,17 +8,28 @@
 
 ⚠️ **Correction de conception** : cette table ne listait à l'origine que quatre
 opérations, en supposant que l'utilisateur disposait déjà des fichiers BOOT et
-EASYROMS à injecter. Le vrai parcours à deux cartes (§4.4/§4.5) en compte six,
-dans cet ordre chronologique fixe (A→F) :
+EASYROMS à injecter. Le parcours à deux cartes en a compté six (A→F) ;
+depuis le 2026-10-14 il en reste quatre, sans lettres :
 
-| Étape | Job | Entrée | Sortie |
-|-------|-----|--------|--------|
-| A | `extract_boot` | carte source | dossier horodaté `BOOT_AAAA-MM-JJ_HH-MM` sur l'ordinateur |
-| B | `extract_easyroms` | carte source | dossier horodaté `EASYROMS_AAAA-MM-JJ_HH-MM` sur l'ordinateur |
-| C | `flash` | fichier image + carte neuve | carte écrite + vérifiée (SHA-256) |
-| D | `inject_boot` | archive BOOT (étape A) + carte neuve | fichiers copiés sur `BOOT` |
-| E | `copy_games` | archive EASYROMS (étape B) + carte neuve | fichiers copiés sur `EASYROMS` |
-| F | `eject` | carte (neuve, en général) | partitions démontées, carte éjectée |
+| Job | Entrée | Sortie |
+|-----|--------|--------|
+| `extract_easyroms` | carte source | dossier horodaté `EASYROMS_AAAA-MM-JJ_HH-MM` sur l'ordinateur |
+| `flash` | fichier image + carte | carte écrite + vérifiée (SHA-256) |
+| `copy_games` | archive EASYROMS + carte | fichiers copiés sur `EASYROMS` |
+| `eject` | carte | partitions démontées, carte éjectée |
+
+**Retirés le 2026-10-14 : `extract_boot`/`inject_boot` (ex-étapes A/D).**
+Doublon de la sauvegarde système sans les jeux, qui contient tout le BOOT
+plus la partition système et le chargeur de démarrage hors partition (A ne
+copiait que les fichiers de BOOT, et ne trouvait pas la partition sur les
+clones où elle ne s'appelle pas `BOOT`). D copiait tout le BOOT, noyau
+compris, par-dessus un firmware neuf : risque de non-démarrage si les
+noyaux diffèrent ; le bon écran passe par « Choisir l'écran de la
+console » (`boot-sets`). Seul cas perdu : sauvegarder le BOOT d'une carte
+sans partition de jeux (la sauvegarde système s'y arrête sur
+`GAMES_PARTITION_NOT_FOUND` ; la sauvegarde complète reste possible).
+B/E restent : seul chemin intégré pour déplacer ses jeux entre deux cartes
+de taille ou de firmware différents.
 
 En dehors de ce parcours, `backup` (périphérique source → fichier `.img`/`.img.xz`)
 reste disponible comme opération de sécurité indépendante (§5) : une sauvegarde

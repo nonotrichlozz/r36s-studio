@@ -1,4 +1,4 @@
-"""Tests de l'orchestration extract_boot/extract_easyroms/inject_boot/
+"""Tests de l'orchestration extract_easyroms/
 copy_games (partitions/jobs.py). `locate_mounted` et `copy_tree` sont
 mockés — aucune partition réelle n'est localisée ni montée."""
 
@@ -14,9 +14,7 @@ from r36s_studio.devices import Device
 from r36s_studio.partitions.jobs import (
     MacosNtfsWriteUnsupported,
     copy_games,
-    extract_boot,
     extract_easyroms,
-    inject_boot,
 )
 from r36s_studio.partitions.locate import BOOT_LABEL, EASYROMS_LABEL, PartitionInfo
 
@@ -33,20 +31,7 @@ def _make_device(path="/dev/fake-disk-test-4") -> Device:
     )
 
 
-# --- extract_boot / extract_easyroms : ancienne carte -> ordinateur -------
-
-
-@patch("r36s_studio.partitions.jobs.copy_tree", return_value=321)
-@patch("r36s_studio.partitions.jobs.locate_mounted")
-def test_extract_boot_copies_from_boot_partition_mountpoint_to_dest_dir(mock_locate, mock_copy):
-    mock_locate.return_value = PartitionInfo("/dev/fake-disk-test-4s1", "BOOT", "msdos", "/Volumes/BOOT")
-    device = _make_device()
-
-    copied = extract_boot(device, "/tmp/R36S Studio/BOOT_2026-07-06_00-21")
-
-    mock_locate.assert_called_once_with(device.path, BOOT_LABEL)
-    assert mock_copy.call_args.args[:2] == ("/Volumes/BOOT", "/tmp/R36S Studio/BOOT_2026-07-06_00-21")
-    assert copied == 321
+# --- extract_easyroms : carte -> ordinateur ------------------------------
 
 
 @patch("r36s_studio.partitions.jobs.platform.system", return_value="Darwin")
@@ -72,20 +57,6 @@ def test_extract_easyroms_copies_from_easyroms_partition_even_when_ntfs_on_macos
         "/tmp/R36S Studio/EASYROMS_2026-07-06_00-21",
     )
     assert copied == 654
-
-
-@patch("r36s_studio.partitions.jobs.copy_tree", return_value=123)
-@patch("r36s_studio.partitions.jobs.locate_mounted")
-def test_inject_boot_copies_to_boot_partition_mountpoint(mock_locate, mock_copy):
-    mock_locate.return_value = PartitionInfo("/dev/fake-disk-test-4s1", "BOOT", "msdos", "/Volumes/BOOT")
-    device = _make_device()
-
-    copied = inject_boot(device, "/tmp/boot_backup")
-
-    mock_locate.assert_called_once_with(device.path, BOOT_LABEL)
-    mock_copy.assert_called_once()
-    assert mock_copy.call_args.args[:2] == ("/tmp/boot_backup", "/Volumes/BOOT")
-    assert copied == 123
 
 
 @patch("r36s_studio.partitions.jobs.platform.system", return_value="Linux")
@@ -178,19 +149,6 @@ def test_copy_games_end_to_end_rejects_real_world_windows_ntfs_field_value(
 # --- diskutil/udisksctl normal (`unmount_forced`, locate.py). -------------
 
 
-@patch("r36s_studio.partitions.jobs.unmount_forced")
-@patch("r36s_studio.partitions.jobs.copy_tree", return_value=321)
-@patch("r36s_studio.partitions.jobs.locate_mounted")
-def test_extract_boot_unmounts_forced_mount_after_copying(mock_locate, mock_copy, mock_unmount):
-    partition = PartitionInfo("/dev/fake-disk-test-2s1", "", "", "/tmp/r36s-studio-test", partition_type="efi")
-    mock_locate.return_value = partition
-    device = _make_device()
-
-    extract_boot(device, "/tmp/R36S Studio/BOOT_2026-07-06_00-21")
-
-    mock_unmount.assert_called_once_with(partition)
-
-
 @patch("r36s_studio.partitions.jobs.platform.system", return_value="Darwin")
 @patch("r36s_studio.partitions.jobs.unmount_forced")
 @patch("r36s_studio.partitions.jobs.copy_tree", return_value=654)
@@ -201,19 +159,6 @@ def test_extract_easyroms_unmounts_forced_mount_after_copying(mock_locate, mock_
     device = _make_device()
 
     extract_easyroms(device, "/tmp/R36S Studio/EASYROMS_2026-07-06_00-21")
-
-    mock_unmount.assert_called_once_with(partition)
-
-
-@patch("r36s_studio.partitions.jobs.unmount_forced")
-@patch("r36s_studio.partitions.jobs.copy_tree", return_value=123)
-@patch("r36s_studio.partitions.jobs.locate_mounted")
-def test_inject_boot_unmounts_forced_mount_after_copying(mock_locate, mock_copy, mock_unmount):
-    partition = PartitionInfo("/dev/fake-disk-test-4s1", "BOOT", "msdos", "/Volumes/BOOT")
-    mock_locate.return_value = partition
-    device = _make_device()
-
-    inject_boot(device, "/tmp/boot_backup")
 
     mock_unmount.assert_called_once_with(partition)
 

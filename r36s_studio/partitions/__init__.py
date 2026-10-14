@@ -13,9 +13,7 @@ from .copy import MountpointNotWritable, copy_tree
 from .jobs import (
     MacosNtfsWriteUnsupported,
     copy_games,
-    extract_boot,
     extract_easyroms,
-    inject_boot,
 )
 from .locate import (
     BOOT_LABEL,
@@ -39,9 +37,7 @@ __all__ = [
     "MountpointNotWritable",
     "MacosNtfsWriteUnsupported",
     "copy_games",
-    "extract_boot",
     "extract_easyroms",
-    "inject_boot",
     "BOOT_LABEL",
     "EASYROMS_LABEL",
     "PartitionInfo",

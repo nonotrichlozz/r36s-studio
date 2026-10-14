@@ -1,5 +1,5 @@
-"""Tests des CLI `inject-boot` et `copy-games` (__main__.py, §4.4/§4.6).
-`list_devices`, `inject_boot`/`copy_games` sont mockés — aucune carte réelle
+"""Tests des CLI `copy-games` (__main__.py, §4.4/§4.6).
+`list_devices`, `copy_games` sont mockés — aucune carte réelle
 n'est touchée."""
 
 from __future__ import annotations
@@ -40,98 +40,50 @@ def _parse(argv):
     return cli.build_parser().parse_args(argv)
 
 
-# --- inject-boot -------------------------------------------------------
+# --- copy-games (refus, partitions) -------------------------------------------------------
 
 
-@patch("r36s_studio.__main__.inject_boot", return_value=42)
+@patch("r36s_studio.__main__.copy_games")
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_inject_boot_success_emits_done_true(mock_list, mock_inject, tmp_path, capsys):
-    mock_list.return_value = [_make_device()]
-    boot_source = tmp_path / "boot_backup"
-    boot_source.mkdir()
-
-    args = _parse(["inject-boot", "--device", "/dev/fake-disk-test-3", "--boot-source", str(boot_source)])
-    code = args.func(args)
-
-    assert code == 0
-    out = capsys.readouterr().out
-    assert '"type": "done"' in out
-    assert '"ok": true' in out
-
-
-@patch("r36s_studio.__main__.inject_boot")
-@patch("r36s_studio.__main__.list_devices")
-def test_cmd_inject_boot_rejects_missing_source_folder(mock_list, mock_inject, capsys):
-    mock_list.return_value = [_make_device()]
-
-    args = _parse(["inject-boot", "--device", "/dev/fake-disk-test-3", "--boot-source", "/nonexistent"])
-    code = args.func(args)
-
-    assert code == 1
-    mock_inject.assert_not_called()
-    assert "SOURCE_NOT_FOUND" in capsys.readouterr().out
-
-
-@patch("r36s_studio.__main__.inject_boot")
-@patch("r36s_studio.__main__.list_devices")
-def test_cmd_inject_boot_rejects_device_not_in_safe_list(mock_list, mock_inject, tmp_path, capsys):
+def test_cmd_copy_games_rejects_device_not_in_safe_list(mock_list, mock_copy, tmp_path, capsys):
     mock_list.return_value = [_make_device(path="/dev/fake-disk-test-9")]
-    boot_source = tmp_path / "boot_backup"
-    boot_source.mkdir()
+    games_source = tmp_path / "boot_backup"
+    games_source.mkdir()
 
-    args = _parse(["inject-boot", "--device", "/dev/fake-disk-test-3", "--boot-source", str(boot_source)])
+    args = _parse(["copy-games", "--device", "/dev/fake-disk-test-3", "--games-source", str(games_source)])
     code = args.func(args)
 
     assert code == 1
-    mock_inject.assert_not_called()
+    mock_copy.assert_not_called()
     assert "DEVICE_NOT_ALLOWED" in capsys.readouterr().out
 
 
-@patch("r36s_studio.__main__.inject_boot", side_effect=PartitionNotFound("BOOT", "/dev/fake-disk-test-3"))
+@patch("r36s_studio.__main__.copy_games", side_effect=PartitionNotFound("EASYROMS", "/dev/fake-disk-test-3"))
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_inject_boot_reports_partition_not_found(mock_list, mock_inject, tmp_path, capsys):
+def test_cmd_copy_games_reports_partition_not_found(mock_list, mock_copy, tmp_path, capsys):
     mock_list.return_value = [_make_device()]
-    boot_source = tmp_path / "boot_backup"
-    boot_source.mkdir()
+    games_source = tmp_path / "boot_backup"
+    games_source.mkdir()
 
-    args = _parse(["inject-boot", "--device", "/dev/fake-disk-test-3", "--boot-source", str(boot_source)])
+    args = _parse(["copy-games", "--device", "/dev/fake-disk-test-3", "--games-source", str(games_source)])
     code = args.func(args)
 
     assert code == 1
     assert "PARTITION_NOT_FOUND" in capsys.readouterr().out
 
 
-@patch("r36s_studio.__main__.inject_boot", side_effect=PartitionNotMounted("BOOT", "/dev/fake-disk-test-3"))
+@patch("r36s_studio.__main__.copy_games", side_effect=PartitionNotMounted("EASYROMS", "/dev/fake-disk-test-3"))
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_inject_boot_reports_partition_not_mounted(mock_list, mock_inject, tmp_path, capsys):
+def test_cmd_copy_games_reports_partition_not_mounted(mock_list, mock_copy, tmp_path, capsys):
     mock_list.return_value = [_make_device()]
-    boot_source = tmp_path / "boot_backup"
-    boot_source.mkdir()
+    games_source = tmp_path / "boot_backup"
+    games_source.mkdir()
 
-    args = _parse(["inject-boot", "--device", "/dev/fake-disk-test-3", "--boot-source", str(boot_source)])
+    args = _parse(["copy-games", "--device", "/dev/fake-disk-test-3", "--games-source", str(games_source)])
     code = args.func(args)
 
     assert code == 1
     assert "PARTITION_NOT_MOUNTED" in capsys.readouterr().out
-
-
-@patch("r36s_studio.__main__.inject_boot", side_effect=OperationCancelled(1024))
-@patch("r36s_studio.__main__.list_devices")
-def test_cmd_inject_boot_reports_cancellation(mock_list, mock_inject, tmp_path, capsys):
-    mock_list.return_value = [_make_device()]
-    boot_source = tmp_path / "boot_backup"
-    boot_source.mkdir()
-
-    args = _parse(["inject-boot", "--device", "/dev/fake-disk-test-3", "--boot-source", str(boot_source)])
-    code = args.func(args)
-
-    assert code == 1
-    out = capsys.readouterr().out
-    assert "CANCELLED" in out
-    assert '"ok": false' in out
-
-
-# --- copy-games --------------------------------------------------------
 
 
 @patch("r36s_studio.__main__.copy_games", return_value=999)

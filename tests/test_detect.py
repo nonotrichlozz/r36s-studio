@@ -11,11 +11,9 @@ from unittest.mock import patch
 from r36s_studio.detect import (
     COPY_GAMES,
     EJECT,
-    EXTRACT_BOOT,
     EXTRACT_EASYROMS,
     FLASH,
     IDENTIFY,
-    INJECT_BOOT,
     CardSystem,
     StepStatus,
     arkos_step_refusal,
@@ -48,10 +46,8 @@ def test_no_device_marks_every_step_not_relevant(mock_platform):
 
     assert all(value == StepStatus.NOT_RELEVANT for value in status.values())
     assert set(status) == {
-        EXTRACT_BOOT,
         EXTRACT_EASYROMS,
         FLASH,
-        INJECT_BOOT,
         COPY_GAMES,
         EJECT,
         IDENTIFY,
@@ -69,9 +65,7 @@ def test_blank_card_only_flash_available_and_eject(mock_list, mock_archives, moc
 
     assert status[FLASH] == StepStatus.AVAILABLE
     assert status[EJECT] == StepStatus.AVAILABLE
-    assert status[EXTRACT_BOOT] == StepStatus.NOT_RELEVANT
     assert status[EXTRACT_EASYROMS] == StepStatus.NOT_RELEVANT
-    assert status[INJECT_BOOT] == StepStatus.NOT_RELEVANT
     assert status[COPY_GAMES] == StepStatus.NOT_RELEVANT
 
 
@@ -95,11 +89,8 @@ def test_arkos_card_without_archives_extraction_available_injection_available(
     ]
 
     status = detect_workflow_status(_make_device())
-
-    assert status[EXTRACT_BOOT] == StepStatus.AVAILABLE
     assert status[EXTRACT_EASYROMS] == StepStatus.AVAILABLE
     assert status[FLASH] == StepStatus.DONE
-    assert status[INJECT_BOOT] == StepStatus.AVAILABLE
     assert status[COPY_GAMES] == StepStatus.AVAILABLE
     assert status[EJECT] == StepStatus.AVAILABLE
 
@@ -117,8 +108,6 @@ def test_arkos_card_with_existing_archives_marks_extraction_done(mock_list):
 
     with patch("r36s_studio.detect.archives.list_archives", side_effect=_fake_archives):
         status = detect_workflow_status(_make_device())
-
-    assert status[EXTRACT_BOOT] == StepStatus.DONE
     assert status[EXTRACT_EASYROMS] == StepStatus.AVAILABLE
 
 
@@ -135,11 +124,8 @@ def test_single_fat_partition_card_boot_extraction_available_easyroms_not(mock_l
 
     with patch("r36s_studio.detect.archives.list_archives", return_value=[]):
         status = detect_workflow_status(_make_device())
-
-    assert status[EXTRACT_BOOT] == StepStatus.AVAILABLE
     assert status[EXTRACT_EASYROMS] == StepStatus.NOT_RELEVANT
     assert status[FLASH] == StepStatus.AVAILABLE  # pas encore ArkOS
-    assert status[INJECT_BOOT] == StepStatus.NOT_RELEVANT  # pas encore de partition BOOT à injecter
     assert status[COPY_GAMES] == StepStatus.NOT_RELEVANT
 
 
@@ -149,9 +135,6 @@ def test_single_fat_partition_card_boot_extraction_available_easyroms_not(mock_l
 @patch("r36s_studio.detect.list_partitions", side_effect=NotImplementedError("OS non supporté"))
 def test_unsupported_os_falls_back_to_not_relevant_without_raising(mock_list):
     status = detect_workflow_status(_make_device())
-
-    assert status[EXTRACT_BOOT] == StepStatus.NOT_RELEVANT
-    assert status[INJECT_BOOT] == StepStatus.NOT_RELEVANT
     # Le flash reste "faisable" par défaut : contrairement à
     # l'extraction/l'injection, il ne dépend pas de partitions existantes
     # -- une lecture ratée ne doit pas empêcher de proposer de flasher.
@@ -173,8 +156,6 @@ def test_read_error_falls_back_to_not_relevant_without_raising(mock_list, mock_p
 )
 def test_failed_system_command_falls_back_to_not_relevant_without_raising(mock_list):
     status = detect_workflow_status(_make_device())
-
-    assert status[EXTRACT_BOOT] == StepStatus.NOT_RELEVANT
     assert status[FLASH] == StepStatus.AVAILABLE
 
 
@@ -210,7 +191,6 @@ def test_copy_games_platform_limited_on_macos_even_with_arkos_card(mock_list, mo
 
     assert status[COPY_GAMES] == StepStatus.PLATFORM_LIMITED
     # Les autres étapes ne sont pas concernées par cette limite.
-    assert status[INJECT_BOOT] == StepStatus.AVAILABLE
 
 
 @patch("r36s_studio.detect.platform.system", return_value="Darwin")
@@ -306,10 +286,7 @@ def test_detect_card_system_unknown_for_unrecognized_structure():
 @patch("r36s_studio.detect.list_partitions", return_value=_ROCKNIX_PARTITIONS)
 def test_rocknix_card_marks_boot_easyroms_inject_copy_as_system_incompatible(mock_list, mock_platform):
     status = detect_workflow_status(_make_device())
-
-    assert status[EXTRACT_BOOT] == StepStatus.SYSTEM_INCOMPATIBLE
     assert status[EXTRACT_EASYROMS] == StepStatus.SYSTEM_INCOMPATIBLE
-    assert status[INJECT_BOOT] == StepStatus.SYSTEM_INCOMPATIBLE
     assert status[COPY_GAMES] == StepStatus.SYSTEM_INCOMPATIBLE
 
 
@@ -358,7 +335,7 @@ def test_emuelec_card_marks_a_b_d_e_incompatible_and_is_not_taken_for_arkos(mock
     card_system, status = detect_card(_make_device())
 
     assert card_system == CardSystem.EMUELEC
-    for step in (EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, COPY_GAMES):
+    for step in (EXTRACT_EASYROMS, COPY_GAMES):
         assert status[step] == StepStatus.SYSTEM_INCOMPATIBLE
     assert status[FLASH] == StepStatus.AVAILABLE  # pas « déjà ArkOS »
     assert status[EJECT] == StepStatus.AVAILABLE
@@ -369,40 +346,39 @@ def test_emuelec_card_marks_a_b_d_e_incompatible_and_is_not_taken_for_arkos(mock
 
 @patch("r36s_studio.detect.list_partitions", return_value=_EMUELEC_PARTITIONS)
 def test_refusal_names_emuelec_for_every_arkos_step(mock_list):
-    for step in (EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, COPY_GAMES):
+    for step in (EXTRACT_EASYROMS, COPY_GAMES):
         assert arkos_step_refusal(_make_device(), step) == CardSystem.EMUELEC
 
 
 @patch("r36s_studio.detect.list_partitions", return_value=_ROCKNIX_PARTITIONS)
 def test_refusal_names_rocknix(mock_list):
-    assert arkos_step_refusal(_make_device(), EXTRACT_BOOT) == CardSystem.ROCKNIX
+    assert arkos_step_refusal(_make_device(), EXTRACT_EASYROMS) == CardSystem.ROCKNIX
 
 
 @patch("r36s_studio.detect.list_partitions", return_value=_ARKOS_PARTITIONS)
 def test_no_refusal_on_arkos_card(mock_list):
-    for step in (EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, COPY_GAMES):
+    for step in (EXTRACT_EASYROMS, COPY_GAMES):
         assert arkos_step_refusal(_make_device(), step) is None
 
 
 @patch("r36s_studio.detect.list_partitions")
-def test_original_single_partition_card_still_allows_boot_extraction(mock_list):
-    """Carte d'origine (une seule partition FAT, jamais ArkOS) : l'étape A
-    reste possible -- seule l'étape dont la partition manque est refusée."""
+def test_original_single_partition_card_refuses_games_steps(mock_list):
+    """Carte d'origine (une seule partition FAT, jamais ArkOS) : sans
+    partition de jeux, l'extraction et la copie des jeux sont refusées."""
     mock_list.return_value = [PartitionInfo("/dev/fake-disk-test-3s1", "", "fat32", "/Volumes/NO NAME")]
 
-    assert arkos_step_refusal(_make_device(), EXTRACT_BOOT) is None
     assert arkos_step_refusal(_make_device(), EXTRACT_EASYROMS) == CardSystem.UNKNOWN
     assert arkos_step_refusal(_make_device(), COPY_GAMES) == CardSystem.UNKNOWN
 
 
 @patch("r36s_studio.detect.list_partitions", return_value=[])
 def test_blank_card_refuses_arkos_steps(mock_list):
-    assert arkos_step_refusal(_make_device(), INJECT_BOOT) == CardSystem.UNKNOWN
+    assert arkos_step_refusal(_make_device(), COPY_GAMES) == CardSystem.UNKNOWN
 
 
 @patch("r36s_studio.detect.list_partitions", side_effect=OSError("carte débranchée"))
 def test_unreadable_card_is_not_refused_the_worker_decides(mock_list):
-    assert arkos_step_refusal(_make_device(), EXTRACT_BOOT) is None
+    assert arkos_step_refusal(_make_device(), EXTRACT_EASYROMS) is None
 
 
 # --- identify (accueil assisté, menu de tuiles) ---------------------------

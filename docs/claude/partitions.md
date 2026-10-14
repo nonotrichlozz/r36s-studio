@@ -217,12 +217,13 @@ l'utilisateur disposait déjà de ces fichiers. Le vrai parcours enchaîne **deu
 cartes** (l'ancienne, déjà en usage, puis la neuve) et nécessite donc aussi
 l'**extraction** : copier le BOOT et l'EASYROMS de l'ancienne carte vers
 l'ordinateur, avant de pouvoir les réinjecter sur la neuve. `partitions/jobs.py`
-fournit donc `extract_boot`/`extract_easyroms`, symétriques d'`inject_boot`/
-`copy_games` (même montage de la partition source, mais copie dans le sens
+fournit donc `extract_easyroms`, symétrique de `copy_games` (même montage de la partition source, mais copie dans le sens
 partition → dossier de l'ordinateur plutôt que l'inverse). L'extraction
 d'EASYROMS ne lève jamais `MacosNtfsWriteUnsupported` : elle ne fait que lire la
 partition, et macOS monte nativement le NTFS en lecture seule — la limitation
 d'écriture ne concerne que l'injection (étape E, sur la carte neuve).
+`extract_boot`/`inject_boot` (ex-étapes A/D) ont été retirées le 2026-10-14 :
+doublon de la sauvegarde système (`firmwares-flash.md`).
 
 **Dossiers d'archive horodatés** (`partitions/archives.py`) : chaque extraction
 crée un dossier nommé `{BOOT,EASYROMS}_{AAAA-MM-JJ}_{HH-MM}` (ex.

@@ -130,18 +130,15 @@ def _banner_state_text(is_arkos: bool, card_system: Optional[CardSystem]) -> str
     return tr("home_banner_state_unprepared")
 
 
-# Les six étapes chronologiques fixes du workflow à deux cartes (§4.4/§4.5),
-# dans l'ordre A à F. Clés identiques aux noms de job déjà utilisés par
-# `partition_runner.py`/`__main__.py`. La lettre est l'icône affichée à
-# gauche de chaque ligne (§5 -- pas d'image, un simple repère de position
-# dans le parcours, cohérent avec le texte déjà lettré A à F).
+# Les étapes du mode expert, dans l'ordre d'usage. Clés identiques aux noms
+# de job de `partition_runner.py`/`__main__.py`. Plus de lettres A→F depuis
+# le retrait de l'extraction/injection du BOOT (2026-10-14, doublon de la
+# sauvegarde système) : même repère « ◆ » que les lignes « Par sécurité ».
 _STEP_SPECS = [
-    ("extract_boot", "A", "home_step_a_title", "home_step_a_desc"),
-    ("extract_easyroms", "B", "home_step_b_title", "home_step_b_desc"),
-    ("flash", "C", "home_step_c_title", "home_step_c_desc"),
-    ("inject_boot", "D", "home_step_d_title", "home_step_d_desc"),
-    ("copy_games", "E", "home_step_e_title", "home_step_e_desc"),
-    ("eject", "F", "home_step_f_title", "home_step_f_desc"),
+    ("extract_easyroms", "◆", "home_step_extract_easyroms_title", "home_step_extract_easyroms_desc"),
+    ("flash", "◆", "home_step_flash_title", "home_step_flash_desc"),
+    ("copy_games", "◆", "home_step_copy_games_title", "home_step_copy_games_desc"),
+    ("eject", "◆", "home_step_eject_title", "home_step_eject_desc"),
 ]
 
 
@@ -387,15 +384,6 @@ def _tile_icon_sort(painter: QPainter, rect: QRect, color: QColor) -> None:
         painter.drawRect(box_left, y + round(1 * s), round(4 * s), shelf_height - round(1 * s))
 
 
-def _tile_icon_inject_boot(painter: QPainter, rect: QRect, color: QColor) -> None:
-    s = _icon_scale(rect)
-    painter.setPen(_icon_pen(color, rect))
-    painter.setBrush(Qt.NoBrush)
-    screen = rect.adjusted(round(2 * s), round(2 * s), -round(2 * s), -round(9 * s))
-    painter.drawRoundedRect(screen, round(2 * s), round(2 * s))
-    painter.drawLine(
-        rect.center().x() - round(4 * s), rect.bottom() - round(3 * s), rect.center().x() + round(4 * s), rect.bottom() - round(3 * s)
-    )
 
 
 def _tile_icon_eject(painter: QPainter, rect: QRect, color: QColor) -> None:
@@ -489,7 +477,6 @@ _TILE_ICON_PAINTERS = {
     "copy_games": _tile_icon_copy_games,
     "duplicates": _tile_icon_duplicates,
     "sort": _tile_icon_sort,
-    "inject_boot": _tile_icon_inject_boot,
     "eject": _tile_icon_eject,
     "android": _tile_icon_android,
     "reset_card": _tile_icon_reset_card,
@@ -1146,7 +1133,7 @@ class UpdateDialog(Dialog):
 
 class HomeScreen(Screen):
     """Colonne gauche, largeur fixe, toujours visible (§5, refonte
-    navigation) : bandeau de détection, six étapes A à F, puis la
+    navigation) : bandeau de détection, les étapes, puis la
     sauvegarde complète sous « Par sécurité ». `detect.StepStatus`
     n'indique qu'un statut informatif par étape (faisable / déjà faite /
     non pertinente pour la carte branchée / limitée par la plateforme),
@@ -1154,10 +1141,8 @@ class HomeScreen(Screen):
     *sauf* pendant qu'une opération est en cours (`set_busy`), où cliquer
     une deuxième étape n'aurait pas de sens tant que la première tourne."""
 
-    extract_boot_selected = Signal()
     extract_easyroms_selected = Signal()
     flash_selected = Signal()
-    inject_boot_selected = Signal()
     copy_games_selected = Signal()
     eject_selected = Signal()
     backup_selected = Signal()
@@ -1177,7 +1162,7 @@ class HomeScreen(Screen):
     # signal, c'est main_window.py qui décide quoi en faire.
     android_requested = Signal()
     # Tuile personnelle « Web » (config.py::personal_web_url, jamais
-    # distribuée) -- signal distinct des six étapes, jamais ajouté à
+    # distribuée) -- signal distinct des étapes, jamais ajouté à
     # `ALL_STEPS`/`detect.py`.
     web_requested = Signal()
     # Outils autonomes sur un dossier (docs/doublons.md, docs/tri-roms.md)
@@ -1195,7 +1180,7 @@ class HomeScreen(Screen):
         layout = QVBoxLayout(self)
         # Combinés par `_update_backup_rows_enabled` : « Par sécurité »
         # (sauvegarde complète et sauvegarde système sans les jeux, §4.3)
-        # exige une carte, contrairement aux six étapes lettrées -- jamais
+        # exige une carte, contrairement aux étapes -- jamais
         # désactivé avant le premier `set_status(has_device=...)` (`True`
         # par défaut, pas de fausse alerte avant que la détection n'ait
         # tourné une première fois).
@@ -1297,10 +1282,8 @@ class HomeScreen(Screen):
         self._rows_scroll = rows_scroll  # exposé pour les tests
 
         step_signals = {
-            "extract_boot": self.extract_boot_selected,
             "extract_easyroms": self.extract_easyroms_selected,
             "flash": self.flash_selected,
-            "inject_boot": self.inject_boot_selected,
             "copy_games": self.copy_games_selected,
             "eject": self.eject_selected,
         }
@@ -1387,7 +1370,7 @@ class HomeScreen(Screen):
         self.set_status({})
 
     def set_busy(self, busy: bool) -> None:
-        """Désactive visuellement les six étapes et la sauvegarde pendant
+        """Désactive visuellement les étapes et la sauvegarde pendant
         qu'une opération est en cours (§5, refonte navigation) -- la carte
         concernée est déjà en cours d'utilisation, en démarrer une
         deuxième n'aurait pas de sens tant que la première ne s'est pas
@@ -1417,7 +1400,7 @@ class HomeScreen(Screen):
 
     def _update_backup_rows_enabled(self) -> None:
         """« Par sécurité » (§4.3) exige une carte -- contrairement aux
-        six étapes lettrées, toujours cliquables par principe (§4.5) : la
+        étapes, toujours cliquables par principe (§4.5) : la
         fenêtre Choix de la carte guide même sans carte branchée, alors
         qu'une sauvegarde sans carte n'a tout simplement rien à faire.
         Bug rapporté : lançable alors que la carte venait d'être éjectée
@@ -1431,7 +1414,7 @@ class HomeScreen(Screen):
         self._reset_card_row.setEnabled(enabled)
 
     def _build_row(self, letter: str, title: str, desc: str, signal: Signal) -> Tuple[ClickableFrame, QLabel]:
-        """Une ligne d'étape : icône (lettre) à gauche, titre + description
+        """Une ligne d'étape : icône (repère) à gauche, titre + description
         au centre, badge de statut à droite (§5). Retourne le cadre
         cliquable et le badge -- le seul élément que `set_status` doit
         ensuite pouvoir modifier."""
@@ -1479,7 +1462,7 @@ class HomeScreen(Screen):
         """`card_system` (voir `detect.detect_card`) nomme le système dans
         le badge « Non applicable » et le bandeau. `status` annote chaque
         ligne d'un badge de statut — jamais de ligne masquée ni désactivée
-        par ceci pour les six étapes (voir `set_busy` pour leur seule
+        par ceci pour les étapes (voir `set_busy` pour leur seule
         désactivation prévue) : une étape absente du dict (détection pas
         encore lancée) n'affiche simplement aucun badge. `device`, quand
         fourni, alimente le bandeau carte détectée en haut de la colonne
@@ -1701,15 +1684,13 @@ _FILE_TITLE_KEYS = {
     "backup": "file_title_backup",
     "backup_system": "file_title_backup_system",
     "flash": "file_title_flash",
-    "extract_boot": "file_title_extract_boot",
     "extract_easyroms": "file_title_extract_easyroms",
-    "inject_boot": "file_title_inject_boot",
     "copy_games": "file_title_copy_games",
 }
 
 
-_ARCHIVE_MODES = {"inject_boot", "copy_games"}  # étapes D/E : choix parmi les archives existantes
-_DESTINATION_MODES = {"extract_boot", "extract_easyroms"}  # étapes A/B : dossier de destination, avec défaut
+_ARCHIVE_MODES = {"copy_games"}  # copie des jeux : choix parmi les archives existantes
+_DESTINATION_MODES = {"extract_easyroms"}  # extraction des jeux : dossier de destination, avec défaut
 
 
 
@@ -1927,9 +1908,9 @@ class FileDialog(Dialog):
         firmware: Optional[str] = None,
     ) -> None:
         """`mode` : "backup" (choisir où enregistrer), "flash" (choisir
-        l'image source), "extract_boot"/"extract_easyroms" (choisir un
+        l'image source), "extract_easyroms" (choisir un
         dossier de destination — `default_path` le pré-remplit, toujours
-        remplaçable via Parcourir), ou "inject_boot"/"copy_games" (choisir
+        remplaçable via Parcourir), ou "copy_games" (choisir
         une sauvegarde parmi `archive_choices`, ou en désigner une autre
         via Parcourir). `firmware` (un id du catalogue, §4.6, ignoré hors
         flash) initialise le choix depuis la configuration persistée
@@ -2406,11 +2387,9 @@ _OPERATION_TITLE_KEYS = {
     "backup_system": "execute_title_backup_system",
     "flash": "execute_title_flash",
     "reset_card": "execute_title_reset_card",
-    "extract_boot": "execute_title_extract_boot",
     "extract_easyroms": "execute_title_extract_easyroms",
-    "inject_boot": "execute_title_inject_boot",
     "copy_games": "execute_title_copy_games",
-    "eject": "home_step_f_title",
+    "eject": "home_step_eject_title",
 }
 
 
@@ -2898,14 +2877,6 @@ class FullDiskAccessScreen(Screen):
 # fusionnées en une seule tuile « Identifier ma console » -- l'écran de
 # résultat de l'identification propose l'accès au catalogue en dessous,
 # `IdentifyResultDialog.catalog_requested`).
-#
-# « Remettre l'écran d'origine » (inject_boot) retirée de cette grille
-# (§5, correctif visuel) : déjà couverte par le mode expert (ligne D) et
-# par le parcours guidé lui-même (qui restaure l'écran d'origine avec le
-# reste de l'image), elle n'apportait rien de plus ici. `inject_boot`
-# reste pleinement fonctionnelle ailleurs -- seule cette tuile disparaît,
-# avec son signal (`inject_boot_requested`) et l'entrée correspondante
-# des tables ad-hoc de `main_window.py`.
 #
 # Refonte par situations (2026-10-11, docs/claude/assisted-wizard.md) : la
 # tuile 1 est « Ma console ne démarre plus », suivie de deux situations en

@@ -24,25 +24,20 @@
   `flash`.
 - `python -m r36s_studio gui` (phase 4) — assistant graphique PySide6,
   branché sur `backup`/`flash` via un worker élevé (§3).
-- `python -m r36s_studio inject-boot --device X --boot-source Y` et
-  `python -m r36s_studio copy-games --device X --games-source Y` (phase 5,
-  §4.4/§4.6) — copient respectivement le dossier BOOT sauvegardé et un
-  dossier de jeux vers la carte déjà flashée. Contrairement à
-  `backup`/`flash`, ces deux commandes écrivent sur une partition déjà
-  montée par le système (BOOT et EASYROMS sont FAT/NTFS, pas un accès
-  disque brut) : elles ne passent jamais par le worker élevé (§3), donc pas
+- `python -m r36s_studio copy-games --device X --games-source Y` (phase 5,
+  §4.4/§4.6) — copie un dossier de jeux vers la carte. Contrairement à
+  `backup`/`flash`, écrit sur une partition déjà montée par le système
+  (EASYROMS est FAT/NTFS/exFAT, pas un accès disque brut) : elles ne passent jamais par le worker élevé (§3), donc pas
   de `--worker` ni `--progress-file` sur ces sous-commandes.
-- `python -m r36s_studio extract-boot --device X [--output-dir DIR]` et
-  `python -m r36s_studio extract-easyroms --device X [--output-dir DIR]`
-  (phase 6, workflow à deux cartes §4.4/§4.5) — l'inverse d'`inject-boot`/
-  `copy-games` : copient la partition BOOT/EASYROMS de la carte *source*
-  (l'ancienne) vers un dossier horodaté de l'ordinateur
-  (`~/R36S Studio/BOOT_2026-07-06_00-21` par défaut, voir
-  `partitions/archives.py`), pour réinjection ultérieure sur la carte
-  neuve. Ni élévation ni écriture sur la carte : mêmes conditions
-  qu'`inject-boot`/`copy-games`.
+- `python -m r36s_studio extract-easyroms --device X [--output-dir DIR]`
+  (phase 6, §4.4/§4.5) — l'inverse de `copy-games` : copie la partition
+  EASYROMS vers un dossier horodaté de l'ordinateur (voir
+  `partitions/archives.py`), pour la remettre sur une autre carte. Ni
+  élévation ni écriture sur la carte : mêmes conditions que `copy-games`.
+  `inject-boot`/`extract-boot` retirées le 2026-10-14 (doublon de la
+  sauvegarde système).
 - `python -m r36s_studio eject --device X` — démonte toutes les partitions
-  de la carte et l'éjecte (étape F du workflow à deux cartes, §4.5) ; émet
+  de la carte et l'éjecte (§4.5) ; émet
   une confirmation explicite que la carte peut être retirée physiquement.
 - `python -m r36s_studio identify --boot-dir DIR` (phase 8, mode assisté
   §5) — lance `identify.identify_from_boot_directory` sur un dossier
@@ -60,7 +55,7 @@ lancé avec les privilèges admin) — volontairement absents de `--help`.
 **Mode développement** (`--allow-disk-image` / `R36S_STUDIO_DEV=1`) — les
 disk images/périphériques loop (`.dmg` montée sur macOS, `losetup` sur
 Linux) sont exclus de la liste des cartes SD par les providers `devices/`,
-ce qui rend `inject-boot`/`copy-games`/le futur `detect` impossibles à
+ce qui rend `copy-games`/le futur `detect` impossibles à
 tester sans carte réelle. Ce mode lève *uniquement* cette exclusion — les
 règles de `safety` (disque système, taille, bus...) restent inchangées,
 et il est toujours désactivé en mode worker (`--worker`), donc jamais
@@ -80,7 +75,7 @@ from pathlib import Path
 from typing import List, Optional, TextIO
 
 from r36s_studio import APP_VERSION
-from r36s_studio.detect import COPY_GAMES, EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, ROCKNIX_BOOT_LABEL, arkos_step_refusal
+from r36s_studio.detect import COPY_GAMES, EXTRACT_EASYROMS, ROCKNIX_BOOT_LABEL, arkos_step_refusal
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons.journal_check import verify_journal
 from r36s_studio.identify import identify_from_boot_directory, result_to_dict
@@ -123,9 +118,7 @@ from r36s_studio.partitions import (
     PartitionNotMounted,
     archives,
     copy_games,
-    extract_boot,
     extract_easyroms,
-    inject_boot,
     locate_mounted,
     unmount_forced,
 )
@@ -1035,7 +1028,7 @@ def _format_size(size_bytes: int) -> str:
 
 
 def _resolve_device_or_report(args: argparse.Namespace) -> Optional[Device]:
-    """Commun à `inject-boot`/`copy-games` : résout `--device` et émet
+    """Commun à `copy-games`/`extract-easyroms` : résout `--device` et émet
     l'erreur adaptée (jamais d'accès par un chemin refusé par `safety`)."""
     dev_mode = _warn_dev_mode_if_enabled(args)
     try:
@@ -1069,44 +1062,6 @@ def _refuse_non_arkos_card(device: Device, step: str) -> bool:
     return True
 
 
-def cmd_inject_boot(args: argparse.Namespace) -> int:
-    device = _resolve_device_or_report(args)
-    if device is None or _refuse_non_arkos_card(device, INJECT_BOOT):
-        return 1
-
-    if not os.path.isdir(args.boot_source):
-        emit_error("SOURCE_NOT_FOUND", f"Dossier BOOT introuvable : {args.boot_source}")
-        return 1
-
-    emit_log(f"Injection de {args.boot_source} sur la partition BOOT de {device.display}")
-
-    def on_progress(event: ProgressEvent) -> None:
-        emit_progress(event.done, event.total, event.speed)
-
-    try:
-        copied = inject_boot(
-            device, args.boot_source, on_progress=on_progress, should_cancel=_make_should_cancel(args)
-        )
-    except OperationCancelled as exc:
-        emit_error("CANCELLED", f"Injection annulée après {exc.done} octets")
-        emit_done(False)
-        return 1
-    except PartitionNotFound as exc:
-        emit_error("PARTITION_NOT_FOUND", str(exc))
-        return 1
-    except PartitionNotMounted as exc:
-        emit_error("PARTITION_NOT_MOUNTED", str(exc))
-        return 1
-    except MountpointNotWritable as exc:
-        emit_error("MOUNTPOINT_NOT_WRITABLE", str(exc))
-        return 1
-    except (OSError, subprocess.CalledProcessError) as exc:
-        emit_error("IO_ERROR", str(exc))
-        return 1
-
-    emit_log(f"{copied} octets copiés")
-    emit_done(True)
-    return 0
 
 
 def cmd_copy_games(args: argparse.Namespace) -> int:
@@ -1152,43 +1107,6 @@ def cmd_copy_games(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_extract_boot(args: argparse.Namespace) -> int:
-    device = _resolve_device_or_report(args)
-    if device is None or _refuse_non_arkos_card(device, EXTRACT_BOOT):
-        return 1
-
-    base_dir = Path(args.output_dir) if args.output_dir else None
-    dest_dir = archives.new_archive_path(BOOT_LABEL, base_dir=base_dir)
-
-    emit_log(f"Extraction du BOOT de {device.display} vers {dest_dir}")
-
-    def on_progress(event: ProgressEvent) -> None:
-        emit_progress(event.done, event.total, event.speed)
-
-    try:
-        copied = extract_boot(
-            device, str(dest_dir), on_progress=on_progress, should_cancel=_make_should_cancel(args)
-        )
-    except OperationCancelled as exc:
-        emit_error("CANCELLED", f"Extraction annulée après {exc.done} octets")
-        emit_done(False)
-        return 1
-    except PartitionNotFound as exc:
-        emit_error("PARTITION_NOT_FOUND", str(exc))
-        return 1
-    except PartitionNotMounted as exc:
-        emit_error("PARTITION_NOT_MOUNTED", str(exc))
-        return 1
-    except MountpointNotWritable as exc:
-        emit_error("MOUNTPOINT_NOT_WRITABLE", str(exc))
-        return 1
-    except (OSError, subprocess.CalledProcessError) as exc:
-        emit_error("IO_ERROR", str(exc))
-        return 1
-
-    emit_log(f"{copied} octets copiés dans {dest_dir}")
-    emit_done(True)
-    return 0
 
 
 def cmd_extract_easyroms(args: argparse.Namespace) -> int:
@@ -1282,7 +1200,7 @@ def cmd_boot_sets(args: argparse.Namespace) -> int:
     """Jeux de fichiers de rechange du BOOT (`partitions/boot_sets.py`) :
     liste par défaut, `--apply ID` ou `--restore`. Le résultat (état de la
     carte + jeux) part en un événement `boot_sets_result`. La confirmation
-    avant d'écrire est côté GUI, comme pour `inject-boot`."""
+    avant d'écrire est côté GUI, comme pour `copy-games`."""
     progress_file = _open_progress_file(args)
     try:
         return _run_boot_sets(args)
@@ -1624,25 +1542,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_dev_args(clone_sf3000_parser)
     clone_sf3000_parser.set_defaults(func=cmd_clone_sf3000)
 
-    inject_boot_parser = subparsers.add_parser(
-        "inject-boot",
-        help="Copie un dossier BOOT sauvegardé sur la partition BOOT de la carte déjà flashée",
-    )
-    inject_boot_parser.add_argument(
-        "--device", required=True, help="Chemin du périphérique cible (voir `list`)"
-    )
-    inject_boot_parser.add_argument(
-        "--boot-source", required=True, help="Dossier contenant les fichiers BOOT sauvegardés"
-    )
-    inject_boot_parser.add_argument(
-        "--max-size",
-        type=int,
-        default=DEFAULT_MAX_SIZE_BYTES,
-        help="Taille maximale acceptée en octets (défaut : 1 To)",
-    )
-    inject_boot_parser.add_argument("--cancel-file", help=argparse.SUPPRESS)
-    _add_dev_args(inject_boot_parser)
-    inject_boot_parser.set_defaults(func=cmd_inject_boot)
 
     copy_games_parser = subparsers.add_parser(
         "copy-games", help="Copie un dossier de jeux vers la partition EASYROMS de la carte"
@@ -1663,26 +1562,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_dev_args(copy_games_parser)
     copy_games_parser.set_defaults(func=cmd_copy_games)
 
-    extract_boot_parser = subparsers.add_parser(
-        "extract-boot",
-        help="Copie la partition BOOT de la carte source vers un dossier horodaté de l'ordinateur",
-    )
-    extract_boot_parser.add_argument(
-        "--device", required=True, help="Chemin du périphérique source (voir `list`)"
-    )
-    extract_boot_parser.add_argument(
-        "--output-dir",
-        help="Dossier où créer l'archive horodatée (défaut : ~/R36S Studio)",
-    )
-    extract_boot_parser.add_argument(
-        "--max-size",
-        type=int,
-        default=DEFAULT_MAX_SIZE_BYTES,
-        help="Taille maximale acceptée en octets (défaut : 1 To)",
-    )
-    extract_boot_parser.add_argument("--cancel-file", help=argparse.SUPPRESS)
-    _add_dev_args(extract_boot_parser)
-    extract_boot_parser.set_defaults(func=cmd_extract_boot)
 
     extract_easyroms_parser = subparsers.add_parser(
         "extract-easyroms",

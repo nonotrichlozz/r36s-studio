@@ -14,7 +14,7 @@ est dans `docs/bugs-*.md`.
 
 Permettre à n'importe qui, sans ligne de commande, de sauvegarder sa carte SD,
 flasher un firmware (ROCKNIX par défaut, ArkOS/dArkOS, EmuELEC…), cloner une
-carte vers une autre, injecter le BOOT d'origine et copier des jeux — depuis
+carte vers une autre, choisir l'écran de la console et copier des jeux — depuis
 une fenêtre lancée par un double-clic, sur **Windows, macOS et Linux**.
 
 **Public visé : le néophyte total** (n'a jamais ouvert un terminal, ne sait pas
@@ -95,8 +95,8 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 | `imaging/` : sauvegarde, sauvegarde système (GPT/MBR), flash, SHA-256, formats, partition de jeux auto, « utiliser toute la carte » SF3000 | `docs/claude/imaging.md` |
 | `imaging/reset_card.py`, `cmd_reset_card`, `_format_windows` | `docs/claude/reset-card.md` |
 | `partitions/` : localisation/montage, copie, archives, éjection | `docs/claude/partitions.md` |
-| `detect/` : badges de statut des étapes A→F | `docs/claude/detect.md` |
-| Opérations A→F, catalogue de firmwares, ROCKNIX, clones, avertissements après flash | `docs/claude/firmwares-flash.md` |
+| `detect/` : badges de statut des étapes du mode expert | `docs/claude/detect.md` |
+| Opérations du mode expert, catalogue de firmwares, ROCKNIX, clones, avertissements après flash | `docs/claude/firmwares-flash.md` |
 | `gui/screens.py`, `gui/theme.py`, `gui/strings.py`/`strings_en.py`, `i18n.py`, `LogPanel`, mode expert | `docs/claude/interface.md` |
 | Mode assisté : accueil, parcours de clonage, empreinte de carte, sondage | `docs/claude/assisted-wizard.md` |
 | `packaging/`, `.spec`, CI, releases, `config.json` | `docs/claude/packaging.md` |
@@ -116,9 +116,13 @@ nulle ou inconnue. Aucune sélection par défaut, jamais.
 par situations (« Ma console ne démarre plus », carte neuve, sauvegarde ;
 `assisted-wizard.md`) ; le parcours de clonage en 5 étapes reste dans le code
 mais n'a plus de tuile ; et
-*expert* — six étapes A→F (extraire BOOT, extraire EASYROMS, flasher, injecter
-BOOT, copier les jeux, éjecter) + « Par sécurité » (sauvegarde complète,
-sauvegarde système sans les jeux, remise à zéro).
+*expert* — quatre étapes sans lettres (copier les jeux sur l'ordinateur,
+installer un système, copier des jeux sur la carte, éjecter) + « Par
+sécurité » (sauvegarde complète, sauvegarde système sans les jeux, remise à
+zéro) + outils. Extraction/injection du BOOT retirées le 2026-10-14 :
+doublon de la sauvegarde système (qui contient tout le BOOT, la partition
+système et le chargeur de démarrage) ; le bon écran passe par « Choisir
+l'écran de la console » (`boot-sets`).
 
 ---
 

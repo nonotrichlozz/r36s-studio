@@ -2,13 +2,11 @@
 # Licence : PolyForm Strict 1.0.0, voir LICENSE
 
 """Détection de l'état de la carte SD insérée (§4.5) — le module qui rend
-l'application utilisable par un néophyte. Le vrai parcours utilisateur
-enchaîne deux cartes différentes (l'ancienne, puis la neuve) sur six
-étapes chronologiques fixes (§4.5, §4.6) : ce module n'essaie donc plus de
+l'application utilisable par un néophyte. Ce module n'essaie pas de
 résumer la carte branchée en un seul état qui déciderait d'une action à
-mettre en avant — il indique seulement, pour chacune des six étapes,
+mettre en avant — il indique seulement, pour chaque étape du mode expert,
 si elle est faisable, déjà faite, ou non pertinente pour la carte
-actuellement branchée. Les six étapes restent toujours toutes visibles et
+actuellement branchée. Les étapes restent toujours toutes visibles et
 cliquables (§4.5) : ce module *informe*, il ne masque jamais rien.
 
 Lecture seule stricte (§4.5 : « aucune écriture, aucun montage en
@@ -27,7 +25,6 @@ from typing import Dict, List, Optional, Tuple
 from r36s_studio.devices import Device
 from r36s_studio.partitions import archives
 from r36s_studio.partitions.locate import (
-    BOOT_LABEL,
     EASYROMS_LABEL,
     PartitionInfo,
     has_boot_partition,
@@ -38,19 +35,17 @@ from r36s_studio.partitions.locate import (
 )
 
 # Clés = noms de job (§4.6), identiques à ceux déjà utilisés par
-# `partition_runner.py`/`__main__.py` — "copy_games" reste le nom de
-# l'injection sur EASYROMS, même si le §4.5 la décrit comme l'étape E.
-EXTRACT_BOOT = "extract_boot"
+# `partition_runner.py`/`__main__.py`. Extraction/injection du BOOT
+# retirées le 2026-10-14 (doublon de la sauvegarde système).
 EXTRACT_EASYROMS = "extract_easyroms"
 FLASH = "flash"
-INJECT_BOOT = "inject_boot"
 COPY_GAMES = "copy_games"
 EJECT = "eject"
 
-ALL_STEPS = [EXTRACT_BOOT, EXTRACT_EASYROMS, FLASH, INJECT_BOOT, COPY_GAMES, EJECT]
+ALL_STEPS = [EXTRACT_EASYROMS, FLASH, COPY_GAMES, EJECT]
 
 # Clé de l'accueil assisté (menu de tuiles) uniquement -- jamais ajoutée
-# à `ALL_STEPS` ci-dessus, qui reste la liste des six étapes A-F du mode
+# à `ALL_STEPS` ci-dessus, qui reste la liste des étapes du mode
 # expert. `HomeScreen.set_status` ignore déjà silencieusement toute clé
 # inconnue du dict retourné par `detect_workflow_status` : purement
 # additive, sans aucun risque de régression côté mode expert.
@@ -87,7 +82,7 @@ ROCKNIX_BOOT_LABEL = "ROCKNIX"
 # partition Linux, partition de jeux FAT32 étiquetée STORAGE). Sans cette
 # étiquette, la structure seule passe `looks_like_arkos` (première
 # partition FAT + troisième partition FAT) : la carte était prise pour
-# ArkOS et les étapes A/B/D/E échouaient après coup sur une erreur de
+# ArkOS et l'extraction et la copie des jeux échouaient après coup sur une erreur de
 # partition, comme si la carte avait été mal préparée.
 EMUELEC_BOOT_LABEL = "EMUELEC"
 
@@ -104,7 +99,7 @@ class CardSystem(Enum):
     « quel système est déjà sur cette carte ? » -- pour adapter les
     étapes qui n'ont de sens que pour un système donné (extraction/
     injection du BOOT et d'EASYROMS, propres à ArkOS), sans jamais rien
-    masquer côté mode expert (toujours toutes les six étapes visibles,
+    masquer côté mode expert (toutes les étapes toujours visibles,
     juste annotées différemment) ni décider d'UNE action à la place de
     l'utilisateur."""
 
@@ -122,8 +117,6 @@ _SYSTEM_BY_BOOT_LABEL = {ROCKNIX_BOOT_LABEL: CardSystem.ROCKNIX, EMUELEC_BOOT_LA
 # EASYROMS, §4.4) -- refusées avant lancement sur toute autre carte lisible
 # (`arkos_step_refusal`).
 _PARTITION_CHECK_BY_STEP = {
-    EXTRACT_BOOT: has_boot_partition,
-    INJECT_BOOT: has_boot_partition,
     EXTRACT_EASYROMS: has_easyroms_partition,
     COPY_GAMES: has_easyroms_partition,
 }
@@ -195,7 +188,7 @@ def detect_workflow_status(device: Optional[Device]) -> Dict[str, StepStatus]:
 
 
 def detect_card(device: Optional[Device]) -> Tuple[CardSystem, Dict[str, StepStatus]]:
-    """Système de la carte et statut des six étapes du workflow (§4.5)
+    """Système de la carte et statut des étapes du mode expert (§4.5)
     pour la carte actuellement branchée (`device` à `None` si aucune
     carte, ou plusieurs candidates ambiguës — l'appelant décide, voir
     `main_window.py`). Le statut guide ; le refus effectif d'une étape
@@ -204,7 +197,7 @@ def detect_card(device: Optional[Device]) -> Tuple[CardSystem, Dict[str, StepSta
     has_card = device is not None
     card_system = detect_card_system(partitions)
     # ROCKNIX et EmuELEC ne gèrent ni le BOOT ni l'EASYROMS à la façon
-    # d'ArkOS (§4.5, CardSystem) : les quatre étapes A/B/D/E sont
+    # d'ArkOS (§4.5, CardSystem) : l'extraction et la copie des jeux sont
     # incompatibles avec ces systèmes -- prioritaire sur le calcul habituel
     # (can_boot/can_easyroms/is_arkos ci-dessous), qui resterait sinon
     # trompeur (leur première partition, en FAT32, passerait à tort le test
@@ -241,14 +234,12 @@ def detect_card(device: Optional[Device]) -> Tuple[CardSystem, Dict[str, StepSta
         return StepStatus.AVAILABLE if possible else StepStatus.NOT_RELEVANT
 
     return card_system, {
-        EXTRACT_BOOT: _extraction_status(can_boot, BOOT_LABEL),
         EXTRACT_EASYROMS: _extraction_status(can_easyroms, EASYROMS_LABEL),
         FLASH: (
             StepStatus.NOT_RELEVANT
             if not has_card
             else (StepStatus.DONE if is_arkos else StepStatus.AVAILABLE)
         ),
-        INJECT_BOOT: _injection_status(is_arkos),
         # EASYROMS est en NTFS sur certaines cartes R36S ArkOS, en exFAT sur
         # d'autres (§4.4, varie selon le vendeur, confirmé sur du vrai
         # matériel) : seul le NTFS est concerné par la limitation macOS (son
@@ -286,10 +277,8 @@ __all__ = [
     "detect_card",
     "detect_card_system",
     "detect_workflow_status",
-    "EXTRACT_BOOT",
     "EXTRACT_EASYROMS",
     "FLASH",
-    "INJECT_BOOT",
     "COPY_GAMES",
     "EJECT",
     "ALL_STEPS",

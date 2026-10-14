@@ -1,9 +1,10 @@
 # Copyright (c) 2026 Arnaud
 # Licence : PolyForm Strict 1.0.0, voir LICENSE
 
-"""Orchestration des jobs du §4.6 : extraction du BOOT/EASYROMS de
-l'ancienne carte vers l'ordinateur, et injection du BOOT/copie de jeux sur
-la carte neuve, une fois celle-ci flashée (workflow à deux cartes, §4.4).
+"""Orchestration des jobs du §4.6 : extraction d'EASYROMS vers
+l'ordinateur, et copie de jeux sur une carte (déplacer ses jeux entre deux
+cartes de taille ou de firmware différents). L'extraction/injection du
+BOOT a été retirée le 2026-10-14 (doublon de la sauvegarde système).
 Localise et attend le montage de la partition source/cible (`locate.py`),
 puis copie (`copy.py`).
 
@@ -23,7 +24,7 @@ from r36s_studio.devices import Device
 from r36s_studio.imaging.copy import CancelCheck, ProgressCallback
 
 from .copy import copy_tree
-from .locate import BOOT_LABEL, EASYROMS_LABEL, PartitionInfo, locate_mounted, unmount_forced
+from .locate import EASYROMS_LABEL, PartitionInfo, locate_mounted, unmount_forced
 
 
 class MacosNtfsWriteUnsupported(Exception):
@@ -41,22 +42,6 @@ class MacosNtfsWriteUnsupported(Exception):
             "en écriture sur ce Mac (ex. Tuxera NTFS, Paragon NTFS for Mac)."
         )
         self.label = label
-
-
-def inject_boot(
-    device: Device,
-    boot_source_dir: str,
-    on_progress: Optional[ProgressCallback] = None,
-    should_cancel: Optional[CancelCheck] = None,
-) -> int:
-    """Copie `boot_source_dir` (dossier BOOT précédemment sauvegardé) sur
-    la partition BOOT de `device`."""
-    partition = locate_mounted(device.path, BOOT_LABEL)
-    copied = copy_tree(
-        boot_source_dir, partition.mountpoint, on_progress=on_progress, should_cancel=should_cancel
-    )
-    unmount_forced(partition)
-    return copied
 
 
 def copy_games(
@@ -81,24 +66,6 @@ def copy_games(
 def _reject_macos_ntfs_write(partition: PartitionInfo) -> None:
     if platform.system() == "Darwin" and partition.filesystem == "ntfs":
         raise MacosNtfsWriteUnsupported(partition.label)
-
-
-def extract_boot(
-    device: Device,
-    dest_dir: str,
-    on_progress: Optional[ProgressCallback] = None,
-    should_cancel: Optional[CancelCheck] = None,
-) -> int:
-    """Copie la partition BOOT de `device` (l'ancienne carte, déjà flashée)
-    vers `dest_dir` — l'inverse d'`inject_boot`, pour pouvoir la réinjecter
-    plus tard sur la carte neuve (`dest_dir` est typiquement nommé par
-    `archives.new_archive_path`)."""
-    partition = locate_mounted(device.path, BOOT_LABEL)
-    copied = copy_tree(
-        partition.mountpoint, dest_dir, on_progress=on_progress, should_cancel=should_cancel
-    )
-    unmount_forced(partition)
-    return copied
 
 
 def extract_easyroms(

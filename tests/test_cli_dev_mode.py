@@ -1,6 +1,6 @@
 """Tests du mode développement CLI (`--allow-disk-image` / `R36S_STUDIO_DEV`)
 qui lève l'exclusion des disk images/loop pour tester `backup`/`flash`/
-`inject-boot`/`copy-games` sans carte SD réelle. `list_devices` est mocké —
+`copy-games` sans carte SD réelle. `list_devices` est mocké —
 aucun `diskutil`/`lsblk` réel n'est appelé.
 
 Point central : ce mode ne doit JAMAIS être atteignable depuis la GUI, même
@@ -62,11 +62,6 @@ def test_dev_mode_disabled_for_backup_by_default():
     assert cli._dev_mode_enabled(args) is False
 
 
-def test_dev_mode_disabled_for_inject_boot_by_default():
-    args = _parse(["inject-boot", "--device", "/dev/fake-disk-test-3", "--boot-source", "x"])
-    assert cli._dev_mode_enabled(args) is False
-
-
 def test_dev_mode_disabled_for_copy_games_by_default():
     args = _parse(["copy-games", "--device", "/dev/fake-disk-test-3", "--games-source", "x"])
     assert cli._dev_mode_enabled(args) is False
@@ -114,10 +109,10 @@ def test_worker_mode_disables_dev_mode_even_with_env_var(monkeypatch):
 
 
 def test_no_worker_attribute_does_not_crash_dev_mode_check():
-    """`inject-boot`/`copy-games` n'ont pas d'attribut `worker` du tout
+    """`copy-games`/`copy-games` n'ont pas d'attribut `worker` du tout
     (pas de passage par le worker élevé, §3) — la vérification doit s'en
     accommoder plutôt que planter."""
-    args = _parse(["inject-boot", "--device", "/dev/fake-disk-test-3", "--boot-source", "x", "--allow-disk-image"])
+    args = _parse(["copy-games", "--device", "/dev/fake-disk-test-3", "--games-source", "x", "--allow-disk-image"])
     assert cli._dev_mode_enabled(args) is True
 
 

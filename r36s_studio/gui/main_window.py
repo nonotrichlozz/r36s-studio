@@ -78,7 +78,7 @@ from r36s_studio.imaging import sf3000_clone
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.image_source import is_unstable_image
 from r36s_studio.imaging.source_verify import ImageModified, check_sidecar_matches_size
-from r36s_studio.partitions import BOOT_LABEL, EASYROMS_LABEL, archives, list_partitions, set_privileged_mount_hook
+from r36s_studio.partitions import EASYROMS_LABEL, archives, list_partitions, set_privileged_mount_hook
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
 
@@ -189,16 +189,14 @@ _WIZARD_STEP_STRINGS = {
 # naviguer les Réglages Système à la main.
 _MACOS_FULL_DISK_ACCESS_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
 
-_EXTRACTION_MODES = {"extract_boot", "extract_easyroms"}
-_INJECTION_MODES = {"inject_boot", "copy_games"}
+_EXTRACTION_MODES = {"extract_easyroms"}
+_INJECTION_MODES = {"copy_games"}
 
 # Jobs qui écrivent sur la carte (ou l'éjectent) -- tous sauf "backup", qui
 # n'écrit que dans un fichier (§5 point 6) -- proposent d'éjecter ensuite.
 _ALLOW_EJECT_AFTER_MODES = {
     "flash",
-    "inject_boot",
     "copy_games",
-    "extract_boot",
     "extract_easyroms",
     # "reset_card" volontairement absent : § éjecte déjà automatiquement à
     # la fin (dernière étape suivie par la barre de progression, §4.3 bis)
@@ -226,11 +224,9 @@ def _slow_card_read_speed(speeds: List[float]) -> Optional[float]:
     return median if median < _SLOW_CARD_READ_BYTES_PER_S else None
 
 
-_PARTITION_JOB_MODES = {"extract_boot", "extract_easyroms", "inject_boot", "copy_games"}
+_PARTITION_JOB_MODES = {"extract_easyroms", "copy_games"}
 _ARCHIVE_LABEL_BY_MODE = {
-    "extract_boot": BOOT_LABEL,
     "extract_easyroms": EASYROMS_LABEL,
-    "inject_boot": BOOT_LABEL,
     "copy_games": EASYROMS_LABEL,
 }
 
@@ -245,7 +241,6 @@ _ASSISTED_AD_HOC_RUNNING_STRINGS = {
     "backup": ("assisted_backup_running_title", "assisted_backup_running_instruction"),
     "backup_system": ("assisted_backup_system_running_title", "assisted_backup_system_running_instruction"),
     "flash": ("assisted_flash_running_title", "assisted_flash_running_instruction"),
-    "copy_games": ("assisted_copy_games_running_title", "assisted_copy_games_running_instruction"),
     "reset_card": ("assisted_reset_card_running_title", "assisted_reset_card_running_instruction"),
     "eject": ("assisted_eject_running_title", "assisted_eject_running_instruction"),
 }
@@ -253,7 +248,6 @@ _ASSISTED_AD_HOC_DONE_STRINGS = {
     "backup": ("assisted_backup_done_title", "assisted_backup_done_instruction", True),
     "backup_system": ("assisted_backup_system_done_title", "assisted_backup_system_done_instruction", True),
     "flash": ("assisted_prepare_card_done_title", "assisted_prepare_card_done_instruction", False),
-    "copy_games": ("assisted_copy_games_done_title", "assisted_copy_games_done_instruction", False),
     "reset_card": ("assisted_reset_card_done_title", "assisted_reset_card_done_instruction", False),
     "eject": ("assisted_eject_done_title", "assisted_eject_done_instruction", False),
 }
@@ -406,7 +400,7 @@ class MainWindow(QMainWindow):
         self._eject_runner: Optional[WorkerRunner] = None
         self._last_error_code: Optional[str] = None
         self._last_error_msg: Optional[str] = None
-        self._last_progress_bytes = 0  # taille de l'archive créée (étapes A/B, journal de bord)
+        self._last_progress_bytes = 0  # taille de l'archive créée (extraction des jeux, journal de bord)
         self._read_speeds: List[float] = []  # débits lus pendant une sauvegarde (carte lente)
 
         # Sauvegarde système lancée depuis l'accueil assisté (§4.3), puis
@@ -746,10 +740,8 @@ class MainWindow(QMainWindow):
             self._root_stack.setCurrentWidget(self._assisted_landing)
 
     def _wire_signals(self) -> None:
-        self._home.extract_boot_selected.connect(lambda: self._start_flow("extract_boot"))
         self._home.extract_easyroms_selected.connect(lambda: self._start_flow("extract_easyroms"))
         self._home.flash_selected.connect(lambda: self._start_flow("flash"))
-        self._home.inject_boot_selected.connect(lambda: self._start_flow("inject_boot"))
         self._home.copy_games_selected.connect(lambda: self._start_flow("copy_games"))
         self._home.eject_selected.connect(lambda: self._start_flow("eject"))
         self._home.backup_selected.connect(lambda: self._start_flow("backup"))
@@ -1026,7 +1018,7 @@ class MainWindow(QMainWindow):
             return
 
         if self._mode in _EXTRACTION_MODES:
-            # Étapes A/B : un emplacement par défaut est proposé
+            # Extraction des jeux : un emplacement par défaut est proposé
             # (~/Documents/R36S Studio), mais l'utilisateur choisit
             # toujours activement où son archive est enregistrée --
             # y compris un disque externe. Le nom horodaté, lui, reste
@@ -1038,7 +1030,7 @@ class MainWindow(QMainWindow):
 
         archive_choices = None
         if self._mode in _INJECTION_MODES:
-            # Étapes D/E : proposer les sauvegardes déjà extraites plutôt
+            # Copie des jeux : proposer les sauvegardes déjà extraites plutôt
             # que de redemander un dossier à chaque fois.
             archive_choices = archives.list_archives(_ARCHIVE_LABEL_BY_MODE[self._mode])
         # Flash uniquement : initialise le choix du firmware depuis la
@@ -1050,7 +1042,7 @@ class MainWindow(QMainWindow):
         self._file_dialog.open()
 
     def _refuse_non_arkos_card(self, device: Device, step: str) -> bool:
-        """Étapes A/B/D/E sur une carte qui n'est pas ArkOS (EmuELEC,
+        """Extraction ou copie des jeux sur une carte qui n'est pas ArkOS (EmuELEC,
         ROCKNIX, structure non reconnue) : refus clair ici, avant le choix
         du dossier et toute demande de mot de passe -- jamais une erreur de
         partition introuvable après coup, qui laissait croire la carte mal
@@ -1691,7 +1683,7 @@ class MainWindow(QMainWindow):
             self._console_stage.append_line(f"0x{done:010X}  +{_format_size(block)}  {_format_size(speed)}/s")
         # `done` du tout dernier événement = le compte final exact (§2 n°5,
         # `copy_range`/`copy_tree`) -- utilisé comme taille de l'archive
-        # créée par les étapes A/B (journal de bord).
+        # créée par l'extraction des jeux (journal de bord).
         self._last_progress_bytes = done
         if self._mode in _READ_SPEED_MODES:
             self._read_speeds.append(speed)
@@ -1762,12 +1754,8 @@ class MainWindow(QMainWindow):
             return tr("success_backup", display=self._device.display, path=self._file_path)
         if self._mode == "backup_system":
             return tr("success_backup_system", display=self._device.display, path=self._file_path)
-        if self._mode == "extract_boot":
-            return tr("success_extract_boot")
         if self._mode == "extract_easyroms":
             return tr("success_extract_easyroms")
-        if self._mode == "inject_boot":
-            return tr("success_inject_boot", display=self._device.display)
         if self._mode == "copy_games":
             return tr("success_copy_games", display=self._device.display)
         if self._mode == "reset_card":
@@ -1776,7 +1764,7 @@ class MainWindow(QMainWindow):
 
     def _archive_info(self) -> str:
         """Ligne supplémentaire du journal de bord précisant l'archive
-        concernée (créée pour A/B, source pour D/E) -- jamais pour
+        concernée (créée par l'extraction des jeux, source de leur copie) -- jamais pour
         backup/flash, qui ne manipulent pas de dossier d'archive."""
         if self._mode in _EXTRACTION_MODES:
             return tr("result_archive_created", path=self._file_path, size=_format_size(self._last_progress_bytes))
@@ -2360,8 +2348,8 @@ class MainWindow(QMainWindow):
         refonte menu de tuiles) -- généralise l'ancien `_start_backup_
         system_from_assisted_landing` (qui ne gérait que `backup_system`
         en dur) à tout `job_key` déjà géré par `_start_flow`
-        (`"backup"`/`"backup_system"`/`"flash"`/`"copy_games"`/
-        `"inject_boot"`/`"reset_card"`/`"eject"`). Réutilise `MainView`/
+        (`"backup"`/`"backup_system"`/`"flash"`/`"reset_card"`/
+        `"eject"`). Réutilise `MainView`/
         `_log_panel` le temps de l'opération, pour bénéficier du journal
         de bord et des états occupé déjà en place, sans en faire un vrai
         changement de mode : contrairement à `_switch_to_expert_mode`,

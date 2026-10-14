@@ -149,13 +149,11 @@ def test_home_screen_shows_version_label(qapp):
     assert f"v{__version__}" in screen._version_label.text()
 
 
-def test_home_screen_all_six_steps_emit_their_signal(qapp):
+def test_home_screen_all_steps_emit_their_signal(qapp):
     screen = HomeScreen()
     signals = {
-        "extract_boot": screen.extract_boot_selected,
         "extract_easyroms": screen.extract_easyroms_selected,
         "flash": screen.flash_selected,
-        "inject_boot": screen.inject_boot_selected,
         "copy_games": screen.copy_games_selected,
         "eject": screen.eject_selected,
     }
@@ -169,7 +167,7 @@ def test_home_screen_all_six_steps_emit_their_signal(qapp):
     assert received == list(signals)
 
 
-def test_home_screen_all_six_tiles_always_visible_regardless_of_status(qapp):
+def test_home_screen_all_step_tiles_always_visible_regardless_of_status(qapp):
     """Coeur de la correction de conception : plus de tuile unique mise en
     avant, plus de section « Autres opérations » -- les six étapes restent
     toujours visibles, quel que soit leur statut (§4.5). Restent aussi
@@ -179,10 +177,8 @@ def test_home_screen_all_six_tiles_always_visible_regardless_of_status(qapp):
     screen.show()
 
     status = {
-        "extract_boot": StepStatus.NOT_RELEVANT,
         "extract_easyroms": StepStatus.NOT_RELEVANT,
         "flash": StepStatus.AVAILABLE,
-        "inject_boot": StepStatus.NOT_RELEVANT,
         "copy_games": StepStatus.NOT_RELEVANT,
         "eject": StepStatus.NOT_RELEVANT,
     }
@@ -211,17 +207,13 @@ def test_home_screen_status_sets_badge_text_and_kind(qapp):
 
     screen.set_status(
         {
-            "extract_boot": StepStatus.AVAILABLE,
             "extract_easyroms": StepStatus.DONE,
             "flash": StepStatus.DONE,
-            "inject_boot": StepStatus.AVAILABLE,
             "copy_games": StepStatus.PLATFORM_LIMITED,
             "eject": StepStatus.NOT_RELEVANT,
         }
     )
 
-    assert screen._badges["extract_boot"].text() == "Faisable"
-    assert screen._badges["extract_boot"].property("badgeKind") == "available"
     assert screen._badges["extract_easyroms"].text() == "Déjà faite"
     assert screen._badges["extract_easyroms"].property("badgeKind") == "done"
     assert screen._badges["flash"].text() == "Déjà faite"
@@ -237,20 +229,18 @@ def test_home_screen_status_shows_system_incompatible_badge_for_rocknix_card(qap
     screen = HomeScreen()
     screen.show()
 
-    screen.set_status({"extract_boot": StepStatus.SYSTEM_INCOMPATIBLE}, card_system=CardSystem.ROCKNIX)
+    screen.set_status({"extract_easyroms": StepStatus.SYSTEM_INCOMPATIBLE}, card_system=CardSystem.ROCKNIX)
 
-    assert screen._badges["extract_boot"].text() == "Non applicable — carte ROCKNIX"
-    assert screen._badges["extract_boot"].property("badgeKind") == "system_incompatible"
+    assert screen._badges["extract_easyroms"].text() == "Non applicable — carte ROCKNIX"
+    assert screen._badges["extract_easyroms"].property("badgeKind") == "system_incompatible"
 
 
 def test_home_screen_steps_appear_in_fixed_chronological_order(qapp):
     screen = HomeScreen()
 
     assert list(screen._tiles) == [
-        "extract_boot",
         "extract_easyroms",
         "flash",
-        "inject_boot",
         "copy_games",
         "eject",
     ]
@@ -486,12 +476,12 @@ def test_home_screen_names_emuelec_in_badge_and_banner(qapp):
     screen.show()
 
     screen.set_status(
-        {"extract_boot": StepStatus.SYSTEM_INCOMPATIBLE, "flash": StepStatus.AVAILABLE},
+        {"extract_easyroms": StepStatus.SYSTEM_INCOMPATIBLE, "flash": StepStatus.AVAILABLE},
         device=_make_device(),
         card_system=CardSystem.EMUELEC,
     )
 
-    assert screen._badges["extract_boot"].text() == "Non applicable — carte EmuELEC"
+    assert screen._badges["extract_easyroms"].text() == "Non applicable — carte EmuELEC"
     assert screen._banner_state_label.text() == "Carte EmuELEC reconnue"
 
 
@@ -916,7 +906,7 @@ def test_full_disk_access_screen_set_still_not_detected_shows_label(qapp):
 # console » (§5, correctif visuel) -- plus de signal séparé pour cette
 # dernière, l'accès au catalogue passe par `IdentifyResultDialog.
 # catalog_requested` (voir test_gui_main_window.py). « Remettre l'écran
-# d'origine » (inject_boot) retirée de cette grille (§5, deuxième
+# d'origine » retirée de cette grille (§5, deuxième
 # correctif visuel) -- déjà couverte par le mode expert et le parcours
 # guidé, plus de tuile ni de signal correspondants ici.
 # Refonte par situations (2026-10-11) : trois situations en langage courant.
@@ -2399,20 +2389,6 @@ def test_file_dialog_cancelled_dialog_does_not_enable_next(mock_dialog, qapp):
     assert dialog._next_button.isEnabled() is False
 
 
-@patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/tmp/boot_backup")
-def test_file_dialog_inject_boot_browse_picks_a_folder(mock_dialog, qapp):
-    """inject-boot/copy-games consomment un dossier (§4.4), pas un fichier
-    unique -- le sélecteur doit être un choix de dossier."""
-    dialog = FileDialog()
-    dialog.set_mode("inject_boot")
-
-    dialog._browse()
-
-    mock_dialog.assert_called_once()
-    assert dialog._path_label.text() == "/tmp/boot_backup"
-    assert dialog._next_button.isEnabled() is True
-
-
 @patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/tmp/games")
 def test_file_dialog_copy_games_browse_picks_a_folder(mock_dialog, qapp):
     dialog = FileDialog()
@@ -2516,10 +2492,8 @@ def test_file_dialog_shows_releases_button_only_in_flash_mode(qapp):
     dialog.set_mode("backup")
     assert dialog._releases_button.isVisible() is False
 
-    dialog.set_mode("extract_boot")
     assert dialog._releases_button.isVisible() is False
 
-    dialog.set_mode("inject_boot")
     assert dialog._releases_button.isVisible() is False
 
 
@@ -2793,13 +2767,13 @@ def test_rocknix_variant_dialog_closes_without_emitting(qapp):
     assert dialog.isVisible() is False
 
 
-# --- FileDialog : liste des archives existantes (étapes D/E, §4.4) --------
+# --- FileDialog : liste des archives existantes (copie des jeux, §4.4) --------
 
 
 def test_file_dialog_archive_mode_lists_existing_archives(qapp):
     dialog = FileDialog()
     dialog.show()
-    dialog.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
+    dialog.set_mode("copy_games", archive_choices=["/tmp/R36S Studio/EASYROMS_2026-07-06_00-21"])
 
     assert dialog._archive_list.isVisible() is True
     assert dialog._archive_list.count() == 1
@@ -2825,11 +2799,11 @@ def test_file_dialog_non_archive_mode_hides_archive_list(qapp):
 
 def test_file_dialog_selecting_an_archive_enables_next_and_sets_path(qapp):
     dialog = FileDialog()
-    dialog.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
+    dialog.set_mode("copy_games", archive_choices=["/tmp/R36S Studio/EASYROMS_2026-07-06_00-21"])
 
     dialog._archive_list.setCurrentRow(0)
 
-    assert dialog._path_label.text() == "/tmp/R36S Studio/BOOT_2026-07-06_00-21"
+    assert dialog._path_label.text() == "/tmp/R36S Studio/EASYROMS_2026-07-06_00-21"
     assert dialog._next_button.isEnabled() is True
 
 
@@ -2838,7 +2812,7 @@ def test_file_dialog_browse_still_works_as_fallback_in_archive_mode(mock_dialog,
     """Repli manuel : même quand des archives existent, Parcourir… reste
     disponible pour désigner un dossier différent."""
     dialog = FileDialog()
-    dialog.set_mode("inject_boot", archive_choices=["/tmp/R36S Studio/BOOT_2026-07-06_00-21"])
+    dialog.set_mode("copy_games", archive_choices=["/tmp/R36S Studio/EASYROMS_2026-07-06_00-21"])
 
     dialog._browse()
 
@@ -2858,13 +2832,13 @@ def test_format_archive_label_falls_back_to_folder_name_for_manual_folder():
     assert label == "mon_dossier_perso"
 
 
-# --- FileDialog : dossier de destination avec défaut (étapes A/B, §4.4) ----
+# --- FileDialog : dossier de destination avec défaut (extraction des jeux, §4.4) ----
 
 
 def test_file_dialog_destination_mode_preselects_default_path(qapp):
     dialog = FileDialog()
 
-    dialog.set_mode("extract_boot", default_path="/home/x/Documents/R36S Studio")
+    dialog.set_mode("extract_easyroms", default_path="/home/x/Documents/R36S Studio")
 
     assert dialog._path_label.text() == "/home/x/Documents/R36S Studio"
     assert dialog._next_button.isEnabled() is True
@@ -2893,7 +2867,7 @@ def test_file_dialog_other_modes_hide_destination_hint(qapp):
 @patch("r36s_studio.gui.screens.QFileDialog.getExistingDirectory", return_value="/Volumes/DisqueExterne")
 def test_file_dialog_destination_mode_can_replace_default_via_browse(mock_dialog, qapp):
     dialog = FileDialog()
-    dialog.set_mode("extract_boot", default_path="/home/x/Documents/R36S Studio")
+    dialog.set_mode("extract_easyroms", default_path="/home/x/Documents/R36S Studio")
 
     dialog._browse()
 
@@ -2908,7 +2882,7 @@ def test_file_dialog_without_default_path_disables_next_until_chosen(qapp):
     pratique, mais ne doit pas planter) laisse Suivant désactivé."""
     dialog = FileDialog()
 
-    dialog.set_mode("extract_boot")
+    dialog.set_mode("extract_easyroms")
 
     assert dialog._path_label.text() == ""
     assert dialog._next_button.isEnabled() is False

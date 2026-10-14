@@ -1,6 +1,6 @@
 # `detect/` — statut des étapes du mode expert
 
-À lire quand tu touches à `detect/` ou aux badges de statut des six étapes A→F du mode expert.
+À lire quand tu touches à `detect/` ou aux badges de statut des étapes du mode expert (`extract_easyroms`, `flash`, `copy_games`, `eject` ; `extract_boot`/`inject_boot` retirées le 2026-10-14, voir `firmwares-flash.md`). Les lettres A→F ci-dessous sont historiques.
 
 > Les renvois « §N » de ce texte désignent les sections de l'ancien `CLAUDE.md` monolithique (commit `930f3c9`) : §3 → `elevation-macos.md`, §4.1/§4.2 → `devices-safety.md`, §4.3 → `imaging.md`/`reset-card.md`, §4.4 → `partitions.md`, §4.5 → `detect.md`, §4.6 → `firmwares-flash.md`, §5 → `interface.md`/`assisted-wizard.md`, §6 → `packaging.md`, §8 → `testing.md` ; §1/§2/§9 restent dans `CLAUDE.md`.
 

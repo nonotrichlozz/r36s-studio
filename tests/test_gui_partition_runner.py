@@ -1,5 +1,5 @@
 """Tests de PartitionJobRunner (gui/partition_runner.py) : traduction des
-exceptions de `partitions/jobs.py` en signaux Qt. `inject_boot`/`copy_games`
+exceptions de `partitions/jobs.py` en signaux Qt. `copy_games`
 sont mockés — aucune partition réelle n'est touchée. `run()` est appelé
 directement (jamais `.start()`) pour exécuter la logique de façon
 synchrone, sans vrai threading, comme le fait déjà `gui/worker_runner.py`
@@ -34,29 +34,16 @@ def _make_device(path="/dev/fake-disk-test-4") -> Device:
     )
 
 
-@patch("r36s_studio.gui.partition_runner.inject_boot")
-def test_inject_boot_success_emits_finished_true(mock_inject, qapp):
-    runner = PartitionJobRunner("inject_boot", _make_device(), "/tmp/boot_backup")
+@patch("r36s_studio.gui.partition_runner.copy_games")
+def test_copy_games_success_emits_finished_true(mock_copy, qapp):
+    runner = PartitionJobRunner("copy_games", _make_device(), "/tmp/games_backup")
     finished_events = []
     runner.finished_job.connect(lambda ok: finished_events.append(ok))
 
     runner.run()
 
-    mock_inject.assert_called_once()
-    assert mock_inject.call_args.args[:2] == (runner._device, "/tmp/boot_backup")
-    assert finished_events == [True]
-
-
-@patch("r36s_studio.gui.partition_runner.extract_boot", return_value=10)
-def test_extract_boot_success_calls_extract_boot(mock_extract, qapp):
-    runner = PartitionJobRunner("extract_boot", _make_device(), "/tmp/R36S Studio/BOOT_x")
-    finished_events = []
-    runner.finished_job.connect(lambda ok: finished_events.append(ok))
-
-    runner.run()
-
-    mock_extract.assert_called_once()
-    assert mock_extract.call_args.args[:2] == (runner._device, "/tmp/R36S Studio/BOOT_x")
+    mock_copy.assert_called_once()
+    assert mock_copy.call_args.args[:2] == (runner._device, "/tmp/games_backup")
     assert finished_events == [True]
 
 
@@ -70,9 +57,9 @@ def test_extract_easyroms_success_calls_extract_easyroms(mock_extract, qapp):
     assert mock_extract.call_args.args[:2] == (runner._device, "/tmp/R36S Studio/EASYROMS_x")
 
 
-@patch("r36s_studio.gui.partition_runner.extract_boot", side_effect=PartitionNotFound("BOOT", "/dev/x"))
-def test_extract_boot_partition_not_found_maps_to_dedicated_code(mock_extract, qapp):
-    runner = PartitionJobRunner("extract_boot", _make_device(), "/tmp/dest")
+@patch("r36s_studio.gui.partition_runner.extract_easyroms", side_effect=PartitionNotFound("EASYROMS", "/dev/x"))
+def test_extract_easyroms_partition_not_found_maps_to_dedicated_code(mock_extract, qapp):
+    runner = PartitionJobRunner("extract_easyroms", _make_device(), "/tmp/dest")
     error_events = []
     runner.error.connect(lambda *a: error_events.append(a))
 
@@ -123,11 +110,11 @@ def test_macos_ntfs_unsupported_maps_to_dedicated_code(mock_copy, qapp):
 
 
 @patch(
-    "r36s_studio.gui.partition_runner.inject_boot",
-    side_effect=PartitionNotFound("BOOT", "/dev/fake-disk-test-4"),
+    "r36s_studio.gui.partition_runner.copy_games",
+    side_effect=PartitionNotFound("EASYROMS", "/dev/fake-disk-test-4"),
 )
-def test_partition_not_found_maps_to_dedicated_code(mock_inject, qapp):
-    runner = PartitionJobRunner("inject_boot", _make_device(), "/tmp/boot_backup")
+def test_partition_not_found_maps_to_dedicated_code(mock_copy, qapp):
+    runner = PartitionJobRunner("copy_games", _make_device(), "/tmp/games_backup")
     error_events = []
     runner.error.connect(lambda *a: error_events.append(a))
 
@@ -137,11 +124,11 @@ def test_partition_not_found_maps_to_dedicated_code(mock_inject, qapp):
 
 
 @patch(
-    "r36s_studio.gui.partition_runner.inject_boot",
-    side_effect=PartitionNotMounted("BOOT", "/dev/fake-disk-test-4"),
+    "r36s_studio.gui.partition_runner.copy_games",
+    side_effect=PartitionNotMounted("EASYROMS", "/dev/fake-disk-test-4"),
 )
-def test_partition_not_mounted_maps_to_dedicated_code(mock_inject, qapp):
-    runner = PartitionJobRunner("inject_boot", _make_device(), "/tmp/boot_backup")
+def test_partition_not_mounted_maps_to_dedicated_code(mock_copy, qapp):
+    runner = PartitionJobRunner("copy_games", _make_device(), "/tmp/games_backup")
     error_events = []
     runner.error.connect(lambda *a: error_events.append(a))
 

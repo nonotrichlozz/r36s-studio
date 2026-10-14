@@ -828,36 +828,6 @@ def test_backup_system_prepare_card_flash_finished_only_offers_return_home(
 # --- _perform_eject/_on_perform_eject_finished, jamais _start_worker). ---
 
 
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_copy_games_ad_hoc_job_offers_next_step_choice(
-    mock_list, mock_filter, mock_load, qapp
-):
-    """Généralisation du mécanisme ad-hoc à un job_key au-delà de backup/
-    backup_system -- même mécanisme (`_start_assisted_ad_hoc_job`), une
-    table de chaînes au lieu d'un `if`/`else` en dur pour exactement deux
-    cas. Appelé directement : la tuile « Copier mes jeux » a quitté
-    l'accueil assisté (outils avancés en mode expert), le mécanisme reste."""
-    window = MainWindow()
-    window.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
-
-    window._start_assisted_ad_hoc_job("copy_games")
-
-    assert window._mode == "copy_games"
-    assert window._root_stack.currentWidget() is window._main_view
-    assert window._main_view._left_stack.currentWidget() is window._wizard_panel
-
-    window._device = _make_device()
-    window._file_path = "/tmp/games"
-    window._on_worker_finished(True)
-
-    assert window._wizard_panel._return_home_button.isVisible() is True
-    # "Préparer une carte avec cette sauvegarde" n'a de sens qu'après une
-    # sauvegarde (backup/backup_system) -- jamais pour copy_games.
-    assert window._wizard_panel._prepare_card_button.isVisible() is False
-
-
 @patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
 @patch("r36s_studio.gui.main_window.filter_devices")
@@ -3290,14 +3260,14 @@ def test_help_dialog_open_settings_opens_full_disk_access_pane(
     )
 
 
-# --- inject-boot / copy-games (étapes D/E) : PartitionJobRunner, archives --
+# --- copy-games : PartitionJobRunner, archives --------------------------
 
 
-@patch("r36s_studio.gui.main_window.archives.list_archives", return_value=["/tmp/R36S Studio/BOOT_x"])
+@patch("r36s_studio.gui.main_window.archives.list_archives", return_value=["/tmp/R36S Studio/EASYROMS_x"])
 @patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_inject_boot_flow_offers_existing_archive_and_uses_partition_runner(
+def test_copy_games_flow_offers_existing_archive_and_uses_partition_runner(
     mock_list, mock_filter, mock_detect, mock_list_archives, qapp
 ):
     device = _make_device()
@@ -3307,18 +3277,18 @@ def test_inject_boot_flow_offers_existing_archive_and_uses_partition_runner(
 
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
         window = MainWindow()
-        window._home.inject_boot_selected.emit()
+        window._home.copy_games_selected.emit()
         window._device_dialog._list.setCurrentRow(0)
         window._device_dialog._emit_chosen()
 
-        mock_list_archives.assert_called_once_with("BOOT")
+        mock_list_archives.assert_called_once_with("EASYROMS")
         assert window._file_dialog.isVisible() is True
         assert window._file_dialog._archive_list.count() == 1
 
         window._file_dialog._archive_list.setCurrentRow(0)
         window._file_dialog.file_chosen.emit(window._file_dialog._path_label.text())
 
-    runner_class.assert_called_once_with("inject_boot", device, "/tmp/R36S Studio/BOOT_x", parent=window)
+    runner_class.assert_called_once_with("copy_games", device, "/tmp/R36S Studio/EASYROMS_x", parent=window)
     runner_class.instances[0].start.assert_called_once()
 
 
@@ -3380,7 +3350,7 @@ def test_backup_success_never_allows_eject(mock_list, mock_filter, qapp):
     assert window._log_panel._eject_button.isVisible() is False
 
 
-# --- extract-boot / extract-easyroms (étapes A/B) : choix du dossier ------
+# --- extract-easyroms : choix du dossier ---------------------------------
 #
 # Régression corrigée : la destination était devenue un chemin généré
 # automatiquement, sans que l'utilisateur puisse décider où son archive est
@@ -3394,7 +3364,7 @@ def test_backup_success_never_allows_eject(mock_list, mock_filter, qapp):
 @patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_extract_boot_shows_file_dialog_with_default_path_preselected(
+def test_extract_easyroms_shows_file_dialog_with_default_path_preselected(
     mock_list, mock_filter, mock_detect, mock_default_dir, qapp
 ):
     device = _make_device()
@@ -3403,7 +3373,7 @@ def test_extract_boot_shows_file_dialog_with_default_path_preselected(
     mock_default_dir.return_value = "/home/x/Documents/R36S Studio"
 
     window = MainWindow()
-    window._home.extract_boot_selected.emit()
+    window._home.extract_easyroms_selected.emit()
     window._device_dialog._list.setCurrentRow(0)
     window._device_dialog._emit_chosen()
 
@@ -3417,7 +3387,7 @@ def test_extract_boot_shows_file_dialog_with_default_path_preselected(
 @patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.EMUELEC, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_extract_boot_on_emuelec_card_is_refused_before_anything_starts(
+def test_extract_easyroms_on_emuelec_card_is_refused_before_anything_starts(
     mock_list, mock_filter, mock_detect, mock_refusal, mock_warning, qapp
 ):
     """Carte EmuELEC saine : refus clair au choix de la carte, nommant le
@@ -3429,11 +3399,11 @@ def test_extract_boot_on_emuelec_card_is_refused_before_anything_starts(
 
     with patch("r36s_studio.gui.main_window.WorkerRunner") as mock_runner:
         window = MainWindow()
-        window._home.extract_boot_selected.emit()
+        window._home.extract_easyroms_selected.emit()
         window._device_dialog._list.setCurrentRow(0)
         window._device_dialog._emit_chosen()
 
-    mock_refusal.assert_called_once_with(device, "extract_boot")
+    mock_refusal.assert_called_once_with(device, "extract_easyroms")
     message = mock_warning.call_args.args[2]
     assert "EmuELEC" in message and "Rien n'a été modifié" in message
     assert "préparé" not in message
@@ -3446,18 +3416,18 @@ def test_extract_boot_on_emuelec_card_is_refused_before_anything_starts(
 @patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_extract_boot_accepting_default_uses_it_as_base_dir(
+def test_extract_easyroms_accepting_default_uses_it_as_base_dir(
     mock_list, mock_filter, mock_detect, mock_default_dir, mock_new_path, qapp
 ):
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
-    mock_new_path.return_value = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    mock_new_path.return_value = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21"
     runner_class = _mock_partition_runner_class()
 
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
         window = MainWindow()
-        window._home.extract_boot_selected.emit()
+        window._home.extract_easyroms_selected.emit()
         window._device_dialog._list.setCurrentRow(0)
         window._device_dialog._emit_chosen()
 
@@ -3466,9 +3436,9 @@ def test_extract_boot_accepting_default_uses_it_as_base_dir(
 
     from pathlib import Path
 
-    mock_new_path.assert_called_once_with("BOOT", base_dir=Path("/home/x/Documents/R36S Studio"))
+    mock_new_path.assert_called_once_with("EASYROMS", base_dir=Path("/home/x/Documents/R36S Studio"))
     runner_class.assert_called_once_with(
-        "extract_boot", device, "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21", parent=window
+        "extract_easyroms", device, "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21", parent=window
     )
 
 
@@ -3476,7 +3446,7 @@ def test_extract_boot_accepting_default_uses_it_as_base_dir(
 @patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_extract_boot_can_replace_default_with_external_drive(
+def test_extract_easyroms_can_replace_default_with_external_drive(
     mock_list, mock_filter, mock_detect, mock_new_path, qapp
 ):
     """L'utilisateur peut remplacer le dossier proposé par n'importe quel
@@ -3484,12 +3454,12 @@ def test_extract_boot_can_replace_default_with_external_drive(
     device = _make_device()
     mock_list.return_value = [device]
     mock_filter.return_value = [device]
-    mock_new_path.return_value = "/Volumes/DisqueExterne/BOOT_2026-07-06_00-21"
+    mock_new_path.return_value = "/Volumes/DisqueExterne/EASYROMS_2026-07-06_00-21"
     runner_class = _mock_partition_runner_class()
 
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
         window = MainWindow()
-        window._home.extract_boot_selected.emit()
+        window._home.extract_easyroms_selected.emit()
         window._device_dialog._list.setCurrentRow(0)
         window._device_dialog._emit_chosen()
 
@@ -3502,7 +3472,7 @@ def test_extract_boot_can_replace_default_with_external_drive(
 
     from pathlib import Path
 
-    mock_new_path.assert_called_once_with("BOOT", base_dir=Path("/Volumes/DisqueExterne"))
+    mock_new_path.assert_called_once_with("EASYROMS", base_dir=Path("/Volumes/DisqueExterne"))
 
 
 @patch("r36s_studio.gui.main_window.archives.new_archive_path")
@@ -3533,12 +3503,12 @@ def test_extract_easyroms_uses_easyroms_label(
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_extract_boot_success_logs_archive_path_size_and_shows_reveal(mock_list, mock_filter, mock_load, qapp):
+def test_extract_easyroms_success_logs_archive_path_size_and_shows_reveal(mock_list, mock_filter, mock_load, qapp):
     window = MainWindow()
     window.show()
-    window._mode = "extract_boot"
+    window._mode = "extract_easyroms"
     window._device = _make_device()
-    window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    window._file_path = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21"
     window._last_progress_bytes = 12_582_912  # 12 Mo
 
     window._on_worker_finished(True)
@@ -3546,7 +3516,7 @@ def test_extract_boot_success_logs_archive_path_size_and_shows_reveal(mock_list,
     assert window._log_panel._eject_button.isVisible() is True
     log_text = window._log_panel._log_view.toPlainText()
     assert "ordinateur" in log_text
-    assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
+    assert "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21" in log_text
     assert "12.0 Mo" in log_text
     assert window._log_panel._reveal_button.isVisible() is True
 
@@ -3554,23 +3524,6 @@ def test_extract_boot_success_logs_archive_path_size_and_shows_reveal(mock_list,
 # --- chemin de destination annoncé dès le début de la copie (§5 mode --------
 # --- assisté) : un débutant qui ne le voit qu'au succès final n'a aucune --
 # --- idée d'où va sa sauvegarde pendant que ça copie. --------------------
-
-
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
-@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
-@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_extract_boot_logs_destination_path_at_start_not_only_at_end(mock_list, mock_filter, mock_load, qapp):
-    window = MainWindow()
-    window._mode = "extract_boot"
-    window._device = _make_device()
-    window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
-    runner_class = _mock_partition_runner_class()
-
-    with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
-        window._start_worker()
-
-    log_text = window._log_panel._log_view.toPlainText()
-    assert "Destination : /home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
@@ -3593,15 +3546,15 @@ def test_extract_easyroms_logs_destination_path_at_start(mock_list, mock_filter,
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
-def test_inject_boot_does_not_log_a_destination_line(mock_list, mock_filter, mock_load, qapp):
+def test_copy_games_does_not_log_a_destination_line(mock_list, mock_filter, mock_load, qapp):
     """La destination est ici une partition de la carte, pas un dossier de
     l'ordinateur -- pas la même confusion que pour les étapes A/B, donc pas
     la même annonce (§5 mode assisté, portée volontairement limitée aux
     étapes d'extraction)."""
     window = MainWindow()
-    window._mode = "inject_boot"
+    window._mode = "copy_games"
     window._device = _make_device()
-    window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    window._file_path = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21"
     runner_class = _mock_partition_runner_class()
 
     with patch("r36s_studio.gui.main_window.PartitionJobRunner", runner_class):
@@ -3616,32 +3569,32 @@ def test_inject_boot_does_not_log_a_destination_line(mock_list, mock_filter, moc
 @patch("r36s_studio.gui.main_window.list_devices")
 def test_reveal_requested_calls_reveal_with_archive_path(mock_list, mock_filter, mock_reveal, qapp):
     window = MainWindow()
-    window._mode = "extract_boot"
+    window._mode = "extract_easyroms"
     window._device = _make_device()
-    window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    window._file_path = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21"
     window._on_worker_finished(True)
 
     window._log_panel._reveal_button.click()
 
-    mock_reveal.assert_called_once_with("/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21")
+    mock_reveal.assert_called_once_with("/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21")
 
 
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_inject_boot_success_logs_source_archive_path(mock_list, mock_filter, mock_load, qapp):
+def test_copy_games_success_logs_source_archive_path(mock_list, mock_filter, mock_load, qapp):
     """Étapes D/E : la même ligne indique quelle archive a servi de
     source, plutôt que « archive créée »."""
     window = MainWindow()
     window.show()
-    window._mode = "inject_boot"
+    window._mode = "copy_games"
     window._device = _make_device()
-    window._file_path = "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21"
+    window._file_path = "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21"
 
     window._on_worker_finished(True)
 
     log_text = window._log_panel._log_view.toPlainText()
-    assert "/home/x/Documents/R36S Studio/BOOT_2026-07-06_00-21" in log_text
+    assert "/home/x/Documents/R36S Studio/EASYROMS_2026-07-06_00-21" in log_text
     assert window._log_panel._reveal_button.isVisible() is True
 
 
@@ -3720,10 +3673,10 @@ def test_partition_not_found_error_logs_friendly_message_then_raw_detail(
 ):
     window = MainWindow()
     window.show()
-    window._mode = "inject_boot"
+    window._mode = "copy_games"
     window._device = _make_device()
 
-    window._on_worker_error("PARTITION_NOT_FOUND", "Partition « BOOT » introuvable sur /dev/fake-disk-test-3")
+    window._on_worker_error("PARTITION_NOT_FOUND", "Partition « EASYROMS » introuvable sur /dev/fake-disk-test-3")
     window._on_worker_finished(False)
 
     lines = window._log_panel._log_view.toPlainText().splitlines()

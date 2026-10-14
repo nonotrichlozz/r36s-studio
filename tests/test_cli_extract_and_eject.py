@@ -1,6 +1,6 @@
 """Tests des CLI `extract-boot`, `extract-easyroms` et `eject`
 (__main__.py, workflow à deux cartes §4.4/§4.5). `list_devices`,
-`extract_boot`/`extract_easyroms`/`eject_device` sont mockés — aucune carte
+`extract_easyroms`/`eject_device` sont mockés — aucune carte
 réelle n'est touchée."""
 
 from __future__ import annotations
@@ -54,9 +54,9 @@ def _parse(argv):
 # --- extract-boot ------------------------------------------------------
 
 
-@patch("r36s_studio.__main__.extract_boot")
+@patch("r36s_studio.__main__.extract_easyroms")
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_extract_boot_refuses_emuelec_card_with_a_clear_code_before_touching_it(mock_list, mock_extract, capsys):
+def test_cmd_extract_easyroms_refuses_emuelec_card_with_a_clear_code_before_touching_it(mock_list, mock_extract, capsys):
     """Revérification côté worker (CLAUDE.md, vérifications avant
     élévation) : code dédié, jamais PARTITION_NOT_FOUND sur une carte saine
     d'un autre système."""
@@ -65,12 +65,12 @@ def test_cmd_extract_boot_refuses_emuelec_card_with_a_clear_code_before_touching
     mock_list.return_value = [_make_device()]
 
     with patch("r36s_studio.__main__.arkos_step_refusal", return_value=CardSystem.EMUELEC) as mock_refusal:
-        args = _parse(["extract-boot", "--device", "/dev/fake-disk-test-3"])
+        args = _parse(["extract-easyroms", "--device", "/dev/fake-disk-test-3"])
         code = args.func(args)
 
     assert code == 1
     mock_refusal.assert_called_once()
-    assert mock_refusal.call_args.args[1] == "extract_boot"
+    assert mock_refusal.call_args.args[1] == "extract_easyroms"
     mock_extract.assert_not_called()
     out = capsys.readouterr().out
     assert "CARD_SYSTEM_INCOMPATIBLE" in out
@@ -78,60 +78,39 @@ def test_cmd_extract_boot_refuses_emuelec_card_with_a_clear_code_before_touching
 
 
 @patch("r36s_studio.__main__.archives.new_archive_path")
-@patch("r36s_studio.__main__.extract_boot", return_value=42)
+@patch("r36s_studio.__main__.extract_easyroms")
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_extract_boot_success_emits_done_true_with_archive_path(
-    mock_list, mock_extract, mock_new_path, tmp_path, capsys
-):
-    mock_list.return_value = [_make_device()]
-    dest = tmp_path / "BOOT_2026-07-06_00-21"
-    mock_new_path.return_value = dest
-
-    args = _parse(["extract-boot", "--device", "/dev/fake-disk-test-3"])
-    code = args.func(args)
-
-    assert code == 0
-    mock_extract.assert_called_once()
-    assert mock_extract.call_args.args[1] == str(dest)
-    out = capsys.readouterr().out
-    assert '"ok": true' in out
-    assert "BOOT_2026-07-06_00-21" in out
-
-
-@patch("r36s_studio.__main__.archives.new_archive_path")
-@patch("r36s_studio.__main__.extract_boot")
-@patch("r36s_studio.__main__.list_devices")
-def test_cmd_extract_boot_passes_output_dir_to_new_archive_path(mock_list, mock_extract, mock_new_path, tmp_path):
+def test_cmd_extract_easyroms_passes_output_dir_to_new_archive_path(mock_list, mock_extract, mock_new_path, tmp_path):
     mock_list.return_value = [_make_device()]
     custom_dir = tmp_path / "custom"
 
-    args = _parse(["extract-boot", "--device", "/dev/fake-disk-test-3", "--output-dir", str(custom_dir)])
+    args = _parse(["extract-easyroms", "--device", "/dev/fake-disk-test-3", "--output-dir", str(custom_dir)])
     args.func(args)
 
     from pathlib import Path
 
-    mock_new_path.assert_called_once_with("BOOT", base_dir=Path(custom_dir))
+    mock_new_path.assert_called_once_with("EASYROMS", base_dir=Path(custom_dir))
 
 
 @patch("r36s_studio.__main__.archives.new_archive_path")
-@patch("r36s_studio.__main__.extract_boot")
+@patch("r36s_studio.__main__.extract_easyroms")
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_extract_boot_without_output_dir_passes_none_as_base_dir(mock_list, mock_extract, mock_new_path):
+def test_cmd_extract_easyroms_without_output_dir_passes_none_as_base_dir(mock_list, mock_extract, mock_new_path):
     mock_list.return_value = [_make_device()]
 
-    args = _parse(["extract-boot", "--device", "/dev/fake-disk-test-3"])
+    args = _parse(["extract-easyroms", "--device", "/dev/fake-disk-test-3"])
     args.func(args)
 
-    mock_new_path.assert_called_once_with("BOOT", base_dir=None)
+    mock_new_path.assert_called_once_with("EASYROMS", base_dir=None)
 
 
 @patch("r36s_studio.__main__.archives.new_archive_path", return_value="dest")
-@patch("r36s_studio.__main__.extract_boot", side_effect=PartitionNotFound("BOOT", "/dev/fake-disk-test-3"))
+@patch("r36s_studio.__main__.extract_easyroms", side_effect=PartitionNotFound("EASYROMS", "/dev/fake-disk-test-3"))
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_extract_boot_reports_partition_not_found(mock_list, mock_extract, mock_new_path, capsys):
+def test_cmd_extract_easyroms_reports_partition_not_found(mock_list, mock_extract, mock_new_path, capsys):
     mock_list.return_value = [_make_device()]
 
-    args = _parse(["extract-boot", "--device", "/dev/fake-disk-test-3"])
+    args = _parse(["extract-easyroms", "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 1
@@ -139,12 +118,12 @@ def test_cmd_extract_boot_reports_partition_not_found(mock_list, mock_extract, m
 
 
 @patch("r36s_studio.__main__.archives.new_archive_path", return_value="dest")
-@patch("r36s_studio.__main__.extract_boot", side_effect=OperationCancelled(1024))
+@patch("r36s_studio.__main__.extract_easyroms", side_effect=OperationCancelled(1024))
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_extract_boot_reports_cancellation(mock_list, mock_extract, mock_new_path, capsys):
+def test_cmd_extract_easyroms_reports_cancellation(mock_list, mock_extract, mock_new_path, capsys):
     mock_list.return_value = [_make_device()]
 
-    args = _parse(["extract-boot", "--device", "/dev/fake-disk-test-3"])
+    args = _parse(["extract-easyroms", "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 1
@@ -153,12 +132,12 @@ def test_cmd_extract_boot_reports_cancellation(mock_list, mock_extract, mock_new
     assert '"ok": false' in out
 
 
-@patch("r36s_studio.__main__.extract_boot")
+@patch("r36s_studio.__main__.extract_easyroms")
 @patch("r36s_studio.__main__.list_devices")
-def test_cmd_extract_boot_rejects_device_not_in_safe_list(mock_list, mock_extract, capsys):
+def test_cmd_extract_easyroms_rejects_device_not_in_safe_list(mock_list, mock_extract, capsys):
     mock_list.return_value = [_make_device(path="/dev/fake-disk-test-9")]
 
-    args = _parse(["extract-boot", "--device", "/dev/fake-disk-test-3"])
+    args = _parse(["extract-easyroms", "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
 
     assert code == 1

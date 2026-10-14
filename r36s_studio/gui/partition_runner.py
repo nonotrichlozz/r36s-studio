@@ -46,9 +46,7 @@ from r36s_studio.partitions import (
     PartitionNotFound,
     PartitionNotMounted,
     copy_games,
-    extract_boot,
     extract_easyroms,
-    inject_boot,
     locate_mounted,
     unmount_forced,
 )
@@ -58,8 +56,8 @@ from .strings import tr
 
 
 class PartitionJobRunner(QThread):
-    """`mode` : "extract_boot", "extract_easyroms", "inject_boot" ou
-    "copy_games" (§4.4/§4.6, étapes A/B/D/E du workflow). Émet les mêmes
+    """`mode` : "extract_easyroms" ou "copy_games" (§4.4/§4.6, extraction
+    et copie des jeux). Émet les mêmes
     signaux que `WorkerRunner` pour la progression/l'erreur/la fin (pas de
     `log` : ces jobs n'émettent pas d'événements `emit_log`, contrairement
     au CLI `backup`/`flash`), pour que `main_window.py` puisse réutiliser
@@ -94,11 +92,9 @@ class PartitionJobRunner(QThread):
         # Résolu ici, pas mémorisé en `__init__` ou dans un dict de module :
         # une résolution précoce capturerait la fonction d'origine avant
         # qu'un test ne puisse la patcher via
-        # `r36s_studio.gui.partition_runner.inject_boot`/`copy_games`/etc.
+        # `r36s_studio.gui.partition_runner.copy_games`/etc.
         jobs = {
-            "extract_boot": extract_boot,
             "extract_easyroms": extract_easyroms,
-            "inject_boot": inject_boot,
             "copy_games": copy_games,
         }
         job = jobs[self._mode]

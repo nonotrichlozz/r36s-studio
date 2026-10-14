@@ -272,6 +272,7 @@ def _config_json_isolated(tmp_path, monkeypatch):
     from r36s_studio import config
 
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))  # log_dir/config_dir hors Windows (CI du 2026-10-12)
     monkeypatch.setattr(config, "config_path", lambda: tmp_path / "config.json")
     yield
 

@@ -10,6 +10,13 @@ import pytest
 from r36s_studio.gui import logs
 
 
+@pytest.fixture(autouse=True)
+def _home_config_not_xdg(monkeypatch):
+    """Ces tests vérifient le repli `~/.config` : sans la variable que
+    `conftest._config_json_isolated` pose."""
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+
 @patch("r36s_studio.gui.logs.platform.system", return_value="Darwin")
 def test_log_dir_under_home_config_on_macos(mock_system, tmp_path):
     with patch("r36s_studio.gui.logs.Path.home", return_value=tmp_path):

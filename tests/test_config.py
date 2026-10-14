@@ -8,7 +8,16 @@ import sys
 from dataclasses import fields
 from unittest.mock import patch
 
+import pytest
+
 from r36s_studio import config
+
+
+@pytest.fixture(autouse=True)
+def _home_config_not_xdg(monkeypatch):
+    """Ces tests vérifient le repli `~/.config` : sans la variable que
+    `conftest._config_json_isolated` pose."""
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
 
 @patch("r36s_studio.config.platform.system", return_value="Darwin")
@@ -330,3 +339,17 @@ def test_consoles_diverses_licence_key_round_trips_through_config_json(tmp_path)
 
         path.write_text('{"consoles_diverses_licence_key": 42}', encoding="utf-8")
         assert config.load_config().consoles_diverses_licence_key == ""
+
+
+def test_data_dirs_follow_xdg_config_home_outside_windows(tmp_path, monkeypatch):
+    """CI Linux/macOS du 2026-10-12 : `log_dir` écrivait dans le vrai
+    `~/.config` pendant les tests (seul `APPDATA` était redirigé)."""
+    import platform
+
+    from r36s_studio import config as config_module
+    from r36s_studio.gui import logs
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert logs.log_dir() == tmp_path / "r36s-studio" / "logs"
+    assert config_module.config_dir() == tmp_path / "r36s-studio"

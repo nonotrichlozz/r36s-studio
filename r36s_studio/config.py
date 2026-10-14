@@ -162,7 +162,7 @@ def config_dir() -> Path:
     if platform.system() == "Windows":
         base = Path(os.environ.get("APPDATA", str(Path.home())))
     else:
-        base = Path.home() / ".config"
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
     path = base / "r36s-studio"
     path.mkdir(parents=True, exist_ok=True)
     return path

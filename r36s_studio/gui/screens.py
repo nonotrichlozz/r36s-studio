@@ -21,9 +21,10 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QPainter, QPen, QPixmap, QPolygon
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -176,6 +177,30 @@ class Dialog(QDialog):
         super().__init__(parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setModal(True)
+
+    _FIT_EVENTS = (QEvent.LayoutRequest, QEvent.Resize, QEvent.Show)
+
+    def event(self, event) -> bool:  # noqa: N802 (nom imposé par Qt)
+        """Hauteur minimale = celle du contenu à la largeur actuelle. Qt ne
+        compte pas les lignes en plus des textes à retour à la ligne
+        (`totalMinimumSize` ignore `heightForWidth`) : la hauteur restait
+        celle de la première page affichée, et une page plus haute
+        (« Quelle console as-tu ? ») s'écrasait, boutons superposés."""
+        handled = super().event(event)
+        layout = self.layout()
+        if event.type() in self._FIT_EVENTS and layout is not None and layout.hasHeightForWidth():
+            # Une zone de défilement (liste des firmwares...) reste
+            # réductible jusqu'à sa hauteur minimale.
+            slack = sum(
+                max(0, area.sizeHint().height() - max(area.minimumSize().height(), area.minimumSizeHint().height()))
+                for area in self.findChildren(QAbstractScrollArea)
+                if area.isVisible()
+            )
+            base = layout.totalMinimumSize()
+            minimum = QSize(base.width(), max(base.height(), layout.totalHeightForWidth(self.width()) - slack))
+            if minimum != self.minimumSize():
+                self.setMinimumSize(minimum)
+        return handled
 
 
 class ClickableFrame(QFrame):

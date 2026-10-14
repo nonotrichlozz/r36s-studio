@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import QTimer, QUrl, Slot
+from PySide6.QtCore import QByteArray, QTimer, QUrl, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QStackedWidget
 
@@ -287,6 +287,9 @@ _ASSISTED_AD_HOC_DONE_STRINGS = {
 # taille des tuiles l'était.
 _ASSISTED_MIN_WIDTH = _ASSISTED_GRID_TOTAL_WIDTH + _ASSISTED_CONTENT_SPACING + _ASSISTED_PANEL_WIDTH + 60
 _ASSISTED_MIN_HEIGHT = _ASSISTED_GRID_TOTAL_HEIGHT + 96
+# Taille d'ouverture au premier lancement (bornée à 90 % de l'écran, jamais
+# sous le minimum) : de quoi lire le journal sans agrandir à la main.
+_OPENING_WIDTH, _OPENING_HEIGHT = 1440, 900
 
 
 def _android_catalog_search_url(server_url: str) -> str:
@@ -382,7 +385,6 @@ class MainWindow(QMainWindow):
         min_width = max(1120, _ASSISTED_MIN_WIDTH)
         min_height = max(690, _ASSISTED_MIN_HEIGHT)
         self.setMinimumSize(min_width, min_height)
-        self.resize(min_width, min_height)
 
         self._mode: Optional[str] = None
         self._device: Optional[Device] = None
@@ -464,6 +466,7 @@ class MainWindow(QMainWindow):
         # convention que `_device`/`_file_path` ci-dessus plutôt qu'une
         # classe d'état séparée.
         self._app_config = app_config.load_config()
+        self._restore_window_geometry(min_width, min_height)
         # Système de fichiers pour « Remettre la carte à zéro » (§4.3 bis,
         # mode expert uniquement) -- mémorisé comme `firmware`/`ui_mode`,
         # choisi via `ResetCardLabelDialog`.
@@ -1596,7 +1599,23 @@ class MainWindow(QMainWindow):
             self._terminate_active_worker_before_close()
         if self._macos_auth_session is not None:
             self._macos_auth_session.close()
+        self._app_config.window_geometry = bytes(self.saveGeometry().toBase64()).decode("ascii")
+        app_config.save_config(self._app_config)
         super().closeEvent(event)
+
+    def _restore_window_geometry(self, min_width: int, min_height: int) -> None:
+        """Taille du dernier lancement, sinon taille d'ouverture : s'ouvrir à
+        la taille minimale obligeait à agrandir à chaque fois (signalé le
+        2026-10-14). `restoreGeometry` ramène la fenêtre sur un écran
+        visible si celui d'avant a été débranché."""
+        saved = self._app_config.window_geometry
+        if saved and self.restoreGeometry(QByteArray.fromBase64(saved.encode("ascii"))):
+            return
+        available = self.screen().availableGeometry()
+        self.resize(
+            max(min_width, min(_OPENING_WIDTH, int(available.width() * 0.9))),
+            max(min_height, min(_OPENING_HEIGHT, int(available.height() * 0.9))),
+        )
 
     def _terminate_active_worker_before_close(self) -> None:
         """Annulation coopérative d'abord (`cancel()`, via le fichier que

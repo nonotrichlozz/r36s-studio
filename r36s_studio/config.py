@@ -156,6 +156,9 @@ class AppConfig:
     source_stall_timeout_seconds: int = DEFAULT_SOURCE_STALL_TIMEOUT_SECONDS
     # {card_id: [{"set_id", "name", "date" (AAAA-MM-JJ), "outcome"}]}
     boot_set_trials: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
+    # `QMainWindow.saveGeometry()` en base64 : taille et position choisies
+    # par l'utilisateur, retrouvées au lancement suivant ("" = taille d'ouverture).
+    window_geometry: str = ""
 
 
 def config_dir() -> Path:
@@ -248,6 +251,7 @@ def load_config() -> AppConfig:
         verify_backup_source=verify_backup_source,
         source_stall_timeout_seconds=source_stall_timeout_seconds,
         boot_set_trials=_valid_boot_set_trials(raw.get("boot_set_trials")),
+        window_geometry=window_geometry if isinstance(window_geometry := raw.get("window_geometry"), str) else "",
     )
 
 

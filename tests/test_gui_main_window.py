@@ -6448,3 +6448,29 @@ def test_rocknix_r36s_flash_success_tells_what_to_look_at_on_the_console(mock_li
     window._on_worker_finished(True)
 
     assert "Logo ROCKNIX" in window._log_panel._log_view.toPlainText()
+
+
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_window_opens_larger_than_minimum_then_remembers_user_size(mock_list, mock_filter, mock_detect, qapp):
+    """Signalé le 2026-10-14 : la fenêtre s'ouvrait à sa taille minimale,
+    à agrandir à la main à chaque lancement."""
+    from unittest.mock import MagicMock
+
+    from PySide6.QtCore import QRect
+
+    from r36s_studio.gui import main_window as mw
+
+    screen = MagicMock()
+    screen.availableGeometry.return_value = QRect(0, 0, 1920, 1040)
+    with patch.object(mw.MainWindow, "screen", return_value=screen):
+        window = MainWindow()
+    assert (window.width(), window.height()) == (mw._OPENING_WIDTH, mw._OPENING_HEIGHT)
+
+    # Écran offscreen de 800 px de large : `restoreGeometry` y ramène la
+    # largeur au minimum, d'où la hauteur seule (760, pas le minimum de 690).
+    window.resize(window.minimumWidth(), 760)
+    window.close()  # closeEvent -> config.json (redirigé par conftest)
+    reopened = MainWindow()
+    assert reopened.height() == 760

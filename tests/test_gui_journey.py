@@ -74,3 +74,33 @@ def test_main_window_routes_journey(mock_list, mock_filter, mock_load, qapp):
         window._on_journey_image_chosen("C:/fake/k36.img.xz", cp.CLONE, "")
     prepare.assert_called_once()
     assert window._file_path == "C:/fake/k36.img.xz" and window._journey_flash and window._assisted_ad_hoc_active
+
+
+def test_dialog_pages_never_squash_at_any_window_size(qapp):
+    """Signalé le 2026-10-14 : « Quelle console as-tu ? » gardait la hauteur
+    minimale de la première page affichée -- boutons superposés, « Lire la
+    carte » coupé. `Dialog.event` recalcule le minimum, textes à retour à
+    la ligne compris."""
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    from r36s_studio.gui import theme
+
+    qapp.setStyleSheet(theme.STYLESHEET)
+    try:
+        dialog = ConsoleJourneyDialog()
+        dialog.start(not_booting=True)
+        dialog.show()
+        for show_page in (lambda: dialog.start(not_booting=False), lambda: dialog._show_system_page(cp.AMBIGUOUS)):
+            show_page()
+            for size in ((200, 150), (420, 300), (900, 700)):
+                dialog.resize(*size)
+                for _ in range(3):
+                    qapp.processEvents()
+                for widget in dialog.findChildren(QPushButton) + dialog.findChildren(QLabel):
+                    if not widget.isVisible():
+                        continue
+                    needed = widget.heightForWidth(widget.width()) if widget.hasHeightForWidth() else widget.minimumSizeHint().height()
+                    assert widget.height() >= needed, (size, widget.text())
+        dialog.close()
+    finally:
+        qapp.setStyleSheet("")

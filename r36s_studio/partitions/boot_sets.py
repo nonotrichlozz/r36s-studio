@@ -54,6 +54,12 @@ NOT_SCREEN_DIRS = ("device_trees",)
 ROCKNIX_PANELS_DIR = "overlays/panels"
 ROCKNIX_PANEL_PREFIX = "mipi-panel.dtbo."
 ROCKNIX_PANEL_TARGET = "overlays/mipi-panel.dtbo"
+# dArkOSRE (`dtb/<famille>/<chaîne matérielle>/`) : son outil
+# `select_device.ps1` supprime les .dtb de la racine avant de copier -- les
+# jeux n'ont pas tous les mêmes noms (`rg351v-uboot.dtb` des clones,
+# `rg351mp-uboot.dtb` des R36S), un reste lu par u-boot serait le mauvais.
+# Fait seulement pour un jeu dont le dossier de premier niveau a cette table.
+DARKOSRE_DEVICE_TABLE = "r36_devices.ini"
 
 _TMP_SUFFIX = ".r36s-tmp"
 
@@ -141,9 +147,14 @@ def apply_set(boot_root: PathLike, set_id: str) -> BootSetState:
     card = _read_json(state_dir / CARD_FILE)
     card_id = card.get("card_id") if isinstance(card.get("card_id"), str) else uuid.uuid4().hex
 
+    stale = []
+    if (root / PurePosixPath(set_id).parts[0] / DARKOSRE_DEVICE_TABLE).is_file():
+        dests = {dest.lower() for _, dest in chosen.files}  # FAT ignore la casse
+        stale = [p.name for p in root.iterdir() if p.is_file() and p.suffix.lower() == SCREEN_FILE_SUFFIX and p.name.lower() not in dests]
+
     originals = state_dir / ORIGINALS_DIR
     manifest = _read_manifest(originals)
-    for _, dest in chosen.files:
+    for dest in [dest for _, dest in chosen.files] + stale:
         if dest in manifest:
             continue  # déjà sauvegardé : la copie d'origine n'est jamais écrasée
         current = root / dest
@@ -154,6 +165,8 @@ def apply_set(boot_root: PathLike, set_id: str) -> BootSetState:
 
     for source, dest in chosen.files:
         _copy_atomic(root / source, root / dest)
+    for name in stale:
+        (root / name).unlink()
     _write_json(state_dir / CARD_FILE, {"card_id": card_id, "applied": set_id})
     return read_state(root)
 

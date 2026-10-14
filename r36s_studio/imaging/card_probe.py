@@ -213,18 +213,26 @@ class _Fat32:
         return False
 
 
+def _first_partition(f) -> Optional[Tuple[_Reader, bytes]]:
+    """(lecteur, secteur de démarrage) de la première partition MBR, ou
+    `None` (pas de MBR, GPT)."""
+    partitions = parse_mbr(f.read(SECTOR_SIZE))
+    if not partitions or is_gpt_protective(partitions):
+        return None
+    first = min(partitions, key=lambda p: p.index)
+    reader = _Reader(f, first.start_bytes)
+    return reader, reader.read(0, SECTOR_SIZE)
+
+
 def first_partition_contains(device_path: str, path: Tuple[str, ...] = SIGNATURE_PATH) -> bool:
     """Vrai si la première partition MBR du périphérique (exFAT ou FAT32)
     contient `path`. Faux pour tout le reste, sans jamais lever."""
     try:
         with open(device_path, "rb") as f:
-            first_sector = f.read(SECTOR_SIZE)
-            partitions = parse_mbr(first_sector)
-            if not partitions or is_gpt_protective(partitions):
+            found = _first_partition(f)
+            if found is None:
                 return False
-            first = min(partitions, key=lambda p: p.index)
-            reader = _Reader(f, first.start_bytes)
-            boot = reader.read(0, SECTOR_SIZE)
+            reader, boot = found
             if boot[3:11] == b"EXFAT   ":
                 return _ExFat(reader, boot).exists(path)
             if boot[82:90] == b"FAT32   ":
@@ -234,10 +242,25 @@ def first_partition_contains(device_path: str, path: Tuple[str, ...] = SIGNATURE
         return False
 
 
+def is_rocknix_card(device_path: str) -> bool:
+    """Carte ROCKNIX : première partition FAT32 étiquetée « ROCKNIX »
+    (étiquette du secteur de démarrage, relevée sur l'image RK3326
+    20261001). Faux pour tout le reste, sans jamais lever."""
+    try:
+        with open(device_path, "rb") as f:
+            found = _first_partition(f)
+    except (OSError, ValueError, EOFError, IndexError):
+        return False
+    if found is None:
+        return False
+    boot = found[1]
+    return boot[82:90] == b"FAT32   " and boot[71:82].rstrip().upper() == b"ROCKNIX"
+
+
 def is_sf3000_card(device_path: str) -> bool:
     """Carte de console SF3000 (menu d'origine ou TreeFrogUI) : `cubegm/
     rkgame` présent sur la première partition."""
     return first_partition_contains(device_path, SIGNATURE_PATH)
 
 
-__all__ = ["SIGNATURE_PATH", "first_partition_contains", "is_sf3000_card"]
+__all__ = ["SIGNATURE_PATH", "first_partition_contains", "is_rocknix_card", "is_sf3000_card"]

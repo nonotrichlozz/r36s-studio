@@ -40,14 +40,23 @@ d'abandonner avec un code dédié, `VOLUME_IN_USE` (invite à fermer les
 fenêtres de l'Explorateur affichant la carte plutôt que de suggérer un
 débranchement).
 
-⚠️ **Point non résolu à ce jour** : malgré ce verrouillage complet, une
-écriture Windows sur une carte ArkOS complète (BOOT + root + EASYROMS) peut
-encore échouer avec `[Errno 9] Bad file descriptor` peu après le début de
-l'écriture -- cause exacte non confirmée (hypothèses : reset du pilote de
-stockage au démontage, ou état PowerShell/WMI transitoire non encore
-retombé). `imaging/copy.py::copy_range` inclut le nombre d'octets déjà
-écrits et le temps écoulé dans le message d'erreur pour faciliter un futur
-diagnostic.
+**Ordre d'écriture du flash (`imaging/flash.py`)** : le premier Mio de
+l'image (MBR + GPT primaire) est lu en premier mais écrit **en dernier**
+(`DEFERRED_HEAD_BYTES`, `_write_deferred_head`), et le dernier Mio de la
+carte est remis à zéro juste avant (`TAIL_WIPE_BYTES`, `_wipe_stale_tail`,
+jamais s'il chevauche l'image). La vérification relit le corps de l'image
+**avant** d'écrire la table (`_hash_written_body` -- aucun volume ne peut
+encore être monté, donc ni Windows ni macOS ne peuvent y écrire), puis
+relit seulement le début de la carte après l'avoir écrit
+(`_read_back_head`, sur une poignée neuve si Windows a révoqué la
+poignée d'écriture).
+
+⚠️ **`[Errno 9] Bad file descriptor` sous Windows -- cause identifiée le
+11/10/2026, correctif à confirmer sur du vrai matériel** : écrire la table de
+partitions en premier laissait Windows découvrir et monter les partitions de
+l'image *pendant* la copie (nouveaux lecteurs visibles dans l'Explorateur
+juste après l'échec) ; ces volumes-là n'étaient pas verrouillés, et Windows
+révoquait la poignée physique. Détail : docs/bugs-imaging-io.md.
 
 **Sauvegarde intelligente :** ne pas copier 128 Go quand la dernière partition s'arrête
 à 8 Go. Lire la table de partitions (MBR ou GPT), calculer la fin du dernier secteur
@@ -275,6 +284,19 @@ standard ne le fait (Windows refuse, exfatprogs n'a pas de redimensionnement)
 -- l'espace restant reste non partitionné par ce chemin ; « utiliser toute
 la carte » (ci-dessous) est l'alternative. Détection vérifiée depuis sur
 la vraie image d'une carte d'origine (fichier `.img`, lecture seule).
+
+**Exception : carte ROCKNIX (2026-10-11).** Première partition FAT32
+étiquetée `ROCKNIX` (`imaging/card_probe.py::is_rocknix_card`, lecture
+brute de l'étiquette du secteur de démarrage, vérifiée sur l'image
+`ROCKNIX-RK3326.aarch64-20261001-a`) : aucune partition de jeux. ROCKNIX
+agrandit lui-même sa partition de stockage (32 Mo dans l'image) jusqu'à la
+fin de la carte au premier démarrage (`resizepart 2 100%`) ; une partition
+de jeux créée derrière elle l'en empêche -- exactement « Can't have
+overlapping partitions » dans `fs-resize.log`, stockage resté à 32 Mo, écran
+noir après le logo. Cause probable de l'incident du 11/10/2026, en plus de
+la table GPT de secours périmée (`docs/bugs-imaging-io.md`) : **à confirmer
+sur du vrai matériel** (le journal du flash concerné aurait dû contenir
+« Espace de jeux recréé… »).
 
 **« Utiliser toute la carte » (carte SF3000, 2026-09-29).** Commande
 `clone-sf3000` (`__main__.py::cmd_clone_sf3000`, `imaging/sf3000_clone.py`,

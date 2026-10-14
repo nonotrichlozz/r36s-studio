@@ -60,6 +60,9 @@ class DtbInfo:
     board_compatible: Optional[str]
     panel_compatible: Optional[str]
     timings: Dict[str, int] = field(default_factory=dict)
+    # `model` racine : ce que le noyau Rockchip 4.4 affiche en `Hardware:`
+    # de /proc/cpuinfo (ex. `G80CA-MB V1.2-20250422`), voir hardware_table.py.
+    model: Optional[str] = None
 
 
 def _read_u32(data: bytes, offset: int) -> int:
@@ -96,6 +99,7 @@ def parse_dtb(data: bytes) -> DtbInfo:
 
     board_compatible: Optional[str] = None
     panel_compatible: Optional[str] = None
+    model: Optional[str] = None
     timings: Dict[str, int] = {}
 
     node_stack: list[str] = []
@@ -140,6 +144,8 @@ def parse_dtb(data: bytes) -> DtbInfo:
                     board_compatible = first_value
                 if at_panel_node and panel_compatible is None:
                     panel_compatible = first_value
+            elif prop_name == "model" and at_root and model is None:
+                model = value.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
             elif in_panel_subtree and prop_name in _TIMING_PROPERTIES and prop_name not in timings:
                 if len(value) == 4:
                     timings[prop_name] = struct.unpack(">I", value)[0]
@@ -153,7 +159,7 @@ def parse_dtb(data: bytes) -> DtbInfo:
         else:
             raise InvalidDtbError(f"Jeton DTB inconnu : 0x{token:08x}.")
 
-    return DtbInfo(board_compatible, panel_compatible, timings)
+    return DtbInfo(board_compatible, panel_compatible, timings, model)
 
 
 def parse_dtb_file(path: Union[str, Path]) -> DtbInfo:

@@ -296,8 +296,15 @@ seul un démarrage réel le dit.
   `.dtb` chacun ; **ArkOS-K36 supposé identique, non vérifié** (pas d'image
   sous la main le 2026-10-11). Et les fichiers
   `overlays/panels/mipi-panel.dtbo.*` de ROCKNIX (-> `overlays/mipi-panel.dtbo`,
-  posés par `identify/rocknix_r36s.py`). dArkOSen (« SELECT MODEL.bat ») :
-  pas encore, le `.bat` est dans l'image, non téléchargée.
+  posés par `identify/rocknix_r36s.py`). dArkOSRE (relevé sur
+  `dArkOSRE_R36_trixie_03082026.img`, 2026-10-14) : `dtb/<clone|r36s|
+  soysauce>/<chaîne matérielle>/`, affichés « clone / G80CA-MB V1.2-20250422
+  Panel 8 » ; à l'application, les `.dtb` de la racine absents du jeu sont
+  sauvegardés puis retirés, comme le fait son `select_device.ps1` (les jeux
+  clone ont `rg351v-uboot.dtb`, les R36S `rg351mp-uboot.dtb`). Seulement si
+  le dossier de premier niveau contient `r36_devices.ini` ; `Panels/` &co
+  inchangés. Constaté par l'utilisateur : le jeu `clone` fait démarrer son
+  clone.
 - **Retour en arrière, sur le BOOT lui-même** (`r36s-studio/`) :
   `origine/` garde chaque fichier avant sa première modification (jamais
   écrasé par un essai suivant) et `manifest.json` (le fichier existait-il ?),

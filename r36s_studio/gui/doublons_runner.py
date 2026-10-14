@@ -111,6 +111,11 @@ class DoublonsScanRunner(QThread):
         self.finished_scan.emit(result)
 
 
+# Échecs de même raison déjà ignorés par l'utilisateur au-delà desquels on
+# ne demande plus (signalé : touche Entrée bloquée sur un millier de fenêtres).
+AUTO_SKIP_AFTER = 3
+
+
 class DoublonsMoveRunner(QThread):
     """Écarte les unités choisies dans l'écran de résultats vers
     `_doublons/` (`dry_run` -- § garde-fou 1, mode simulation). Signal
@@ -140,6 +145,13 @@ class DoublonsMoveRunner(QThread):
         self._cancel_requested = False
         self._file_error_event = threading.Event()
         self._file_error_skip = False
+        # Signalé : un millier d'échecs = un millier de fenêtres. Case
+        # « Appliquer ce choix aux fichiers suivants » (`_skip_all`), et de
+        # toute façon plus de question après `AUTO_SKIP_AFTER` échecs de
+        # même raison déjà ignorés -- récapitulatif à la fin (doublons.log
+        # et message final), chaque fichier restant journalisé.
+        self._skip_all = False
+        self._skipped_by_reason: dict = {}
         # Exposés publiquement (même principe que `DoublonsScanRunner.
         # hash_cache`) pour que l'appelant, après coup, retire du résultat
         # affiché ce qui a réellement bougé sans jamais relancer une
@@ -158,8 +170,9 @@ class DoublonsMoveRunner(QThread):
         self._cancel_requested = True
         self._file_error_event.set()
 
-    def resume_after_file_error_confirmation(self, skip: bool) -> None:
+    def resume_after_file_error_confirmation(self, skip: bool, apply_to_following: bool = False) -> None:
         self._file_error_skip = skip
+        self._skip_all = skip and apply_to_following
         self._file_error_event.set()
 
     def run(self) -> None:
@@ -170,10 +183,15 @@ class DoublonsMoveRunner(QThread):
             return self._cancel_requested
 
         def on_file_error(exc: MoveFileFailed) -> bool:
-            self._file_error_event.clear()
-            self.file_error_confirmation_needed.emit(exc)
-            self._file_error_event.wait()
-            return self._file_error_skip
+            already = self._skipped_by_reason.get(exc.reason, 0)
+            if not (self._skip_all or already >= AUTO_SKIP_AFTER):
+                self._file_error_event.clear()
+                self.file_error_confirmation_needed.emit(exc)
+                self._file_error_event.wait()
+                if not self._file_error_skip:
+                    return False
+            self._skipped_by_reason[exc.reason] = already + 1
+            return True
 
         try:
             move_duplicates(

@@ -415,6 +415,119 @@ def test_cmd_flash_probes_the_real_card_content(
     assert "Carte de console SF3000 reconnue" in capsys.readouterr().out
 
 
+# --- carte ROCKNIX (§4.6) ------------------------------------------------------
+# ROCKNIX agrandit lui-même sa partition de stockage au premier démarrage
+# (`resizepart 2 100%`) : un espace de jeux créé derrière elle le bloque
+# (« Can't have overlapping partitions », écran noir après le logo).
+
+
+def _flash_ok(mock_list, mock_flash, tmp_path, device=None):
+    mock_list.return_value = [device or _make_device()]
+    mock_flash.return_value = FlashResult(bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True)
+    image = tmp_path / "ROCKNIX-RK3326.aarch64-20261001-a.img.gz"
+    image.write_bytes(b"x" * 100)
+    return image
+
+
+@patch("r36s_studio.__main__.is_rocknix_card", return_value=True)
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_rocknix_card_gets_no_games_partition(
+    mock_list, mock_confirm, mock_flash, mock_create_games, mock_probe, tmp_path, capsys
+):
+    image = _flash_ok(mock_list, mock_flash, tmp_path)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    assert args.func(args) == 0
+
+    mock_create_games.assert_not_called()
+    assert "Carte ROCKNIX" in capsys.readouterr().out
+
+
+@patch("r36s_studio.__main__.unmount_forced")
+@patch("r36s_studio.__main__.locate_mounted")
+@patch("r36s_studio.__main__.is_rocknix_card", return_value=True)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_prepares_rocknix_for_r36s_before_eject(
+    mock_list, mock_confirm, mock_flash, mock_probe, mock_locate, mock_unmount, tmp_path, capsys
+):
+    from r36s_studio.partitions import PartitionInfo
+
+    image = _flash_ok(mock_list, mock_flash, tmp_path)
+    root = tmp_path / "ROCKNIX"
+    mock_locate.return_value = PartitionInfo(device_path="/dev/fake-disk-test-3s1", label="ROCKNIX", filesystem="fat32", mountpoint=str(root))
+    order = []
+
+    def prepare(partition_root, cache_dir, preferred):
+        order.append(("prepare", partition_root, cache_dir, preferred))
+        return preferred
+
+    with patch("r36s_studio.__main__.prepare_r36s_card", side_effect=prepare), patch(
+        "r36s_studio.__main__.eject_device", side_effect=lambda path: order.append(("eject", path))
+    ):
+        args = _parse(
+            [
+                "flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--eject-after",
+                "--rocknix-r36s-panels", str(tmp_path / "panels"), "--rocknix-panel", "r36s-panel4",
+            ]
+        )
+        assert args.func(args) == 0
+
+    mock_locate.assert_called_once_with("/dev/fake-disk-test-3", "ROCKNIX")
+    assert order == [
+        ("prepare", str(root), str(tmp_path / "panels"), "r36s-panel4"),
+        ("eject", "/dev/fake-disk-test-3"),
+    ]
+    out = capsys.readouterr().out
+    assert "r36s-panel4" in out
+    assert '"ok": true' in out
+
+
+@patch("r36s_studio.__main__.locate_mounted", side_effect=OSError("partition introuvable"))
+@patch("r36s_studio.__main__.is_rocknix_card", return_value=True)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_r36s_preparation_failure_warns_without_failing_the_flash(
+    mock_list, mock_confirm, mock_flash, mock_probe, mock_locate, tmp_path, capsys
+):
+    image = _flash_ok(mock_list, mock_flash, tmp_path)
+
+    args = _parse(
+        ["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--rocknix-r36s-panels", str(tmp_path)]
+    )
+    assert args.func(args) == 0
+
+    out = capsys.readouterr().out
+    assert "Réglage R36S non fait" in out
+    assert '"warning"' in out
+    assert '"ok": true' in out
+
+
+@patch("r36s_studio.__main__.locate_mounted")
+@patch("r36s_studio.__main__.is_rocknix_card", return_value=False)
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile", return_value=None)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_r36s_preparation_skipped_when_card_is_not_rocknix(
+    mock_list, mock_confirm, mock_flash, mock_games, mock_probe, mock_locate, tmp_path, capsys
+):
+    image = _flash_ok(mock_list, mock_flash, tmp_path)
+
+    args = _parse(
+        ["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--rocknix-r36s-panels", str(tmp_path)]
+    )
+    assert args.func(args) == 0
+
+    mock_locate.assert_not_called()
+    assert "Réglage R36S non fait" in capsys.readouterr().out
+
+
 # --- --eject-after (§4.6) ----------------------------------------------------
 # Firmware Android : ses partitions sont illisibles pour Windows, qui propose
 # de les formater dès qu'il les découvre -- éjecter tout de suite, dans le

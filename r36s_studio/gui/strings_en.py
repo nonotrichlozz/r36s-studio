@@ -206,7 +206,12 @@ STRINGS_EN = {
     "doublons_move_reason_path_too_long": "the path is too long.",
     "doublons_move_reason_drive_removed": "the drive seems to have been unplugged or is no longer accessible.",
     "doublons_move_reason_insufficient_space": "not enough space on the destination drive.",
-    "doublons_move_reason_unknown": "unknown reason.",
+    "doublons_move_reason_source_missing": (
+        "the file is no longer there (moved or deleted since the analysis -- run the analysis again)."
+    ),
+    "doublons_move_reason_unknown": "unexpected system error:\n{detail}",
+    "doublons_file_error_apply_to_following": "Apply this choice to the following files",
+    "doublons_partial_move_reason_line": "\n• {count}: {reason}",
     "doublons_partial_move_completed": (
         "{moved} file(s) moved, {skipped} skipped after a failure -- see the log for details."
     ),
@@ -363,6 +368,7 @@ STRINGS_EN = {
     "journey_system_title": "The system to put on the card",
     "journey_system_origin": "It's an original console: the recommended system is dArkOS. Open the download page, take the latest version for the R36S, then come back here and choose the file.",
     "journey_system_clone": "It's a “clone” console: the recommended system is ArkOS-K36. Open the download page and take the “K36 and Similar Clones” version (.img.xz file, on Google Drive, Mediafire or MEGA), then come back here and choose the file.",
+    "journey_system_ambiguous": "This reference exists on both original consoles and clones: it isn't enough to tell them apart. So we suggest ArkOS-K36, the image that includes several spare screens and has a good chance of starting in both cases. Open the download page and take the “K36 and Similar Clones” version (.img.xz file), then come back here and choose the file.",
     "journey_system_unknown": "Without knowing which console it is, the safest choice is ArkOS-K36: it includes several spare screens and has a good chance of starting on most consoles. Open the download page and take the “K36 and Similar Clones” version (.img.xz file), then come back here and choose the file.",
     "journey_system_open_page": "Open the download page",
     "journey_system_choose_file": "I downloaded the file: choose it",
@@ -480,6 +486,30 @@ STRINGS_EN = {
     "execute_title_list_rocknix": "Looking for ROCKNIX versions online…",
     "execute_title_download_rocknix": "Downloading ROCKNIX…",
     "rocknix_download_success": "The latest version of ROCKNIX has been downloaded: {path}",
+    "rocknix_console_title": "Which console is this card for?",
+    "rocknix_console_hint": (
+        "On an R36S, ROCKNIX only starts with two settings: R36S Studio makes them for "
+        "you. On another console, these settings would stop it from starting: answer "
+        "Yes only if it really is an R36S."
+    ),
+    "rocknix_console_yes": "Yes, an R36S",
+    "rocknix_console_no": "No, another console",
+    "rocknix_console_unknown": "I don't know",
+    "rocknix_console_unknown_log": (
+        "Card not set up for an R36S. If your console is an R36S and the screen stays "
+        "black or grey, flash again and answer \"Yes, an R36S\"."
+    ),
+    "execute_title_download_panels": "Downloading the R36S screen files…",
+    "rocknix_panels_log": "R36S screen files ready: {count} of {total}.",
+    "rocknix_panels_none_log": (
+        "No screen file could be downloaded (no internet?). The flash can go on, but "
+        "the console's screen may stay grey."
+    ),
+    "rocknix_r36s_next_steps_log": (
+        "Put the card in your R36S and switch it on. ROCKNIX logo: all good, nothing else "
+        "to do. Grey screen or frozen black screen: put the card back in the computer to "
+        "try the next screen."
+    ),
     "execute_cancel": "Cancel",
     "execute_speed": "{speed:.1f} MB/s",
     "execute_eta": "Estimated time left: {eta}",

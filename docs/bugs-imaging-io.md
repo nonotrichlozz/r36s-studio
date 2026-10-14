@@ -9,6 +9,65 @@
 
 ---
 
+> ⚠️ **Cause identifiée (11/10/2026), correctif à confirmer sur du vrai
+> matériel : `[Errno 9] Bad file descriptor` pendant un flash Windows --
+> l'« investigation non résolue » plus bas.** Observé sur un lecteur
+> « Realtek PCIE CardReader », image `ROCKNIX-RK3326.aarch64-20261001-a.img.gz`,
+> carte de 32 Go qu'un `diskpart clean` venait de vider (aucune partition,
+> donc rien à verrouiller) : échec après 167 772 160 octets / 7,4 s. Indice
+> décisif, visible juste après l'échec : **deux nouveaux lecteurs dans
+> l'Explorateur, « ROCKNIX (D:) » (1,99 Go) et « Disque amovible (E:) »** --
+> les partitions de l'image en cours d'écriture.
+>
+> **Mécanisme** : la copie écrivait l'image dans l'ordre, donc sa table de
+> partitions (secteur 0) dès les premiers blocs. Windows la découvre en
+> cours de copie, crée les volumes correspondants et monte ceux qu'il
+> reconnaît (FAT) ; ces volumes n'existaient pas au moment de
+> `prepared_write_target`, ils ne sont donc pas verrouillés, et Windows
+> révoque la poignée `\\.\PhysicalDriveN` dès qu'on écrit dans leurs
+> secteurs (`ERROR_INVALID_HANDLE` -> `[Errno 9]`). Ça explique aussi le cas
+> de la carte ArkOS complète resté inexpliqué plus bas : verrouiller les
+> *anciennes* partitions ne protège pas des *nouvelles* dès que la table de
+> l'image diffère de celle de la carte -- et explique pourquoi certains
+> flashs passaient (même firmware reflashé : table identique, volumes déjà
+> verrouillés).
+>
+> **Correctif** (`imaging/flash.py`) : le premier Mio de l'image est lu
+> d'abord (SHA-256 inchangé, toujours dans l'ordre) mais écrit **en
+> dernier** (`_write_deferred_head`) -- pendant toute la copie la carte
+> garde son ancienne table, aucun nouveau volume ne peut apparaître.
+> **Premier test sur du vrai matériel (11/10/2026, 12h41) : écriture
+> complète, plus de `[Errno 9]`** (2 198 863 872 octets). Bonus : une annulation ou une erreur en cours de copie laisse une
+> carte sans nouvelle table plutôt qu'une table pointant vers des
+> partitions à moitié écrites. Tests : `tests/test_flash.py`
+> (`test_flash_writes_partition_table_region_last`,
+> `test_flash_cancelled_mid_copy_never_writes_new_partition_table`,
+> `test_flash_rereads_head_on_fresh_handle_if_write_handle_revoked`).
+>
+> **Suite, bug corrigé dans la foulée** : ce premier flash complet a
+> affiché « vérification échouée ». La relecture se faisait après
+> l'écriture de la table : Windows avait déjà monté la partition ROCKNIX
+> et y avait créé `System Volume Information` (présent sur la carte juste
+> après, `KERNEL` intact, md5 conforme). Corrigé : le corps est relu
+> **avant** d'écrire la table (`_hash_written_body`), puis seul le début
+> de la carte est relu après (`_read_back_head`). Tests :
+> `test_flash_verification_ignores_os_writes_after_partition_table_appears`,
+> `test_flash_detects_corrupted_body`,
+> `test_flash_detects_wrong_partition_table_read_back`.
+>
+> **Ajouté au passage, bug distinct confirmé sur du vrai matériel** : une
+> R36S sous ROCKNIX 20261001 restait sur un écran noir après le logo ;
+> `fs-resize.log` (partition ROCKNIX) : `parted ... resizepart 2 100%` ->
+> « Error: Can't have overlapping partitions », stockage resté à 32 Mo --
+> deux fois, y compris après un reflash. La carte de test avait porté ArkOS
+> et d'autres systèmes : une table GPT de secours, en fin de carte, survit
+> à l'écriture d'une image plus petite que la carte. Corrigé en remettant
+> le dernier Mio de la carte à zéro avant d'écrire la table
+> (`_wipe_stale_tail`, jamais s'il chevauche l'image ; avertissement
+> `on_warning` sans annuler le flash si cette écriture échoue).
+
+---
+
 > ⚠️ **Diagnostic partiel, PAS le correctif complet -- voir la note plus
 > bas (« Investigation en cours, non résolue ») : cette hypothèse (BOOT
 > resté monté) a corrigé un vrai bug de champ d'application, mais

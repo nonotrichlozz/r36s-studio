@@ -346,3 +346,41 @@ en échec, pendant le freeze). Ce n'est donc pas un problème de sélection
 d'écran pour ce firmware sur ce matériel précis ; ne pas présenter une future
 automatisation du choix de panneau comme la réponse à un simple écran figé
 sans d'abord exclure ce cas.
+
+**ROCKNIX sur R36S : préparation automatique après le flash (2026-10-11,
+`identify/rocknix_r36s.py`).** Vécu sur une R36S d'origine (carte mère
+« R36S V12 2023-08 », ROCKNIX 20261001 `-a`) : la console n'a démarré
+qu'après deux réglages à la main sur la partition ROCKNIX (FAT32) --
+`extlinux/extlinux.conf` remplacé par `extlinux.conf.r36s` (sinon
+`boot.scr` choisit le .dtb d'après une tension ADC où la R36S ne figure
+pas, et retombe sur l'Odroid Go 2), et `overlays/mipi-panel.dtbo` = le
+fichier d'écran adapté (seul `r36s_clone` affichait le logo sur cette
+R36S *d'origine* : le nom du fichier ne dit pas quelle console l'utilise).
+Contenu de l'image vérifié en lecture seule : `extlinux.conf.r36s` (ligne
+`FDT /rk3326-gameconsole-r36s.dtb`) et `overlays/README.TXT` présents.
+- **Question avant la confirmation** (`RocknixConsoleDialog`, mode expert,
+  firmware ROCKNIX, fichier téléchargé ou choisi à la main) : « Pour quelle
+  console est cette carte ? ». L'image RK3326 sert aussi aux RG351, Odroid
+  Go… où ces réglages empêcheraient le démarrage : seulement sur « Oui, une
+  R36S », aucun bouton par défaut. « Je ne sais pas » = non, avec une
+  consigne au journal. Jamais dans le parcours de clonage ni « Préparer une
+  carte avec cette sauvegarde » (carte déjà réglée).
+- **Fichiers d'écran** : release `panel_overlays` de `stolen/rnix` (ex-
+  `r.nix-distribution`, fork de ROCKNIX/distribution). Aucune licence
+  explicite sur ces fichiers (GPL au mieux) : **jamais embarqués**,
+  téléchargés à la demande (`RocknixPanelDownloadRunner`, avant la
+  confirmation et toute élévation) dans `~/Documents/R36S Studio/
+  Firmwares/panels/`. Le dépôt ne publie aucune somme : empreintes SHA-256
+  fixées dans le code (`PANELS`, relevées le 2026-10-11), tout fichier
+  différent est refusé. Ordre d'essai : `r36s_clone`, `r36s-panel4`, 3, 2, 1.
+- **Worker** (`cmd_flash --rocknix-r36s-panels <cache> [--rocknix-panel]`),
+  après la vérification, avant l'éjection : partition localisée par
+  `locate_mounted(device, "ROCKNIX")` (jamais de lettre en dur) ;
+  `extlinux.conf` -> `extlinux.conf.orig` (une seule fois, jamais écrasé),
+  `extlinux.conf.r36s` -> `extlinux.conf`, tous les fichiers d'écran
+  vérifiés dans `overlays/panels/`, le premier disponible en
+  `overlays/mipi-panel.dtbo`. Best-effort comme l'éjection : un échec est un
+  avertissement clair (« Réglage R36S non fait… »), jamais un échec du flash.
+- **À confirmer sur du vrai matériel** : tout ce paragraphe (montage de la
+  partition ROCKNIX par le worker élevé juste après le flash sous Windows,
+  copie, démarrage de la console).

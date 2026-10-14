@@ -80,7 +80,7 @@ from pathlib import Path
 from typing import List, Optional, TextIO
 
 from r36s_studio import APP_VERSION
-from r36s_studio.detect import COPY_GAMES, EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, arkos_step_refusal
+from r36s_studio.detect import COPY_GAMES, EXTRACT_BOOT, EXTRACT_EASYROMS, INJECT_BOOT, ROCKNIX_BOOT_LABEL, arkos_step_refusal
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons.journal_check import verify_journal
 from r36s_studio.identify import identify_from_boot_directory, result_to_dict
@@ -105,7 +105,8 @@ from r36s_studio.imaging import (
     format_reset_partition,
 )
 from r36s_studio.imaging import sf3000_clone
-from r36s_studio.imaging.card_probe import is_sf3000_card
+from r36s_studio.identify.rocknix_r36s import DEFAULT_PANEL, PANELS, R36sConfigMissing, prepare_r36s_card
+from r36s_studio.imaging.card_probe import is_rocknix_card, is_sf3000_card
 from r36s_studio.imaging.exfat_reader import ExFatError
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.flash import UnstableImageRefused
@@ -505,6 +506,37 @@ def _create_games_partition_after_flash(device: Device) -> None:
         emit_log(f"La carte est disponible sous {games_result.drive_letter}:.")
 
 
+def _prepare_rocknix_r36s_after_flash(device: Device, rocknix: bool, panels_dir: str, panel: str) -> None:
+    """Réglages R36S sur la partition ROCKNIX (`identify/rocknix_r36s.py`),
+    demandés par la GUI quand l'utilisateur a répondu que la carte est pour
+    une R36S. Best-effort comme l'éjection : un échec n'annule jamais le
+    flash déjà vérifié, mais il est dit clairement (sans ces réglages, la
+    console ne démarre pas)."""
+    try:
+        if not rocknix:
+            raise ValueError("la carte écrite n'est pas une carte ROCKNIX")
+        partition = locate_mounted(device.path, ROCKNIX_BOOT_LABEL)
+        installed = prepare_r36s_card(partition.mountpoint, panels_dir, panel)
+        unmount_forced(partition)
+    except (OSError, ValueError, PartitionNotFound, PartitionNotMounted, R36sConfigMissing) as exc:
+        emit_log(
+            "Réglage R36S non fait : la console risque de ne pas démarrer. "
+            "Recommence le flash ; si ça se reproduit, signale-le.",
+            level="warning",
+        )
+        emit_log(f"Détail : {exc}", level="warning")
+        return
+    emit_log("Carte réglée pour une R36S (démarrage et écran).")
+    if installed is None:
+        emit_log(
+            "Aucun fichier d'écran disponible (pas d'internet ?) : l'écran risque de rester gris. "
+            "Reflashe la carte une fois connecté à internet.",
+            level="warning",
+        )
+    else:
+        emit_log(f"Écran installé : {installed}.")
+
+
 def cmd_flash(args: argparse.Namespace) -> int:
     progress_file = _open_progress_file(args)
     try:
@@ -633,13 +665,28 @@ def cmd_flash(args: argparse.Namespace) -> int:
         # tous deux par ici. Étendre la partition principale n'est pas
         # possible sans risque (exFAT, voir docs/claude/imaging.md) :
         # l'espace restant reste non partitionné, et le journal le dit.
+        #
+        # Exception : carte ROCKNIX. ROCKNIX agrandit lui-même sa partition
+        # de stockage jusqu'à la fin de la carte au premier démarrage
+        # (`resizepart 2 100%`) ; un espace de jeux créé derrière elle
+        # l'en empêche (« Can't have overlapping partitions » dans
+        # fs-resize.log, stockage resté à 32 Mo, écran noir après le logo).
+        rocknix = is_rocknix_card(device.path)
         if is_sf3000_card(device.path):
             emit_log(
                 "Carte de console SF3000 reconnue (cubegm/rkgame) : pas d'espace de jeux séparé, "
                 "la console ne lit que la première partition. Le reste de la carte reste inutilisé."
             )
+        elif rocknix:
+            emit_log(
+                "Carte ROCKNIX reconnue : pas d'espace de jeux séparé, ROCKNIX utilisera "
+                "toute la carte au premier démarrage."
+            )
         else:
             _create_games_partition_after_flash(device)
+
+        if args.rocknix_r36s_panels:
+            _prepare_rocknix_r36s_after_flash(device, rocknix, args.rocknix_r36s_panels, args.rocknix_panel)
 
         if args.eject_after:
             # Généralisé au-delà d'Android (§4.6) : au moins une partition
@@ -1494,6 +1541,20 @@ def build_parser() -> argparse.ArgumentParser:
             "Autorise l'écriture d'une image .img.instable (sauvegarde d'une carte source "
             "instable, non fiable) -- mode expert seulement, après confirmation explicite"
         ),
+    )
+    flash_parser.add_argument(
+        "--rocknix-r36s-panels",
+        metavar="DOSSIER",
+        help=(
+            "Carte ROCKNIX pour une R36S : règle extlinux.conf et pose le fichier d'écran, "
+            "pris dans ce dossier (fichiers déjà téléchargés et vérifiés)"
+        ),
+    )
+    flash_parser.add_argument(
+        "--rocknix-panel",
+        default=DEFAULT_PANEL,
+        choices=[name for name, _ in PANELS],
+        help="Écran à poser en premier (défaut : %(default)s)",
     )
     _add_worker_args(flash_parser)
     _add_dev_args(flash_parser)

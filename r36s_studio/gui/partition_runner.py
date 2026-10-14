@@ -35,6 +35,7 @@ from r36s_studio.identify.rocknix import (
     download_asset,
     resolve_latest_r36s_assets,
 )
+from r36s_studio.identify import rocknix_r36s
 from r36s_studio.imaging.copy import PROGRESS_INTERVAL, OperationCancelled, ProgressEvent
 from r36s_studio.imaging.system_backup import GamesPartitionNotFound, estimate_system_backup_size_unprivileged
 from r36s_studio.partitions import (
@@ -274,6 +275,20 @@ class RocknixDownloadRunner(QThread):
 
         self.finished_download.emit(True, str(destination))
 
+
+
+class RocknixPanelDownloadRunner(QThread):
+    """Fichiers d'écran R36S (`identify/rocknix_r36s.py`) téléchargés dans
+    le cache avant la confirmation du flash -- quelques Ko, mais un appel
+    réseau ne tourne jamais sur le thread Qt principal. Ne lève jamais :
+    renvoie le nombre de fichiers disponibles (vérifiés) sur le total."""
+
+    finished_panels = Signal(int, int)  # disponibles, total
+
+    def run(self) -> None:
+        cache = rocknix_r36s.panels_cache_dir()
+        rocknix_r36s.download_missing_panels(cache)
+        self.finished_panels.emit(len(rocknix_r36s.available_panels(cache)), len(rocknix_r36s.PANELS))
 
 @dataclass
 class SystemBackupEstimate:

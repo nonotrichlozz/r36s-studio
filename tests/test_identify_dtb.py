@@ -61,6 +61,7 @@ def _build_fake_dtb(
     board_compatible: str = "rk3326-evb-lp3-v12",
     panel_compatible: str = "sitronix,st7703",
     timings: dict[str, int] | None = None,
+    model: str | None = None,
 ) -> bytes:
     """Construit un .dtb minimal à la main : nœud racine avec `compatible`,
     un enfant `panel@0` avec son propre `compatible` et ses propriétés de
@@ -84,6 +85,8 @@ def _build_fake_dtb(
     struct_block = b""
     struct_block += _begin_node("")
     struct_block += _prop(strings, "compatible", board_compatible.encode("utf-8") + b"\x00")
+    if model is not None:
+        struct_block += _prop(strings, "model", model.encode("utf-8") + b"\x00")
     struct_block += _begin_node("panel@0")
     struct_block += _prop(strings, "compatible", panel_compatible.encode("utf-8") + b"\x00")
     for name, value in timings.items():

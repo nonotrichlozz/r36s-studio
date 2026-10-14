@@ -42,6 +42,10 @@ __all__ = [
 # clones sans changer la forme de ce module.
 CLONE_DTB_FILENAMES = {"rk3326-evb-lp3-v12-linux.dtb"}
 
+# Table de dArkOSRE (identify/hardware_table.py) : sur une telle carte, le
+# `.dtb` de la racine est celui qu'on a choisi, pas celui de la console.
+DARKOSRE_DEVICE_TABLE = ("dtb", "r36_devices.ini")
+
 
 class IdentifyFailureReason(Enum):
     """Cause de l'échec d'identification (étape 2 du mode assisté, §5) --
@@ -76,6 +80,10 @@ class IdentifyResult:
     # des `.dtb` trouvés, indépendamment de leur validité de parsing ou du
     # `.dtb` retenu pour `info` (`identify_from_boot_directory`).
     is_clone: bool = False
+    # `model` du premier `.dtb` de la racine qui en porte un (chaîne
+    # `Hardware:` de la console, identify/hardware_table.py) ; `None` sur
+    # une carte dArkOSRE (voir DARKOSRE_DEVICE_TABLE).
+    hardware_model: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -119,6 +127,7 @@ def identify_from_boot_directory(directory: Union[str, Path]) -> IdentifyResult:
     # nom qui l'identifie comme clone -- l'autre pourrait très bien être
     # celui choisi pour l'identification normale (tri alphabétique).
     is_clone = any(candidate.name.lower() in CLONE_DTB_FILENAMES for candidate in candidates)
+    hardware_model = None if root.joinpath(*DARKOSRE_DEVICE_TABLE).is_file() else _root_model(root, candidates)
 
     if not candidates:
         return IdentifyResult(
@@ -126,6 +135,7 @@ def identify_from_boot_directory(directory: Union[str, Path]) -> IdentifyResult:
             scanned_directory=scanned_directory,
             examined_files=examined_files,
             is_clone=is_clone,
+            hardware_model=hardware_model,
         )
 
     for candidate in candidates:
@@ -136,7 +146,11 @@ def identify_from_boot_directory(directory: Union[str, Path]) -> IdentifyResult:
         if not info.board_compatible:
             continue
         return IdentifyResult(
-            info=info, scanned_directory=scanned_directory, examined_files=examined_files, is_clone=is_clone
+            info=info,
+            scanned_directory=scanned_directory,
+            examined_files=examined_files,
+            is_clone=is_clone,
+            hardware_model=hardware_model,
         )
 
     return IdentifyResult(
@@ -145,6 +159,19 @@ def identify_from_boot_directory(directory: Union[str, Path]) -> IdentifyResult:
         examined_files=examined_files,
         is_clone=is_clone,
     )
+
+
+def _root_model(root: Path, candidates: List[Path]) -> Optional[str]:
+    for candidate in candidates:
+        if candidate.parent != root:
+            continue
+        try:
+            model = parse_dtb_file(candidate).model
+        except (InvalidDtbError, OSError):
+            continue
+        if model:
+            return model
+    return None
 
 
 def result_to_dict(result: IdentifyResult) -> dict:
@@ -165,4 +192,5 @@ def result_from_dict(data: dict) -> IdentifyResult:
         examined_files=list(data.get("examined_files") or []),
         detail=data.get("detail"),
         is_clone=bool(data.get("is_clone")),
+        hardware_model=data.get("hardware_model"),
     )

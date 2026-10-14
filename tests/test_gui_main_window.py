@@ -1891,7 +1891,7 @@ def test_doublons_move_file_error_confirmed_resumes_with_skip_true(
 
     window._on_doublons_move_file_error_confirmed()
 
-    window._doublons_move_runner.resume_after_file_error_confirmation.assert_called_once_with(True)
+    window._doublons_move_runner.resume_after_file_error_confirmation.assert_called_once_with(True, False)
 
 
 @patch("r36s_studio.gui.main_window.app_config.save_config")
@@ -2086,7 +2086,7 @@ def test_fda_welcome_screen_open_settings_opens_the_same_settings_pane(
     mock_run.assert_called_once_with(["open", _MACOS_FULL_DISK_ACCESS_SETTINGS_URL], check=True)
 
 
-@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig())
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(firmware="arkos"))
 @patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
@@ -2534,10 +2534,11 @@ def test_choosing_an_unsupported_format_for_flash_blocks_confirm_dialog(
     assert "pas une image utilisable" in mock_warning.call_args[0][2]
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(firmware="arkos"))
 @patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.UNKNOWN, _all_status(StepStatus.AVAILABLE)))
 @patch("r36s_studio.gui.main_window.filter_devices")
 @patch("r36s_studio.gui.main_window.list_devices")
-def test_confirm_dialog_cancel_never_starts_the_worker(mock_list, mock_filter, mock_detect, qapp):
+def test_confirm_dialog_cancel_never_starts_the_worker(mock_list, mock_filter, mock_detect, mock_load, qapp):
     """Annuler ferme simplement la fenêtre de confirmation (§5, refonte
     navigation) -- plus de retour à une fenêtre Fichier chaînée, juste un
     abandon qui laisse la vue principale inchangée derrière."""
@@ -6054,6 +6055,8 @@ def test_rocknix_download_success_opens_confirm_dialog_with_downloaded_path(
     window._on_rocknix_download_finished(True, "/tmp/ROCKNIX-RK3326.aarch64-20260801-a.img.gz")
 
     assert window._file_path == "/tmp/ROCKNIX-RK3326.aarch64-20260801-a.img.gz"
+    assert window._rocknix_console_dialog.isVisible() is True  # question R36S avant la confirmation
+    window._rocknix_console_dialog.no_button.click()
     assert window._confirm_dialog.isVisible() is True
     assert window._home._tiles["flash"].isEnabled() is True  # plus occupé, la fenêtre Confirmation prend le relais
 
@@ -6331,3 +6334,117 @@ def test_identify_on_windows_gives_the_runner_an_elevated_reader(mock_list, mock
         window._run_identify(device)
 
     assert callable(mock_runner_class.call_args.kwargs["elevated_identify"])
+
+
+# --- ROCKNIX sur R36S : question, fichiers d'écran, options du worker ------
+# Les réglages R36S (identify/rocknix_r36s.py) empêcheraient une autre
+# console de démarrer : faits seulement sur un « Oui, une R36S » explicite.
+
+
+def _rocknix_flash_window():
+    window = MainWindow()
+    window.show()
+    window._device = _make_device()
+    window._mode = "flash"
+    window._file_path = "/tmp/ROCKNIX-RK3326.aarch64-20261001-a.img.gz"
+    return window
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="rocknix"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_rocknix_flash_asks_the_console_with_no_default_answer(mock_list, mock_filter, mock_load, qapp):
+    window = _rocknix_flash_window()
+
+    window._open_flash_confirmation()
+
+    dialog = window._rocknix_console_dialog
+    assert dialog.isVisible() is True
+    assert window._confirm_dialog.isVisible() is False
+    assert not any(b.isDefault() or b.autoDefault() for b in (dialog.yes_button, dialog.no_button, dialog.unknown_button))
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="arkos"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_other_firmware_goes_straight_to_confirmation(mock_list, mock_filter, mock_load, qapp):
+    window = _rocknix_flash_window()
+
+    window._open_flash_confirmation()
+
+    assert window._rocknix_console_dialog.isVisible() is False
+    assert window._confirm_dialog.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="rocknix"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_rocknix_r36s_yes_downloads_panels_then_passes_them_to_the_worker(mock_list, mock_filter, mock_load, qapp, tmp_path):
+    window = _rocknix_flash_window()
+    panel_runner_class = _mock_rocknix_runner_class()
+    worker_class = _mock_runner_class()
+
+    window._open_flash_confirmation()
+    with patch("r36s_studio.gui.main_window.RocknixPanelDownloadRunner", panel_runner_class):
+        window._rocknix_console_dialog.yes_button.click()
+
+    assert window._rocknix_console_dialog.isVisible() is False
+    panel_runner_class.instances[0].start.assert_called_once()
+    assert window._confirm_dialog.isVisible() is False  # pas avant la fin du téléchargement
+
+    window._on_rocknix_panels_finished(5, 5)
+    assert window._confirm_dialog.isVisible() is True
+    assert "5 sur 5" in window._log_panel._log_view.toPlainText()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", worker_class), patch(
+        "r36s_studio.gui.main_window.rocknix_r36s.panels_cache_dir", return_value=tmp_path
+    ):
+        window._on_confirmed()
+    argv = worker_class.instances[0].argv
+    assert argv[argv.index("--rocknix-r36s-panels") + 1] == str(tmp_path)
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="rocknix"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_rocknix_r36s_without_any_panel_warns_but_still_offers_the_flash(mock_list, mock_filter, mock_load, qapp):
+    window = _rocknix_flash_window()
+    window._rocknix_r36s = True
+
+    window._on_rocknix_panels_finished(0, 5)
+
+    assert window._confirm_dialog.isVisible() is True
+    assert "pas d'internet" in window._log_panel._log_view.toPlainText()
+
+
+@pytest.mark.parametrize("button, logs_hint", [("no_button", False), ("unknown_button", True)])
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="rocknix"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_rocknix_not_r36s_never_prepares_the_card(mock_list, mock_filter, mock_load, qapp, button, logs_hint):
+    window = _rocknix_flash_window()
+    worker_class = _mock_runner_class()
+
+    window._open_flash_confirmation()
+    getattr(window._rocknix_console_dialog, button).click()
+
+    assert window._confirm_dialog.isVisible() is True
+    assert ("Oui, une R36S" in window._log_panel._log_view.toPlainText()) is logs_hint
+    with patch("r36s_studio.gui.main_window.WorkerRunner", worker_class):
+        window._on_confirmed()
+    assert "--rocknix-r36s-panels" not in worker_class.instances[0].argv
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="rocknix"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_rocknix_r36s_flash_success_tells_what_to_look_at_on_the_console(mock_list, mock_filter, mock_load, qapp):
+    window = _rocknix_flash_window()
+    window._rocknix_r36s = True
+    worker_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", worker_class):
+        window._start_worker()
+
+    window._on_worker_finished(True)
+
+    assert "Logo ROCKNIX" in window._log_panel._log_view.toPlainText()

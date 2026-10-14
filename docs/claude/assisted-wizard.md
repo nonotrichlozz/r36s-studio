@@ -307,7 +307,16 @@ sauvegarder, éjecter, aide) ; tout reste accessible en mode expert,
   (`identify`), sinon la référence de carte mère imprimée dans la console,
   **en saisie libre** (pas de liste fermée : la base s'enrichira avec les
   consoles des clients). Un seul cas documenté : `G80CA-MB V1.2-20250422` =
-  clone.
+  clone. **Table de dArkOSRE** (`identify/hardware_table.py`, 2026-10-14,
+  crédit southoz/dArkOSRE-R36) : 28 chaînes `Hardware:` de /proc/cpuinfo ->
+  r36s/clone/soysauce. Ces chaînes sont la propriété `model` racine du
+  `.dtb` (noyau Rockchip 4.4) : `identify` la lit sur les `.dtb` de la
+  racine du BOOT (`hardware_model`, ignorée si `dtb/r36_devices.ini` existe :
+  le `.dtb` y est un choix, pas la console), et la référence tapée passe par
+  la même table. Correspondance par préfixe à un mot près ; `R36S-V12
+  2023-08-18` seul reste ambigu (R36S et clones) : profil `AMBIGUOUS`,
+  même image que UNKNOWN mais message qui dit pourquoi (sinon l'utilisateur
+  croit que sa saisie n'a servi à rien) ; soysauce -> UNKNOWN.
 - **« Je ne sais pas » -> l'image clone** (ArkOS-K36) : c'est elle qui a
   sauvé le testeur, et elle embarque les écrans (`Panels/`) -- bonnes chances
   de démarrer même sur une console d'origine. Console d'origine connue ->

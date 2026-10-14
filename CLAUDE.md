@@ -260,6 +260,13 @@ Détail et bancs de test : `docs/claude/testing.md`.
   (worker élevé) ; sous Linux, montage `udisksctl` d'une partition EFI non
   vérifié -- un refus donnerait le message « protection de l'ordinateur »,
   sans relecture élevée (`elevation-macos.md`).
+- Table matérielle de dArkOSRE (`identify/hardware_table.py`) : vérifiée sur
+  les `.dtb` de dArkOSRE, jamais sur un `.dtb` de carte d'usine -- que son
+  `model` porte bien ces chaînes reste supposé (`assisted-wizard.md`).
+- ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
+  fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
+  sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,
+  `imaging.md`).
 
 ---
 

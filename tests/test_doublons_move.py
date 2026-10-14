@@ -946,3 +946,44 @@ def test_posix_mount_filesystem_returns_none_when_command_fails(monkeypatch):
     monkeypatch.setattr("r36s_studio.doublons.move.subprocess.run", raising_run)
 
     assert move_module._posix_mount_filesystem("/mnt/x") is None
+
+
+def test_move_duplicates_source_gone_since_scan_is_reported_as_source_missing(tmp_path):
+    """Signalé : ~1000 « raison inconnue », toutes `[Errno 2]` -- la source
+    n'existait plus au moment du déplacement (doublons.log)."""
+    root = tmp_path / "root"
+    unit = _single_file_unit(root / "Gone.zip", b"g" * 10)
+    (root / "Gone.zip").unlink()
+
+    with pytest.raises(MoveFileFailed) as exc_info:
+        move_duplicates(str(root), [unit])
+
+    assert exc_info.value.reason == "source_missing"
+    assert "code 2" in exc_info.value.system_error
+
+
+def test_move_duplicates_cross_volume_deletes_a_read_only_original(tmp_path, monkeypatch):
+    """Signalé : 270 « accès refusé » à la suppression de l'original après
+    une copie vérifiée -- attribut lecture seule sous Windows."""
+    import stat
+
+    _make_cross_volume(monkeypatch, destination_suffix="backup")
+    root = tmp_path / "root"
+    destination = tmp_path / "backup"
+    destination.mkdir()
+    game = root / "Game.zip"
+    unit = _single_file_unit(game, b"x" * 100)
+    os.chmod(game, stat.S_IREAD)
+
+    real_unlink = os.unlink
+
+    def unlink_refusing_read_only(path, *args, **kwargs):
+        if "backup" not in str(path) and not os.stat(path).st_mode & stat.S_IWRITE:
+            raise PermissionError(13, "Access denied")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr("r36s_studio.doublons.move.os.unlink", unlink_refusing_read_only)
+
+    assert move_duplicates(str(root), [unit], destination=str(destination)) == 1
+    assert not game.exists()
+    assert (destination / "Game.zip").read_bytes() == b"x" * 100

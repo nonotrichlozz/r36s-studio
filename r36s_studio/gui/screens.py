@@ -1635,6 +1635,43 @@ class RocknixVariantDialog(Dialog):
         self.variant_chosen.emit(asset, expected_sha256)
 
 
+class RocknixConsoleDialog(Dialog):
+    """« Pour quelle console est cette carte ? », avant tout flash ROCKNIX
+    en mode expert (`MainWindow._open_flash_confirmation`). Les réglages R36S
+    (`identify/rocknix_r36s.py`) empêcheraient une autre console de
+    démarrer : `answered(True)` seulement sur « Oui, une R36S ». Aucun
+    bouton par défaut, Entrée ne répond jamais Oui à la place de
+    l'utilisateur."""
+
+    answered = Signal(bool, bool)  # est une R36S, « je ne sais pas »
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("rocknix_console_title"))
+
+        layout = QVBoxLayout(self)
+        title = QLabel(tr("rocknix_console_title"))
+        title.setProperty("role", "title")
+        layout.addWidget(title)
+
+        hint = QLabel(tr("rocknix_console_hint"))
+        hint.setWordWrap(True)
+        hint.setProperty("role", "secondary")
+        layout.addWidget(hint)
+
+        self.yes_button = QPushButton(tr("rocknix_console_yes"))
+        self.no_button = QPushButton(tr("rocknix_console_no"))
+        self.unknown_button = QPushButton(tr("rocknix_console_unknown"))
+        self.yes_button.clicked.connect(lambda: self.answered.emit(True, False))
+        self.no_button.clicked.connect(lambda: self.answered.emit(False, False))
+        self.unknown_button.clicked.connect(lambda: self.answered.emit(False, True))
+        buttons = QHBoxLayout()
+        for button in (self.yes_button, self.no_button, self.unknown_button):
+            button.setAutoDefault(False)
+            buttons.addWidget(button)
+        layout.addLayout(buttons)
+
+
 _FILE_TITLE_KEYS = {
     "backup": "file_title_backup",
     "backup_system": "file_title_backup_system",
@@ -4275,6 +4312,12 @@ class DoublonsRiskConfirmDialog(Dialog):
         self._message = QLabel()
         self._message.setWordWrap(True)
         layout.addWidget(self._message)
+        # Seulement pour « ignorer ce fichier et continuer » (signalé : une
+        # fenêtre par fichier en échec, inutilisable sur un millier) --
+        # masquée pour les analyses à risque, jamais pré-cochée.
+        self._apply_to_following = QCheckBox(tr("doublons_file_error_apply_to_following"))
+        self._apply_to_following.setVisible(False)
+        layout.addWidget(self._apply_to_following)
         layout.addStretch()
 
         buttons = QHBoxLayout()
@@ -4304,6 +4347,13 @@ class DoublonsRiskConfirmDialog(Dialog):
         explicitement, point 4) a besoin d'un titre différent, ce
         déplacement n'ayant rien à voir avec une analyse à risque."""
         self._title_label.setText(title)
+
+    def show_apply_to_following(self, visible: bool) -> None:
+        self._apply_to_following.setChecked(False)
+        self._apply_to_following.setVisible(visible)
+
+    def apply_to_following(self) -> bool:
+        return self._apply_to_following.isVisible() and self._apply_to_following.isChecked()
 
     def _on_confirm(self) -> None:
         self.close()

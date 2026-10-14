@@ -115,6 +115,35 @@ def test_apply_then_restore_returns_to_original(tmp_path):
     assert not list(root.rglob("*.r36s-tmp"))
 
 
+def test_darkosre_set_removes_stale_root_dtb_like_select_device_ps1(tmp_path):
+    """Relevé sur dArkOSRE_R36_trixie_03082026.img : les jeux clone ont
+    `rg351v-uboot.dtb`, les R36S `rg351mp-uboot.dtb` ; l'ancien ne doit pas
+    rester à la racine. Ailleurs (Panels/), rien n'est retiré."""
+    root = tmp_path / "BOOT"
+    folder = root / "dtb" / "r36s" / "R36S-V22 2024-12-18"
+    folder.mkdir(parents=True)
+    (root / "dtb" / "r36_devices.ini").write_text("[R36S-V22 2024-12-18]\nvariant = r36s\n")
+    (root / "rg351v-uboot.dtb").write_bytes(b"clone-uboot")
+    (root / "RK3326-R36S-LINUX.DTB").write_bytes(b"clone-linux")
+    (folder / "rg351mp-uboot.dtb").write_bytes(b"r36s-uboot")
+    (folder / "rk3326-r36s-linux.dtb").write_bytes(b"r36s-linux")
+
+    set_id = "dtb/r36s/R36S-V22 2024-12-18"
+    assert [s.name for s in boot_sets.list_sets(root)] == ["r36s / R36S-V22 2024-12-18"]
+    boot_sets.apply_set(root, set_id)
+    names = {p.name.lower() for p in root.iterdir() if p.is_file()}
+    assert names == {"rg351mp-uboot.dtb", "rk3326-r36s-linux.dtb"}  # casse différente : copié, pas supprimé
+
+    boot_sets.restore_original(root)
+    assert (root / "rg351v-uboot.dtb").read_bytes() == b"clone-uboot"
+    assert not (root / "rg351mp-uboot.dtb").exists()
+
+    other = _boot(tmp_path / "autre")
+    (other / "garde.dtb").write_bytes(b"x")
+    boot_sets.apply_set(other, "Panels/Panel 1")
+    assert (other / "garde.dtb").exists()
+
+
 def test_manifest_written_before_any_boot_file_changes(tmp_path):
     """Retrait de la carte en pleine copie : l'origine reste restaurable."""
     root = _boot(tmp_path)

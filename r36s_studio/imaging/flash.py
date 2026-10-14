@@ -10,18 +10,39 @@ demande, sans redemander confirmation lui-même."""
 from __future__ import annotations
 
 import hashlib
+import os
 import platform
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 from r36s_studio.devices import Device
 
-from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, copy_range
+from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, ProgressEvent, copy_range
 from .image_source import check_image_format, estimate_total_bytes, is_unstable_image, open_image_source
 from .source_verify import check_image_digests, check_sidecar_matches_size
 from .write_target import WINDOWS_SECTOR_SIZE, prepared_write_target, reunmount_before_verify
 
 HASH_CHUNK_SIZE = 4 * 1024 * 1024
+
+# Début de l'image (table de partitions MBR + GPT primaire, et de la marge)
+# écrit EN DERNIER, après tout le reste -- voir `_write_deferred_head` et
+# docs/bugs-imaging-io.md (« [Errno 9] Bad file descriptor », cause
+# identifiée le 11/10/2026, correctif à confirmer sur du vrai matériel).
+# 1 Mio : multiple de tout secteur, couvre le MBR (secteur 0), l'en-tête
+# GPT (secteur 1) et ses 128 entrées (secteurs 2-33).
+DEFERRED_HEAD_BYTES = 1024 * 1024
+
+# Fin de la carte remise à zéro avant d'écrire la table de partitions --
+# voir `_wipe_stale_tail` : une table GPT de secours laissée par un ancien
+# système (ArkOS, EmuELEC, une autre carte...) empêche ROCKNIX d'agrandir sa
+# partition de stockage au premier démarrage.
+TAIL_WIPE_BYTES = 1024 * 1024
+
+# Windows seulement : délai avant de relire le début de la carte sur une
+# poignée neuve, si Windows a révoqué la poignée d'écriture juste après
+# l'écriture de la table (`_read_back_head`).
+WINDOWS_REMOUNT_SETTLE_SECONDS = 2.0
 
 
 class UnstableImageRefused(Exception):
@@ -54,31 +75,169 @@ class _HashingReader:
         return self._digest.hexdigest()
 
 
-def _hash_stream_range(stream, num_bytes: int, chunk_size: int = HASH_CHUNK_SIZE) -> str:
-    """Relit `num_bytes` depuis `stream` pour la vérification, en le
-    repositionnant au début (`seek(0)`) plutôt que de rouvrir le chemin par
-    lequel il a été ouvert. Bug corrigé, constaté sur du vrai matériel :
-    refermer le descripteur d'écriture puis rouvrir le même chemin pour
-    relire laisse une fenêtre, même brève, pendant laquelle macOS peut
-    remonter automatiquement le disque fraîchement écrit et y écrire des
-    fichiers d'index (Spotlight, fseventsd) — invalidant les octets qu'on
-    s'apprête à relire (comparaison octet par octet confirmée : les
-    divergences tombent exactement dans la zone FAT de la première
-    partition). Garder le même descripteur ouvert entre l'écriture et
-    cette relecture (`flash_device`) referme cette fenêtre ;
-    `write_target.reunmount_before_verify` reste un filet de sécurité en
-    plus, pour le cas où une partition individuelle se monterait
-    indépendamment du périphérique brut."""
-    stream.seek(0)
-    digest = hashlib.sha256()
+def _read_up_to(stream, num_bytes: int) -> bytes:
+    """Lit jusqu'à `num_bytes` (moins seulement si la source s'épuise) --
+    un flux décompressé (`gzip`/`lzma`) peut renvoyer moins que demandé
+    sans être terminé."""
+    parts = []
     remaining = num_bytes
     while remaining > 0:
-        chunk = stream.read(min(chunk_size, remaining))
+        chunk = stream.read(remaining)
+        if not chunk:
+            break
+        parts.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(parts)
+
+
+def _pad_to_sector(data: bytes, sector_size: Optional[int]) -> bytes:
+    if sector_size and len(data) % sector_size != 0:
+        return data + b"\x00" * (sector_size - len(data) % sector_size)
+    return data
+
+
+def _offset_progress(on_progress: Optional[ProgressCallback], offset: int) -> Optional[ProgressCallback]:
+    """La copie du corps de l'image commence après `DEFERRED_HEAD_BYTES` :
+    on décale ses événements pour que la barre reflète toujours l'image
+    entière (règle §2 n°5, progression réelle) -- le début, déjà lu, est
+    compté comme fait."""
+    if on_progress is None or offset == 0:
+        return on_progress
+
+    def _shifted(event: ProgressEvent) -> None:
+        on_progress(
+            ProgressEvent(
+                done=event.done + offset,
+                total=event.total + offset,
+                speed=event.speed,
+                phase=event.phase,
+            )
+        )
+
+    return _shifted
+
+
+def _sync(destination) -> None:
+    destination.flush()
+    try:
+        os.fsync(destination.fileno())
+    except (AttributeError, OSError):
+        pass  # flux sans descripteur réel (tests) ; voir aussi `copy_range`
+
+
+def _wipe_stale_tail(destination, device: Device, image_end: int, sector_size: Optional[int]) -> bool:
+    """Remet à zéro le dernier `TAIL_WIPE_BYTES` de la carte, s'il est
+    entièrement au-delà de l'image écrite (jamais un octet de l'image).
+
+    Bug corrigé, confirmé sur du vrai matériel (R36S, ROCKNIX 20261001,
+    carte de test de 32 Go ayant déjà porté ArkOS puis d'autres systèmes) :
+    au premier démarrage, ROCKNIX échoue à agrandir sa partition de
+    stockage (`parted ... resizepart 2 100%` -> « Can't have overlapping
+    partitions », visible dans `fs-resize.log` sur la partition ROCKNIX),
+    qui reste à 32 Mo : écran noir après le logo. L'écriture de l'image ne
+    touche que son propre début -- la table GPT de secours d'un ancien
+    système, rangée dans les derniers secteurs de la carte, survit au flash
+    et contredit la nouvelle table. Même précaution que les outils de
+    flash grand public (effacer le début ET la fin).
+
+    Retourne False (sans lever) si la zone n'a pas pu être écrite : un
+    échec ici n'empêche pas une carte de démarrer, l'appelant prévient
+    l'utilisateur (`on_warning`) plutôt que d'annuler un flash réussi."""
+    size = device.size_bytes or 0
+    align = sector_size or 512
+    start = (size - TAIL_WIPE_BYTES) // align * align
+    image_end_aligned = -(-image_end // align) * align
+    if size <= 0 or start < image_end_aligned or start >= size:
+        return True  # carte trop petite pour une zone distincte de l'image : rien à faire
+    try:
+        destination.seek(start)
+        destination.write(b"\x00" * (size - start))
+        _sync(destination)
+    except OSError:
+        return False
+    return True
+
+
+def _write_deferred_head(destination, head: bytes, sector_size: Optional[int]) -> None:
+    """Écrit le début de l'image (dont la table de partitions) en tout
+    dernier, une fois tout le reste en place.
+
+    Cause identifiée sur du vrai matériel (Windows, lecteur
+    Realtek PCIE CardReader, image ROCKNIX-RK3326 sur une carte de 32 Go
+    qu'un `diskpart clean` venait de vider) : `[Errno 9] Bad file
+    descriptor` après 160 Mo écrits / 7,4 s, et aussitôt après l'échec,
+    deux NOUVEAUX lecteurs dans l'Explorateur -- « ROCKNIX (D:) » et un
+    « Disque amovible (E:) » : les partitions de l'image en cours
+    d'écriture. Mécanisme : en écrivant le début de l'image en premier, on
+    pose dès la première seconde une table de partitions valide ; Windows
+    la découvre en cours de copie, crée et monte ces volumes -- qui ne
+    sont PAS verrouillés (`prepared_write_target` ne peut verrouiller que
+    les volumes qui existaient AVANT l'écriture) -- puis révoque la
+    poignée `\\\\.\\PhysicalDriveN` dès qu'on écrit dans leurs secteurs.
+    Ça explique aussi l'échec « non résolu » sur la carte ArkOS complète
+    (docs/bugs-imaging-io.md) : verrouiller les anciennes partitions ne
+    protège pas des nouvelles, dès que la nouvelle table diffère de
+    l'ancienne. Écrire la table en dernier supprime la cause : pendant
+    toute la copie, la carte garde son ancienne table (volumes verrouillés)
+    et aucun nouveau volume ne peut apparaître. Une annulation ou une
+    erreur en cours de copie laisse au passage une carte sans nouvelle
+    table plutôt qu'une table pointant vers des partitions à moitié
+    écrites. ⚠️ Correctif pas encore re-testé sur du vrai matériel au
+    moment de l'écrire (voir docs/bugs-imaging-io.md)."""
+    destination.seek(0)
+    destination.write(_pad_to_sector(head, sector_size))
+    _sync(destination)
+
+
+def _hash_written_body(destination, head: bytes, body_len: int) -> "hashlib._Hash":
+    """SHA-256 de ce qui est sur la carte, relu AVANT d'écrire la table de
+    partitions : `head` (encore en mémoire, pas encore écrit) suivi du corps
+    relu depuis la carte. `_read_back_head` vérifie ensuite que le début
+    relu après écriture est identique à `head` -- les deux ensemble
+    valent une relecture complète.
+
+    Bug corrigé, constaté sur du vrai matériel (Windows, 11/10/2026, premier
+    flash réussi après `_write_deferred_head`) : écriture complète
+    (2 198 863 872 octets) mais « vérification échouée ». Une fois la table
+    écrite, Windows monte la partition ROCKNIX (FAT) et y crée aussitôt
+    `System Volume Information` (indexeur) -- dossier bien présent sur la
+    carte juste après, avec `KERNEL` intact (md5 conforme). Relire APRÈS
+    l'écriture de la table laissait Windows modifier la carte pendant la
+    relecture ; tant que la table n'est pas écrite, aucun volume ne peut
+    être monté, la relecture voit exactement ce qu'on a écrit. Même
+    protection contre l'indexation macOS (Spotlight, fseventsd).
+
+    Toujours sur le MÊME descripteur que l'écriture, jamais refermé puis
+    rouvert -- bug corrigé plus ancien, constaté sur du vrai matériel
+    macOS : refermer le descripteur d'écriture puis rouvrir le même chemin
+    laissait une fenêtre pendant laquelle macOS remontait le disque et y
+    écrivait des fichiers d'index, divergences tombant exactement dans la
+    zone FAT de la première partition."""
+    digest = hashlib.sha256(head)
+    destination.seek(len(head))
+    remaining = body_len
+    while remaining > 0:
+        chunk = destination.read(min(HASH_CHUNK_SIZE, remaining))
         if not chunk:
             break
         digest.update(chunk)
         remaining -= len(chunk)
-    return digest.hexdigest()
+    return digest
+
+
+def _read_back_head(destination, device: Device, length: int) -> bytes:
+    """Relit le début de la carte juste après l'avoir écrit, sur la même
+    poignée. Si Windows l'a déjà révoquée (nouvelle table découverte, voir
+    `_write_deferred_head`), relit sur une poignée neuve en lecture seule --
+    lire le début d'un disque dont des volumes sont montés est permis, et
+    cette zone (table de partitions) n'appartient à aucun volume."""
+    try:
+        destination.seek(0)
+        return _read_up_to(destination, length)
+    except OSError:
+        time.sleep(WINDOWS_REMOUNT_SETTLE_SECONDS)
+        with open(device.path, "rb") as fresh:
+            return _read_up_to(fresh, length)
 
 
 def flash_device(
@@ -134,38 +293,63 @@ def flash_device(
         total_hint = device.size_bytes or None
     sector_size = WINDOWS_SECTOR_SIZE if platform.system() == "Windows" else None
 
+    tail_wiped = True
+
     with prepared_write_target(device) as raw_path:
         # `destination` reste ouvert jusqu'à la fin de la vérification --
-        # voir la note sur `_hash_stream_range` : un descripteur d'écriture
-        # tenu ouvert sur le périphérique brut referme la fenêtre pendant
-        # laquelle macOS pourrait remonter automatiquement le disque entre
-        # la fin de l'écriture et la relecture. `raw_source` (l'image
-        # source), lui, n'est plus utile une fois la copie terminée.
+        # voir `_hash_written_body`.
         with open(raw_path, "r+b") as destination:
             with open_image_source(image_path) as raw_source:
                 hashing_source = _HashingReader(raw_source)
-                written = copy_range(
-                    hashing_source,
-                    destination,
-                    total_bytes=total_hint,
-                    on_progress=on_progress,
-                    block_size=block_size,
-                    sector_size=sector_size,
-                    should_cancel=should_cancel,
-                )
+                # Début de l'image lu tout de suite (pour le SHA-256, dans
+                # l'ordre), mais écrit en dernier -- `_write_deferred_head`.
+                head = _read_up_to(hashing_source, DEFERRED_HEAD_BYTES)
+                body_written = 0
+                if len(head) == DEFERRED_HEAD_BYTES:
+                    destination.seek(len(head))
+                    body_written = copy_range(
+                        hashing_source,
+                        destination,
+                        total_bytes=(None if total_hint is None else max(total_hint - len(head), 0)),
+                        on_progress=_offset_progress(on_progress, len(head)),
+                        block_size=block_size,
+                        sector_size=sector_size,
+                        should_cancel=should_cancel,
+                    )
+                elif should_cancel is not None and should_cancel():
+                    # Image plus petite que `DEFERRED_HEAD_BYTES` (tests,
+                    # images minuscules) : pas de copie du corps, mais
+                    # l'annulation reste honorée avant toute écriture.
+                    from .copy import OperationCancelled
+
+                    raise OperationCancelled(0)
             source_sha256 = hashing_source.hexdigest()
-            # Bug corrigé, constaté sur du vrai matériel : macOS peut
-            # remonter automatiquement les partitions fraîchement écrites
-            # (table de partitions désormais valide) et y écrire aussitôt
-            # des fichiers d'index (Spotlight, fseventsd) qui invalident la
-            # vérification -- voir `write_target.reunmount_before_verify`.
-            # Démonter une seule fois avant l'écriture
-            # (`prepared_write_target`) ne suffit pas ; garder `destination`
-            # ouvert (ci-dessus) non plus à lui seul, une partition pouvant
-            # se monter indépendamment du périphérique brut -- les deux
-            # mesures se complètent.
+            written = len(head) + body_written
+            tail_wiped = _wipe_stale_tail(destination, device, written, sector_size)
+            # Relecture du corps AVANT d'écrire la table -- voir
+            # `_hash_written_body`. `destination` reste le même descripteur
+            # que pour l'écriture (le refermer puis le rouvrir laisserait
+            # macOS remonter le disque entre les deux) ; `reunmount_before_verify` reste un
+            # filet de sécurité pour macOS.
             reunmount_before_verify(device)
-            written_sha256 = _hash_stream_range(destination, written)
+            verify_digest = _hash_written_body(destination, head, body_written)
+            _write_deferred_head(destination, head, sector_size)
+            head_back = _read_back_head(destination, device, len(head))
+            if on_progress is not None and len(head) < DEFERRED_HEAD_BYTES:
+                on_progress(ProgressEvent(done=written, total=written, speed=0.0))
+
+    if head_back == head:
+        written_sha256 = verify_digest.hexdigest()
+    else:
+        # Début de carte relu différent de ce qui vient d'être écrit : on
+        # le signale par une empreinte qui ne peut pas égaler la source.
+        written_sha256 = hashlib.sha256(head_back).hexdigest()
+
+    if not tail_wiped and on_warning is not None:
+        on_warning(
+            "La fin de la carte n'a pas pu être remise à zéro : si le système ne démarre pas "
+            "correctement (partition de stockage non agrandie), efface complètement la carte et reflashe-la."
+        )
 
     return FlashResult(
         bytes_written=written,

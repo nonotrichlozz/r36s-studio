@@ -69,6 +69,7 @@ import json
 import os
 import platform
 import shutil
+import stat
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -185,6 +186,7 @@ REASON_READ_ONLY = "read_only"
 REASON_PATH_TOO_LONG = "path_too_long"
 REASON_DRIVE_REMOVED = "drive_removed"
 REASON_INSUFFICIENT_SPACE = "insufficient_space"
+REASON_SOURCE_MISSING = "source_missing"
 REASON_UNKNOWN = "unknown"
 
 
@@ -204,13 +206,26 @@ class MoveFileFailed(Exception):
     que la copie vérifiée est déjà en place à destination (« le dire
     explicitement », § demandé)."""
 
-    def __init__(self, path: str, step: str, reason: str, detail: str, copy_succeeded: bool = False):
+    def __init__(
+        self,
+        path: str,
+        step: str,
+        reason: str,
+        detail: str,
+        copy_succeeded: bool = False,
+        system_error: str = "",
+    ):
         super().__init__(f"Échec ({step}) sur « {path} » : {detail}")
         self.path = path
         self.step = step
         self.reason = reason
         self.detail = detail
         self.copy_succeeded = copy_succeeded
+        # Message système court, sans le chemin (« Le fichier spécifié est
+        # introuvable (code 2) ») -- affiché seulement quand `reason` vaut
+        # `REASON_UNKNOWN`, pour ne plus jamais montrer « raison inconnue »
+        # sans la cause réelle (signalé : ~1000 échecs sans explication).
+        self.system_error = system_error or detail
         # Renseigné par `move_duplicates` au moment de la propagation --
         # les `Unit` déjà entièrement déplacées avant cet échec, pour que
         # l'appelant retire du résultat affiché ce qui a réellement
@@ -267,6 +282,12 @@ def _classify_os_error(exc: OSError) -> str:
     if exc.errno in (errno.EIO, errno.ENODEV, errno.ENXIO) or winerror in (21, 1117):  # ERROR_NOT_READY/IO_DEVICE
         return REASON_DRIVE_REMOVED
     return REASON_UNKNOWN
+
+
+def _system_error_text(exc: OSError) -> str:
+    code = getattr(exc, "winerror", None) or exc.errno
+    text = exc.strerror or str(exc)
+    return f"{text} (code {code})" if code else text
 
 
 _LONG_PATH_PREFIX = "\\\\?\\"
@@ -327,11 +348,39 @@ def _log_move_file_failure(exc: MoveFileFailed) -> None:
         pass
 
 
+def skipped_reason_counts(skipped: List[Tuple[Unit, MoveFileFailed]]) -> List[Tuple[str, int]]:
+    """Récapitulatif des fichiers ignorés, par raison, du plus fréquent au
+    moins fréquent -- un millier d'échecs se lit en deux lignes."""
+    counts: dict = {}
+    for _unit, failure in skipped:
+        counts[failure.reason] = counts.get(failure.reason, 0) + 1
+    return sorted(counts.items(), key=lambda item: -item[1])
+
+
+def _log_skipped_summary(skipped: List[Tuple[Unit, MoveFileFailed]]) -> None:
+    try:
+        horodatage = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        detail = ", ".join(f"{reason}={count}" for reason, count in skipped_reason_counts(skipped))
+        with open(gui_logs.doublons_log_path(), "a", encoding="utf-8") as fichier:
+            fichier.write(f"{horodatage} récapitulatif : {len(skipped)} ignoré(s) -- {detail}\n")
+    except OSError:
+        pass
+
+
 def _fail_move_step(path: Path, step: str, exc: OSError, copy_succeeded: bool = False) -> None:
     """Construit, journalise puis lève `MoveFileFailed` -- point de
     passage unique pour ne jamais oublier de journaliser un de ces trois
     cas (copie, vérification, suppression de la source)."""
-    failure = MoveFileFailed(str(path), step, _classify_os_error(exc), str(exc), copy_succeeded=copy_succeeded)
+    reason = _classify_os_error(exc)
+    # Signalé (doublons.log, 1680 « raison inconnue » toutes en Errno 2) :
+    # la source n'existait plus au moment du déplacement -- déjà déplacée
+    # ou retirée depuis l'analyse. Vérifié sur le disque, jamais déduit du
+    # seul code : un ENOENT peut aussi venir du côté destination.
+    if reason == REASON_UNKNOWN and isinstance(exc, FileNotFoundError) and not _path_exists_long(path):
+        reason = REASON_SOURCE_MISSING
+    failure = MoveFileFailed(
+        str(path), step, reason, str(exc), copy_succeeded=copy_succeeded, system_error=_system_error_text(exc)
+    )
     _log_move_file_failure(failure)
     raise failure from exc
 
@@ -573,6 +622,16 @@ def _move_one_file(member: Path, destination: Path, expected_sha256: Optional[st
     # pour "annuler" cet échec, ça perdrait un fichier pour de vrai.
     try:
         os.unlink(member_str)
+    except PermissionError as exc:
+        # Signalé (doublons.log : 270 « accès refusé » après une copie
+        # vérifiée) : attribut lecture seule sur l'original, qui bloque sa
+        # suppression sous Windows. Retiré seulement sur ce fichier, qui
+        # part de toute façon -- sa copie vérifiée est déjà en place.
+        try:
+            os.chmod(member_str, stat.S_IWRITE)
+            os.unlink(member_str)
+        except OSError:
+            _fail_move_step(member, "delete_source", exc, copy_succeeded=True)
     except OSError as exc:
         _fail_move_step(member, "delete_source", exc, copy_succeeded=True)
 
@@ -818,6 +877,7 @@ def move_duplicates(
         raise
 
     if skipped:
+        _log_skipped_summary(skipped)
         raise PartialMoveFailure(moved_units, skipped, done)
     return done
 

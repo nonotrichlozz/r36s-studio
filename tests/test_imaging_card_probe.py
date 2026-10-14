@@ -9,7 +9,7 @@ import struct
 
 import pytest
 
-from r36s_studio.imaging.card_probe import first_partition_contains, is_sf3000_card
+from r36s_studio.imaging.card_probe import first_partition_contains, is_rocknix_card, is_sf3000_card
 from r36s_studio.imaging.fat32 import format_fat32
 
 from .sparse_file import create_sparse_file
@@ -284,3 +284,40 @@ def test_partition_boot_sector_beyond_end_of_device_never_raises(tmp_path):
     img = tmp_path / "coupe.img"
     img.write_bytes(_mbr(0x07, 10_000, 100))
     assert first_partition_contains(str(img)) is False
+
+
+# --- carte ROCKNIX (étiquette du volume FAT32 de la première partition) -------
+# Relevé sur l'image ROCKNIX-RK3326.aarch64-20261001-a : MBR, partition 1 en
+# FAT32 étiquetée « ROCKNIX », partition 2 (stockage) de 32 Mo agrandie par
+# ROCKNIX lui-même au premier démarrage.
+
+
+def _fat32_card(path, label: str) -> None:
+    create_sparse_file(path, PART_START_LBA * SECTOR + FAT32_TEST_BYTES, _mbr(0x0C, PART_START_LBA, FAT32_TEST_BYTES // SECTOR))
+    format_fat32(str(path), PART_START_LBA * SECTOR, FAT32_TEST_BYTES, label)
+
+
+def test_rocknix_card_is_recognized_by_volume_label(tmp_path):
+    img = tmp_path / "rocknix.img"
+    _fat32_card(img, "ROCKNIX")
+    assert is_rocknix_card(str(img)) is True
+
+
+def test_other_fat32_label_is_not_rocknix(tmp_path):
+    img = tmp_path / "sdcard.img"
+    _fat32_card(img, "SDCARD")
+    assert is_rocknix_card(str(img)) is False
+
+
+def test_exfat_card_is_not_rocknix(tmp_path):
+    img = tmp_path / "sf3000.img"
+    _sf3000_exfat(img)
+    assert is_rocknix_card(str(img)) is False
+
+
+@pytest.mark.parametrize("content", [b"", b"\x00" * SECTOR])
+def test_rocknix_probe_never_raises(tmp_path, content):
+    img = tmp_path / "vide.img"
+    img.write_bytes(content)
+    assert is_rocknix_card(str(img)) is False
+    assert is_rocknix_card(str(tmp_path / "absent.img")) is False

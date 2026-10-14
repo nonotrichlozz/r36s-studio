@@ -317,7 +317,14 @@ STRINGS = {
     "doublons_move_reason_path_too_long": "le chemin est trop long.",
     "doublons_move_reason_drive_removed": "le disque semble avoir été débranché ou n'est plus accessible.",
     "doublons_move_reason_insufficient_space": "espace insuffisant sur le disque de destination.",
-    "doublons_move_reason_unknown": "raison inconnue.",
+    "doublons_move_reason_source_missing": (
+        "le fichier n'est plus à cet endroit (déplacé ou supprimé depuis l'analyse -- relance l'analyse)."
+    ),
+    # Seule raison qui montre l'erreur système réelle : sans elle,
+    # « raison inconnue » ne permet aucun diagnostic (signalé).
+    "doublons_move_reason_unknown": "erreur système inattendue :\n{detail}",
+    "doublons_file_error_apply_to_following": "Appliquer ce choix aux fichiers suivants",
+    "doublons_partial_move_reason_line": "\n• {count} : {reason}",
     "doublons_partial_move_completed": (
         "{moved} fichier(s) déplacé(s), {skipped} ignoré(s) après échec -- voir le journal pour le détail."
     ),
@@ -540,6 +547,7 @@ STRINGS = {
     "journey_system_title": "Le système à mettre sur la carte",
     "journey_system_origin": "C'est une console d'origine : le système conseillé est dArkOS. Ouvre la page de téléchargement, prends la dernière version pour la R36S, puis reviens ici et choisis le fichier.",
     "journey_system_clone": "C'est une console « clone » : le système conseillé est ArkOS-K36. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz, sur Google Drive, Mediafire ou MEGA), puis reviens ici et choisis le fichier.",
+    "journey_system_ambiguous": "Cette référence existe à la fois sur des consoles d'origine et sur des clones : elle ne suffit pas à trancher. On te propose donc ArkOS-K36, l'image qui contient plusieurs écrans de rechange et a de bonnes chances de démarrer dans les deux cas. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz), puis reviens ici et choisis le fichier.",
     "journey_system_unknown": "Sans savoir quelle console c'est, le plus sûr est ArkOS-K36 : il contient plusieurs écrans de rechange, il a de bonnes chances de démarrer sur la plupart des consoles. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz), puis reviens ici et choisis le fichier.",
     "journey_system_open_page": "Ouvrir la page de téléchargement",
     "journey_system_choose_file": "J'ai téléchargé le fichier : le choisir",
@@ -726,6 +734,33 @@ STRINGS = {
     "execute_title_list_rocknix": "Recherche des versions ROCKNIX en ligne…",
     "execute_title_download_rocknix": "Téléchargement de ROCKNIX en cours…",
     "rocknix_download_success": "La dernière version de ROCKNIX a été téléchargée : {path}",
+    # Question posée avant tout flash ROCKNIX en mode expert : les réglages
+    # R36S (identify/rocknix_r36s.py) empêcheraient une autre console de
+    # démarrer, donc seulement sur un « Oui » explicite.
+    "rocknix_console_title": "Pour quelle console est cette carte ?",
+    "rocknix_console_hint": (
+        "Sur une R36S, ROCKNIX ne démarre qu'avec deux réglages : R36S Studio les fait "
+        "pour toi. Sur une autre console, ces réglages l'empêcheraient de démarrer : "
+        "réponds Oui seulement si c'est bien une R36S."
+    ),
+    "rocknix_console_yes": "Oui, une R36S",
+    "rocknix_console_no": "Non, une autre console",
+    "rocknix_console_unknown": "Je ne sais pas",
+    "rocknix_console_unknown_log": (
+        "Carte non réglée pour une R36S. Si ta console est une R36S et que l'écran reste "
+        "noir ou gris, refais le flash en répondant « Oui, une R36S »."
+    ),
+    "execute_title_download_panels": "Téléchargement des fichiers d'écran R36S…",
+    "rocknix_panels_log": "Fichiers d'écran R36S prêts : {count} sur {total}.",
+    "rocknix_panels_none_log": (
+        "Aucun fichier d'écran n'a pu être téléchargé (pas d'internet ?). Le flash peut "
+        "continuer, mais l'écran de la console risque de rester gris."
+    ),
+    "rocknix_r36s_next_steps_log": (
+        "Mets la carte dans ta R36S et allume-la. Logo ROCKNIX : c'est bon, rien d'autre à "
+        "faire. Écran gris ou noir figé : remets la carte dans l'ordinateur pour essayer "
+        "l'écran suivant."
+    ),
     "execute_cancel": "Annuler",
     "execute_speed": "{speed:.1f} Mo/s",
     "execute_eta": "Temps restant estimé : {eta}",
@@ -1453,8 +1488,13 @@ _DOUBLONS_MOVE_REASON_KEYS = {
     "path_too_long": "doublons_move_reason_path_too_long",
     "drive_removed": "doublons_move_reason_drive_removed",
     "insufficient_space": "doublons_move_reason_insufficient_space",
+    "source_missing": "doublons_move_reason_source_missing",
     "unknown": "doublons_move_reason_unknown",
 }
+
+
+def _doublons_move_reason_text(reason: str, system_error: str = "") -> str:
+    return tr(_DOUBLONS_MOVE_REASON_KEYS.get(reason, "doublons_move_reason_unknown"), detail=system_error)
 
 
 def doublons_move_file_error_message(exc) -> str:
@@ -1470,13 +1510,18 @@ def doublons_move_file_error_message(exc) -> str:
     jargon dans l'interface). Utilisée à la fois pour la fenêtre « ignorer
     et continuer » (point 4) et pour le message final si l'utilisateur a
     choisi d'arrêter."""
-    reason = tr(_DOUBLONS_MOVE_REASON_KEYS.get(exc.reason, "doublons_move_reason_unknown"))
+    reason = _doublons_move_reason_text(exc.reason, getattr(exc, "system_error", "") or exc.detail)
     key = "doublons_file_error_message_copy_succeeded" if exc.copy_succeeded else "doublons_file_error_message"
     return tr(key, path=exc.path, reason=reason)
 
 
-def doublons_partial_move_message(moved: int, skipped: int) -> str:
+def doublons_partial_move_message(moved: int, skipped: int, reason_counts=()) -> str:
     """§ demandé explicitement, point 4 : le lot s'est terminé après
     qu'au moins un fichier a été ignoré -- un résumé plutôt qu'un message
     par fichier ignoré (déjà journalisé individuellement, `doublons.log`)."""
-    return tr("doublons_partial_move_completed", moved=moved, skipped=skipped)
+    message = tr("doublons_partial_move_completed", moved=moved, skipped=skipped)
+    # `reason_counts` : `move.py::skipped_reason_counts` -- un millier
+    # d'échecs récapitulés en quelques lignes plutôt qu'une fenêtre chacun.
+    for reason, count in reason_counts:
+        message += tr("doublons_partial_move_reason_line", count=count, reason=_doublons_move_reason_text(reason).rstrip(" :\n"))
+    return message

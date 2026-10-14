@@ -57,11 +57,13 @@ from r36s_studio.doublons.move import (
     has_pending_journal_entries,
     is_cross_volume_destination,
     is_fat_filesystem,
+    skipped_reason_counts,
 )
 from r36s_studio.doublons.report import build_report
 from r36s_studio.doublons.safety import is_filesystem_root, is_whole_user_folder
 from r36s_studio.doublons.scan import Unit
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, result_from_dict
+from r36s_studio.identify import rocknix_r36s
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.imaging import (
     DEFAULT_RESET_LABEL,
@@ -88,6 +90,7 @@ from .partition_runner import (
     IdentifyRunner,
     PartitionJobRunner,
     RocknixDownloadRunner,
+    RocknixPanelDownloadRunner,
     RocknixListRunner,
     SystemBackupEstimate,
     SystemBackupEstimateRunner,
@@ -120,6 +123,7 @@ from .screens import (
     MainView,
     ResetCardLabelDialog,
     WholeCardChoiceDialog,
+    RocknixConsoleDialog,
     RocknixVariantDialog,
     SameCardUnverifiedDialog,
     UpdateDialog,
@@ -627,6 +631,9 @@ class MainWindow(QMainWindow):
         # complet au disque, §3), sans rapport avec ces deux OS.
         self._about_dialog = AboutDialog(self)
         self._rocknix_variant_dialog = RocknixVariantDialog(self)
+        self._rocknix_console_dialog = RocknixConsoleDialog(self)
+        # Réponse « Oui, une R36S » du dernier flash ROCKNIX (`_open_flash_confirmation`).
+        self._rocknix_r36s = False
         self._backup_kind_dialog = BackupKindDialog(self)
         # Instance séparée pour la tuile 3 de l'accueil assisté (§5, refonte
         # menu de tuiles) -- `self._backup_kind_dialog` ci-dessus reste
@@ -684,6 +691,7 @@ class MainWindow(QMainWindow):
         self._doublons_move_error_moved_units: List[Unit] = []
         self._doublons_move_error_file_failure = None
         self._doublons_move_error_skipped_count = 0
+        self._doublons_move_error_skipped_reasons: list = []
         # Dernier résultat en cache trouvé (§ demandé explicitement :
         # « ne jamais obliger à relancer une analyse ») -- rafraîchi à
         # chaque ouverture de l'écran de choix du dossier
@@ -781,6 +789,7 @@ class MainWindow(QMainWindow):
         self._file_dialog.source_verify_toggled.connect(self._on_source_verify_toggled)
         self._file_dialog.rocknix_download_requested.connect(self._on_rocknix_download_requested)
         self._rocknix_variant_dialog.variant_chosen.connect(self._on_rocknix_variant_chosen)
+        self._rocknix_console_dialog.answered.connect(self._on_rocknix_console_answered)
         self._backup_kind_dialog.full_copy_requested.connect(lambda: self._on_backup_kind_chosen("full"))
         self._backup_kind_dialog.system_only_requested.connect(lambda: self._on_backup_kind_chosen("system"))
         self._backup_kind_dialog.cancelled.connect(self._cancel_wizard)
@@ -1265,6 +1274,53 @@ class MainWindow(QMainWindow):
         # obligatoire (règle §2 n°6). Les autres jobs n'effacent rien
         # (sauvegarde vers un fichier, ou copie de fichiers sur une
         # partition déjà en usage) — pas de fenêtre rouge.
+        self._open_flash_confirmation()
+
+    def _open_flash_confirmation(self) -> None:
+        """Fenêtre Confirmation du flash, précédée pour ROCKNIX (mode expert)
+        de la question « Pour quelle console est cette carte ? » : les
+        réglages R36S (`identify/rocknix_r36s.py`) empêcheraient une autre
+        console de démarrer, ils ne sont faits que sur un « Oui » explicite."""
+        self._rocknix_r36s = False
+        if self._is_flashing_rocknix():
+            self._rocknix_console_dialog.open()
+            return
+        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.open()
+
+    def _is_flashing_rocknix(self) -> bool:
+        """Mêmes conditions que `_is_flashing_android_firmware` : jamais le
+        parcours de clonage ni « Préparer une carte avec cette sauvegarde »,
+        qui restaurent une carte déjà réglée."""
+        if self._mode != "flash" or self._wizard_active or self._assisted_ad_hoc_active:
+            return False
+        return self._app_config.firmware == "rocknix"
+
+    def _on_rocknix_console_answered(self, is_r36s: bool, unknown: bool) -> None:
+        self._rocknix_console_dialog.close()
+        if not is_r36s:
+            if unknown:
+                self._log_panel.append_log(tr("rocknix_console_unknown_log"))
+            self._confirm_dialog.set_device(self._device)
+            self._confirm_dialog.open()
+            return
+        self._rocknix_r36s = True
+        # Fichiers d'écran téléchargés maintenant, avant toute élévation : le
+        # worker ne fait que les copier depuis le cache.
+        self._log_panel.start_operation(tr("execute_title_download_panels"))
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        self._runner = RocknixPanelDownloadRunner(parent=self)
+        self._runner.finished_panels.connect(self._on_rocknix_panels_finished)
+        self._runner.start()
+
+    def _on_rocknix_panels_finished(self, count: int, total: int) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        self._log_panel.set_idle()
+        self._log_panel.append_log(tr("rocknix_panels_log", count=count, total=total))
+        if count == 0:
+            self._log_panel.append_log(tr("rocknix_panels_none_log"))
         self._confirm_dialog.set_device(self._device)
         self._confirm_dialog.open()
 
@@ -1431,6 +1487,8 @@ class MainWindow(QMainWindow):
             argv += ["--stall-timeout", str(self._app_config.source_stall_timeout_seconds)]
         if argv[0] == "flash" and self._allow_unstable_image:
             argv.append("--allow-unstable")
+        if argv[0] == "flash" and self._rocknix_r36s and self._is_flashing_rocknix():
+            argv += ["--rocknix-r36s-panels", str(rocknix_r36s.panels_cache_dir())]
 
         # Journalise la ligne de commande complète au lancement de tout
         # worker élevé (backup/flash) -- signalé sur du vrai matériel :
@@ -1799,6 +1857,8 @@ class MainWindow(QMainWindow):
                 # la description lue avant le flash est oubliée plusieurs
                 # minutes après (`FirmwareEntry.post_flash_log_key`).
                 self._log_panel.append_log(tr(post_flash_key))
+            if self._rocknix_r36s and self._is_flashing_rocknix():
+                self._log_panel.append_log(tr("rocknix_r36s_next_steps_log"))
         else:
             # `friendly_error_message` mappe déjà "CANCELLED" sur le
             # message d'annulation adéquat (`strings._ERROR_MESSAGE_KEYS`)
@@ -2074,8 +2134,7 @@ class MainWindow(QMainWindow):
         # écriront réellement (règle §2 n°6).
         self._log_panel.finish_success(tr("rocknix_download_success", path=path), allow_eject=False, reveal_path=path)
         self._file_path = path
-        self._confirm_dialog.set_device(self._device)
-        self._confirm_dialog.open()
+        self._open_flash_confirmation()
 
     # --- fenêtre Aide (macOS uniquement, §3) --------------------------------
 
@@ -2864,13 +2923,16 @@ class MainWindow(QMainWindow):
         a échoué, § point 3)."""
         self._doublons_file_error_dialog.set_title(tr("doublons_file_error_title"))
         self._doublons_file_error_dialog.set_message(doublons_move_file_error_message(exc))
+        self._doublons_file_error_dialog.show_apply_to_following(True)
         self._doublons_file_error_dialog.open()
 
     def _on_doublons_move_file_error_confirmed(self) -> None:
         """« Continuer » -- ignore ce fichier précis et poursuit avec les
         suivants ; ce qui a déjà été déplacé le reste, jamais annulé."""
         if self._doublons_move_runner is not None:
-            self._doublons_move_runner.resume_after_file_error_confirmation(True)
+            self._doublons_move_runner.resume_after_file_error_confirmation(
+                True, self._doublons_file_error_dialog.apply_to_following()
+            )
 
     def _on_doublons_move_file_error_cancelled(self) -> None:
         """« Annuler » -- arrête le lot entier à partir de ce fichier."""
@@ -2891,10 +2953,12 @@ class MainWindow(QMainWindow):
             self._doublons_move_error_moved_units = list(runner.moved_units)
             self._doublons_move_error_file_failure = runner.last_file_error
             self._doublons_move_error_skipped_count = len(runner.skipped)
+            self._doublons_move_error_skipped_reasons = skipped_reason_counts(runner.skipped)
         else:
             self._doublons_move_error_moved_units = []
             self._doublons_move_error_file_failure = None
             self._doublons_move_error_skipped_count = 0
+            self._doublons_move_error_skipped_reasons = []
 
     def _on_doublons_move_finished(self, ok: bool) -> None:
         self._doublons_move_runner = None
@@ -2923,12 +2987,14 @@ class MainWindow(QMainWindow):
         self._doublons_move_error_moved_units = []
         self._doublons_move_error_file_failure = None
         self._doublons_move_error_skipped_count = 0
+        skipped_reasons = self._doublons_move_error_skipped_reasons
+        self._doublons_move_error_skipped_reasons = []
 
         if moved_units:
             self._doublons_results_screen.remove_units(moved_units)
 
         if self._last_error_code == "PARTIAL_MOVE_COMPLETED":
-            message = doublons_partial_move_message(len(moved_units), skipped_count)
+            message = doublons_partial_move_message(len(moved_units), skipped_count, skipped_reasons)
         elif file_failure is not None:
             message = doublons_move_file_error_message(file_failure)
         else:

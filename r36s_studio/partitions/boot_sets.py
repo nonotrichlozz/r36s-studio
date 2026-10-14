@@ -60,6 +60,9 @@ ROCKNIX_PANEL_TARGET = "overlays/mipi-panel.dtbo"
 # `rg351mp-uboot.dtb` des R36S), un reste lu par u-boot serait le mauvais.
 # Fait seulement pour un jeu dont le dossier de premier niveau a cette table.
 DARKOSRE_DEVICE_TABLE = "r36_devices.ini"
+# Écran de la carte d'origine, posé après le flash (`screen_backup.py`) :
+# toujours proposé en premier, seul jeu connu pour avoir fait démarrer la console.
+ORIGINAL_SCREEN_DIR = "ecran-d-origine"
 
 _TMP_SUFFIX = ".r36s-tmp"
 
@@ -89,7 +92,8 @@ class BootSetState:
 def list_sets(boot_root: PathLike) -> List[BootFileSet]:
     root = Path(boot_root)
     os.listdir(root)  # BOOT illisible (EFI sous Windows) : PermissionError, jamais « aucun jeu »
-    return _screen_folder_sets(root) + _rocknix_overlay_sets(root)
+    sets = _screen_folder_sets(root) + _rocknix_overlay_sets(root)
+    return sorted(sets, key=lambda s: s.set_id != ORIGINAL_SCREEN_DIR)  # tri stable
 
 
 def _screen_folder_sets(root: Path) -> List[BootFileSet]:
@@ -267,6 +271,7 @@ def _copy_atomic(source: Path, dest: Path) -> None:
 __all__ = [
     "BootFileSet",
     "BootSetState",
+    "ORIGINAL_SCREEN_DIR",
     "OriginalsMissing",
     "UnknownBootSet",
     "apply_set",

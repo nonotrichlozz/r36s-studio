@@ -342,3 +342,28 @@ def _real_config_dir_guard():
     _real_config_dir_guard_state.violations.clear()
     if violations:
         pytest.fail("\n".join(violations), pytrace=False)
+
+
+class _NoScreenToSave:
+    """`OriginalScreenSaveRunner` synchrone pour les tests de `MainWindow` :
+    le vrai monterait la carte (thread bloqué jusqu'à `MOUNT_WAIT_SECONDS`)
+    avant chaque flash confirmé. Répond « rien à mettre de côté »."""
+
+    def __init__(self, device_path, backups_dir=None, parent=None):
+        from unittest.mock import MagicMock
+
+        self.finished_save = MagicMock()
+        self._slots = []
+        self.finished_save.connect.side_effect = self._slots.append
+
+    def start(self):
+        for slot in self._slots:
+            slot(None, "none", "")
+
+
+@pytest.fixture(autouse=True)
+def _original_screen_save_is_synchronous(monkeypatch):
+    module = sys.modules.get("r36s_studio.gui.main_window")
+    if module is not None:
+        monkeypatch.setattr(module, "OriginalScreenSaveRunner", _NoScreenToSave)
+    yield

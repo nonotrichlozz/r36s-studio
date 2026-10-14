@@ -122,7 +122,7 @@ from r36s_studio.partitions import (
     locate_mounted,
     unmount_forced,
 )
-from r36s_studio.partitions import boot_sets
+from r36s_studio.partitions import boot_sets, screen_backup
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.protocol import configure as configure_protocol
 from r36s_studio.protocol import (
@@ -530,6 +530,36 @@ def _prepare_rocknix_r36s_after_flash(device: Device, rocknix: bool, panels_dir:
         emit_log(f"Écran installé : {installed}.")
 
 
+def _install_original_screen_after_flash(device: Device, saved_dir: str, rocknix: bool) -> None:
+    """Fichiers d'écran de la carte d'origine, mis de côté par la GUI avant
+    le flash, posés dans `ecran-d-origine/` du BOOT flashé et renommés
+    comme ceux du firmware écrit (`partitions/screen_backup.py`). Bonus :
+    un échec est un avertissement, jamais un échec du flash vérifié."""
+    if rocknix:
+        emit_log("Écran d'origine non reposé : ROCKNIX choisit son écran autrement (fichier d'écran).")
+        return
+    try:
+        partition = locate_mounted(device.path, BOOT_LABEL)
+        try:
+            names = screen_backup.install_original_screen(saved_dir, partition.mountpoint)
+        finally:
+            unmount_forced(partition)
+    except (OSError, PartitionNotFound, PartitionNotMounted, subprocess.CalledProcessError) as exc:
+        emit_log(
+            "L'écran d'origine n'a pas pu être reposé sur la carte : il reste sur l'ordinateur.",
+            level="warning",
+        )
+        emit_log(f"Détail : {exc} ({saved_dir})", level="warning")
+        return
+    if names is None:
+        emit_log("Écran d'origine non reposé : ce système n'a pas de fichier d'écran à remplacer.")
+        emit_log(f"Fichiers gardés sur l'ordinateur : {saved_dir}")
+        return
+    emit_log("Écran d'origine reposé sur la carte : proposé en premier dans « Choisir l'écran de la console ».")
+    for original, placed in names.items():
+        emit_log(f"{original} -> {screen_backup.ORIGINAL_SCREEN_DIR}/{placed}")
+
+
 def cmd_flash(args: argparse.Namespace) -> int:
     progress_file = _open_progress_file(args)
     try:
@@ -680,6 +710,9 @@ def cmd_flash(args: argparse.Namespace) -> int:
 
         if args.rocknix_r36s_panels:
             _prepare_rocknix_r36s_after_flash(device, rocknix, args.rocknix_r36s_panels, args.rocknix_panel)
+
+        if args.original_screen:
+            _install_original_screen_after_flash(device, args.original_screen, rocknix)
 
         if args.eject_after:
             # Généralisé au-delà d'Android (§4.6) : au moins une partition
@@ -1466,6 +1499,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Carte ROCKNIX pour une R36S : règle extlinux.conf et pose le fichier d'écran, "
             "pris dans ce dossier (fichiers déjà téléchargés et vérifiés)"
+        ),
+    )
+    flash_parser.add_argument(
+        "--original-screen",
+        metavar="DOSSIER",
+        help=(
+            "Fichiers d'écran de la carte d'origine (mis de côté avant le flash) : "
+            "posés dans ecran-d-origine/ du BOOT flashé, renommés comme ceux du firmware écrit"
         ),
     )
     flash_parser.add_argument(

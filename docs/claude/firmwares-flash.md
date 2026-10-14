@@ -110,6 +110,14 @@ décompression en flux, donc espace disque doublé). Après un flash réussi
 en mode expert, le journal rappelle de lancer « SELECT MODEL.bat » pour
 choisir le modèle de la console (`FirmwareEntry.post_flash_log_key`, affiché
 par `MainWindow._on_worker_finished` après l'avertissement de formatage).
+**Revérifié le 2026-10-14** (API GitHub) : toujours du 7-Zip découpé pour
+les 5 releases qui ont des fichiers (`07312026` → `09302026`) ; `07202026`
+et `07272026` n'ont **aucun** fichier attaché, et aucune n'est une
+pré-release. Lien manuel maintenu. README : le sélecteur de `.dtb` vient
+de dArkOSRE (southoz) ; sans modèle dans le sélecteur, copier les `.dtb`
+d'origine en les renommant `rg351mp-uboot.dtb` et `rk3326-r36s-linux.dtb`
+-- c'est ce que fait l'écran d'origine reposé après le flash
+(`partitions/screen_backup.py`, `partitions.md`).
 Les 6 dossiers de modèles de `boot/dtb/r36s` (dépôt `dArkOSen-updates`)
 ne contiennent pas `rk3326-evb-lp3-v12-linux.dtb` : `identify` les traite
 comme des consoles standard, ce qui est cohérent avec dArkOSen.

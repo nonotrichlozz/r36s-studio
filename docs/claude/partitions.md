@@ -326,3 +326,30 @@ seul un démarrage réel le dit.
 - **Pas encore d'interface** : prévue dans le parcours assisté « Ma console
   ne démarre plus » (`assisted-wizard.md`).
 
+## Écran d'origine mis de côté avant un flash (`screen_backup.py`, 2026-10-14)
+
+- **Avant tout flash** (`MainWindow._on_confirmed` → `OriginalScreenSaveRunner`,
+  sans élévation) : `.dtb` + `boot.ini` de la racine du BOOT copiés dans
+  `~/Documents/R36S Studio/Ecrans d'origine/<date>_<empreinte[:12]>/`, avec
+  `origine.json` (empreinte complète `card_fingerprint.fingerprint_of_boot_dir`).
+  Même empreinte déjà sauvegardée : rien n'est recopié ni écrasé. Doublons
+  macOS `._*` et `.dtb.V1` ignorés. Carte illisible, vierge ou sans `.dtb` :
+  journalisé, **le flash part quand même**. Côté GUI et pas dans le worker :
+  élevé, il créerait des fichiers appartenant à root dans les Documents.
+- **Après le flash vérifié** (worker, `--original-screen DIR`) : les `.dtb`
+  sont posés dans `BOOT/ecran-d-origine/`, renommés comme le `.dtb` de même
+  rôle à la racine du firmware écrit (`rg351*` lu par u-boot, `rk3326*` lu
+  par le noyau ; s'il n'y en a pas exactement un de chaque côté, nom
+  d'origine gardé). Le `boot.ini` d'origine n'est jamais posé (il désigne le
+  noyau d'usine). ROCKNIX, ou aucun `.dtb` à la racine : rien n'est posé,
+  journalisé. Échec : avertissement, jamais un échec du flash.
+- `boot_sets.list_sets` met `ecran-d-origine` en premier ; « Choisir l'écran
+  de la console » l'affiche « Écran d'origine de cette console ».
+- Vérifié sur le BOOT réel d'une R36S d'usine (`rg351mp-kernel.dtb`,
+  `rk3326-r35s-linux.dtb` → noms dArkOSen). **Non vérifié** : qu'une carte
+  dArkOSen fraîchement flashée a bien ces deux `.dtb` à la racine (sinon
+  noms d'origine gardés) ; démarrage réel de la console avec ce jeu.
+- Non couvert : flash d'une carte *neuve* (rien à sauvegarder dessus) --
+  aucune sauvegarde d'une autre carte n'est proposée à la place, faute de
+  savoir de quelle console elle vient.
+

@@ -18,6 +18,7 @@ import platform
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Optional
 
 from PySide6.QtCore import QThread, Signal
@@ -50,7 +51,8 @@ from r36s_studio.partitions import (
     locate_mounted,
     unmount_forced,
 )
-from r36s_studio.safety.card_fingerprint import compute_boot_fingerprint
+from r36s_studio.partitions import archives, screen_backup
+from r36s_studio.safety.card_fingerprint import compute_boot_fingerprint, fingerprint_of_boot_dir
 
 from .strings import tr
 
@@ -414,3 +416,42 @@ class SystemBackupEstimateRunner(QThread):
             return
 
         self.finished_estimate.emit(SystemBackupEstimate(size_bytes=size_bytes, board_compatible=board_compatible))
+
+
+class OriginalScreenSaveRunner(QThread):
+    """Avant un flash : met de côté les fichiers d'écran du BOOT de la carte
+    (`partitions/screen_backup.py`). Ne bloque jamais le flash : tout échec
+    est rapporté (`"failed"`) et le flash continue."""
+
+    finished_save = Signal(object, str, str)  # dossier | None, "saved"/"already"/"none"/"failed", détail
+
+    def __init__(self, device_path: str, backups_dir: Optional[Path] = None, parent=None):
+        super().__init__(parent)
+        self._device_path = device_path
+        self._backups_dir = backups_dir or archives.default_archives_dir() / screen_backup.BACKUPS_DIR_NAME
+
+    def run(self) -> None:
+        try:
+            boot = locate_mounted(self._device_path, BOOT_LABEL)
+        except (PartitionNotFound, PartitionNotMounted):
+            self.finished_save.emit(None, "none", "")  # carte vierge ou sans BOOT
+            return
+        except Exception as exc:  # jamais bloquer le flash
+            self.finished_save.emit(None, "failed", str(exc))
+            return
+        try:
+            fingerprint = fingerprint_of_boot_dir(boot.mountpoint)
+            if fingerprint is None:
+                self.finished_save.emit(None, "failed", f"BOOT illisible : {boot.mountpoint}")
+                return
+            saved = screen_backup.save_original_screen(boot.mountpoint, self._backups_dir, fingerprint)
+            if saved is None:
+                self.finished_save.emit(None, "none", "")
+            else:
+                folder, created = saved
+                self.finished_save.emit(folder, "saved" if created else "already", str(folder))
+        except Exception as exc:
+            self.finished_save.emit(None, "failed", str(exc))
+        finally:
+            unmount_forced(boot)
+

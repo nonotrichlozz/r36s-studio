@@ -94,7 +94,7 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 | `devices/` (détection des cartes), `safety/` (garde-fou) | `docs/claude/devices-safety.md` |
 | `imaging/` : sauvegarde, sauvegarde système (GPT/MBR), flash, SHA-256, formats, partition de jeux auto, « utiliser toute la carte » SF3000 | `docs/claude/imaging.md` |
 | `imaging/reset_card.py`, `cmd_reset_card`, `_format_windows` | `docs/claude/reset-card.md` |
-| `partitions/` : localisation/montage, copie, archives, éjection | `docs/claude/partitions.md` |
+| `partitions/` : localisation/montage, copie, archives, éjection, jeux d'écran, écran d'origine mis de côté | `docs/claude/partitions.md` |
 | `detect/` : badges de statut des étapes du mode expert | `docs/claude/detect.md` |
 | Opérations du mode expert, catalogue de firmwares, ROCKNIX, clones, avertissements après flash | `docs/claude/firmwares-flash.md` |
 | `gui/screens.py`, `gui/theme.py`, `gui/strings.py`/`strings_en.py`, `i18n.py`, `LogPanel`, mode expert | `docs/claude/interface.md` |
@@ -267,6 +267,10 @@ Détail et bancs de test : `docs/claude/testing.md`.
 - Table matérielle de dArkOSRE (`identify/hardware_table.py`) : vérifiée sur
   les `.dtb` de dArkOSRE, jamais sur un `.dtb` de carte d'usine -- que son
   `model` porte bien ces chaînes reste supposé (`assisted-wizard.md`).
+- Écran d'origine mis de côté avant un flash et reposé après
+  (`partitions/screen_backup.py`) : vérifié sur le BOOT réel d'une R36S
+  d'usine, jamais sur une carte dArkOSen flashée ni au démarrage
+  (`partitions.md`).
 - ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,

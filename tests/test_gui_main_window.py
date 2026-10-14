@@ -6427,3 +6427,51 @@ def test_window_opens_larger_than_minimum_then_remembers_user_size(mock_list, mo
     window.close()  # closeEvent -> config.json (redirigé par conftest)
     reopened = MainWindow()
     assert reopened.height() == 760
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="arkos"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_flash_sets_original_screen_aside_then_hands_it_to_the_worker(mock_list, mock_filter, mock_load, qapp, tmp_path):
+    """Demandé le 2026-10-13 : avant tout flash, les fichiers d'écran de la
+    carte sont mis de côté puis reposés par le worker (`--original-screen`)."""
+    from tests.conftest import _NoScreenToSave
+
+    class _Saved(_NoScreenToSave):
+        def start(self):
+            for slot in self._slots:
+                slot(tmp_path, "saved", str(tmp_path))
+
+    window = _rocknix_flash_window()
+    worker_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.OriginalScreenSaveRunner", _Saved), patch(
+        "r36s_studio.gui.main_window.WorkerRunner", worker_class
+    ):
+        window._on_confirmed()
+
+    argv = worker_class.instances[0].argv
+    assert argv[argv.index("--original-screen") + 1] == str(tmp_path)
+    log = window._log_panel._log_view.toPlainText()
+    assert "mis de côté" in log and str(tmp_path) in log
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="arkos"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_unreadable_card_never_blocks_the_flash(mock_list, mock_filter, mock_load, qapp):
+    from tests.conftest import _NoScreenToSave
+
+    class _Failed(_NoScreenToSave):
+        def start(self):
+            for slot in self._slots:
+                slot(None, "failed", "BOOT illisible")
+
+    window = _rocknix_flash_window()
+    worker_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.OriginalScreenSaveRunner", _Failed), patch(
+        "r36s_studio.gui.main_window.WorkerRunner", worker_class
+    ):
+        window._on_confirmed()
+
+    assert "--original-screen" not in worker_class.instances[0].argv
+    assert "L'écriture continue normalement" in window._log_panel._log_view.toPlainText()

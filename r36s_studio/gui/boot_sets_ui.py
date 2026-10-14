@@ -211,6 +211,8 @@ class BootSetsDialog(Dialog):
     # --- interne -----------------------------------------------------------
 
     def _name(self, set_id: Optional[str]) -> str:
+        if set_id == boot_sets.ORIGINAL_SCREEN_DIR:
+            return tr("boot_sets_original_screen")
         for entry in self._result.get("sets", []):
             if entry["set_id"] == set_id:
                 return entry["name"]
@@ -220,7 +222,7 @@ class BootSetsDialog(Dialog):
         self._list.clear()
         applied = self._result.get("applied")
         for entry in self._result.get("sets", []):
-            label = entry["name"]
+            label = tr("boot_sets_original_screen") if entry["set_id"] == boot_sets.ORIGINAL_SCREEN_DIR else entry["name"]
             trial = self._trials.get(entry["set_id"])
             if trial is not None:
                 label += " — " + tr(f"boot_sets_trial_{trial['outcome']}", date=_short_date(trial["date"]))

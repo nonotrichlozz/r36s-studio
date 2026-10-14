@@ -88,6 +88,7 @@ from .android_runner import AndroidDetectRunner, AndroidPlatformToolsDownloadRun
 from .doublons_runner import DoublonsMoveRunner, DoublonsResumeRunner, DoublonsScanRunner, DoublonsUndoRunner
 from .partition_runner import (
     IdentifyRunner,
+    OriginalScreenSaveRunner,
     PartitionJobRunner,
     RocknixDownloadRunner,
     RocknixPanelDownloadRunner,
@@ -631,6 +632,9 @@ class MainWindow(QMainWindow):
         self._rocknix_console_dialog = RocknixConsoleDialog(self)
         # Réponse « Oui, une R36S » du dernier flash ROCKNIX (`_open_flash_confirmation`).
         self._rocknix_r36s = False
+        # Fichiers d'écran mis de côté avant le flash en cours (`_on_confirmed`).
+        self._original_screen_dir: Optional[Path] = None
+        self._screen_save_log: Optional[Tuple[str, str]] = None
         self._backup_kind_dialog = BackupKindDialog(self)
         # Instance séparée pour la tuile 3 de l'accueil assisté (§5, refonte
         # menu de tuiles) -- `self._backup_kind_dialog` ci-dessus reste
@@ -1368,6 +1372,22 @@ class MainWindow(QMainWindow):
 
     def _on_confirmed(self) -> None:
         self._confirm_dialog.close()
+        self._original_screen_dir = None
+        self._screen_save_log = None
+        if self._mode != "flash":
+            self._start_worker()
+            return
+        # Avant tout flash : fichiers d'écran de la carte mis de côté
+        # (`partitions/screen_backup.py`), reposés par le worker après
+        # l'écriture. Jamais bloquant : un échec est journalisé, le flash part.
+        self._home.set_busy(True)
+        self._screen_save_runner = OriginalScreenSaveRunner(self._device.path, parent=self)
+        self._screen_save_runner.finished_save.connect(self._on_original_screen_saved)
+        self._screen_save_runner.start()
+
+    def _on_original_screen_saved(self, folder: Optional[Path], outcome: str, detail: str) -> None:
+        self._original_screen_dir = folder
+        self._screen_save_log = (f"screen_backup_{outcome}_log", detail)
         self._start_worker()
 
     # --- opération : journal de bord permanent (§5, refonte navigation) ----
@@ -1376,6 +1396,11 @@ class MainWindow(QMainWindow):
         self._flash_ejected = None
         self._read_speeds = []
         self._log_panel.start_operation(tr(_OPERATION_TITLE_KEYS[self._mode]))
+        if self._mode == "flash" and self._screen_save_log is not None:
+            key, detail = self._screen_save_log
+            self._log_panel.append_log(tr(key))
+            if detail:
+                self._log_panel.append_log(detail)  # chemin ou message brut : ligne à part (§5)
         if self._mode in _EXTRACTION_MODES:
             # Annoncé dès le début de la copie, pas seulement à la fin
             # (§5 mode assisté) : un débutant qui ne voit le chemin
@@ -1484,6 +1509,8 @@ class MainWindow(QMainWindow):
             argv.append("--allow-unstable")
         if argv[0] == "flash" and self._rocknix_r36s and self._is_flashing_rocknix():
             argv += ["--rocknix-r36s-panels", str(rocknix_r36s.panels_cache_dir())]
+        if argv[0] == "flash" and self._original_screen_dir is not None:
+            argv += ["--original-screen", str(self._original_screen_dir)]
 
         # Journalise la ligne de commande complète au lancement de tout
         # worker élevé (backup/flash) -- signalé sur du vrai matériel :

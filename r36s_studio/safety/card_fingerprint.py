@@ -66,8 +66,15 @@ def compute_boot_fingerprint(device_path: str) -> Optional[str]:
 
     if not boot.mountpoint:
         return None
+    try:
+        return fingerprint_of_boot_dir(boot.mountpoint)
+    finally:
+        unmount_forced(boot)
 
-    root = Path(boot.mountpoint)
+
+def fingerprint_of_boot_dir(boot_root: str) -> Optional[str]:
+    """Même empreinte, sur un BOOT déjà monté (`partitions/screen_backup.py`)."""
+    root = Path(boot_root)
     digest = hashlib.sha256()
     try:
         paths = sorted(p for p in root.rglob("*") if p.is_file())
@@ -87,8 +94,6 @@ def compute_boot_fingerprint(device_path: str) -> Optional[str]:
                 digest.update(handle.read(_MAX_BYTES_PER_FILE))
         except OSError:
             continue
-
-    unmount_forced(boot)
     return digest.hexdigest()
 
 

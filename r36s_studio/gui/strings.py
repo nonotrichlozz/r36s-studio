@@ -1347,6 +1347,14 @@ STRINGS = {
     # Éjection sans carte unique (`main_window`, détail du journal).
     "eject_multiple_cards": "Plusieurs cartes détectées -- débranche celles qui ne sont pas concernées, puis réessaie.",
     "eject_card_not_found": "Carte introuvable -- vérifie qu'elle est toujours branchée, puis réessaie.",
+    # Partition de jeux sans lettre de lecteur (Windows, `main_window`,
+    # `partitions/drive_letter.py`).
+    "drive_letter_assigned": "L'espace de jeux de ta carte est disponible sous {letter}: dans l'Explorateur.",
+    "drive_letter_none": "Windows n'affiche pas l'espace de jeux de ta carte dans l'Explorateur.",
+    "drive_letter_refused": (
+        "L'espace de jeux de ta carte n'apparaît pas dans l'Explorateur : il faut ton autorisation "
+        "pour l'afficher. Relance R36S Studio pour réessayer."
+    ),
     "cancelled_after_bytes": "Opération annulée après {done} octets",
     "cancelled_or_elevation_failed": "L'opération a été annulée ou l'élévation a échoué.",
     # Bouton « Afficher » (`reveal.reveal_label`), nom réel du gestionnaire

@@ -51,7 +51,7 @@ from r36s_studio.partitions import (
     locate_mounted,
     unmount_forced,
 )
-from r36s_studio.partitions import archives, screen_backup
+from r36s_studio.partitions import archives, drive_letter, screen_backup
 from r36s_studio.safety.card_fingerprint import compute_boot_fingerprint, fingerprint_of_boot_dir
 
 from .strings import tr
@@ -311,6 +311,27 @@ class SystemBackupEstimate:
     detail: Optional[str] = None
     board_compatible: Optional[str] = None
     needs_elevation: bool = False
+
+
+class GamesDriveLetterRunner(QThread):
+    """Partition de jeux sans lettre de lecteur (Windows, `partitions/
+    drive_letter.py`) : détection sans élévation, puis `assign(device_path)`
+    -- le worker élevé, fourni par `main_window.py` -- seulement s'il en
+    manque une. `finished_letters(chemin, résultat)` : `None` si rien à
+    faire, sinon la liste renvoyée par `assign` ou le texte de l'exception."""
+
+    finished_letters = Signal(str, object)
+
+    def __init__(self, device_path: str, assign: Callable[[str], object], parent=None):
+        super().__init__(parent)
+        self._device_path = device_path
+        self._assign = assign
+
+    def run(self) -> None:
+        if not drive_letter.games_partition_missing_letter(self._device_path):
+            self.finished_letters.emit(self._device_path, None)
+            return
+        self.finished_letters.emit(self._device_path, self._assign(self._device_path))
 
 
 class IdentifyRunner(QThread):

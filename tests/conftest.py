@@ -121,6 +121,22 @@ def _default_full_disk_access_granted(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _games_drive_letter_check_stubbed(request, monkeypatch):
+    """`MainWindow` vérifie, sous Windows, à chaque liste de cartes, que la
+    partition de jeux a une lettre de lecteur (`partitions/drive_letter.py`,
+    PowerShell sur un thread) : stubbée à « rien à faire » partout, sauf
+    `@pytest.mark.real_drive_letter_check` (tests de la fonction elle-même)."""
+    if request.node.get_closest_marker("real_drive_letter_check"):
+        yield
+        return
+
+    from r36s_studio.partitions import drive_letter
+
+    monkeypatch.setattr(drive_letter, "games_partition_missing_letter", lambda device_path: False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _consoles_diverses_log_isolated(request, tmp_path, monkeypatch):
     """Bug corrigé, confirmé sur du vrai matériel : chaque lancement local
     de la suite écrivait pour de vrai dans le journal applicatif réel

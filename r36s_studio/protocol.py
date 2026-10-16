@@ -116,3 +116,9 @@ def emit_boot_sets_result(result: dict) -> None:
     """Jeux de fichiers du BOOT et état de la carte (`boot-sets`) -- lu par
     un worker élevé quand le BOOT n'est lisible qu'en administrateur."""
     emit({"type": "boot_sets_result", "result": result})
+
+
+def emit_drive_letter_result(result: list) -> None:
+    """Lettres attribuées aux partitions de jeux par le worker élevé
+    (`assign-letter`, Windows) : liste de `AssignedLetter.to_dict()`."""
+    emit({"type": "drive_letter_result", "result": result})

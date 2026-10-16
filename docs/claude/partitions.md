@@ -203,6 +203,26 @@ opération sur une partition sans lettre de lecteur, pas seulement
 l'identification — extraction du BOOT (étape A) comprise, qui aurait
 échoué de la même façon sur une carte avec cette même particularité.
 
+**Lettre de lecteur pour l'espace de jeux (Windows, 2026-10-17,
+`partitions/drive_letter.py`).** Constaté sur du vrai matériel : après
+l'agrandissement d'EASYROMS par dArkOSen au premier démarrage (19,62 Go sur
+32 Go), Windows ne lui donne plus de lettre -- invisible dans l'Explorateur,
+lettre posée à la main avec `Set-Partition -NewDriveLetter` (élevé). Chaque
+liste de cartes (`MainWindow._list_devices_with_diagnostics`, point commun
+des deux modes) appelle `_check_games_drive_letters` : détection sans
+élévation sur un thread (`GamesDriveLetterRunner`, EASYROMS dont le
+`mountpoint` est le chemin GUID), au plus une fois toutes les 20 s par carte
+et jamais pendant une opération ; s'il manque une lettre, worker élevé
+`assign-letter` (`Add-PartitionAccessPath -AssignDriveLetter`, même
+mécanisme qu'après un formatage, rien n'est écrit sur la carte donc pas de
+`ConfirmDialog`). Une seule invite UAC par carte branchée (oubliée quand une
+liste la voit débranchée) ; refusée : message « Relance R36S Studio pour
+réessayer ». Journal : « L'espace de jeux de ta carte est disponible sous
+K: dans l'Explorateur. » + `[diagnostic] espace de jeux : système de
+fichiers exFAT, NoDefaultDriveLetter=…` (système de fichiers réel lu par
+`Get-Volume`). STORAGE (ext4) n'est jamais concernée. Les tests stubent la
+détection (`conftest.py`, marqueur `real_drive_letter_check`).
+
 Copie de fichiers : parcours récursif avec cumul d'octets pour la progression, puis
 `fsync` et démontage propre à la fin. `partitions/copy.py::_walk_files`
 (`os.scandir()` récursif) énumère et récupère taille/type de fichier en un seul

@@ -87,6 +87,7 @@ from . import logs as gui_logs
 from .android_runner import AndroidDetectRunner, AndroidPlatformToolsDownloadRunner, AndroidPlatformToolsSizeRunner
 from .doublons_runner import DoublonsMoveRunner, DoublonsResumeRunner, DoublonsScanRunner, DoublonsUndoRunner
 from .partition_runner import (
+    GamesDriveLetterRunner,
     IdentifyRunner,
     OriginalScreenSaveRunner,
     PartitionJobRunner,
@@ -364,6 +365,23 @@ def _boot_sets_with_windows_elevation(
         return None, "ELEVATION_REFUSED"
     except OSError:
         return None, "IO_ERROR"
+
+
+def _assign_letter_with_windows_elevation(device_path: str, parent_hwnd: Optional[int]) -> object:
+    """Lettre de lecteur de la partition de jeux par le worker élevé
+    (`elevate.run_elevated_assign_letter`). Liste de dictionnaires
+    `AssignedLetter`, ou le code `ELEVATION_REFUSED`/`IO_ERROR`."""
+    try:
+        return elevate.run_elevated_assign_letter(device_path, parent_hwnd=parent_hwnd) or []
+    except elevate.ElevationRefusedError:
+        return "ELEVATION_REFUSED"
+    except OSError:
+        return "IO_ERROR"
+
+
+# Délai minimal entre deux vérifications (sans élévation) de la même carte :
+# le sondage du mode assisté liste les cartes toutes les 1,5 s.
+_DRIVE_LETTER_RECHECK_SECONDS = 20.0
 
 
 class MainWindow(QMainWindow):
@@ -662,6 +680,13 @@ class MainWindow(QMainWindow):
         self._boot_sets_result: dict = {}
         self._boot_sets_runner: Optional[BootSetsRunner] = None
         self._identify_runner: Optional[IdentifyRunner] = None
+        # Partition de jeux sans lettre de lecteur (Windows) : une
+        # vérification à la fois, une seule invite par carte branchée --
+        # `_drive_letter_attempted` n'oublie une carte qu'une fois vue
+        # débranchée.
+        self._drive_letter_runner: Optional[GamesDriveLetterRunner] = None
+        self._drive_letter_checked: dict = {}
+        self._drive_letter_attempted: set = set()
         # Outil « Doublons de jeux » -- deux instances de la même fenêtre
         # de confirmation, jamais une seule reconnectée dynamiquement
         # selon le contexte (source d'erreurs de câblage) : l'une pour la
@@ -908,6 +933,7 @@ class MainWindow(QMainWindow):
         config = SafetyConfig()
         accepted = filter_devices(raw_devices, config)
         accepted_paths = {device.path for device in accepted}
+        self._check_games_drive_letters(accepted)
         rejected_lines = []
         for device in raw_devices:
             if device.path in accepted_paths:
@@ -916,6 +942,60 @@ class MainWindow(QMainWindow):
             if reason is not None:
                 rejected_lines.append(f"{device.display} ({device.path}) : {reason}")
         return accepted, rejected_lines
+
+    def _check_games_drive_letters(self, devices: List[Device]) -> None:
+        """Windows : une carte dont la partition de jeux n'a pas de lettre
+        de lecteur (constaté après l'agrandissement par dArkOSen) en reçoit
+        une, par le worker élevé -- sinon elle n'apparaît pas dans
+        l'Explorateur. Hors du thread Qt (`GamesDriveLetterRunner`)."""
+        if platform.system() != "Windows":
+            return
+        present = {device.path for device in devices}
+        self._drive_letter_attempted &= present
+        if self._drive_letter_runner is not None or self._log_panel.is_operation_active():
+            return
+        # Horloge murale : `time.monotonic` est simulée par les tests du sondage.
+        now = time.time()
+        for device in devices:
+            if device.path in self._drive_letter_attempted:
+                continue
+            if now - self._drive_letter_checked.get(device.path, -_DRIVE_LETTER_RECHECK_SECONDS) < _DRIVE_LETTER_RECHECK_SECONDS:
+                continue
+            self._drive_letter_checked[device.path] = now
+            try:
+                parent_hwnd: Optional[int] = int(self.winId())
+            except (RuntimeError, TypeError, ValueError):
+                parent_hwnd = None
+            self._drive_letter_runner = GamesDriveLetterRunner(
+                device.path,
+                lambda path: _assign_letter_with_windows_elevation(path, parent_hwnd),
+                parent=self,
+            )
+            self._drive_letter_runner.finished_letters.connect(self._on_games_drive_letters)
+            self._drive_letter_runner.start()
+            return
+
+    def _on_games_drive_letters(self, device_path: str, result: object) -> None:
+        self._drive_letter_runner = None
+        if result is None:
+            return
+        self._drive_letter_attempted.add(device_path)
+        if result == "ELEVATION_REFUSED":
+            self._log_panel.append_log(tr("drive_letter_refused"))
+            return
+        if not isinstance(result, list) or not result:
+            self._log_panel.append_log(tr("drive_letter_none"))
+            self._log_panel.append_log(f"[diagnostic] assign-letter {device_path} : {result!r}")
+            return
+        for item in result:
+            self._log_panel.append_log(
+                f"[diagnostic] espace de jeux : système de fichiers {item.get('filesystem') or 'inconnu'}, "
+                f"NoDefaultDriveLetter={bool(item.get('no_default_drive_letter'))}"
+            )
+            if item.get("letter"):
+                self._log_panel.append_log(tr("drive_letter_assigned", letter=item["letter"]))
+            else:
+                self._log_panel.append_log(tr("drive_letter_none"))
 
     def _list_safe_devices(self) -> List[Device]:
         accepted, _ = self._list_devices_with_diagnostics()

@@ -123,12 +123,13 @@ from r36s_studio.partitions import (
     locate_mounted,
     unmount_forced,
 )
-from r36s_studio.partitions import boot_sets, screen_backup
+from r36s_studio.partitions import boot_sets, drive_letter, screen_backup
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.protocol import configure as configure_protocol
 from r36s_studio.protocol import (
     emit_boot_sets_result,
     emit_done,
+    emit_drive_letter_result,
     emit_eject_result,
     emit_identify_result,
     emit_error,
@@ -1261,6 +1262,36 @@ def cmd_identify(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_assign_letter(args: argparse.Namespace) -> int:
+    """Lettre de lecteur pour la partition de jeux qui n'en a pas (Windows,
+    `partitions/drive_letter.py`). N'écrit rien sur la carte : pas de
+    confirmation. Résultat dans un événement `drive_letter_result`."""
+    progress_file = _open_progress_file(args)
+    try:
+        device = _resolve_device_or_report(args)
+        if device is None:
+            return 1
+        try:
+            assigned = drive_letter.assign_games_drive_letters(device.path)
+        except (OSError, ValueError) as exc:
+            emit_error("IO_ERROR", str(exc))
+            return 1
+        for item in assigned:
+            emit_log(
+                f"Espace de jeux : système de fichiers {item.filesystem or 'inconnu'}, "
+                f"NoDefaultDriveLetter={item.no_default_drive_letter}"
+            )
+            if item.letter:
+                emit_log(f"L'espace de jeux de ta carte est disponible sous {item.letter}: dans l'Explorateur.")
+            else:
+                emit_log("Windows n'a donné aucune lettre à l'espace de jeux de ta carte.", level="warning")
+        emit_drive_letter_result([item.to_dict() for item in assigned])
+        return 0
+    finally:
+        if progress_file is not None:
+            progress_file.close()
+
+
 def cmd_boot_sets(args: argparse.Namespace) -> int:
     """Jeux de fichiers de rechange du BOOT (`partitions/boot_sets.py`) :
     liste par défaut, `--apply ID`, `--restore` ou `--import DOSSIER`
@@ -1704,6 +1735,21 @@ def build_parser() -> argparse.ArgumentParser:
     _add_worker_args(boot_sets_parser)
     _add_dev_args(boot_sets_parser)
     boot_sets_parser.set_defaults(func=cmd_boot_sets)
+
+    assign_letter_parser = subparsers.add_parser(
+        "assign-letter",
+        help="Donne une lettre de lecteur à la partition de jeux qui n'en a pas (Windows)",
+    )
+    assign_letter_parser.add_argument("--device", required=True, help="Chemin du périphérique (voir `list`)")
+    assign_letter_parser.add_argument(
+        "--max-size",
+        type=int,
+        default=DEFAULT_MAX_SIZE_BYTES,
+        help="Taille maximale acceptée en octets (défaut : 1 To)",
+    )
+    _add_worker_args(assign_letter_parser)
+    _add_dev_args(assign_letter_parser)
+    assign_letter_parser.set_defaults(func=cmd_assign_letter)
 
     doublons_verify_journal_parser = subparsers.add_parser(
         "doublons-verify-journal",

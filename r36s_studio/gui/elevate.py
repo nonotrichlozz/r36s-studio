@@ -940,6 +940,13 @@ def run_elevated_boot_sets(device_path: str, action: List[str], parent_hwnd: Opt
     return result, (errors[0] if errors else None)
 
 
+def run_elevated_assign_letter(device_path: str, parent_hwnd: Optional[int] = None) -> Optional[list]:
+    """`assign-letter --device …` dans le worker élevé (Windows) : liste de
+    `AssignedLetter` en dictionnaires, `None` si le worker n'a rien renvoyé.
+    Lève `ElevationRefusedError` si l'invite UAC est refusée."""
+    return _run_elevated_for_result(["assign-letter", "--device", device_path], "drive_letter_result", parent_hwnd)
+
+
 def _run_elevated_for_result(
     argv: List[str], event_type: str, parent_hwnd: Optional[int], errors: Optional[List[str]] = None
 ) -> Optional[dict]:

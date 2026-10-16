@@ -70,7 +70,8 @@ sans interface (c'est un CLI : `python -m r36s_studio <commande>`).
 `verify_source`/`verify_image` -- les `progress` suivants repartent de 0) et
 `stalled` (`seconds`/`limit` : la carte source ne renvoie plus rien),
 `boot_sets_result` (`result` : jeux de fichiers du BOOT et état de la carte,
-`boot-sets`).
+`boot-sets`), `drive_letter_result` (`result` : lettres données à l'espace de
+jeux, `assign-letter`, Windows).
 
 **Élévation, par OS** (détail et pièges macOS : `docs/claude/elevation-macos.md`) :
 
@@ -275,6 +276,11 @@ Détail et bancs de test : `docs/claude/testing.md`.
   sur une R36S noire avec dArkOSen (démarrage OK, 2026-10-14), à partir de
   fichiers copiés à la main ; la sauvegarde automatique avant flash, elle,
   jamais lancée sur une vraie carte d'usine (`partitions.md`).
+- Lettre de lecteur donnée automatiquement à une EASYROMS qui n'en a pas
+  (Windows, `partitions/drive_letter.py`, constaté après l'agrandissement par
+  dArkOSen) : jamais lancée sur la vraie carte ; que la lettre reste après
+  un rebranchement, et la cause (attribut GPT `NoDefaultDriveLetter` ?),
+  non vérifiées -- lire la ligne `[diagnostic] espace de jeux` (`partitions.md`).
 - ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,

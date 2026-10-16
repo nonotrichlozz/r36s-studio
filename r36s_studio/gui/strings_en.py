@@ -950,6 +950,12 @@ STRINGS_EN = {
     "success_ready": "{display} is ready.",
     "eject_multiple_cards": "Several cards detected -- unplug the ones that are not involved, then try again.",
     "eject_card_not_found": "Card not found -- check that it is still plugged in, then try again.",
+    "drive_letter_assigned": "Your card's games space is available as {letter}: in File Explorer.",
+    "drive_letter_none": "Windows does not show your card's games space in File Explorer.",
+    "drive_letter_refused": (
+        "Your card's games space does not show in File Explorer: your permission is needed "
+        "to show it. Restart R36S Studio to retry."
+    ),
     "cancelled_after_bytes": "Operation cancelled after {done} bytes",
     "cancelled_or_elevation_failed": "The operation was cancelled or the permission request failed.",
     "reveal_finder": "Show in Finder",

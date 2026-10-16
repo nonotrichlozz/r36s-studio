@@ -6475,3 +6475,38 @@ def test_unreadable_card_never_blocks_the_flash(mock_list, mock_filter, mock_loa
 
     assert "--original-screen" not in worker_class.instances[0].argv
     assert "L'écriture continue normalement" in window._log_panel._log_view.toPlainText()
+
+
+# --- partition de jeux sans lettre de lecteur (Windows) -----------------------
+
+
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_games_drive_letter_check_once_per_plugged_card(mock_list, qapp):
+    window = MainWindow()
+    device = _make_device(path=r"\\.\PhysicalDrive9902")
+    runner_class = MagicMock()
+    with patch("r36s_studio.gui.main_window.platform.system", return_value="Windows"), patch(
+        "r36s_studio.gui.main_window.GamesDriveLetterRunner", runner_class
+    ), patch("r36s_studio.gui.main_window.time.time", side_effect=[0.0, 100.0, 200.0, 300.0]):
+        window._check_games_drive_letters([device])
+        assert runner_class.call_count == 1
+        window._on_games_drive_letters(device.path, "ELEVATION_REFUSED")  # invite refusée
+        window._check_games_drive_letters([device])
+        assert runner_class.call_count == 1  # pas de nouvelle invite tant qu'elle reste branchée
+        window._check_games_drive_letters([])  # débranchée
+        window._check_games_drive_letters([device])
+        assert runner_class.call_count == 2
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Relance R36S Studio pour réessayer" in log_text
+
+
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_games_drive_letter_result_is_logged(mock_list, qapp):
+    window = MainWindow()
+    window._on_games_drive_letters(
+        r"\\.\PhysicalDrive9902", [{"letter": "K", "filesystem": "exFAT", "no_default_drive_letter": True}]
+    )
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "L'espace de jeux de ta carte est disponible sous K: dans l'Explorateur." in log_text
+    assert "système de fichiers exFAT, NoDefaultDriveLetter=True" in log_text

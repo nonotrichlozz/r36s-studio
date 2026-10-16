@@ -133,11 +133,42 @@ supportee` (500, serveur mal réglé). Sans clé, l'écran l'explique d'emblée
 `client.py::_journaliser_diagnostic_licence` consigne toujours, à chaque
 refus de licence, longueur/hash/URL (jamais la clé en clair).
 
+## Télécharger et installer (2026-10-17)
+
+Une option de fiche peut porter un champ `telechargement` (schéma du
+catalogue : `depot`, `motif_fichier`, `url_directe` optionnelle). Sur une
+fiche **vérifiée** seulement, l'option affiche alors un bouton
+« ⬇ Télécharger et installer » (`screen.py`, signal `install_requested`).
+
+1. `telechargement.py::resoudre` (thread `search_runner.py::
+   FirmwareResolveRunner`) cherche dans la **dernière** release GitHub de
+   `depot` le fichier dont le nom correspond à `motif_fichier` -- une
+   nouvelle version publiée par le projet est prise sans toucher au
+   catalogue. Repli sur `url_directe` si l'API ne répond pas (limite
+   anonyme de 60 requêtes/heure) ou ne trouve rien.
+2. `MainWindow._on_consoles_diverses_install_requested` bascule sur le
+   journal de bord (habillage du mode courant, `ui_mode` jamais modifié),
+   télécharge avec `RocknixDownloadRunner` (générique malgré son nom :
+   progression réelle, annulation, sha256 vérifié quand GitHub publie le
+   `digest` du fichier), dans `~/Documents/R36S Studio/Firmwares/`.
+3. Puis fenêtre Choix de la carte et fenêtre Confirmation habituelles
+   (§2 n°6, jamais sautées). `_catalogue_flash_active` neutralise tout
+   réglage lié au firmware du sélecteur R36S (question d'écran ROCKNIX,
+   consignes Android) : la console n'est pas forcément une R36S.
+
+Durcissement : dépôt au format `propriétaire/nom`, téléchargement depuis
+`https://github.com/` uniquement, nom de fichier sans séparateur et
+finissant par `.img`/`.img.gz`/`.img.xz` (jamais un `.7z`). Exception
+assumée à la règle d'isolation ci-dessus : ce flux réutilise le pipeline
+de flash, par `MainWindow` uniquement -- le package lui-même n'écrit
+toujours rien sur un disque.
+
 ## Hors périmètre (étape 1)
 
-Analyse de carte SD (`detection_sd` du schéma non affiché), installation ou
-téléchargement d'un firmware/frontend depuis cette section (liens externes
-ouverts au navigateur uniquement, jamais de téléchargement automatique),
+Analyse de carte SD (`detection_sd` du schéma non affiché), options sans
+champ `telechargement` (liens externes ouverts au navigateur uniquement),
+étapes manuelles après flash (ex. le `dtb.img` de ROCKNIX sur H700 : pas
+de téléchargement direct proposé tant que l'app ne sait pas les faire),
 contribution/soumission au catalogue, cache local des fiches consultées,
 sous-commande CLI de diagnostic, dédoublonnage des jeux (détecter qu'un
 jeu déjà présent sur la carte correspond à un jeu qu'on s'apprête à

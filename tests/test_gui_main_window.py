@@ -6510,3 +6510,115 @@ def test_games_drive_letter_result_is_logged(mock_list, qapp):
     log_text = window._log_panel._log_view.toPlainText()
     assert "L'espace de jeux de ta carte est disponible sous K: dans l'Explorateur." in log_text
     assert "système de fichiers exFAT, NoDefaultDriveLetter=True" in log_text
+
+
+# --- « Télécharger et installer » depuis une fiche Consoles diverses -------
+
+
+def _knulli_option():
+    from r36s_studio.consoles_diverses.models import OptionConsole
+    from r36s_studio.consoles_diverses.telechargement import Telechargement
+
+    return OptionConsole(
+        nom="KNULLI",
+        description="",
+        source_url="https://github.com/knulli-cfw/knulli-linux",
+        telechargement=Telechargement(
+            depot="knulli-cfw/knulli-linux",
+            motif_fichier=r"^knulli-h700-rg40xx-v-.*\.img\.gz$",
+            url_directe="https://github.com/knulli-cfw/knulli-linux/releases/download/x/knulli-h700-rg40xx-v-x.img.gz",
+        ),
+    )
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_catalogue_install_resolves_then_downloads_the_found_file(mock_list, mock_filter, mock_load, mock_save, qapp):
+    from r36s_studio.consoles_diverses.telechargement import FichierFirmware
+
+    window = MainWindow()
+    resolve_class = _mock_rocknix_runner_class()
+    download_class = _mock_rocknix_runner_class()
+
+    with patch("r36s_studio.gui.main_window.FirmwareResolveRunner", resolve_class):
+        window._consoles_diverses_screen.install_requested.emit(_knulli_option(), "RG40XXV")
+
+    assert window._root_stack.currentWidget() is window._main_view
+    resolve_class.instances[0].start.assert_called_once()
+    assert window._home._tiles["flash"].isEnabled() is False  # occupé pendant la recherche
+
+    fichier = FichierFirmware(
+        nom="knulli-h700-rg40xx-v-scarab-20261001.img.gz",
+        url="https://github.com/knulli-cfw/knulli-linux/releases/download/20261001/knulli-h700-rg40xx-v-scarab-20261001.img.gz",
+        taille=999,
+        sha256="b" * 64,
+        depuis_derniere_release=True,
+    )
+    with patch("r36s_studio.gui.main_window.RocknixDownloadRunner", download_class):
+        window._on_catalogue_firmware_resolved(fichier)
+
+    asset, sha = download_class.instances[0].init_args
+    assert asset.name == fichier.nom and asset.download_url == fichier.url and asset.size_bytes == 999
+    assert sha == "b" * 64
+    download_class.instances[0].start.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="expert", firmware="rocknix"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_catalogue_download_success_asks_for_the_card_then_confirms_without_r36s_questions(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    """Le firmware choisi pour la R36S (ici ROCKNIX) ne doit jamais
+    déclencher ses réglages propres sur une autre console."""
+    window = MainWindow()
+    window._catalogue_firmware_name = "KNULLI"
+    path = "/tmp/knulli-h700-rg40xx-v-scarab-20260511.img.gz"
+
+    window._on_catalogue_download_finished(True, path)
+
+    assert window._file_path == path
+    assert window._mode == "flash"
+    assert window._device_dialog.isVisible() is True
+    assert window._catalogue_flash_active is True
+    assert window._is_flashing_rocknix() is False
+    assert window._is_flashing_android_firmware() is False
+    assert window._flash_post_log_key() is None
+
+    with patch("r36s_studio.gui.main_window.check_image_format"), patch.object(
+        window, "_check_flash_image_integrity_or_warn", return_value=True
+    ), patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=None):
+        window._on_device_chosen(_make_device())
+
+    assert window._rocknix_console_dialog.isVisible() is False
+    assert window._confirm_dialog.isVisible() is True  # jamais sautée (§2 n°6)
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_catalogue_install_not_found_shows_friendly_message(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+
+    window._on_catalogue_install_failed("FIRMWARE_NOT_FOUND", "rien dans knulli-cfw/knulli-linux")
+
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "Impossible de trouver le fichier à télécharger" in log_text
+    assert window._device_dialog.isVisible() is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_starting_a_normal_flow_clears_the_catalogue_flag(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window._catalogue_flash_active = True
+
+    window._start_flow("flash")
+
+    assert window._catalogue_flash_active is False

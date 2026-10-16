@@ -15,6 +15,7 @@ from typing import Optional
 from PySide6.QtCore import QThread, Signal
 
 from .client import Opener, RechercheErreur, rechercher_console
+from .telechargement import Telechargement, TelechargementErreur, resoudre
 
 
 class ConsoleSearchRunner(QThread):
@@ -56,4 +57,33 @@ class ConsoleSearchRunner(QThread):
         self.finished_ok.emit(resultat)
 
 
-__all__ = ["ConsoleSearchRunner"]
+class FirmwareResolveRunner(QThread):
+    """Lance `telechargement.py::resoudre` (appel à l'API GitHub) sur un
+    thread séparé -- même principe que `ConsoleSearchRunner`. Ne
+    télécharge rien : le fichier trouvé est remonté à `MainWindow`, qui
+    enchaîne sur le téléchargement puis la fenêtre Confirmation."""
+
+    resolved = Signal(object)  # FichierFirmware
+    error = Signal(str, str)  # code, détail
+
+    def __init__(self, telechargement: Telechargement, opener=None, parent=None):
+        super().__init__(parent)
+        self._telechargement = telechargement
+        self._opener = opener
+
+    def run(self) -> None:
+        try:
+            if self._opener is not None:
+                fichier = resoudre(self._telechargement, opener=self._opener)
+            else:
+                fichier = resoudre(self._telechargement)
+        except TelechargementErreur as exc:
+            self.error.emit("FIRMWARE_NOT_FOUND", str(exc))
+            return
+        except Exception as exc:  # filet -- jamais d'exception qui traverse le thread
+            self.error.emit("FIRMWARE_NOT_FOUND", str(exc))
+            return
+        self.resolved.emit(fichier)
+
+
+__all__ = ["ConsoleSearchRunner", "FirmwareResolveRunner"]

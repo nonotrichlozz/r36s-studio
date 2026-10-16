@@ -326,3 +326,29 @@ def test_fiche_depuis_json_parses_the_real_r36s_ia_response_fixture():
     assert fiche.options.frontend[0].licence_a_verifier is True
     assert fiche.licences == ["CC-BY-NC-4.0"]
     assert fiche.sources[0].url == "https://github.com/dov/r36s-programming"
+
+
+FIXTURE_FICHE_RG40XXV = Path(__file__).parent / "fixtures_fiche_rg40xxv.json"
+
+
+def test_fiche_rg40xxv_du_catalogue_porte_le_telechargement_knulli():
+    """Copie de `r36s-studio-catalogue/consoles/rg40xxv.json` : KNULLI décrit
+    un téléchargement direct, les autres options non."""
+    fiche = fiche_depuis_json(json.loads(FIXTURE_FICHE_RG40XXV.read_text(encoding="utf-8")))
+
+    noms = [option.nom for option in fiche.options.systeme_cfw]
+    assert noms == ["KNULLI", "ROCKNIX", "muOS (MustardOS)", "MinUI"]
+    knulli = fiche.options.systeme_cfw[0]
+    assert knulli.telechargement is not None
+    assert knulli.telechargement.depot == "knulli-cfw/knulli-linux"
+    assert knulli.telechargement.url_directe.startswith("https://github.com/")
+    assert all(option.telechargement is None for option in fiche.options.systeme_cfw[1:])
+
+
+def test_telechargement_inexploitable_ignore_sans_rejeter_la_fiche():
+    data = _fiche_sf3000hd()
+    data["options"]["frontend"][0]["telechargement"] = {"depot": "../../etc", "motif_fichier": "x"}
+
+    fiche = fiche_depuis_json(data)
+
+    assert fiche.options.frontend[0].telechargement is None

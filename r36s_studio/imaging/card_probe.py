@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from .gpt import parse_gpt_entries, parse_gpt_header
 from .mbr import SECTOR_SIZE, is_gpt_protective, parse_mbr
 
 # Chemin cherché, comparé sans tenir compte de la casse (exFAT et FAT32 sont
@@ -263,4 +264,78 @@ def is_sf3000_card(device_path: str) -> bool:
     return first_partition_contains(device_path, SIGNATURE_PATH)
 
 
-__all__ = ["SIGNATURE_PATH", "first_partition_contains", "is_rocknix_card", "is_sf3000_card"]
+# Mêmes étiquettes que `system_backup.GAMES_PARTITION_LABELS` (pas importé :
+# ce module ne dépend que de `mbr`/`gpt`).
+GAMES_LABELS = {"EASYROMS", "STORAGE"}
+
+
+def _partition_starts_and_names(f) -> List[Tuple[int, int, str]]:
+    """(début en octets, taille en octets, nom GPT ou "") de chaque
+    partition, MBR ou GPT."""
+    partitions = parse_mbr(f.read(SECTOR_SIZE))
+    if not is_gpt_protective(partitions):
+        return [(p.start_bytes, p.sector_count * SECTOR_SIZE, "") for p in partitions]
+    header = parse_gpt_header(f.read(SECTOR_SIZE))
+    f.seek(header.partition_entry_lba * SECTOR_SIZE)
+    size = -(-header.num_entries * header.entry_size // SECTOR_SIZE) * SECTOR_SIZE
+    return [
+        (
+            e.start_lba * SECTOR_SIZE,
+            (e.end_lba - e.start_lba + 1) * SECTOR_SIZE,
+            e.name.decode("utf-16-le", "replace").split("\x00")[0],
+        )
+        for e in parse_gpt_entries(f.read(size), header)
+    ]
+
+
+def _filesystem_label(reader: _Reader) -> str:
+    """Étiquette du système de fichiers (FAT16/32, exFAT, ext2/3/4), "" sinon."""
+    boot = reader.read(0, SECTOR_SIZE)
+    if boot[82:87] == b"FAT32":
+        return boot[71:82].decode("ascii", "replace").strip()
+    if boot[54:57] == b"FAT":
+        return boot[43:54].decode("ascii", "replace").strip()
+    if boot[3:11] == b"EXFAT   ":
+        fs = _ExFat(reader, boot)
+        root = fs._cluster_bytes(fs.root_cluster)
+        for i in range(0, len(root) - 31, 32):
+            if root[i] == 0x00:
+                break
+            if root[i] == 0x83:  # entrée « étiquette de volume »
+                return root[i + 2 : i + 2 + 2 * min(root[i + 1], 11)].decode("utf-16-le", "replace")
+        return ""
+    superblock = reader.read(1024, 1024)
+    if superblock[56:58] == b"\x53\xef":
+        return superblock[120:136].split(b"\x00")[0].decode("utf-8", "replace")
+    return ""
+
+
+def own_games_partition_bytes(device_path: str) -> int:
+    """Taille de la partition de jeux déjà présente sur la carte
+    (EASYROMS/STORAGE, nom GPT ou étiquette du système de fichiers), 0 s'il
+    n'y en a pas. Toute image de firmware en porte une (ArkOS, dArkOS,
+    ROCKNIX, EmuELEC…), qu'elle agrandit elle-même au premier démarrage ;
+    une sauvegarde système, elle, en est privée (`system_backup.py`). 0 pour
+    tout le reste, sans jamais lever."""
+    try:
+        with open(device_path, "rb") as f:
+            for start, size, name in _partition_starts_and_names(f):
+                if name.upper() in GAMES_LABELS:
+                    return size
+                try:
+                    if _filesystem_label(_Reader(f, start)).upper() in GAMES_LABELS:
+                        return size
+                except (EOFError, ValueError, IndexError, ZeroDivisionError):
+                    continue
+    except (OSError, ValueError, EOFError, IndexError):
+        return 0
+    return 0
+
+
+__all__ = [
+    "SIGNATURE_PATH",
+    "first_partition_contains",
+    "own_games_partition_bytes",
+    "is_rocknix_card",
+    "is_sf3000_card",
+]

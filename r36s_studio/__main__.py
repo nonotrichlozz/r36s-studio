@@ -101,7 +101,8 @@ from r36s_studio.imaging import (
 )
 from r36s_studio.imaging import sf3000_clone
 from r36s_studio.identify.rocknix_r36s import DEFAULT_PANEL, PANELS, R36sConfigMissing, prepare_r36s_card
-from r36s_studio.imaging.card_probe import is_rocknix_card, is_sf3000_card
+from r36s_studio.imaging.card_probe import is_rocknix_card, is_sf3000_card, own_games_partition_bytes
+from r36s_studio.imaging.games_partition import GAMES_PARTITION_WORTHWHILE_BYTES, _peek_free_games_partition_bytes
 from r36s_studio.imaging.exfat_reader import ExFatError
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.flash import UnstableImageRefused
@@ -479,8 +480,8 @@ def _confirm_flash(device: Device, prompt=input) -> bool:
 
 
 def _create_games_partition_after_flash(device: Device) -> None:
-    """Partition de jeux sur l'espace libre restant après un flash vérifié
-    (comportement inchangé pour ArkOS et les autres firmwares, voir
+    """Partition de jeux sur l'espace libre restant après la restauration
+    d'une sauvegarde système (carte sans partition de jeux, voir
     `cmd_flash`) -- best-effort, journalisé dans tous les cas, ne lève
     jamais."""
     try:
@@ -497,6 +498,27 @@ def _create_games_partition_after_flash(device: Device) -> None:
         # de lecteur, un volume exFAT fraîchement formaté n'apparaît pas dans
         # l'Explorateur malgré un formatage réussi.
         emit_log(f"La carte est disponible sous {games_result.drive_letter}:.")
+
+
+def _report_space_after_own_games_partition(device: Device, games_bytes: int) -> None:
+    """Carte qui a déjà sa partition de jeux : rien n'est créé derrière
+    (voir `cmd_flash`). Une petite partition (firmware neuf, 99 Mo pour
+    dArkOSen) sera agrandie par la console ; une grande (sauvegarde
+    complète d'une carte plus petite, déjà agrandie une fois) ne le sera
+    plus -- l'espace restant serait perdu sans qu'on le dise."""
+    free_bytes = _peek_free_games_partition_bytes(device)
+    # ponytail: seuil de 1 Go pour « déjà agrandie », jamais mesuré sur une carte.
+    if games_bytes < GAMES_PARTITION_WORTHWHILE_BYTES or free_bytes < GAMES_PARTITION_WORTHWHILE_BYTES:
+        emit_log(
+            "Le reste de la carte est laissé libre : ta console va agrandir sa partition de jeux "
+            "toute seule au premier démarrage, elle redémarrera une ou deux fois."
+        )
+        return
+    emit_log(
+        f"Ta carte est plus grande que la sauvegarde : {_format_size(free_bytes)} restent inutilisés. "
+        "Pour en profiter, restaure plutôt ta sauvegarde système, puis copie tes jeux sur la carte.",
+        level="warning",
+    )
 
 
 def _prepare_rocknix_r36s_after_flash(device: Device, rocknix: bool, panels_dir: str, panel: str) -> None:
@@ -694,6 +716,14 @@ def cmd_flash(args: argparse.Namespace) -> int:
         # (`resizepart 2 100%`) ; un espace de jeux créé derrière elle
         # l'en empêche (« Can't have overlapping partitions » dans
         # fs-resize.log, stockage resté à 32 Mo, écran noir après le logo).
+        #
+        # Généralisé (2026-10-17) : toute image qui porte déjà sa propre
+        # partition de jeux (EASYROMS/STORAGE) est un firmware qui
+        # l'agrandit lui-même au premier démarrage (ArkOS, dArkOS, EmuELEC…).
+        # Constaté deux fois avec dArkOSen : EASYROMS restée à 99 Mo, pleine,
+        # derrière une partition de 20,9 Go que la console ne lit pas. Seule
+        # une sauvegarde système (partition de jeux retirée,
+        # `system_backup.py`) reçoit donc un espace de jeux créé par l'app.
         rocknix = is_rocknix_card(device.path)
         if is_sf3000_card(device.path):
             emit_log(
@@ -705,6 +735,8 @@ def cmd_flash(args: argparse.Namespace) -> int:
                 "Carte ROCKNIX reconnue : pas d'espace de jeux séparé, ROCKNIX utilisera "
                 "toute la carte au premier démarrage."
             )
+        elif (games_bytes := own_games_partition_bytes(device.path)) > 0:
+            _report_space_after_own_games_partition(device, games_bytes)
         else:
             _create_games_partition_after_flash(device)
 

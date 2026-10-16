@@ -372,12 +372,12 @@ def test_cmd_flash_sf3000_card_gets_no_separate_games_partition(
 def test_cmd_flash_other_cards_keep_the_automatic_games_partition(
     mock_list, mock_confirm, mock_flash, mock_create_games, mock_probe, tmp_path, capsys
 ):
-    """ArkOS et tout le reste : comportement inchangé."""
+    """Sauvegarde système (partition de jeux retirée) : espace de jeux créé."""
     mock_list.return_value = [_make_device()]
     mock_flash.return_value = FlashResult(
         bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
     )
-    image = tmp_path / "arkos.img"
+    image = tmp_path / "systeme.img"
     image.write_bytes(b"x" * 100)
 
     args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
@@ -385,6 +385,58 @@ def test_cmd_flash_other_cards_keep_the_automatic_games_partition(
 
     mock_create_games.assert_called_once()
     assert "SF3000" not in capsys.readouterr().out
+
+
+@patch("r36s_studio.__main__._peek_free_games_partition_bytes", return_value=20 * 1024**3)
+@patch("r36s_studio.__main__.own_games_partition_bytes", return_value=99 * 1024**2)
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_firmware_with_its_own_games_partition_is_left_to_expand(
+    mock_list, mock_confirm, mock_flash, mock_create_games, mock_probe, mock_free, tmp_path, capsys
+):
+    """dArkOSen (constaté deux fois) : une partition créée derrière EASYROMS
+    l'empêchait de s'agrandir au premier démarrage."""
+    mock_list.return_value = [_make_device()]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "darkosen.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    assert args.func(args) == 0
+
+    mock_create_games.assert_not_called()
+    assert "agrandir sa partition de jeux toute seule" in capsys.readouterr().out
+
+
+@patch("r36s_studio.__main__._peek_free_games_partition_bytes", return_value=96 * 1024**3)
+@patch("r36s_studio.__main__.own_games_partition_bytes", return_value=29 * 1024**3)
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_full_backup_on_a_bigger_card_warns_about_unused_space(
+    mock_list, mock_confirm, mock_flash, mock_create_games, mock_probe, mock_free, tmp_path, capsys
+):
+    """Sauvegarde complète de 32 Go sur 128 Go : EASYROMS déjà agrandie une
+    fois, la console ne le refera pas -- le dire, avec la marche à suivre."""
+    mock_list.return_value = [_make_device()]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "complete.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    assert args.func(args) == 0
+
+    mock_create_games.assert_not_called()
+    out = capsys.readouterr().out
+    assert "96.0 Go restent inutilisés" in out
+    assert "agrandir sa partition de jeux toute seule" not in out
 
 
 @patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")

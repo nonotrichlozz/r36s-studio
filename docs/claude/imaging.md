@@ -298,6 +298,26 @@ la table GPT de secours périmée (`docs/bugs-imaging-io.md`) : **à confirmer
 sur du vrai matériel** (le journal du flash concerné aurait dû contenir
 « Espace de jeux recréé… »).
 
+**Généralisé : toute carte qui a déjà sa partition de jeux (2026-10-17).**
+`card_probe.py::own_games_partition_bytes` (lecture brute, nom GPT ou
+étiquette FAT16/FAT32/exFAT/ext4 EASYROMS ou STORAGE) : si vrai, aucune
+partition créée, journal « ta console va agrandir sa partition de jeux
+toute seule… ». Toute image de firmware porte sa propre partition de jeux
+et l'agrandit au premier démarrage ; seule une sauvegarde système (partition
+retirée) reçoit donc l'espace de jeux automatique. Incident : dArkOSen,
+constaté deux fois -- EASYROMS restée à 99 Mo, pleine, derrière une
+partition de 20,9 Go illisible par la console. Étiquette STORAGE (ext4)
+vérifiée sur l'image ROCKNIX 20261001-a ; EASYROMS de dArkOSen d'après le
+constat, pas relue sur l'image.
+Cas inverse, **sauvegarde complète restaurée sur une carte plus grande**
+(32 Go sur 128 Go) : la partition de jeux a déjà été agrandie une fois et
+ne le sera plus. Si elle fait au moins 1 Go et qu'il reste au moins 1 Go
+libre derrière (`GAMES_PARTITION_WORTHWHILE_BYTES`, seuil supposé, jamais
+mesuré), `_report_space_after_own_games_partition` avertit : « … restent
+inutilisés. Pour en profiter, restaure plutôt ta sauvegarde système, puis
+copie tes jeux ». Pas d'agrandissement automatique (exFAT non
+redimensionnable, voir SF3000 ci-dessous).
+
 **« Utiliser toute la carte » (carte SF3000, 2026-09-29).** Commande
 `clone-sf3000` (`__main__.py::cmd_clone_sf3000`, `imaging/sf3000_clone.py`,
 lecteur `imaging/exfat_reader.py`) : au lieu d'écrire l'image brute, une

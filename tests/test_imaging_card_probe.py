@@ -9,7 +9,12 @@ import struct
 
 import pytest
 
-from r36s_studio.imaging.card_probe import first_partition_contains, is_rocknix_card, is_sf3000_card
+from r36s_studio.imaging.card_probe import (
+    first_partition_contains,
+    own_games_partition_bytes,
+    is_rocknix_card,
+    is_sf3000_card,
+)
 from r36s_studio.imaging.fat32 import format_fat32
 
 from .sparse_file import create_sparse_file
@@ -321,3 +326,45 @@ def test_rocknix_probe_never_raises(tmp_path, content):
     img.write_bytes(content)
     assert is_rocknix_card(str(img)) is False
     assert is_rocknix_card(str(tmp_path / "absent.img")) is False
+
+
+# --- partition de jeux déjà présente (firmware qui l'agrandit lui-même) -------
+# dArkOSen : EASYROMS de 99 Mo dans l'image, agrandie au premier démarrage ;
+# ROCKNIX : STORAGE en ext4 (vérifié sur l'image RK3326 20261001-a).
+
+
+@pytest.mark.parametrize("label, expected", [("EASYROMS", True), ("SDCARD", False)])
+def test_fat32_games_partition_is_found_by_label(tmp_path, label, expected):
+    img = tmp_path / "carte.img"
+    _fat32_card(img, label)
+    assert (own_games_partition_bytes(str(img)) == FAT32_TEST_BYTES) is expected
+
+
+def test_exfat_games_partition_is_found_by_label(tmp_path):
+    label = bytearray(32)
+    label[0], label[1] = 0x83, len("EASYROMS")
+    label[2:18] = "EASYROMS".encode("utf-16-le")
+    img = tmp_path / "carte.img"
+    _build_exfat(img, bytes(label), {}, fat={4: EOC})
+    assert own_games_partition_bytes(str(img)) > 0
+    _sf3000_exfat(img)  # étiquette vide
+    assert own_games_partition_bytes(str(img)) == 0
+
+
+def test_ext4_storage_partition_is_found_by_label(tmp_path):
+    data = bytearray((PART_START_LBA + 8) * SECTOR)
+    data[0:SECTOR] = _mbr(0x83, PART_START_LBA, 8)
+    sb = PART_START_LBA * SECTOR + 1024
+    data[sb + 56 : sb + 58] = b"\x53\xef"
+    data[sb + 120 : sb + 127] = b"STORAGE"
+    img = tmp_path / "rocknix.img"
+    img.write_bytes(bytes(data))
+    assert own_games_partition_bytes(str(img)) == 8 * SECTOR
+
+
+@pytest.mark.parametrize("content", [b"", b"\x00" * SECTOR])
+def test_games_partition_probe_never_raises(tmp_path, content):
+    img = tmp_path / "vide.img"
+    img.write_bytes(content)
+    assert own_games_partition_bytes(str(img)) == 0
+    assert own_games_partition_bytes(str(tmp_path / "absent.img")) == 0

@@ -36,6 +36,8 @@ from typing import Any, Dict, List, NoReturn, Optional
 
 from r36s_studio.gui import logs as gui_logs
 
+from .telechargement import Telechargement, telechargement_depuis_json
+
 
 @dataclass
 class OptionConsole:
@@ -50,6 +52,9 @@ class OptionConsole:
     licence: Optional[str] = None
     licence_a_verifier: bool = False
     restriction_commerciale: bool = False
+    # Téléchargement direct (`telechargement.py`) -- `None` quand la fiche
+    # ne décrit aucune image téléchargeable pour cette option.
+    telechargement: Optional[Telechargement] = None
 
 
 @dataclass
@@ -138,6 +143,7 @@ def _option_depuis_json(data: Any) -> Optional[OptionConsole]:
         licence=data.get("licence") if isinstance(data.get("licence"), str) else None,
         licence_a_verifier=bool(data.get("licence_a_verifier", False)),
         restriction_commerciale=bool(data.get("restriction_commerciale", False)),
+        telechargement=telechargement_depuis_json(data.get("telechargement")),
     )
 
 

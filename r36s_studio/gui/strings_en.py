@@ -489,6 +489,12 @@ STRINGS_EN = {
     "execute_title_list_rocknix": "Looking for ROCKNIX versions online…",
     "execute_title_download_rocknix": "Downloading ROCKNIX…",
     "rocknix_download_success": "The latest version of ROCKNIX has been downloaded: {path}",
+    "execute_title_download_firmware": "Downloading {firmware}…",
+    "catalogue_install_searching_log": "Looking for the latest version of {firmware} for {console}…",
+    "catalogue_install_file_log": "File found: {name}",
+    "catalogue_download_success": "{firmware} has been downloaded: {path}. Now choose the SD card to prepare.",
+    "catalogue_install_running_title": "Installing {firmware} on {console}",
+    "catalogue_install_running_instruction": "The system is being downloaded. Next, you'll choose the SD card and confirm before anything is erased.",
     "rocknix_console_title": "Which console is this card for?",
     "rocknix_console_hint": (
         "On an R36S, ROCKNIX only starts with two settings: R36S Studio makes them for "
@@ -647,6 +653,7 @@ STRINGS_EN = {
         "file you already downloaded."
     ),
     "error_rocknix_checksum_mismatch": "The downloaded file is corrupted or incomplete. Try again.",
+    "error_firmware_not_found": "Couldn't find the file to download for this system. Check your internet connection, then try again.",
     "error_rocknix_download_failed": "The download failed. Check your internet connection, then try again.",
     "error_games_partition_not_found": (
         "Could not recognize where the games are (EASYROMS or STORAGE) on this card — the system "

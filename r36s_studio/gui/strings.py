@@ -737,6 +737,12 @@ STRINGS = {
     "execute_title_list_rocknix": "Recherche des versions ROCKNIX en ligne…",
     "execute_title_download_rocknix": "Téléchargement de ROCKNIX en cours…",
     "rocknix_download_success": "La dernière version de ROCKNIX a été téléchargée : {path}",
+    "execute_title_download_firmware": "Téléchargement de {firmware} en cours…",
+    "catalogue_install_searching_log": "Recherche de la dernière version de {firmware} pour {console}…",
+    "catalogue_install_file_log": "Fichier trouvé : {name}",
+    "catalogue_download_success": "{firmware} a été téléchargé : {path}. Choisis maintenant la carte SD à préparer.",
+    "catalogue_install_running_title": "Installation de {firmware} sur {console}",
+    "catalogue_install_running_instruction": "Le système est en cours de téléchargement. Ensuite, tu choisiras la carte SD et tu confirmeras avant que quoi que ce soit ne soit effacé.",
     # Question posée avant tout flash ROCKNIX en mode expert : les réglages
     # R36S (identify/rocknix_r36s.py) empêcheraient une autre console de
     # démarrer, donc seulement sur un « Oui » explicite.
@@ -949,6 +955,7 @@ STRINGS = {
     "error_rocknix_checksum_mismatch": (
         "Le fichier téléchargé est corrompu ou incomplet. Réessaie."
     ),
+    "error_firmware_not_found": "Impossible de trouver le fichier à télécharger pour ce système. Vérifie ta connexion internet, puis réessaie.",
     "error_rocknix_download_failed": (
         "Le téléchargement a échoué. Vérifie ta connexion internet, puis réessaie."
     ),
@@ -1436,6 +1443,7 @@ _ERROR_MESSAGE_KEYS = {
     "ROCKNIX_ASSET_NOT_FOUND": "error_rocknix_asset_not_found",
     "ROCKNIX_CHECKSUM_MISMATCH": "error_rocknix_checksum_mismatch",
     "ROCKNIX_DOWNLOAD_FAILED": "error_rocknix_download_failed",
+    "FIRMWARE_NOT_FOUND": "error_firmware_not_found",
     "GAMES_PARTITION_NOT_FOUND": "error_games_partition_not_found",
     "INSUFFICIENT_DISK_SPACE": "error_insufficient_disk_space",
     "DESTINATION_TOO_SMALL": "error_destination_too_small",

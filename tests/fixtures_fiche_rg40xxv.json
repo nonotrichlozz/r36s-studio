@@ -1,0 +1,121 @@
+{
+  "id": "rg40xxv",
+  "identite": {
+    "nom": "RG40XXV",
+    "fabricant": "Anbernic",
+    "alias": [
+      "RG40XX V",
+      "RG40XX-V",
+      "RG 40XXV"
+    ]
+  },
+  "materiel": {
+    "soc": "Allwinner H700",
+    "architecture": "ARM64"
+  },
+  "os": {
+    "type": "Linux (firmware Anbernic d'origine)"
+  },
+  "options": {
+    "frontend": [],
+    "systeme_cfw": [
+      {
+        "nom": "KNULLI",
+        "description": "Firmware complet dérivé de Batocera, interface EmulationStation très soignée. R36S Studio télécharge automatiquement la dernière version pour la RG40XX V (image .img.gz flashable directement).",
+        "url": "https://github.com/knulli-cfw/knulli-linux/releases/tag/20260511",
+        "licence": "Batocera (inclut des composants à usage non commercial)",
+        "restriction_commerciale": true,
+        "source_url": "https://github.com/knulli-cfw/knulli-linux",
+        "telechargement": {
+          "depot": "knulli-cfw/knulli-linux",
+          "motif_fichier": "^knulli-h700-rg40xx-v-.*\\.img\\.gz$",
+          "url_directe": "https://github.com/knulli-cfw/knulli-linux/releases/download/20260511/knulli-h700-rg40xx-v-scarab-20260511.img.gz"
+        }
+      },
+      {
+        "nom": "ROCKNIX",
+        "description": "Successeur de JELOS. Image commune H700 : après flash, copier sun50i-h700-anbernic-rg40xx-v.dtb (dossier device_trees) à la racine de la partition ROCKNIX et le renommer dtb.img. Les versions récentes existent en DDR3 et DDR4 : vérifier le type de RAM de la console.",
+        "url": "https://rocknix.org/configure/h700-installation/",
+        "licence": "GPL-2.0",
+        "source_url": "https://github.com/ROCKNIX/distribution"
+      },
+      {
+        "nom": "muOS (MustardOS)",
+        "description": "Firmware léger et très abouti, pensé pour la famille Anbernic H700. Interface maison, sauvegarde/restauration intégrées.",
+        "url": "https://muos.dev/devices/anbernic/rg40xxv",
+        "licence": "GPL-3.0 + conditions d'utilisation (usage personnel uniquement)",
+        "restriction_commerciale": true,
+        "source_url": "https://github.com/MustardOS"
+      },
+      {
+        "nom": "MinUI",
+        "description": "Interface minimaliste qui s'installe sur la 2e carte SD par-dessus le système d'origine (pas de flash). Support RG40XXV classé « Legacy » (dernière version dédiée : MinUI-20240831-0).",
+        "url": "https://github.com/shauninman/MinUI",
+        "licence": "non_detectee",
+        "licence_a_verifier": true,
+        "source_url": "https://github.com/shauninman/MinUI"
+      }
+    ],
+    "firmware_origine": [
+      {
+        "nom": "Firmware Anbernic officiel RG40XXV",
+        "description": "Images officielles (versions 16 Go et standard) sur la page de téléchargement Anbernic.",
+        "url": "https://win.anbernic.com/download_data/389.html",
+        "source_url": "https://win.anbernic.com/download_data/389.html"
+      }
+    ],
+    "mises_a_jour": []
+  },
+  "incompatibles": [
+    {
+      "nom": "ArkOS",
+      "raison": "Conçu pour les Rockchip RK3326/RK3566, pas pour l'Allwinner H700"
+    },
+    {
+      "nom": "dArkOS",
+      "raison": "Conçu pour les Rockchip RK3326, pas pour l'Allwinner H700"
+    }
+  ],
+  "liens_officiels": [
+    "https://anbernic.com/fr-fr/products/rg-40xxv"
+  ],
+  "licences": [
+    "GPL-2.0",
+    "GPL-3.0",
+    "Batocera (composants non commerciaux)"
+  ],
+  "restriction_commerciale": true,
+  "sources": [
+    {
+      "url": "https://knulli.org/devices/anbernic/rg40xx-v/",
+      "type": "web"
+    },
+    {
+      "url": "https://github.com/knulli-cfw/knulli-linux",
+      "type": "github"
+    },
+    {
+      "url": "https://rocknix.org/configure/h700-installation/",
+      "type": "web"
+    },
+    {
+      "url": "https://github.com/ROCKNIX/distribution",
+      "type": "github"
+    },
+    {
+      "url": "https://muos.dev/devices/anbernic/rg40xxv",
+      "type": "web"
+    },
+    {
+      "url": "https://muos.dev/docs/tou",
+      "type": "web"
+    },
+    {
+      "url": "https://github.com/shauninman/MinUI",
+      "type": "github"
+    }
+  ],
+  "statut": "verifie",
+  "date_verification": "2026-10-17",
+  "signalements": 0
+}

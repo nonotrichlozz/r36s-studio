@@ -74,8 +74,9 @@ serveur injoignable.
 ## Prochaines étapes (hors périmètre de l'étape 1, recherche + affichage)
 - Analyse de carte SD (le champ `detection_sd` du schéma existe déjà côté
   catalogue mais n'est pas exploité côté app).
-- Installation/téléchargement d'un firmware ou frontend depuis cette
-  section -- aujourd'hui, seuls des liens ouverts dans le navigateur.
+- ~~Installation/téléchargement d'un firmware depuis cette section~~ --
+  fait le 2026-10-17 pour les options qui portent un champ
+  `telechargement` (voir `consoles_diverses/CLAUDE.md`).
 - Contributions/soumissions au catalogue depuis l'app (aujourd'hui,
   uniquement via une PR GitHub ouverte côté serveur pour une fiche IA).
 - Dédoublonnage des jeux (détecter qu'un jeu déjà présent sur la carte

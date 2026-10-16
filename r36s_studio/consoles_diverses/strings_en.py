@@ -37,6 +37,7 @@ STRINGS_EN = {
     "category_firmware_origine": "Original firmware",
     "category_mises_a_jour": "Updates",
     "categories_without_options": "Nothing found for: {liste}",
+    "install_button": "⬇ Download and install",
     "no_options_at_all_message": "Little information found for this console.",
     "incompatibles_title": "Do not install: {liste}",
     "open_page_button": "Open the page",

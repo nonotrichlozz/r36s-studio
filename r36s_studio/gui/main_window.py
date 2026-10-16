@@ -39,7 +39,7 @@ from r36s_studio.android.models import DetectionResult
 from r36s_studio.consoles_diverses import settings_store as consoles_diverses_settings_store
 from r36s_studio.consoles_diverses.client import ResultatRecherche
 from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
-from r36s_studio.consoles_diverses.search_runner import ConsoleSearchRunner
+from r36s_studio.consoles_diverses.search_runner import ConsoleSearchRunner, FirmwareResolveRunner
 from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettingsDialog
 from r36s_studio.consoles_diverses.strings import friendly_error_message as consoles_diverses_friendly_error_message
 from r36s_studio.detect import ARKOS_ONLY_STEPS, CardSystem, arkos_step_refusal, detect_card
@@ -64,6 +64,7 @@ from r36s_studio.doublons.safety import is_filesystem_root, is_whole_user_folder
 from r36s_studio.doublons.scan import Unit
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, result_from_dict
 from r36s_studio.identify import rocknix_r36s
+from r36s_studio.identify.rocknix import RocknixAsset
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.imaging import (
     DEFAULT_RESET_LABEL,
@@ -438,6 +439,15 @@ class MainWindow(QMainWindow):
         # choisir. Consommé (remis à False) dès que `_on_device_chosen` en
         # tient compte.
         self._skip_file_dialog_for_flash = False
+        # Flash d'un firmware téléchargé depuis une fiche « Consoles
+        # diverses » (`_on_consoles_diverses_install_requested`) : la
+        # console n'est pas forcément une R36S, donc aucun réglage lié au
+        # firmware choisi dans le sélecteur R36S (`self._app_config.
+        # firmware` : questions d'écran ROCKNIX, consignes Android) ne doit
+        # s'appliquer. Remis à False par `_start_flow` et par « Préparer
+        # une carte avec cette sauvegarde ».
+        self._catalogue_flash_active = False
+        self._catalogue_firmware_name = ""
         # « Utiliser toute la carte » pour une image SF3000 (`imaging/
         # sf3000_clone.py`) : choisi dans `WholeCardChoiceDialog` (mode
         # expert) ou automatiquement (mode assisté) -- remis à False avant
@@ -789,6 +799,7 @@ class MainWindow(QMainWindow):
         # bas avec les autres signaux de ce dialogue).
         self._consoles_diverses_screen.back_requested.connect(self._show_startup_screen)
         self._consoles_diverses_screen.settings_requested.connect(self._on_consoles_diverses_settings_requested)
+        self._consoles_diverses_screen.install_requested.connect(self._on_consoles_diverses_install_requested)
         self._consoles_diverses_settings_dialog.settings_saved.connect(self._on_consoles_diverses_settings_saved)
 
         # Outil « Console Android » (android/, étape 1) -- même principe
@@ -1038,6 +1049,7 @@ class MainWindow(QMainWindow):
     # --- déclenchement d'une étape -> fenêtre Choix de la carte -------------
 
     def _start_flow(self, mode: str) -> None:
+        self._catalogue_flash_active = False
         self._mode = mode
         self._device = None
         self._file_path = None
@@ -1373,6 +1385,8 @@ class MainWindow(QMainWindow):
         parcours de clonage ni « Préparer une carte avec cette sauvegarde »,
         qui restaurent une carte déjà réglée."""
         if self._mode != "flash" or self._wizard_active or self._assisted_ad_hoc_active:
+            return False
+        if self._catalogue_flash_active:
             return False
         return self._app_config.firmware == "rocknix"
 
@@ -1824,7 +1838,7 @@ class MainWindow(QMainWindow):
         `--eject-after`) et à sa fin (`_on_worker_finished`, pour le
         message d'avertissement) -- les deux doivent s'accorder sur le
         même résultat sans dépendre de l'ordre d'appel."""
-        if self._mode != "flash" or self._wizard_active:
+        if self._mode != "flash" or self._wizard_active or self._catalogue_flash_active:
             return False
         entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
         return entry is not None and entry.is_android
@@ -1834,7 +1848,7 @@ class MainWindow(QMainWindow):
         (`FirmwareEntry.post_flash_log_key`) -- mêmes conditions que
         `_is_flashing_android_firmware` : jamais pour le parcours de
         clonage du mode assisté, qui n'a pas choisi de firmware."""
-        if self._mode != "flash" or self._wizard_active:
+        if self._mode != "flash" or self._wizard_active or self._catalogue_flash_active:
             return None
         entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
         return entry.post_flash_log_key if entry is not None else None
@@ -2036,6 +2050,7 @@ class MainWindow(QMainWindow):
         dans ce cas précis), puis la fenêtre Confirmation habituelle
         (§2 n°6, jamais sautée)."""
         backup_path = self._file_path
+        self._catalogue_flash_active = False
         self._mode = "flash"
         self._device = None
         self._file_path = backup_path
@@ -3392,6 +3407,91 @@ class MainWindow(QMainWindow):
             print("[Web] R36S_STUDIO_WEB_URL absente ou non https -- ouverture refusée.", file=sys.stderr)
             return
         QDesktopServices.openUrl(QUrl(url))
+
+    # --- « Télécharger et installer » depuis une fiche Consoles diverses -----
+
+    def _on_consoles_diverses_install_requested(self, option, console_name: str) -> None:
+        """Bouton « Télécharger et installer » d'une option de fiche vérifiée
+        (`consoles_diverses/screen.py`) : cherche le fichier dans la
+        dernière release du projet (`consoles_diverses/telechargement.py`),
+        le télécharge avec progression réelle (`RocknixDownloadRunner`,
+        générique malgré son nom), puis ouvre le choix de la carte et la
+        fenêtre Confirmation habituelle (§2 n°6, jamais sautée). Le journal
+        de bord est celui de `MainView`, dans l'habillage du mode courant
+        (expert ou assisté, `ui_mode` jamais modifié)."""
+        telechargement = getattr(option, "telechargement", None)
+        if telechargement is None:
+            return
+        self._catalogue_firmware_name = option.nom
+        if self._app_config.ui_mode == "expert":
+            self._main_view.show_home()
+        else:
+            self._assisted_ad_hoc_active = True
+            self._main_view.show_wizard_panel()
+            self._wizard_panel.show_step(
+                tr("catalogue_install_running_title", firmware=option.nom, console=console_name),
+                tr("catalogue_install_running_instruction"),
+                can_continue=False,
+            )
+        self._root_stack.setCurrentWidget(self._main_view)
+        self._log_panel.start_operation(tr("execute_title_download_firmware", firmware=option.nom))
+        self._log_panel.append_log(tr("catalogue_install_searching_log", firmware=option.nom, console=console_name))
+        self._set_catalogue_install_busy(True)
+        self._last_error_code = None
+        self._last_error_msg = None
+        self._runner = FirmwareResolveRunner(telechargement, parent=self)
+        self._runner.error.connect(self._on_catalogue_install_failed)
+        self._runner.resolved.connect(self._on_catalogue_firmware_resolved)
+        self._runner.start()
+
+    def _set_catalogue_install_busy(self, busy: bool) -> None:
+        self._home.set_busy(busy)
+        self._assisted_landing.set_busy(busy)
+        if self._console_stage is not None:
+            if busy:
+                self._console_stage.start_activity()
+            else:
+                self._console_stage.stop_activity()
+
+    def _on_catalogue_install_failed(self, code: str, msg: str) -> None:
+        self._set_catalogue_install_busy(False)
+        self._last_error_code = code
+        self._last_error_msg = msg
+        self._log_panel.finish_error(friendly_error_message(code), details=error_log_detail(code, msg))
+        if self._assisted_ad_hoc_active:
+            self._wizard_panel.show_error()
+
+    def _on_catalogue_firmware_resolved(self, fichier) -> None:
+        self._log_panel.append_log(tr("catalogue_install_file_log", name=fichier.nom))
+        asset = RocknixAsset(name=fichier.nom, download_url=fichier.url, size_bytes=fichier.taille)
+        self._runner = RocknixDownloadRunner(asset, fichier.sha256, parent=self)
+        self._runner.progress.connect(self._on_progress)
+        self._runner.error.connect(self._on_worker_error)
+        self._runner.finished_download.connect(self._on_catalogue_download_finished)
+        self._runner.start()
+
+    @Slot(bool, str)
+    def _on_catalogue_download_finished(self, ok: bool, path: str) -> None:
+        self._set_catalogue_install_busy(False)
+        if not ok:
+            friendly = friendly_error_message(self._last_error_code or "")
+            self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
+            if self._assisted_ad_hoc_active:
+                self._wizard_panel.show_error()
+            return
+        # Rien n'a encore été écrit sur une carte : pas d'éjection proposée.
+        self._log_panel.finish_success(
+            tr("catalogue_download_success", firmware=self._catalogue_firmware_name, path=path),
+            allow_eject=False,
+            reveal_path=path,
+        )
+        self._mode = "flash"
+        self._device = None
+        self._file_path = path
+        self._catalogue_flash_active = True
+        self._skip_file_dialog_for_flash = True
+        self._refresh_devices()
+        self._device_dialog.open()
 
     def _on_consoles_diverses_settings_requested(self) -> None:
         self._consoles_diverses_settings_dialog.set_values(self._app_config.consoles_diverses_licence_key)

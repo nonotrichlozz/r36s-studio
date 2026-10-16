@@ -35,7 +35,7 @@ largeur de lecture max (`_MAX_CONTENT_WIDTH`)."""
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Callable, List, Optional
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QTimer, QUrl, Qt, Signal
@@ -241,7 +241,9 @@ def _build_card(*, title: Optional[str] = None) -> tuple[QWidget, QVBoxLayout]:
     return frame, layout
 
 
-def _build_option_widget(option: OptionConsole) -> QWidget:
+def _build_option_widget(
+    option: OptionConsole, on_install: Optional[Callable[[OptionConsole], None]] = None
+) -> QWidget:
     container = QFrame()
     container.setProperty("role", "row")
     layout = QVBoxLayout(container)
@@ -264,6 +266,16 @@ def _build_option_widget(option: OptionConsole) -> QWidget:
         # Pas de libellé fixe ici : `_link_widget` calcule « Ouvrir sur
         # GitHub »/« Ouvrir la page » selon l'URL (retouche visuelle).
         layout.addWidget(_link_widget(option.url), alignment=Qt.AlignLeft)
+
+    if on_install is not None and option.telechargement is not None:
+        # Téléchargement direct puis flash (`telechargement.py`) -- seulement
+        # pour une fiche vérifiée (`_build_options_section` ne passe
+        # `on_install` que dans ce cas) : une fiche IA ne propose jamais
+        # d'installation (docs/consoles-diverses-recherche.md).
+        install_button = QPushButton(tr("install_button"))
+        install_button.setProperty("role", "primary")
+        install_button.clicked.connect(lambda _checked=False, o=option: on_install(o))
+        layout.addWidget(install_button, alignment=Qt.AlignLeft)
 
     return container
 
@@ -334,7 +346,9 @@ def _build_info_block(fiche: FicheConsole) -> Optional[QWidget]:
     return frame
 
 
-def _build_options_section(fiche: FicheConsole) -> List[QWidget]:
+def _build_options_section(
+    fiche: FicheConsole, on_install: Optional[Callable[[OptionConsole], None]] = None
+) -> List[QWidget]:
     """Une carte par option présente, plus -- pour les catégories qui n'en
     ont aucune -- une seule ligne grise groupée plutôt qu'un titre de
     catégorie répété pour ne rien dire (point 4). Si la fiche n'a
@@ -356,7 +370,7 @@ def _build_options_section(fiche: FicheConsole) -> List[QWidget]:
             continue
         widgets.append(_plain_label(tr(_CATEGORY_TITLE_KEYS[key]), role="title"))
         for option in options:
-            widgets.append(_build_option_widget(option))
+            widgets.append(_build_option_widget(option, on_install if fiche.verifiee else None))
 
     if categories_vides:
         widgets.append(
@@ -394,6 +408,9 @@ class ConsolesDiversesScreen(Screen):
 
     back_requested = Signal()
     settings_requested = Signal()
+    # (OptionConsole, nom de la console) -- câblé par `MainWindow`, qui
+    # télécharge puis ouvre la fenêtre Confirmation habituelle.
+    install_requested = Signal(object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -630,7 +647,9 @@ class ConsolesDiversesScreen(Screen):
 
         layout.addWidget(_build_hardware_card(fiche))
 
-        for widget in _build_options_section(fiche):
+        for widget in _build_options_section(
+            fiche, lambda option, nom=fiche.nom: self.install_requested.emit(option, nom)
+        ):
             layout.addWidget(widget)
 
         if fiche.sources:

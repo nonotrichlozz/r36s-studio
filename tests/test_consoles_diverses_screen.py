@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QLabel, QPushButton
 
 from r36s_studio.consoles_diverses.client import ResultatRecherche
 from r36s_studio.consoles_diverses.models import fiche_depuis_json
+from r36s_studio.consoles_diverses.strings import tr as tr_consoles
 from r36s_studio.consoles_diverses.screen import (
     SLOW_SEARCH_WARNING_DELAY_MS,
     ConsolesDiversesScreen,
@@ -408,7 +409,10 @@ def test_fiche_source_with_unsafe_scheme_shown_as_plain_text(qapp):
     assert "file:///etc/passwd" in label_texts
 
 
-# --- Aucun bouton d'installation/téléchargement automatique -----------------
+# --- Bouton « Télécharger et installer » --------------------------------------
+#
+# Seulement pour une option qui décrit un téléchargement direct
+# (`telechargement`), et seulement sur une fiche vérifiée.
 
 
 def test_no_install_or_download_button_appears_in_a_rendered_fiche(qapp):
@@ -421,6 +425,51 @@ def test_no_install_or_download_button_appears_in_a_rendered_fiche(qapp):
     button_texts = [button.text().lower() for button in content.findChildren(QPushButton)]
     interdits = ("install", "télécharg", "download")
     assert not any(mot in texte for texte in button_texts for mot in interdits)
+
+
+FIXTURE_FICHE_RG40XXV = Path(__file__).parent / "fixtures_fiche_rg40xxv.json"
+
+
+def _fiche_rg40xxv(**overrides) -> dict:
+    data = json.loads(FIXTURE_FICHE_RG40XXV.read_text(encoding="utf-8"))
+    data.update(overrides)
+    return data
+
+
+def _install_buttons(screen):
+    content = screen._result_frame.widget()
+    libelle = tr_consoles("install_button")
+    return [button for button in content.findChildren(QPushButton) if button.text() == libelle]
+
+
+def test_install_button_shown_once_for_knulli_on_a_verified_fiche(qapp):
+    screen = ConsolesDiversesScreen()
+    fiche = fiche_depuis_json(_fiche_rg40xxv())
+
+    screen._on_search_finished(ResultatRecherche(statut="trouve_dans_catalogue", console=fiche))
+
+    assert len(_install_buttons(screen)) == 1
+
+
+def test_install_button_emits_option_and_console_name(qapp):
+    screen = ConsolesDiversesScreen()
+    fiche = fiche_depuis_json(_fiche_rg40xxv())
+    recus = []
+    screen.install_requested.connect(lambda option, nom: recus.append((option.nom, nom)))
+
+    screen._on_search_finished(ResultatRecherche(statut="trouve_dans_catalogue", console=fiche))
+    _install_buttons(screen)[0].click()
+
+    assert recus == [("KNULLI", "RG40XXV")]
+
+
+def test_no_install_button_on_an_unverified_fiche_even_with_a_download(qapp):
+    screen = ConsolesDiversesScreen()
+    fiche = fiche_depuis_json(_fiche_rg40xxv(statut="non_verifie"))
+
+    screen._on_search_finished(ResultatRecherche(statut="trouve_par_ia", console=fiche))
+
+    assert _install_buttons(screen) == []
 
 
 # --- Recherche / Réessayer ---------------------------------------------------

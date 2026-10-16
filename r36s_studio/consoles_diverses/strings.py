@@ -47,6 +47,7 @@ STRINGS = {
     "category_firmware_origine": "Firmware d'origine",
     "category_mises_a_jour": "Mises à jour",
     "categories_without_options": "Rien trouvé pour : {liste}",
+    "install_button": "⬇ Télécharger et installer",
     "no_options_at_all_message": "Peu d'informations trouvées pour cette console.",
     "incompatibles_title": "Ne pas installer : {liste}",
     "open_page_button": "Ouvrir la page",

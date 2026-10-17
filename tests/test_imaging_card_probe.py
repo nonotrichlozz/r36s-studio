@@ -362,6 +362,20 @@ def test_ext4_storage_partition_is_found_by_label(tmp_path):
     assert own_games_partition_bytes(str(img)) == 8 * SECTOR
 
 
+def test_ext4_knulli_share_partition_is_found_by_label(tmp_path):
+    """KNULLI Scarab (RG40XX V) : partition `userdata` ext4 étiquetée SHARE.
+    Non reconnue avant le 2026-10-17 : l'app créait une EASYROMS derrière
+    elle et KNULLI restait figé sur son image de démarrage."""
+    data = bytearray((PART_START_LBA + 8) * SECTOR)
+    data[0:SECTOR] = _mbr(0x83, PART_START_LBA, 8)
+    sb = PART_START_LBA * SECTOR + 1024
+    data[sb + 56 : sb + 58] = b"\x53\xef"
+    data[sb + 120 : sb + 125] = b"SHARE"
+    img = tmp_path / "knulli.img"
+    img.write_bytes(bytes(data))
+    assert own_games_partition_bytes(str(img)) == 8 * SECTOR
+
+
 @pytest.mark.parametrize("content", [b"", b"\x00" * SECTOR])
 def test_games_partition_probe_never_raises(tmp_path, content):
     img = tmp_path / "vide.img"

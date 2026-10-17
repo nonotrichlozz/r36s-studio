@@ -264,9 +264,18 @@ def is_sf3000_card(device_path: str) -> bool:
     return first_partition_contains(device_path, SIGNATURE_PATH)
 
 
-# Mêmes étiquettes que `system_backup.GAMES_PARTITION_LABELS` (pas importé :
-# ce module ne dépend que de `mbr`/`gpt`).
-GAMES_LABELS = {"EASYROMS", "STORAGE"}
+# Étiquettes de `system_backup.GAMES_PARTITION_LABELS` (pas importé : ce
+# module ne dépend que de `mbr`/`gpt`), plus SHARE : partition `userdata` en
+# ext4 étiquetée « SHARE » de KNULLI/Batocera (relevée sur l'image KNULLI
+# Scarab RG40XX V 20260511, 512 Mo, agrandie au premier démarrage par
+# `autoresize=true` de knulli-boot.conf). Bug réel du 2026-10-17 : SHARE
+# non reconnue, l'app créait une EASYROMS derrière elle ; KNULLI ne
+# trouvait plus d'espace libre et restait figé sur son image de démarrage
+# (constaté plus d'une heure, `boot/autoresize` jamais supprimé). SHARE
+# n'est volontairement PAS ajoutée à `system_backup` : elle contient aussi
+# les sauvegardes et réglages, l'exclure d'une sauvegarde système serait
+# une autre décision.
+GAMES_LABELS = {"EASYROMS", "STORAGE", "SHARE"}
 
 
 def _partition_starts_and_names(f) -> List[Tuple[int, int, str]]:
@@ -314,7 +323,7 @@ def own_games_partition_bytes(device_path: str) -> int:
     """Taille de la partition de jeux déjà présente sur la carte
     (EASYROMS/STORAGE, nom GPT ou étiquette du système de fichiers), 0 s'il
     n'y en a pas. Toute image de firmware en porte une (ArkOS, dArkOS,
-    ROCKNIX, EmuELEC…), qu'elle agrandit elle-même au premier démarrage ;
+    ROCKNIX, EmuELEC, KNULLI…), qu'elle agrandit elle-même au premier démarrage ;
     une sauvegarde système, elle, en est privée (`system_backup.py`). 0 pour
     tout le reste, sans jamais lever."""
     try:

@@ -20,6 +20,10 @@ toucher au catalogue. Si l'API GitHub ne répond pas (réseau, limite de
 requêtes anonymes) ou ne trouve rien, repli sur `url_directe` (version
 figée au moment de la vérification de la fiche).
 
+Le champ optionnel `apres_flash` liste les fichiers à copier sur la carte
+juste après le flash (`partitions/post_flash_copy.py`, mêmes règles de
+chemin côté GUI et côté worker).
+
 Une fiche reste une donnée externe (`consoles_diverses/CLAUDE.md`,
 durcissement) : seul un dépôt au format `propriétaire/nom` est accepté,
 seuls des liens `https://github.com/` sont téléchargés, et le nom de
@@ -35,10 +39,11 @@ import json
 import re
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
 from r36s_studio import __version__
+from r36s_studio.partitions.post_flash_copy import PostFlashCopy, copies_depuis_json
 
 API_RELEASE_LATEST = "https://api.github.com/repos/{depot}/releases/latest"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -61,6 +66,10 @@ class Telechargement:
     depot: str
     motif_fichier: str
     url_directe: Optional[str] = None
+    # Copies à faire sur la carte juste après le flash (ex. `dtb.img` de
+    # ROCKNIX sur H700), transmises au worker élevé par `MainWindow`
+    # (`--copy-after-flash`, `partitions/post_flash_copy.py`).
+    apres_flash: Tuple[PostFlashCopy, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -91,7 +100,12 @@ def telechargement_depuis_json(data: Any) -> Optional[Telechargement]:
     url_directe = data.get("url_directe")
     if not (isinstance(url_directe, str) and url_github_sure(url_directe)):
         url_directe = None
-    return Telechargement(depot=depot, motif_fichier=motif, url_directe=url_directe)
+    # Une seule entrée `apres_flash` invalide suffit à retirer le bouton :
+    # jamais une installation à moitié réglée (console qui ne démarre pas).
+    copies = copies_depuis_json(data.get("apres_flash"))
+    if copies is None:
+        return None
+    return Telechargement(depot=depot, motif_fichier=motif, url_directe=url_directe, apres_flash=tuple(copies))
 
 
 def url_github_sure(url: str) -> bool:

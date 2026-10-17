@@ -332,8 +332,9 @@ FIXTURE_FICHE_RG40XXV = Path(__file__).parent / "fixtures_fiche_rg40xxv.json"
 
 
 def test_fiche_rg40xxv_du_catalogue_porte_le_telechargement_knulli():
-    """Copie de `r36s-studio-catalogue/consoles/rg40xxv.json` : KNULLI décrit
-    un téléchargement direct, les autres options non."""
+    """Copie de `r36s-studio-catalogue/consoles/rg40xxv.json` : KNULLI
+    (`telechargement`) et ROCKNIX (`installation`, avec `dtb.img` après
+    flash) s'installent directement, muOS et MinUI non."""
     fiche = fiche_depuis_json(json.loads(FIXTURE_FICHE_RG40XXV.read_text(encoding="utf-8")))
 
     noms = [option.nom for option in fiche.options.systeme_cfw]
@@ -342,7 +343,25 @@ def test_fiche_rg40xxv_du_catalogue_porte_le_telechargement_knulli():
     assert knulli.telechargement is not None
     assert knulli.telechargement.depot == "knulli-cfw/knulli-linux"
     assert knulli.telechargement.url_directe.startswith("https://github.com/")
-    assert all(option.telechargement is None for option in fiche.options.systeme_cfw[1:])
+    rocknix = fiche.options.systeme_cfw[1]
+    assert rocknix.telechargement is not None  # clé `installation`
+    assert rocknix.telechargement.depot == "ROCKNIX/distribution"
+    assert [(c.partition, c.destination) for c in rocknix.telechargement.apres_flash] == [("ROCKNIX", "dtb.img")]
+    assert all(option.telechargement is None for option in fiche.options.systeme_cfw[2:])
+
+
+def test_installation_invalide_ne_retombe_jamais_sur_telechargement():
+    data = _fiche_sf3000hd()
+    data["options"]["frontend"][0]["telechargement"] = {"depot": "a/b", "motif_fichier": "x"}
+    data["options"]["frontend"][0]["installation"] = {
+        "depot": "a/b",
+        "motif_fichier": "x",
+        "apres_flash": [{"partition": "BOOT", "copier": "../x", "vers": "y"}],
+    }
+
+    fiche = fiche_depuis_json(data)
+
+    assert fiche.options.frontend[0].telechargement is None
 
 
 def test_telechargement_inexploitable_ignore_sans_rejeter_la_fiche():

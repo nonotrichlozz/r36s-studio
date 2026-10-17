@@ -184,3 +184,38 @@ def test_motif_7z_jamais_retenu():
     tel = _tel(motif_fichier=r"rg40xx-v", url_directe=None)
     with pytest.raises(TelechargementErreur):
         resoudre(tel, opener=opener)
+
+
+# --- apres_flash -------------------------------------------------------------
+
+
+def test_parsing_avec_apres_flash():
+    from r36s_studio.partitions.post_flash_copy import PostFlashCopy
+
+    tel = telechargement_depuis_json(
+        {
+            "depot": "ROCKNIX/distribution",
+            "motif_fichier": r"^ROCKNIX-H700\.aarch64-.*-DDR4\.img\.gz$",
+            "apres_flash": [
+                {"partition": "ROCKNIX", "copier": "device_trees/sun50i-h700-anbernic-rg40xx-v.dtb", "vers": "dtb.img"}
+            ],
+        }
+    )
+    assert tel.apres_flash == (
+        PostFlashCopy("ROCKNIX", "device_trees/sun50i-h700-anbernic-rg40xx-v.dtb", "dtb.img"),
+    )
+
+
+def test_apres_flash_invalide_retire_tout_le_telechargement():
+    tel = telechargement_depuis_json(
+        {
+            "depot": DEPOT,
+            "motif_fichier": MOTIF,
+            "apres_flash": [{"partition": "ROCKNIX", "copier": "../../x", "vers": "dtb.img"}],
+        }
+    )
+    assert tel is None
+
+
+def test_sans_apres_flash_tuple_vide():
+    assert telechargement_depuis_json({"depot": DEPOT, "motif_fichier": MOTIF}).apres_flash == ()

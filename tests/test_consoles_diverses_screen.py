@@ -442,13 +442,13 @@ def _install_buttons(screen):
     return [button for button in content.findChildren(QPushButton) if button.text() == libelle]
 
 
-def test_install_button_shown_once_for_knulli_on_a_verified_fiche(qapp):
+def test_install_button_shown_for_knulli_and_rocknix_on_a_verified_fiche(qapp):
     screen = ConsolesDiversesScreen()
     fiche = fiche_depuis_json(_fiche_rg40xxv())
 
     screen._on_search_finished(ResultatRecherche(statut="trouve_dans_catalogue", console=fiche))
 
-    assert len(_install_buttons(screen)) == 1
+    assert len(_install_buttons(screen)) == 2
 
 
 def test_install_button_emits_option_and_console_name(qapp):

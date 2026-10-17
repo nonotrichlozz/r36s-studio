@@ -129,6 +129,18 @@ def _as_str_list(value: Any) -> List[str]:
     return [str(item) for item in value]
 
 
+def _telechargement_de_l_option(data: dict) -> Optional[Telechargement]:
+    """`installation` (catalogue, versions de l'app qui savent faire
+    `apres_flash`) est prioritaire sur `telechargement` (lu aussi par les
+    versions plus anciennes). Une entrée `installation` présente mais
+    invalide ne retombe jamais sur `telechargement` : la fiche a voulu un
+    réglage après flash, l'ignorer laisserait une console qui ne démarre
+    pas."""
+    if "installation" in data:
+        return telechargement_depuis_json(data.get("installation"))
+    return telechargement_depuis_json(data.get("telechargement"))
+
+
 def _option_depuis_json(data: Any) -> Optional[OptionConsole]:
     if not isinstance(data, dict):
         return None
@@ -143,7 +155,7 @@ def _option_depuis_json(data: Any) -> Optional[OptionConsole]:
         licence=data.get("licence") if isinstance(data.get("licence"), str) else None,
         licence_a_verifier=bool(data.get("licence_a_verifier", False)),
         restriction_commerciale=bool(data.get("restriction_commerciale", False)),
-        telechargement=telechargement_depuis_json(data.get("telechargement")),
+        telechargement=_telechargement_de_l_option(data),
     )
 
 

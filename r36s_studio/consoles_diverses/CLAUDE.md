@@ -156,6 +156,18 @@ fiche **vérifiée** seulement, l'option affiche alors un bouton
    réglage lié au firmware du sélecteur R36S (question d'écran ROCKNIX,
    consignes Android) : la console n'est pas forcément une R36S.
 
+**Réglages après flash (`apres_flash`)** : liste de copies à l'intérieur
+d'une partition de la carte juste après l'écriture (ex. ROCKNIX sur H700 :
+`device_trees/sun50i-h700-anbernic-rg40xx-v.dtb` → `dtb.img`). Transmises
+au worker élevé (`flash --copy-after-flash PARTITION SOURCE DESTINATION`,
+`partitions/post_flash_copy.py`, mêmes règles de chemin des deux côtés),
+avant l'éjection. Échec = avertissement clair, jamais un échec du flash.
+Une seule entrée invalide retire le bouton : jamais une installation à
+moitié réglée. **Clé `installation` du catalogue** : même contenu que
+`telechargement`, lue en priorité, et seulement par les versions ≥ 0.1.10
+-- à utiliser dès qu'il y a `apres_flash`, sinon une 0.1.9 (qui ignore ce
+champ) afficherait un bouton qui laisse la console sans démarrer.
+
 Durcissement : dépôt au format `propriétaire/nom`, téléchargement depuis
 `https://github.com/` uniquement, nom de fichier sans séparateur et
 finissant par `.img`/`.img.gz`/`.img.xz` (jamais un `.7z`). Exception
@@ -167,8 +179,10 @@ toujours rien sur un disque.
 
 Analyse de carte SD (`detection_sd` du schéma non affiché), options sans
 champ `telechargement` (liens externes ouverts au navigateur uniquement),
-étapes manuelles après flash (ex. le `dtb.img` de ROCKNIX sur H700 : pas
-de téléchargement direct proposé tant que l'app ne sait pas les faire),
+systèmes hébergés hors GitHub (muOS : Gofile/MEGA, et conditions
+d'utilisation qui interdisent la redistribution) ou qui ne s'installent
+pas par flash d'image (MinUI : fichiers copiés sur la 2e carte par-dessus
+le système d'origine ; TreeFrog UI : `update.zip`),
 contribution/soumission au catalogue, cache local des fiches consultées,
 sous-commande CLI de diagnostic, dédoublonnage des jeux (détecter qu'un
 jeu déjà présent sur la carte correspond à un jeu qu'on s'apprête à

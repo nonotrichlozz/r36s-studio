@@ -6622,3 +6622,48 @@ def test_starting_a_normal_flow_clears_the_catalogue_flag(mock_list, mock_filter
     window._start_flow("flash")
 
     assert window._catalogue_flash_active is False
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_catalogue_flash_passes_post_flash_copies_to_the_worker(mock_list, mock_filter, mock_load, mock_save, qapp):
+    from r36s_studio.partitions.post_flash_copy import PostFlashCopy
+
+    window = MainWindow()
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/ROCKNIX-H700.aarch64-20261001-DDR4.img.gz"
+    window._catalogue_flash_active = True
+    window._catalogue_post_copies = (PostFlashCopy("ROCKNIX", "device_trees/sun50i-h700-anbernic-rg40xx-v.dtb", "dtb.img"),)
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    argv = runner_class.instances[0].argv
+    i = argv.index("--copy-after-flash")
+    assert argv[i : i + 4] == ["--copy-after-flash", "ROCKNIX", "device_trees/sun50i-h700-anbernic-rg40xx-v.dtb", "dtb.img"]
+    assert "--eject-after" in argv
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_post_flash_copies_never_passed_outside_a_catalogue_flash(mock_list, mock_filter, mock_load, mock_save, qapp):
+    from r36s_studio.partitions.post_flash_copy import PostFlashCopy
+
+    window = MainWindow()
+    window._mode = "flash"
+    window._device = _make_device()
+    window._file_path = "/tmp/autre.img"
+    window._catalogue_flash_active = False
+    window._catalogue_post_copies = (PostFlashCopy("ROCKNIX", "a.dtb", "dtb.img"),)
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner", runner_class):
+        window._start_worker()
+
+    assert "--copy-after-flash" not in runner_class.instances[0].argv

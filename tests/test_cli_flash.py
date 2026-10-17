@@ -668,3 +668,91 @@ def test_cmd_flash_eject_after_failure_does_not_fail_the_flash(
     assert "carte occupée" in out
     assert '"type": "eject_result"' in out
     assert '"ok": false' in out.split('"type": "eject_result"')[-1].split("\n")[0]
+
+
+# --- --copy-after-flash (fiche du catalogue, ex. dtb.img ROCKNIX H700) ------
+
+_DTB_RG40XXV = "device_trees/sun50i-h700-anbernic-rg40xx-v.dtb"
+
+
+@patch("r36s_studio.__main__.unmount_forced")
+@patch("r36s_studio.__main__.locate_mounted")
+@patch("r36s_studio.__main__.is_rocknix_card", return_value=True)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_copies_dtb_after_flash_before_eject(
+    mock_list, mock_confirm, mock_flash, mock_probe, mock_locate, mock_unmount, tmp_path, capsys
+):
+    from r36s_studio.partitions import PartitionInfo
+
+    image = _flash_ok(mock_list, mock_flash, tmp_path)
+    root = tmp_path / "ROCKNIX"
+    (root / "device_trees").mkdir(parents=True)
+    (root / _DTB_RG40XXV).write_bytes(b"dtb")
+    partition = PartitionInfo(device_path="/dev/fake-disk-test-3s1", label="ROCKNIX", filesystem="fat32", mountpoint=str(root))
+    mock_locate.return_value = partition
+    order = []
+    mock_unmount.side_effect = lambda p: order.append(("unmount", (root / "dtb.img").exists()))
+
+    with patch("r36s_studio.__main__.eject_device", side_effect=lambda path: order.append(("eject", path))):
+        args = _parse(
+            [
+                "flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--eject-after",
+                "--copy-after-flash", "ROCKNIX", _DTB_RG40XXV, "dtb.img",
+            ]
+        )
+        assert args.func(args) == 0
+
+    mock_locate.assert_called_once_with("/dev/fake-disk-test-3", "ROCKNIX")
+    assert (root / "dtb.img").read_bytes() == b"dtb"
+    assert order == [("unmount", True), ("eject", "/dev/fake-disk-test-3")]
+    out = capsys.readouterr().out
+    assert "dtb.img posé sur ROCKNIX" in out
+    assert '"ok": true' in out
+
+
+@patch("r36s_studio.__main__.unmount_forced")
+@patch("r36s_studio.__main__.locate_mounted")
+@patch("r36s_studio.__main__.is_rocknix_card", return_value=True)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_copy_after_flash_missing_source_warns_without_failing(
+    mock_list, mock_confirm, mock_flash, mock_probe, mock_locate, mock_unmount, tmp_path, capsys
+):
+    from r36s_studio.partitions import PartitionInfo
+
+    image = _flash_ok(mock_list, mock_flash, tmp_path)
+    root = tmp_path / "ROCKNIX"
+    root.mkdir()
+    mock_locate.return_value = PartitionInfo(device_path="/dev/fake-disk-test-3s1", label="ROCKNIX", filesystem="fat32", mountpoint=str(root))
+
+    args = _parse(
+        ["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--copy-after-flash", "ROCKNIX", _DTB_RG40XXV, "dtb.img"]
+    )
+    assert args.func(args) == 0
+
+    out = capsys.readouterr().out
+    assert "Réglage de la carte après installation non fait" in out
+    assert '"ok": true' in out
+    mock_unmount.assert_called_once()
+
+
+@patch("r36s_studio.__main__.locate_mounted")
+@patch("r36s_studio.__main__.is_rocknix_card", return_value=True)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_copy_after_flash_refuses_unsafe_path_without_mounting(
+    mock_list, mock_confirm, mock_flash, mock_probe, mock_locate, tmp_path, capsys
+):
+    image = _flash_ok(mock_list, mock_flash, tmp_path)
+
+    args = _parse(
+        ["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3", "--copy-after-flash", "ROCKNIX", "../../x", "dtb.img"]
+    )
+    assert args.func(args) == 0
+
+    mock_locate.assert_not_called()
+    assert "Réglage de la carte après installation non fait" in capsys.readouterr().out

@@ -123,7 +123,7 @@ from r36s_studio.partitions import (
     locate_mounted,
     unmount_forced,
 )
-from r36s_studio.partitions import boot_sets, drive_letter, screen_backup
+from r36s_studio.partitions import boot_sets, drive_letter, post_flash_copy, screen_backup
 from r36s_studio.partitions.eject import eject as eject_device
 from r36s_studio.protocol import configure as configure_protocol
 from r36s_studio.protocol import (
@@ -553,6 +553,37 @@ def _prepare_rocknix_r36s_after_flash(device: Device, rocknix: bool, panels_dir:
         emit_log(f"Écran installé : {installed}.")
 
 
+def _copy_files_after_flash(device: Device, specs) -> None:
+    """Copies demandées par une fiche du catalogue (`--copy-after-flash`,
+    `partitions/post_flash_copy.py`), ex. le `dtb.img` de ROCKNIX sur
+    H700. Best-effort comme les réglages R36S ci-dessus : un échec n'annule
+    jamais le flash déjà vérifié, mais il est dit clairement (sans ces
+    fichiers, la console risque de ne pas démarrer)."""
+    copies = [post_flash_copy.PostFlashCopy(*spec) for spec in specs]
+    par_partition = {}
+    for copie in copies:
+        par_partition.setdefault(copie.partition, []).append(copie)
+    for label, groupe in par_partition.items():
+        try:
+            for copie in groupe:
+                post_flash_copy.valider(copie)
+            partition = locate_mounted(device.path, label)
+            try:
+                ecrites = post_flash_copy.appliquer(partition.mountpoint, groupe)
+            finally:
+                unmount_forced(partition)
+        except (OSError, PartitionNotFound, PartitionNotMounted, post_flash_copy.PostFlashCopyError) as exc:
+            emit_log(
+                "Réglage de la carte après installation non fait : la console risque de ne pas démarrer. "
+                "Recommence l'installation ; si ça se reproduit, signale-le.",
+                level="warning",
+            )
+            emit_log(f"Détail : {exc}", level="warning")
+            continue
+        for destination in ecrites:
+            emit_log(f"Carte réglée pour la console : {destination} posé sur {label}.")
+
+
 def _install_original_screen_after_flash(device: Device, saved_dir: str, rocknix: bool) -> None:
     """Fichiers d'écran de la carte d'origine, mis de côté par la GUI avant
     le flash, posés dans `ecran-d-origine/` du BOOT flashé et renommés
@@ -746,6 +777,9 @@ def cmd_flash(args: argparse.Namespace) -> int:
 
         if args.original_screen:
             _install_original_screen_after_flash(device, args.original_screen, rocknix)
+
+        if args.copy_after_flash:
+            _copy_files_after_flash(device, args.copy_after_flash)
 
         if args.eject_after:
             # Généralisé au-delà d'Android (§4.6) : au moins une partition
@@ -1582,6 +1616,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Fichiers d'écran de la carte d'origine (mis de côté avant le flash) : "
             "posés dans ecran-d-origine/ du BOOT flashé, renommés comme ceux du firmware écrit"
+        ),
+    )
+    flash_parser.add_argument(
+        "--copy-after-flash",
+        nargs=3,
+        action="append",
+        metavar=("PARTITION", "SOURCE", "DESTINATION"),
+        help=(
+            "Après l'écriture, copie SOURCE vers DESTINATION à l'intérieur de la partition "
+            "PARTITION de la carte (chemins relatifs ; répétable) -- ex. ROCKNIX "
+            "device_trees/sun50i-h700-anbernic-rg40xx-v.dtb dtb.img"
         ),
     )
     flash_parser.add_argument(

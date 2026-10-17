@@ -67,11 +67,6 @@ class FirmwareEntry:
     # avertissement explicite dans le journal après le flash, et un
     # `--eject-after` best-effort côté CLI).
     is_android: bool = False
-    # Clé `gui/strings.py` d'une consigne propre au firmware, ajoutée au
-    # journal après un flash réussi en mode expert (`MainWindow.
-    # _on_worker_finished`), en plus des avertissements de formatage : la
-    # description lue avant le flash est oubliée plusieurs minutes après.
-    post_flash_log_key: Optional[str] = None
     # None = ROCKNIX (téléchargement automatique, identify/rocknix.py) --
     # le seul cas à ce jour, voir docstring de module.
     releases_url: Optional[str] = None
@@ -100,7 +95,6 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
         "file_firmware_darkosen_title",
         "file_firmware_darkosen_desc",
         status="maintained",
-        post_flash_log_key="flash_darkosen_model_selection_note",
         releases_url=DARKOSEN_R36S_RELEASES_URL,
     ),
     FirmwareEntry(

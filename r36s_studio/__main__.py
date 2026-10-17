@@ -101,13 +101,13 @@ from r36s_studio.imaging import (
 )
 from r36s_studio.imaging import sf3000_clone
 from r36s_studio.identify.rocknix_r36s import DEFAULT_PANEL, PANELS, R36sConfigMissing, prepare_r36s_card
-from r36s_studio.imaging.card_probe import is_rocknix_card, is_sf3000_card, own_games_partition_bytes
+from r36s_studio.imaging.card_probe import is_darkosen_card, is_rocknix_card, is_sf3000_card, own_games_partition_bytes
 from r36s_studio.imaging.games_partition import GAMES_PARTITION_WORTHWHILE_BYTES, _peek_free_games_partition_bytes
 from r36s_studio.imaging.exfat_reader import ExFatError
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.flash import UnstableImageRefused
 from r36s_studio.imaging.source import DEFAULT_STALL_TIMEOUT_SECONDS, SourceNotResponding, has_stuck_reads
-from r36s_studio.imaging.source_verify import ImageModified, SourceUnstable
+from r36s_studio.imaging.source_verify import ImageModified, SourceUnstable, sidecar_path
 from r36s_studio.imaging.mbr import SECTOR_SIZE
 from r36s_studio.imaging.winlock import VolumeInUseError
 from r36s_studio.partitions import (
@@ -136,6 +136,7 @@ from r36s_studio.protocol import (
     emit_estimate,
     emit_log,
     emit_phase,
+    emit_post_flash_note,
     emit_progress,
     emit_stalled,
     emit_step_progress,
@@ -749,13 +750,18 @@ def cmd_flash(args: argparse.Namespace) -> int:
         # l'en empêche (« Can't have overlapping partitions » dans
         # fs-resize.log, stockage resté à 32 Mo, écran noir après le logo).
         #
-        # Généralisé (2026-10-17) : toute image qui porte déjà sa propre
-        # partition de jeux (EASYROMS/STORAGE) est un firmware qui
-        # l'agrandit lui-même au premier démarrage (ArkOS, dArkOS, EmuELEC…).
-        # Constaté deux fois avec dArkOSen : EASYROMS restée à 99 Mo, pleine,
-        # derrière une partition de 20,9 Go que la console ne lit pas. Seule
-        # une sauvegarde système (partition de jeux retirée,
-        # `system_backup.py`) reçoit donc un espace de jeux créé par l'app.
+        # Généralisé (2026-10-17) : un firmware téléchargé agrandit lui-même
+        # sa partition de données au premier démarrage (ArkOS, dArkOS,
+        # EmuELEC ; Knulli : `autoresize=true` dans knulli-boot.conf).
+        # Constaté avec dArkOSen (EASYROMS restée à 99 Mo, pleine, derrière
+        # une partition de 20,9 Go que la console ne lit pas), puis Knulli
+        # sur RG40XXV (partition « SHARE », étiquette alors inconnue). Les
+        # noms varient d'un firmware à l'autre : la règle ne dépend plus
+        # d'eux. Seule une sauvegarde système faite par l'app (reconnue à
+        # son `.sha256blocks`, partition de jeux retirée, `system_backup.
+        # py`) reçoit un espace de jeux créé par l'app. Une sauvegarde
+        # système d'avant le 2026-10-10 (sans `.sha256blocks`) n'en reçoit
+        # donc plus : l'espace reste libre, et le journal le dit.
         rocknix = is_rocknix_card(device.path)
         if is_sf3000_card(device.path):
             emit_log(
@@ -769,8 +775,20 @@ def cmd_flash(args: argparse.Namespace) -> int:
             )
         elif (games_bytes := own_games_partition_bytes(device.path)) > 0:
             _report_space_after_own_games_partition(device, games_bytes)
+        elif not os.path.exists(sidecar_path(args.image)):
+            emit_log(
+                "Le reste de la carte est laissé libre : ce n'est pas une sauvegarde faite par R36S Studio, "
+                "le système de ta console l'occupera lui-même au premier démarrage (elle peut redémarrer "
+                "une ou deux fois)."
+            )
         else:
             _create_games_partition_after_flash(device)
+
+        # Consigne propre à dArkOSen, décidée sur la carte écrite et non sur
+        # le firmware choisi dans la liste (incident 2026-10-17 : affichée
+        # après un flash de Knulli, dArkOSen restant sélectionné).
+        if is_darkosen_card(device.path):
+            emit_post_flash_note("darkosen_model_selection")
 
         if args.rocknix_r36s_panels:
             _prepare_rocknix_r36s_after_flash(device, rocknix, args.rocknix_r36s_panels, args.rocknix_panel)

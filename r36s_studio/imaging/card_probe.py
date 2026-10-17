@@ -275,6 +275,9 @@ def is_sf3000_card(device_path: str) -> bool:
 # n'est volontairement PAS ajoutée à `system_backup` : elle contient aussi
 # les sauvegardes et réglages, l'exclure d'une sauvegarde système serait
 # une autre décision.
+# Avec la règle du `.sha256blocks` (`__main__.py::cmd_flash`), sert surtout
+# à distinguer une sauvegarde complète d'une sauvegarde système ; garde-fou
+# en double pour les firmwares connus.
 GAMES_LABELS = {"EASYROMS", "STORAGE", "SHARE"}
 
 
@@ -319,13 +322,37 @@ def _filesystem_label(reader: _Reader) -> str:
     return ""
 
 
+def card_contains(device_path: str, path: Tuple[str, ...]) -> bool:
+    """Vrai si une partition FAT32/exFAT de la carte (MBR ou GPT) contient
+    `path`. Faux pour tout le reste, sans jamais lever."""
+    try:
+        with open(device_path, "rb") as f:
+            for start, _size, _name in _partition_starts_and_names(f):
+                reader = _Reader(f, start)
+                try:
+                    boot = reader.read(0, SECTOR_SIZE)
+                    if boot[3:11] == b"EXFAT   " and _ExFat(reader, boot).exists(path):
+                        return True
+                    if boot[82:90] == b"FAT32   " and _Fat32(reader, boot).exists(path):
+                        return True
+                except (EOFError, ValueError, IndexError, ZeroDivisionError):
+                    continue
+    except (OSError, ValueError, EOFError, IndexError):
+        return False
+    return False
+
+
+def is_darkosen_card(device_path: str) -> bool:
+    """Carte dArkOSen : « SELECT MODEL.bat » (choix du modèle de console,
+    README du projet) sur une partition de la carte."""
+    return card_contains(device_path, ("SELECT MODEL.bat",))
+
+
 def own_games_partition_bytes(device_path: str) -> int:
     """Taille de la partition de jeux déjà présente sur la carte
-    (EASYROMS/STORAGE, nom GPT ou étiquette du système de fichiers), 0 s'il
-    n'y en a pas. Toute image de firmware en porte une (ArkOS, dArkOS,
-    ROCKNIX, EmuELEC, KNULLI…), qu'elle agrandit elle-même au premier démarrage ;
-    une sauvegarde système, elle, en est privée (`system_backup.py`). 0 pour
-    tout le reste, sans jamais lever."""
+    (`GAMES_LABELS`, nom GPT ou étiquette du système de fichiers), 0 s'il
+    n'y en a pas. Une sauvegarde système en est privée (`system_backup.py`).
+    0 pour tout le reste, sans jamais lever."""
     try:
         with open(device_path, "rb") as f:
             for start, size, name in _partition_starts_and_names(f):
@@ -343,7 +370,9 @@ def own_games_partition_bytes(device_path: str) -> int:
 
 __all__ = [
     "SIGNATURE_PATH",
+    "card_contains",
     "first_partition_contains",
+    "is_darkosen_card",
     "own_games_partition_bytes",
     "is_rocknix_card",
     "is_sf3000_card",

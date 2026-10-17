@@ -105,6 +105,12 @@ def emit_eject_result(ok: bool, msg: str = "") -> None:
     emit({"type": "eject_result", "ok": ok, "msg": msg})
 
 
+def emit_post_flash_note(name: str) -> None:
+    """Consigne à afficher après un flash, décidée sur la carte écrite
+    (`cmd_flash`) -- la GUI la traduit (`main_window._POST_FLASH_NOTE_KEYS`)."""
+    emit({"type": "post_flash_note", "name": name})
+
+
 def emit_identify_result(result: dict) -> None:
     """Résultat d'identification de la console (`identify.result_to_dict`)
     lu par un worker élevé -- Windows, BOOT EFI lisible seulement en

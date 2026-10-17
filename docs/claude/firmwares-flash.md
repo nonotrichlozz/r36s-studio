@@ -108,8 +108,13 @@ un téléchargement automatique demanderait de décompresser le 7-Zip, et
 `py7zr` est écarté pour ce projet (dépendances C sur trois OS, pas de
 décompression en flux, donc espace disque doublé). Après un flash réussi
 en mode expert, le journal rappelle de lancer « SELECT MODEL.bat » pour
-choisir le modèle de la console (`FirmwareEntry.post_flash_log_key`, affiché
-par `MainWindow._on_worker_finished` après l'avertissement de formatage).
+choisir le modèle de la console -- décidé sur la carte écrite, jamais sur
+le firmware choisi dans la liste (incident 2026-10-17 : affiché après un
+flash de Knulli, dArkOSen restant sélectionné) : `cmd_flash` cherche « SELECT
+MODEL.bat » sur les partitions FAT32/exFAT (`card_probe.py::
+is_darkosen_card`) et émet `post_flash_note`, que `MainWindow.
+_on_worker_finished` traduit (`_POST_FLASH_NOTE_KEYS`) après
+l'avertissement de formatage.
 **En tête du catalogue depuis le 2026-10-14** (seul firmware actif aux images sur GitHub, sélecteur de `.dtb` intégré, a fait redémarrer une R36S d'origine avec l'écran d'origine reposé) ; conseillé aussi par le parcours assisté pour une console d'origine et pour une référence ambiguë, ArkOS-K36 (archivé depuis le 2026-03-24) restant conseillé pour les clones (`console_profile.recommended_releases_url`). **Revérifié le 2026-10-14** (API GitHub) : toujours du 7-Zip découpé pour
 les 5 releases qui ont des fichiers (`07312026` → `09302026`) ; `07202026`
 et `07272026` n'ont **aucun** fichier attaché, et aucune n'est une

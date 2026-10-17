@@ -298,24 +298,29 @@ la table GPT de secours périmée (`docs/bugs-imaging-io.md`) : **à confirmer
 sur du vrai matériel** (le journal du flash concerné aurait dû contenir
 « Espace de jeux recréé… »).
 
-**Généralisé : toute carte qui a déjà sa partition de jeux (2026-10-17).**
-`card_probe.py::own_games_partition_bytes` (lecture brute, nom GPT ou
-étiquette FAT16/FAT32/exFAT/ext4 EASYROMS ou STORAGE) : si vrai, aucune
-partition créée, journal « ta console va agrandir sa partition de jeux
-toute seule… ». Toute image de firmware porte sa propre partition de jeux
-et l'agrandit au premier démarrage ; seule une sauvegarde système (partition
-retirée) reçoit donc l'espace de jeux automatique. Incident : dArkOSen,
-constaté deux fois -- EASYROMS restée à 99 Mo, pleine, derrière une
-partition de 20,9 Go illisible par la console. Étiquette STORAGE (ext4)
-vérifiée sur l'image ROCKNIX 20261001-a ; EASYROMS de dArkOSen d'après le
-constat, pas relue sur l'image.
-**SHARE ajoutée (2026-10-17)** : KNULLI/Batocera (`userdata` en ext4
-étiquetée SHARE, 512 Mo, vérifiée sur l'image KNULLI Scarab RG40XX V
-20260511 ; agrandie par `autoresize=true` de `knulli-boot.conf`). Incident
-réel : SHARE non reconnue, EASYROMS créée derrière, console figée plus
-d'une heure sur l'image KNULLI (`boot/autoresize` jamais supprimé).
-Pas ajoutée à `system_backup.GAMES_PARTITION_LABELS` (SHARE contient aussi
-sauvegardes et réglages).
+**Généralisé : seule une sauvegarde de l'app reçoit un espace de jeux (2026-10-17).**
+Ordre de `cmd_flash` après SF3000/ROCKNIX : (1) `card_probe.py::
+own_games_partition_bytes` (lecture brute, nom GPT ou étiquette
+FAT16/FAT32/exFAT/ext4 dans `GAMES_LABELS` : EASYROMS, STORAGE, SHARE) non
+nul → rien créé, `_report_space_after_own_games_partition` ; (2) image sans
+`<image>.sha256blocks` → pas une sauvegarde faite par l'app (firmware
+téléchargé, image d'un autre outil) → rien créé, journal « laissé libre…
+le système de ta console l'occupera lui-même » ; (3) sinon (sauvegarde
+système, partition de jeux retirée) → `_create_games_partition_after_flash`.
+La règle (2) ne dépend d'aucun nom de partition : chaque firmware nomme la
+sienne autrement. Incidents : dArkOSen, constaté deux fois (EASYROMS restée
+à 99 Mo, pleine, derrière une partition de 20,9 Go illisible par la
+console) ; Knulli sur RG40XXV (`knulli-h700-rg40xx-v-scarab-20260511`,
+GPT : `boot`, `env`, `boot-resource` = FAT « KNULLI » 5 Go, `userdata` =
+ext4 « SHARE » 512 Mo, étiquette inconnue à l'époque, console figée plus d'une
+heure sur l'image KNULLI ; `knulli-boot.conf` (racine de la partition
+système) porte `autoresize=true`, « resize the userdata partition if unallocated
+space is present », relu sur l'image). Étiquette STORAGE (ext4) vérifiée sur
+l'image ROCKNIX 20261001-a ; EASYROMS de dArkOSen d'après le constat, pas
+relue sur l'image. SHARE pas ajoutée à `system_backup.GAMES_PARTITION_LABELS` (elle contient
+aussi sauvegardes et réglages). Limite connue : une sauvegarde système d'avant le
+2026-10-10 (sans `.sha256blocks`) ne reçoit plus d'espace de jeux -- l'espace
+reste libre, le journal le dit.
 Cas inverse, **sauvegarde complète restaurée sur une carte plus grande**
 (32 Go sur 128 Go) : la partition de jeux a déjà été agrandie une fois et
 ne le sera plus. Si elle fait au moins 1 Go et qu'il reste au moins 1 Go

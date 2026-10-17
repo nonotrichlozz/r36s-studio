@@ -229,6 +229,12 @@ def test_cmd_flash_volume_in_use_emits_dedicated_code_not_io_error(mock_list, mo
     assert '"code": "IO_ERROR"' not in out
 
 
+def _mark_as_studio_backup(image):
+    """Sauvegarde faite par l'app : seule à recevoir un espace de jeux
+    créé après le flash (`cmd_flash`, reconnue à son `.sha256blocks`)."""
+    (image.parent / (image.name + ".sha256blocks")).write_text("")
+
+
 # --- partition de jeux, décision automatique post-écriture (§4.3) ----------
 # Plus de drapeau `--create-games-partition` (retiré, §1 : l'utilisateur ne
 # peut pas savoir à l'avance si une image laissera de l'espace libre) --
@@ -257,6 +263,7 @@ def test_cmd_flash_logs_when_not_enough_free_space_for_games_partition(
     )
     image = tmp_path / "sd.img"
     image.write_bytes(b"x" * 100)
+    _mark_as_studio_backup(image)
 
     args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
@@ -286,6 +293,7 @@ def test_cmd_flash_creates_games_partition_automatically_when_worthwhile(
     mock_create_games.return_value = GamesPartitionResult(start_bytes=100, size_bytes=200, is_gpt=False)
     image = tmp_path / "sd.img"
     image.write_bytes(b"x" * 100)
+    _mark_as_studio_backup(image)
 
     args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
@@ -317,6 +325,7 @@ def test_cmd_flash_games_partition_failure_is_best_effort_and_does_not_fail_the_
     )
     image = tmp_path / "sd.img"
     image.write_bytes(b"x" * 100)
+    _mark_as_studio_backup(image)
 
     args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
     code = args.func(args)
@@ -379,12 +388,103 @@ def test_cmd_flash_other_cards_keep_the_automatic_games_partition(
     )
     image = tmp_path / "systeme.img"
     image.write_bytes(b"x" * 100)
+    _mark_as_studio_backup(image)
 
     args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
     assert args.func(args) == 0
 
     mock_create_games.assert_called_once()
     assert "SF3000" not in capsys.readouterr().out
+
+
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_downloaded_firmware_is_left_to_expand_whatever_its_partition_names(
+    mock_list, mock_confirm, mock_flash, mock_create_games, tmp_path, capsys
+):
+    """Knulli sur RG40XXV (2026-10-17) : sa partition « SHARE » n'était pas
+    reconnue, l'app a créé un espace de jeux derrière elle et bloqué son
+    `autoresize`. Pas de `.sha256blocks` = pas une sauvegarde de l'app :
+    rien n'est créé, quels que soient les noms des partitions."""
+    mock_list.return_value = [_make_device()]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "knulli-h700-rg40xx-v-scarab-20260511.img.gz"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    assert args.func(args) == 0
+
+    mock_create_games.assert_not_called()
+    out = capsys.readouterr().out
+    assert "laissé libre" in out
+    assert "post_flash_note" not in out
+
+
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_firmware_with_an_unknown_games_label_gets_no_games_partition(
+    mock_list, mock_confirm, mock_flash, mock_create_games, tmp_path, capsys
+):
+    """muOS : partition de jeux « ROMS », étiquette absente de `GAMES_LABELS`.
+    Sondes réelles sur une carte factice (fichier) : l'étiquette n'est pas
+    reconnue, mais l'image n'est pas une sauvegarde de l'app (pas de
+    `.sha256blocks`) -- aucun espace de jeux créé derrière."""
+    import struct
+
+    from r36s_studio.imaging.card_probe import own_games_partition_bytes
+
+    start_lba, sectors = 2048, 8
+    card = bytearray((start_lba + sectors) * 512)
+    card[446 + 4] = 0x83
+    card[446 + 8 : 446 + 16] = struct.pack("<II", start_lba, sectors)
+    card[510:512] = b"\x55\xaa"
+    superblock = start_lba * 512 + 1024
+    card[superblock + 56 : superblock + 58] = b"\x53\xef"
+    card[superblock + 120 : superblock + 124] = b"ROMS"
+    card_path = tmp_path / "carte-muos.bin"
+    card_path.write_bytes(bytes(card))
+    assert own_games_partition_bytes(str(card_path)) == 0  # étiquette inconnue
+
+    mock_list.return_value = [_make_device(path=str(card_path))]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "muOS-RG40XXV.img.gz"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", str(card_path)])
+    assert args.func(args) == 0
+
+    mock_create_games.assert_not_called()
+    assert "laissé libre" in capsys.readouterr().out
+
+
+@patch("r36s_studio.__main__.is_darkosen_card", return_value=True)
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_darkosen_card_sends_the_model_selection_note(
+    mock_list, mock_confirm, mock_flash, mock_darkosen, tmp_path, capsys
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_flash.return_value = FlashResult(
+        bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True
+    )
+    image = tmp_path / "darkosen.img"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", "/dev/fake-disk-test-3"])
+    assert args.func(args) == 0
+
+    mock_darkosen.assert_called_once_with(device.path)
+    assert '{"type": "post_flash_note", "name": "darkosen_model_selection"}' in capsys.readouterr().out
 
 
 @patch("r36s_studio.__main__._peek_free_games_partition_bytes", return_value=20 * 1024**3)

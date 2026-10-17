@@ -93,6 +93,9 @@ class WorkerRunner(QObject):
     # séparément pour décider d'enchaîner ou de retomber sur un worker
     # d'éjection dédié.
     eject_result = Signal(bool, str)  # ok, msg
+    # Consigne après un flash, décidée sur la carte écrite (`protocol.
+    # emit_post_flash_note`).
+    post_flash_note = Signal(str)  # nom
     # Début d'une nouvelle passe (`copy`/`verify_source`/`verify_image`,
     # `protocol.emit_phase`) -- les `progress` suivants repartent de 0.
     phase = Signal(str)  # nom de la passe
@@ -295,6 +298,8 @@ class WorkerRunner(QObject):
             self.phase.emit(event.get("name", ""))
         elif etype == "eject_result":
             self.eject_result.emit(bool(event.get("ok")), event.get("msg", ""))
+        elif etype == "post_flash_note":
+            self.post_flash_note.emit(event.get("name", ""))
         elif etype == "done":
             self._done_emitted = True
             self.finished.emit(bool(event.get("ok")))

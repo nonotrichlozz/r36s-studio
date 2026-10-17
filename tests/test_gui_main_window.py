@@ -5762,7 +5762,7 @@ def test_darkosen_flash_success_logs_model_selection_after_format_warning(mock_l
     window._mode = "flash"
     window._device = _make_device()
     window._file_path = "/tmp/darkosen.img"
-    window._app_config.firmware = "darkosen"
+    window._flash_post_note = "darkosen_model_selection"  # reçu du worker
 
     window._on_worker_finished(True)
 
@@ -5775,12 +5775,14 @@ def test_darkosen_flash_success_logs_model_selection_after_format_warning(mock_l
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_model_selection_note_only_for_darkosen(mock_list, mock_filter, mock_load, qapp):
+    """Décidée sur la carte écrite (`post_flash_note` du worker), jamais
+    d'après le firmware choisi : incident 2026-10-17, consigne dArkOSen
+    affichée après un flash de Knulli, dArkOSen restant sélectionné."""
     window = MainWindow()
     window._mode = "flash"
-    for firmware_id in ("arkos", "rocknix", "emuelec", "amberelec", "minui", "r36droid", "andr36oid"):
-        window._app_config.firmware = firmware_id
-        assert window._flash_post_log_key() is None, firmware_id
     window._app_config.firmware = "darkosen"
+    assert window._flash_post_log_key() is None
+    window._flash_post_note = "darkosen_model_selection"
     assert window._flash_post_log_key() == "flash_darkosen_model_selection_note"
     window._wizard_active = True  # le clonage restaure une sauvegarde, pas un firmware choisi
     assert window._flash_post_log_key() is None

@@ -71,7 +71,8 @@ sans interface (c'est un CLI : `python -m r36s_studio <commande>`).
 `stalled` (`seconds`/`limit` : la carte source ne renvoie plus rien),
 `boot_sets_result` (`result` : jeux de fichiers du BOOT et état de la carte,
 `boot-sets`), `drive_letter_result` (`result` : lettres données à l'espace de
-jeux, `assign-letter`, Windows).
+jeux, `assign-letter`, Windows), `post_flash_note` (`name` : consigne décidée
+sur la carte écrite, ex. dArkOSen).
 
 **Élévation, par OS** (détail et pièges macOS : `docs/claude/elevation-macos.md`) :
 
@@ -239,11 +240,11 @@ Détail et bancs de test : `docs/claude/testing.md`.
 - Carte SF3000 (`cubegm/rkgame`) : aucune partition de jeux après un flash --
   détection (`imaging/card_probe.py`) vérifiée sur l'image d'une vraie carte,
   pas encore sur la carte elle-même (`imaging.md`).
-- Partition de jeux recréée automatiquement après la restauration d'une
-  sauvegarde système plus petite que la carte : ligne « Espace de jeux
-  recréé… » attendue dans le journal ; un firmware (carte qui a déjà
-  EASYROMS/STORAGE) est laissé s'agrandir seul -- jamais revérifié sur une
-  console après le correctif dArkOSen du 2026-10-17 (`imaging.md`).
+- Partition de jeux recréée automatiquement seulement après la restauration
+  d'une sauvegarde de l'app (`.sha256blocks`) sans partition de jeux : ligne
+  « Espace de jeux recréé… » attendue ; un firmware téléchargé est laissé
+  s'agrandir seul (dArkOSen vérifié sur console le 2026-10-17 ; Knulli
+  `autoresize=true` lu sur l'image, pas revérifié sur la RG40XXV) (`imaging.md`).
 - Avertissement de formatage Windows après un flash « Linux » (`firmwares-flash.md`).
 - Tour complet UAC depuis le binaire Windows empaqueté ; paquets `apt` du job
   CI Linux ; `release.yml` (installeur Inno Setup, test de fumée `_internal`

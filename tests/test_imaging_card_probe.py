@@ -11,6 +11,7 @@ import pytest
 
 from r36s_studio.imaging.card_probe import (
     first_partition_contains,
+    is_darkosen_card,
     own_games_partition_bytes,
     is_rocknix_card,
     is_sf3000_card,
@@ -382,3 +383,54 @@ def test_games_partition_probe_never_raises(tmp_path, content):
     img.write_bytes(content)
     assert own_games_partition_bytes(str(img)) == 0
     assert own_games_partition_bytes(str(tmp_path / "absent.img")) == 0
+
+
+# --- dArkOSen : « SELECT MODEL.bat » sur la carte écrite -------------------------
+
+
+def _add_fat32_root_file(path, long_name: str, short: bytes) -> None:
+    base = PART_START_LBA * SECTOR
+    with open(path, "r+b") as f:
+        f.seek(base)
+        boot = f.read(SECTOR)
+        bps = struct.unpack_from("<H", boot, 11)[0]
+        reserved = struct.unpack_from("<H", boot, 14)[0]
+        fat_size = struct.unpack_from("<I", boot, 36)[0]
+        root_cluster = struct.unpack_from("<I", boot, 44)[0]
+        root_off = base + (reserved + boot[16] * fat_size) * bps + (root_cluster - 2) * bps * boot[13]
+        f.seek(root_off)
+        root = f.read(bps * boot[13])
+        pos = 0
+        while root[pos] != 0:
+            pos += 32
+        f.seek(root_off + pos)
+        f.write(_fat32_long_name_entries(long_name, short) + _fat32_dir_entry(short, 0x20, 0, 10))
+
+
+def _fat32_long_name_entries(name: str, short: bytes) -> bytes:
+    """Nom long sur plusieurs entrées (13 caractères chacune), dernière en premier."""
+    checksum = 0
+    for c in short.ljust(11, b" "):
+        checksum = (((checksum & 1) << 7) + (checksum >> 1) + c) & 0xFF
+    raw = name.encode("utf-16-le") + b"\x00\x00"
+    chunks = [raw[i : i + 26].ljust(26, b"\xff") for i in range(0, len(name) * 2, 26)]
+    out = b""
+    for seq in range(len(chunks), 0, -1):
+        chars = chunks[seq - 1]
+        e = bytearray(32)
+        e[0] = seq | (0x40 if seq == len(chunks) else 0)
+        e[1:11], e[11], e[13], e[14:26], e[28:32] = chars[0:10], 0x0F, checksum, chars[10:22], chars[22:26]
+        out += bytes(e)
+    return out
+
+
+def test_darkosen_card_is_recognized_by_its_select_model_script(tmp_path):
+    img = tmp_path / "darkosen.img"
+    _new_fat32(img)
+    assert is_darkosen_card(str(img)) is False
+    _add_fat32_root_file(img, "SELECT MODEL.bat", b"SELECT~1BAT")
+    assert is_darkosen_card(str(img)) is True
+
+
+def test_darkosen_probe_never_raises():
+    assert is_darkosen_card("/dev/fake-disk-test-404") is False

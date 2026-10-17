@@ -384,6 +384,10 @@ def _assign_letter_with_windows_elevation(device_path: str, parent_hwnd: Optiona
 # le sondage du mode assisté liste les cartes toutes les 1,5 s.
 _DRIVE_LETTER_RECHECK_SECONDS = 20.0
 
+# `post_flash_note` du worker (`protocol.emit_post_flash_note`) -> clé de
+# `gui/strings.py`.
+_POST_FLASH_NOTE_KEYS = {"darkosen_model_selection": "flash_darkosen_model_selection_note"}
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -535,6 +539,7 @@ class MainWindow(QMainWindow):
         # éjectée sans bouton visible pour réessayer, forçant à passer par
         # l'étape F séparée -- une invite UAC dédiée, minutes plus tard).
         self._flash_ejected: Optional[bool] = None
+        self._flash_post_note: Optional[str] = None  # `post_flash_note` du worker
         # Choix fait à l'étape 2 (`BackupKindDialog`) -- "full" (copie
         # complète) ou "system" (système seul, sans les jeux) -- décide du
         # mode passé à `_start_worker` et du texte de fin de parcours.
@@ -1492,6 +1497,7 @@ class MainWindow(QMainWindow):
 
     def _start_worker(self) -> None:
         self._flash_ejected = None
+        self._flash_post_note = None
         self._read_speeds = []
         self._log_panel.start_operation(tr(_OPERATION_TITLE_KEYS[self._mode]))
         if self._mode == "flash" and self._screen_save_log is not None:
@@ -1631,6 +1637,7 @@ class MainWindow(QMainWindow):
         self._runner.log.connect(lambda level, msg: self._log_panel.append_log(msg))
         self._runner.error.connect(self._on_worker_error)
         self._runner.finished.connect(self._on_worker_finished)
+        self._runner.post_flash_note.connect(lambda name: setattr(self, "_flash_post_note", name))
         if self._mode in ("backup", "backup_system") and self._wizard_active:
             self._runner.eject_result.connect(self._on_wizard_source_eject_result)
         elif "--eject-after" in argv:
@@ -1850,14 +1857,15 @@ class MainWindow(QMainWindow):
         return entry is not None and entry.is_android
 
     def _flash_post_log_key(self) -> Optional[str]:
-        """Consigne du firmware flashé à journaliser après un flash réussi
-        (`FirmwareEntry.post_flash_log_key`) -- mêmes conditions que
-        `_is_flashing_android_firmware` : jamais pour le parcours de
-        clonage du mode assisté, qui n'a pas choisi de firmware."""
+        """Consigne à journaliser après un flash réussi, reçue du worker qui
+        l'a décidée sur la carte écrite (`post_flash_note`) -- jamais
+        d'après le firmware choisi dans la liste, qui peut ne rien avoir à
+        voir avec le fichier flashé (incident 2026-10-17 : consigne
+        dArkOSen après un flash de Knulli). Jamais pour le parcours de
+        clonage du mode assisté (restaure une sauvegarde déjà réglée)."""
         if self._mode != "flash" or self._wizard_active or self._catalogue_flash_active:
             return None
-        entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
-        return entry.post_flash_log_key if entry is not None else None
+        return _POST_FLASH_NOTE_KEYS.get(self._flash_post_note or "")
 
     def _flash_may_trigger_windows_format_prompt(self) -> bool:
         """Vrai pour tout flash mode expert, quel que soit le firmware

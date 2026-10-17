@@ -309,6 +309,13 @@ constaté deux fois -- EASYROMS restée à 99 Mo, pleine, derrière une
 partition de 20,9 Go illisible par la console. Étiquette STORAGE (ext4)
 vérifiée sur l'image ROCKNIX 20261001-a ; EASYROMS de dArkOSen d'après le
 constat, pas relue sur l'image.
+**SHARE ajoutée (2026-10-17)** : KNULLI/Batocera (`userdata` en ext4
+étiquetée SHARE, 512 Mo, vérifiée sur l'image KNULLI Scarab RG40XX V
+20260511 ; agrandie par `autoresize=true` de `knulli-boot.conf`). Incident
+réel : SHARE non reconnue, EASYROMS créée derrière, console figée plus
+d'une heure sur l'image KNULLI (`boot/autoresize` jamais supprimé).
+Pas ajoutée à `system_backup.GAMES_PARTITION_LABELS` (SHARE contient aussi
+sauvegardes et réglages).
 Cas inverse, **sauvegarde complète restaurée sur une carte plus grande**
 (32 Go sur 128 Go) : la partition de jeux a déjà été agrandie une fois et
 ne le sera plus. Si elle fait au moins 1 Go et qu'il reste au moins 1 Go

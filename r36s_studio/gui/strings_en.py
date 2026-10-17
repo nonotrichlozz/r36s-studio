@@ -490,6 +490,16 @@ STRINGS_EN = {
     "execute_title_download_rocknix": "Downloading ROCKNIX…",
     "rocknix_download_success": "The latest version of ROCKNIX has been downloaded: {path}",
     "execute_title_download_firmware": "Downloading {firmware}…",
+    "log_open_page": "Open the page",
+    "catalogue_open_page_hint": "You can also download the system yourself from its official page: \"Open the page\" button.",
+    "personal_use_title": "Personal use only",
+    "personal_use_text": (
+        "{firmware} is distributed for personal use only: its authors forbid selling it, preinstalling "
+        "it on consoles that are sold, or redistributing it without their permission. R36S Studio "
+        "downloads it from its official source, for you alone."
+    ),
+    "personal_use_checkbox": "I will use {firmware} for my personal use only",
+    "personal_use_continue": "Continue",
     "catalogue_install_searching_log": "Looking for the latest version of {firmware} for {console}…",
     "catalogue_install_file_log": "File found: {name}",
     "catalogue_download_success": "{firmware} has been downloaded: {path}. Now choose the SD card to prepare.",

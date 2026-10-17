@@ -431,8 +431,9 @@ def test_cmd_flash_downloaded_firmware_is_left_to_expand_whatever_its_partition_
 def test_cmd_flash_firmware_with_an_unknown_games_label_gets_no_games_partition(
     mock_list, mock_confirm, mock_flash, mock_create_games, tmp_path, capsys
 ):
-    """muOS : partition de jeux « ROMS », étiquette absente de `GAMES_LABELS`.
-    Sondes réelles sur une carte factice (fichier) : l'étiquette n'est pas
+    """Firmware dont la partition de jeux porte un nom encore inconnu
+    (« JEUX » ; muOS « ROMS » avant son ajout à `GAMES_LABELS`). Sondes
+    réelles sur une carte factice (fichier) : l'étiquette n'est pas
     reconnue, mais l'image n'est pas une sauvegarde de l'app (pas de
     `.sha256blocks`) -- aucun espace de jeux créé derrière."""
     import struct
@@ -446,7 +447,7 @@ def test_cmd_flash_firmware_with_an_unknown_games_label_gets_no_games_partition(
     card[510:512] = b"\x55\xaa"
     superblock = start_lba * 512 + 1024
     card[superblock + 56 : superblock + 58] = b"\x53\xef"
-    card[superblock + 120 : superblock + 124] = b"ROMS"
+    card[superblock + 120 : superblock + 124] = b"JEUX"
     card_path = tmp_path / "carte-muos.bin"
     card_path.write_bytes(bytes(card))
     assert own_games_partition_bytes(str(card_path)) == 0  # étiquette inconnue

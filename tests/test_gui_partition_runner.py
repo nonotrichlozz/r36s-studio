@@ -258,7 +258,7 @@ def test_rocknix_list_runner_cancel_does_not_raise(qapp):
 def test_rocknix_download_runner_success_emits_progress_and_final_path(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
 
-    def fake_download(asset_arg, destination, *, expected_sha256, on_progress, should_cancel):
+    def fake_download(asset_arg, destination, *, expected_sha256, on_progress, should_cancel, transform=None):
         on_progress(50, 100)
         on_progress(100, 100)
 

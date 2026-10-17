@@ -6613,6 +6613,92 @@ def test_catalogue_install_not_found_shows_friendly_message(mock_list, mock_filt
     assert window._device_dialog.isVisible() is False
 
 
+def _muos_option():
+    from dataclasses import replace
+
+    from r36s_studio.consoles_diverses.telechargement import Telechargement
+
+    return replace(
+        _knulli_option(),
+        nom="muOS (MustardOS)",
+        url="https://muos.dev/devices/anbernic/rg40xxv",
+        restriction_commerciale=True,
+        telechargement=Telechargement(
+            depot="",
+            motif_fichier=r"^MustardOS_RG40XX-V_.*\.img\.gz$",
+            source="mega",
+            dossier="https://mega.nz/folder/AbCdEf12#" + "A" * 22,
+        ),
+    )
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_personal_use_only_system_needs_the_box_ticked_before_any_download(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    """`restriction_commerciale` (conditions de muOS) : fenêtre « Usage
+    personnel uniquement » ; sans la case cochée, rien n'est téléchargé."""
+    window = MainWindow()
+    resolve_class = _mock_rocknix_runner_class()
+    with patch("r36s_studio.gui.main_window.FirmwareResolveRunner", resolve_class):
+        with patch("r36s_studio.gui.main_window._confirm_personal_use", return_value=False) as refused:
+            window._on_consoles_diverses_install_requested(_muos_option(), "RG40XXV")
+        refused.assert_called_once_with(window, "muOS (MustardOS)")
+        assert resolve_class.instances == []
+
+        with patch("r36s_studio.gui.main_window._confirm_personal_use", return_value=True):
+            window._on_consoles_diverses_install_requested(_muos_option(), "RG40XXV")
+    resolve_class.instances[0].start.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_failed_catalogue_download_offers_the_official_page(mock_list, mock_filter, mock_load, mock_save, qapp):
+    """MEGA qui ne répond pas (quota, lien changé) : message clair et bouton
+    « Ouvrir la page », jamais un fichier douteux."""
+    window = MainWindow()
+    with patch("r36s_studio.gui.main_window.FirmwareResolveRunner", _mock_rocknix_runner_class()), patch(
+        "r36s_studio.gui.main_window._confirm_personal_use", return_value=True
+    ):
+        window._on_consoles_diverses_install_requested(_muos_option(), "RG40XXV")
+
+    window._on_catalogue_install_failed("FIRMWARE_NOT_FOUND", "MEGA ne répond pas comme prévu : code -18")
+
+    assert "page officielle" in window._log_panel._log_view.toPlainText()
+    assert window._log_panel._open_page_button.isHidden() is False
+    with patch("r36s_studio.gui.main_window.QDesktopServices.openUrl") as open_url:
+        window._log_panel._open_page_button.click()
+    assert open_url.call_args[0][0].toString() == "https://muos.dev/devices/anbernic/rg40xxv"
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_mega_file_is_decrypted_while_downloading(mock_list, mock_filter, mock_load, mock_save, qapp):
+    from r36s_studio.consoles_diverses.telechargement import FichierFirmware
+
+    window = MainWindow()
+    download_class = _mock_rocknix_runner_class()
+    fichier = FichierFirmware(
+        nom="MustardOS_RG40XX-V_2601.1_FUNKY_JACARANDA-bc38efa0.img.gz",
+        url="https://gfs270n1.userstorage.mega.co.nz/dl/x",
+        taille=4414677605,
+        sha256="8" * 64,
+        dechiffrement=(bytes(16), bytes(8)),
+    )
+    with patch("r36s_studio.gui.main_window.RocknixDownloadRunner", download_class):
+        window._on_catalogue_firmware_resolved(fichier)
+
+    transform = download_class.instances[0].init_kwargs["transform"]
+    assert callable(transform) and len(transform(b"0123456789")) == 10
+
+
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])

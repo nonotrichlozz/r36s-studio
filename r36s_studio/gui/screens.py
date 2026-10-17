@@ -2415,6 +2415,7 @@ class LogPanel(QFrame):
     cancel_requested = Signal()
     eject_requested = Signal()
     reveal_requested = Signal(str)  # chemin à révéler
+    open_page_requested = Signal(str)  # page officielle d'un système (téléchargement échoué)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2439,6 +2440,11 @@ class LogPanel(QFrame):
         self._reveal_button.setVisible(False)
         self._reveal_button.clicked.connect(lambda: self.reveal_requested.emit(self._reveal_path))
         header_row.addWidget(self._reveal_button)
+
+        self._open_page_button = QPushButton(tr("log_open_page"))
+        self._open_page_button.setVisible(False)
+        self._open_page_button.clicked.connect(lambda: self.open_page_requested.emit(self._page_url or ""))
+        header_row.addWidget(self._open_page_button)
 
         self._eject_button = QPushButton(tr("result_eject"))
         self._eject_button.setVisible(False)
@@ -2474,6 +2480,7 @@ class LogPanel(QFrame):
         layout.addWidget(self._log_view, 1)
 
         self._reveal_path: Optional[str] = None
+        self._page_url: Optional[str] = None
         self.set_idle()
 
     # --- cycle d'une opération -------------------------------------------
@@ -2491,6 +2498,7 @@ class LogPanel(QFrame):
         self._cancel_button.setVisible(False)
         self._eject_button.setVisible(False)
         self._reveal_button.setVisible(False)
+        self._open_page_button.setVisible(False)
 
     def start_operation(self, title: str) -> None:
         self._operation_active = True
@@ -2507,6 +2515,7 @@ class LogPanel(QFrame):
         self._cancel_button.setEnabled(True)
         self._eject_button.setVisible(False)
         self._reveal_button.setVisible(False)
+        self._open_page_button.setVisible(False)
         self._log_view.clear()  # ne conserve l'historique que de l'opération qui démarre (§5)
 
     def update_progress(self, done: int, total: int, speed: float) -> None:
@@ -2601,6 +2610,7 @@ class LogPanel(QFrame):
 
     def finish_success(self, message: str, allow_eject: bool, reveal_path: Optional[str]) -> None:
         self._operation_active = False
+        self._open_page_button.setVisible(False)
         self.append_log(message)
         self._reveal_path = reveal_path
         self._reveal_button.setVisible(bool(reveal_path))
@@ -2611,11 +2621,15 @@ class LogPanel(QFrame):
         self._cancel_button.setVisible(False)
         self._header_label.setText(tr("log_header_idle"))
 
-    def finish_error(self, message: str, details: str = "") -> None:
+    def finish_error(self, message: str, details: str = "", page_url: Optional[str] = None) -> None:
+        """`page_url` : page officielle à proposer (« Ouvrir la page ») quand
+        le téléchargement automatique d'un système a échoué."""
         self._operation_active = False
         self.append_log(message)
         if details and details != message:
             self.append_log(details)
+        self._page_url = page_url
+        self._open_page_button.setVisible(bool(page_url))
         self._reveal_button.setVisible(False)
         self._eject_button.setVisible(False)
         self._bar.setVisible(False)

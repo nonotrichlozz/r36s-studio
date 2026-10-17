@@ -267,6 +267,7 @@ def download_asset(
     opener: Opener = _default_opener,
     block_size: int = BLOCK_SIZE,
     should_cancel: Optional[CancelCheck] = None,
+    transform: Optional[Callable[[bytes], bytes]] = None,
 ) -> None:
     """Télécharge `asset` vers `destination`, par blocs (même principe que
     `imaging/copy.py`), en calculant la somme sha256 au fil de l'eau.
@@ -274,7 +275,10 @@ def download_asset(
     `expected_sha256` est fourni et ne correspond pas, ou
     `DownloadCancelledError` (même sort) si `should_cancel` répond True
     avant la fin -- consulté avant chaque bloc, comme
-    `imaging/copy.py::copy_range`."""
+    `imaging/copy.py::copy_range`. `transform` (déchiffrement MEGA,
+    `consoles_diverses/mega.py`) s'applique à chaque bloc, dans l'ordre,
+    avant écriture et somme. Un fichier qui dépasse la taille annoncée
+    (`asset.size_bytes` non nul) est refusé, jamais gardé."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256()
     done = 0
@@ -288,6 +292,10 @@ def download_asset(
                 chunk = response.read(block_size)
                 if not chunk:
                     break
+                if transform is not None:
+                    chunk = transform(chunk)
+                if total and done + len(chunk) > total:
+                    raise OSError(f"le fichier dépasse la taille annoncée ({total} octets)")
                 out.write(chunk)
                 digest.update(chunk)
                 done += len(chunk)
@@ -306,6 +314,12 @@ def download_asset(
     except OSError as exc:
         destination.unlink(missing_ok=True)
         raise RocknixReleaseError(f"Échec du téléchargement : {exc}") from exc
+
+    if total and done != total:
+        # Connexion coupée en cours de route (quota MEGA...) : jamais un
+        # fichier partiel laissé comme s'il était complet.
+        destination.unlink(missing_ok=True)
+        raise RocknixReleaseError(f"Téléchargement incomplet : {done} octets reçus sur {total}.")
 
     if on_progress is not None:
         on_progress(done, total)  # dernier événement avec le compte final exact (règle §2 n°5)

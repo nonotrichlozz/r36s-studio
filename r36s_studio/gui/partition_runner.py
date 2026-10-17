@@ -219,10 +219,11 @@ class RocknixDownloadRunner(QThread):
     error = Signal(str, str)  # code, msg
     finished_download = Signal(bool, str)  # ok, chemin téléchargé ("" si échec)
 
-    def __init__(self, asset: RocknixAsset, expected_sha256: Optional[str] = None, parent=None):
+    def __init__(self, asset: RocknixAsset, expected_sha256: Optional[str] = None, parent=None, transform=None):
         super().__init__(parent)
         self._asset = asset
         self._expected_sha256 = expected_sha256
+        self._transform = transform  # déchiffrement MEGA (`consoles_diverses/mega.py`)
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -257,6 +258,7 @@ class RocknixDownloadRunner(QThread):
                 expected_sha256=self._expected_sha256,
                 on_progress=on_progress,
                 should_cancel=lambda: self._cancelled,
+                transform=self._transform,
             )
         except DownloadCancelledError as exc:
             self.error.emit("CANCELLED", str(exc))

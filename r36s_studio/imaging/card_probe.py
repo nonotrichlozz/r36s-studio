@@ -278,7 +278,10 @@ def is_sf3000_card(device_path: str) -> bool:
 # Avec la règle du `.sha256blocks` (`__main__.py::cmd_flash`), sert surtout
 # à distinguer une sauvegarde complète d'une sauvegarde système ; garde-fou
 # en double pour les firmwares connus.
-GAMES_LABELS = {"EASYROMS", "STORAGE", "SHARE"}
+# ROMS : muOS (MustardOS), relevée sur MustardOS_RG40XX-V_2601.1 (partition
+# GPT « roms », exFAT, 4 Mo, agrandie au premier démarrage par
+# `script/system/reset.sh` : `parted resizepart … 100%`).
+GAMES_LABELS = {"EASYROMS", "STORAGE", "SHARE", "ROMS"}
 
 
 def _partition_starts_and_names(f) -> List[Tuple[int, int, str]]:

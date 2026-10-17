@@ -168,8 +168,22 @@ moitié réglée. **Clé `installation` du catalogue** : même contenu que
 -- à utiliser dès qu'il y a `apres_flash`, sinon une 0.1.9 (qui ignore ce
 champ) afficherait un bouton qui laisse la console sans démarrer.
 
+**Source MEGA (`"source": "mega"`, 2026-10-17, muOS)** : `dossier` = lien
+public `https://mega.nz/folder/<ID>#<CLÉ>`, fichier choisi par
+`motif_fichier`, SHA-256 lue dans le `hash.txt` du dossier, contenu
+déchiffré en AES-128-CTR pendant le téléchargement (`mega.py`, dépendance
+`cryptography`). Pas de `depot` : les versions antérieures n'affichent pas
+de bouton. Gofile écarté (jeton calculé par un script obfusqué). Échec
+(quota MEGA, lien changé) : message clair + bouton « Ouvrir la page »
+(`LogPanel.finish_error(page_url=…)`, page = `url` de l'option), aucun
+fichier partiel gardé (`download_asset` : taille annoncée exigée).
+**Usage personnel** : toute option `restriction_commerciale` passe par la
+fenêtre « Usage personnel uniquement » (`main_window._confirm_personal_use`,
+case obligatoire) avant tout téléchargement.
+
 Durcissement : dépôt au format `propriétaire/nom`, téléchargement depuis
-`https://github.com/` uniquement, nom de fichier sans séparateur et
+`https://github.com/` (ou dossier `https://mega.nz/` et serveurs
+`*.mega.co.nz` en HTTPS) uniquement, taille annoncée ≤ 16 Gio, nom de fichier sans séparateur et
 finissant par `.img`/`.img.gz`/`.img.xz` (jamais un `.7z`). Exception
 assumée à la règle d'isolation ci-dessus : ce flux réutilise le pipeline
 de flash, par `MainWindow` uniquement -- le package lui-même n'écrit
@@ -179,8 +193,7 @@ toujours rien sur un disque.
 
 Analyse de carte SD (`detection_sd` du schéma non affiché), options sans
 champ `telechargement` (liens externes ouverts au navigateur uniquement),
-systèmes hébergés hors GitHub (muOS : Gofile/MEGA, et conditions
-d'utilisation qui interdisent la redistribution) ou qui ne s'installent
+systèmes hébergés ailleurs que sur GitHub ou MEGA, ou qui ne s'installent
 pas par flash d'image (MinUI : fichiers copiés sur la 2e carte par-dessus
 le système d'origine ; TreeFrog UI : `update.zip`),
 contribution/soumission au catalogue, cache local des fiches consultées,

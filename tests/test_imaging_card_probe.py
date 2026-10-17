@@ -341,10 +341,11 @@ def test_fat32_games_partition_is_found_by_label(tmp_path, label, expected):
     assert (own_games_partition_bytes(str(img)) == FAT32_TEST_BYTES) is expected
 
 
-def test_exfat_games_partition_is_found_by_label(tmp_path):
+@pytest.mark.parametrize("name", ["EASYROMS", "ROMS"])  # ROMS : muOS, relevée sur l'image RG40XX-V 2601.1
+def test_exfat_games_partition_is_found_by_label(tmp_path, name):
     label = bytearray(32)
-    label[0], label[1] = 0x83, len("EASYROMS")
-    label[2:18] = "EASYROMS".encode("utf-16-le")
+    label[0], label[1] = 0x83, len(name)
+    label[2 : 2 + 2 * len(name)] = name.encode("utf-16-le")
     img = tmp_path / "carte.img"
     _build_exfat(img, bytes(label), {}, fat={4: EOC})
     assert own_games_partition_bytes(str(img)) > 0

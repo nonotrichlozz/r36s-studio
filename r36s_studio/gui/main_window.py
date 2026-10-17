@@ -28,7 +28,17 @@ from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QByteArray, QTimer, QUrl, Slot
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QStackedWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+    QVBoxLayout,
+)
 
 from r36s_studio import config as app_config
 from r36s_studio import update_check
@@ -36,6 +46,7 @@ from r36s_studio.android import adb as android_adb
 from r36s_studio.android import emulators as android_emulators
 from r36s_studio.android import platform_tools as android_platform_tools
 from r36s_studio.android.models import DetectionResult
+from r36s_studio.consoles_diverses import mega as consoles_diverses_mega
 from r36s_studio.consoles_diverses import settings_store as consoles_diverses_settings_store
 from r36s_studio.consoles_diverses.client import ResultatRecherche
 from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
@@ -384,6 +395,33 @@ def _assign_letter_with_windows_elevation(device_path: str, parent_hwnd: Optiona
 # le sondage du mode assisté liste les cartes toutes les 1,5 s.
 _DRIVE_LETTER_RECHECK_SECONDS = 20.0
 
+def _confirm_personal_use(parent, firmware: str) -> bool:
+    """Fenêtre « Usage personnel uniquement » avant le téléchargement d'un
+    système dont la fiche porte `restriction_commerciale` (conditions de
+    muOS, licence de KNULLI) : case à cocher obligatoire, jamais
+    pré-cochée. Vrai si l'utilisateur l'a cochée puis a continué."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(tr("personal_use_title"))
+    layout = QVBoxLayout(dialog)
+    text = QLabel(tr("personal_use_text", firmware=firmware))
+    text.setWordWrap(True)
+    layout.addWidget(text)
+    box = QCheckBox(tr("personal_use_checkbox", firmware=firmware))
+    layout.addWidget(box)
+    buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    buttons.button(QDialogButtonBox.Ok).setText(tr("personal_use_continue"))
+    buttons.button(QDialogButtonBox.Ok).setEnabled(False)
+    box.toggled.connect(buttons.button(QDialogButtonBox.Ok).setEnabled)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    return dialog.exec() == QDialog.Accepted and box.isChecked()
+
+
+def _safe_page_url(url) -> Optional[str]:
+    return url if isinstance(url, str) and url.startswith("https://") else None
+
+
 # `post_flash_note` du worker (`protocol.emit_post_flash_note`) -> clé de
 # `gui/strings.py`.
 _POST_FLASH_NOTE_KEYS = {"darkosen_model_selection": "flash_darkosen_model_selection_note"}
@@ -452,6 +490,7 @@ class MainWindow(QMainWindow):
         # une carte avec cette sauvegarde ».
         self._catalogue_flash_active = False
         self._catalogue_firmware_name = ""
+        self._catalogue_page_url: Optional[str] = None  # « Ouvrir la page » si le téléchargement échoue
         # Copies après flash de la fiche (`Telechargement.apres_flash`),
         # transmises au worker seulement si `_catalogue_flash_active`.
         self._catalogue_post_copies = ()
@@ -845,6 +884,9 @@ class MainWindow(QMainWindow):
         self._log_panel.cancel_requested.connect(self._on_cancel_requested)
         self._log_panel.eject_requested.connect(self._on_eject_requested)
         self._log_panel.reveal_requested.connect(self._on_reveal_requested)
+        self._log_panel.open_page_requested.connect(
+            lambda url: QDesktopServices.openUrl(QUrl(url)) if _safe_page_url(url) else None
+        )
 
         self._assisted_landing.prepare_requested.connect(self._start_wizard)
         self._assisted_landing.expert_mode_requested.connect(self._switch_to_expert_mode)
@@ -3436,6 +3478,9 @@ class MainWindow(QMainWindow):
         telechargement = getattr(option, "telechargement", None)
         if telechargement is None:
             return
+        if getattr(option, "restriction_commerciale", False) and not _confirm_personal_use(self, option.nom):
+            return
+        self._catalogue_page_url = _safe_page_url(getattr(option, "url", None))
         self._catalogue_firmware_name = option.nom
         self._catalogue_post_copies = tuple(telechargement.apres_flash)
         if self._app_config.ui_mode == "expert":
@@ -3468,18 +3513,30 @@ class MainWindow(QMainWindow):
             else:
                 self._console_stage.stop_activity()
 
+    def _finish_catalogue_error(self) -> None:
+        """Échec de la recherche ou du téléchargement : message clair, et la
+        page officielle à ouvrir pour télécharger soi-même -- jamais un
+        fichier douteux gardé (`download_asset` supprime tout partiel)."""
+        code, msg = self._last_error_code or "", self._last_error_msg
+        if self._catalogue_page_url:
+            self._log_panel.append_log(tr("catalogue_open_page_hint"))
+        self._log_panel.finish_error(
+            friendly_error_message(code), details=error_log_detail(code, msg), page_url=self._catalogue_page_url
+        )
+
     def _on_catalogue_install_failed(self, code: str, msg: str) -> None:
         self._set_catalogue_install_busy(False)
         self._last_error_code = code
         self._last_error_msg = msg
-        self._log_panel.finish_error(friendly_error_message(code), details=error_log_detail(code, msg))
+        self._finish_catalogue_error()
         if self._assisted_ad_hoc_active:
             self._wizard_panel.show_error()
 
     def _on_catalogue_firmware_resolved(self, fichier) -> None:
         self._log_panel.append_log(tr("catalogue_install_file_log", name=fichier.nom))
         asset = RocknixAsset(name=fichier.nom, download_url=fichier.url, size_bytes=fichier.taille)
-        self._runner = RocknixDownloadRunner(asset, fichier.sha256, parent=self)
+        transform = consoles_diverses_mega.dechiffreur(*fichier.dechiffrement) if fichier.dechiffrement else None
+        self._runner = RocknixDownloadRunner(asset, fichier.sha256, parent=self, transform=transform)
         self._runner.progress.connect(self._on_progress)
         self._runner.error.connect(self._on_worker_error)
         self._runner.finished_download.connect(self._on_catalogue_download_finished)
@@ -3489,8 +3546,7 @@ class MainWindow(QMainWindow):
     def _on_catalogue_download_finished(self, ok: bool, path: str) -> None:
         self._set_catalogue_install_busy(False)
         if not ok:
-            friendly = friendly_error_message(self._last_error_code or "")
-            self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
+            self._finish_catalogue_error()
             if self._assisted_ad_hoc_active:
                 self._wizard_panel.show_error()
             return

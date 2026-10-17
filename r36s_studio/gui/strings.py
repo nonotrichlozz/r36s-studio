@@ -738,6 +738,16 @@ STRINGS = {
     "execute_title_download_rocknix": "Téléchargement de ROCKNIX en cours…",
     "rocknix_download_success": "La dernière version de ROCKNIX a été téléchargée : {path}",
     "execute_title_download_firmware": "Téléchargement de {firmware} en cours…",
+    "log_open_page": "Ouvrir la page",
+    "catalogue_open_page_hint": "Tu peux aussi télécharger le système toi-même depuis sa page officielle : bouton « Ouvrir la page ».",
+    "personal_use_title": "Usage personnel uniquement",
+    "personal_use_text": (
+        "{firmware} est distribué pour un usage personnel uniquement : ses auteurs interdisent de le "
+        "revendre, de le préinstaller sur des consoles vendues ou de le redistribuer sans leur "
+        "permission. R36S Studio le télécharge depuis sa source officielle, pour toi seul."
+    ),
+    "personal_use_checkbox": "J'utiliserai {firmware} pour mon usage personnel uniquement",
+    "personal_use_continue": "Continuer",
     "catalogue_install_searching_log": "Recherche de la dernière version de {firmware} pour {console}…",
     "catalogue_install_file_log": "Fichier trouvé : {name}",
     "catalogue_download_success": "{firmware} a été téléchargé : {path}. Choisis maintenant la carte SD à préparer.",

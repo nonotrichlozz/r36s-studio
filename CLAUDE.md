@@ -282,6 +282,11 @@ Détail et bancs de test : `docs/claude/testing.md`.
   dArkOSen) : jamais lancée sur la vraie carte ; que la lettre reste après
   un rebranchement, et la cause (attribut GPT `NoDefaultDriveLetter` ?),
   non vérifiées -- lire la ligne `[diagnostic] espace de jeux` (`partitions.md`).
+- « Télécharger et installer » muOS (source MEGA, `consoles_diverses/mega.py`) :
+  liste, SHA-256 et déchiffrement vérifiés contre le vrai dossier MEGA
+  (2026-10-17), flash de l'image réelle vérifié (8 769 240 576 octets) ;
+  le parcours complet depuis l'app (4,4 Go, quota gratuit de MEGA) jamais
+  lancé (`consoles_diverses/CLAUDE.md`).
 - ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,

@@ -1,1 +1,3 @@
 PySide6>=6.9,<7
+# Déchiffrement des téléchargements MEGA (Consoles diverses, muOS).
+cryptography>=44

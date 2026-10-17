@@ -4028,8 +4028,10 @@ class MainWindow(QMainWindow):
         quelle. Vérification de taille avant toute écriture (§ pré-vol) :
         une carte plus petite que l'image tronquerait la table GPT
         secondaire (déjà rencontré) -- `estimate_total_bytes` est exacte et
-        non privilégiée pour `.img`/`.img.gz`/`.img.xz` (lue depuis le pied
-        du fichier, sans décompression) ; `None` seulement pour un pied
+        non privilégiée pour `.img`/`.img.xz` (lue depuis le pied du
+        fichier, sans décompression), minimale pour `.img.gz` au-delà de
+        4 Gio (le worker refuse alors en cours de route, jamais de
+        troncature) ; `None` seulement pour un pied
         tronqué/non standard, cas résiduel où le blocage est laissé au
         worker élevé (`flash_device` échoue alors avec une vraie erreur
         d'écriture plutôt que de tronquer silencieusement)."""

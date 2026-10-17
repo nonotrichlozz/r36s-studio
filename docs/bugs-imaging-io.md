@@ -336,3 +336,18 @@ partition BOOT reçoit aussitôt des fichiers d'index système
 l'ouverture de tout volume — ça modifie, dans la fenêtre entre la fin de
 l'écriture et la relecture de vérification, exactement les octets qu'on
 s'apprête à relire.
+
+⚠️ **Bug corrigé (2026-10-17) : flash d'un `.img.gz` de plus de 4 Gio
+tronqué en silence.** Le champ ISIZE du pied gzip ne donne la taille
+décompressée que **modulo 2³²**, mais `estimate_total_bytes` la prenait
+pour exacte et `flash_device` arrêtait la copie là. Image muOS RG40XX-V
+2601.1 : 8 769 240 576 octets décompressés, ISIZE = 179 306 496 -- 171 Mio
+écrits sur 8,2 Gio. Le SHA-256 « source » étant calculé sur ce qui avait
+été lu (tronqué pareil), le flash se déclarait vérifié. Correctif :
+`_gzip_uncompressed_size` rend une taille **minimale** (plus petite valeur
+congrue à ISIZE non inférieure au fichier compressé), `is_size_exact` dit
+si elle est exacte ; pour un `.gz`, `flash_device` copie jusqu'à la fin du
+flux, borné par la carte seulement (`ImageLargerThanDevice` →
+`DESTINATION_TOO_SMALL` si l'image ne tient pas) ; la barre prend la
+prochaine taille candidate (+2³²) quand la copie dépasse l'estimation ;
+le contrôle du `.sha256blocks` compare modulo 2³² pour un `.gz`.

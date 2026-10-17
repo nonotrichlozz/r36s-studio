@@ -460,7 +460,7 @@ plutôt qu'après coup seulement via le message d'erreur ci-dessus.
 
 **Décompression native du `.7z` (py7zr) : envisagée, non retenue** (streaming impossible sans fichier temporaire + poids des dépendances C). Évaluation complète dans `docs/bugs-imaging-io.md` ; à revisiter seulement sur demande explicite.
 
-**Taille décompressée d'un `.xz`** : lue sans décompression depuis l'Index au pied de l'archive (`image_source._xz_uncompressed_size`, comme le champ ISIZE pour `.gz`) ; si le format n'est pas standard, `flash_device` retombe sur la taille du périphérique cible plutôt que de traiter la copie comme non bornée (sinon la barre affiche 100 % dès le premier octet — récit dans `docs/bugs-imaging-io.md`).
+**Taille décompressée d'un `.xz`** : lue sans décompression depuis l'Index au pied de l'archive (`image_source._xz_uncompressed_size`). **`.gz` : taille minimale seulement** (ISIZE = taille modulo 2³²) -- `flash_device` copie un `.gz` jusqu'à la fin du flux, borné par la carte, jamais par l'estimation (bug de troncature au-delà de 4 Gio, `docs/bugs-imaging-io.md`) ; si le format n'est pas standard, `flash_device` retombe sur la taille du périphérique cible plutôt que de traiter la copie comme non bornée (sinon la barre affiche 100 % dès le premier octet — récit dans `docs/bugs-imaging-io.md`).
 
 **Vérification SHA-256 après flash sur macOS** : macOS peut remonter automatiquement les partitions juste après l'écriture et y écrire (`.Spotlight-V100`, `.fseventsd`…), faussant la relecture — récit complet dans `docs/bugs-imaging-io.md`.
 

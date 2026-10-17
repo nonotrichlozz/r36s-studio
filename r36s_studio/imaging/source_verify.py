@@ -31,7 +31,7 @@ import os
 import platform
 from typing import BinaryIO, Iterable, List, Optional, Tuple
 
-from .image_source import estimate_total_bytes
+from .image_source import GZIP_ISIZE_MODULUS, estimate_total_bytes, is_size_exact
 from .copy import BLOCK_SIZE, CancelCheck, OperationCancelled, ProgressCallback, ProgressEvent, ProgressThrottle
 
 SIDECAR_SUFFIX = ".sha256blocks"
@@ -257,7 +257,12 @@ def check_sidecar_matches_size(image_path: str) -> Optional[str]:
         return None
     _, total_size = read_block_digests_header(path)
     image_size = estimate_total_bytes(image_path)
-    if image_size is not None and image_size != total_size:
+    if image_size is not None and not is_size_exact(image_path):
+        # `.gz` : taille connue modulo 2**32 seulement, au minimum.
+        mismatch = image_size > total_size or (total_size - image_size) % GZIP_ISIZE_MODULUS
+    else:
+        mismatch = image_size is not None and image_size != total_size
+    if mismatch:
         raise ImageModified(
             f"taille de l'image ({image_size} octets) différente de celle de la sauvegarde ({total_size} octets)"
         )

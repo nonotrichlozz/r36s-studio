@@ -15,6 +15,7 @@ from r36s_studio.imaging.image_source import (
     _detect_format,
     check_image_format,
     estimate_total_bytes,
+    is_size_exact,
     open_image_source,
 )
 
@@ -188,3 +189,15 @@ def test_seven_zip_archive_error_is_an_unsupported_image_format_error(tmp_path):
     (§5) -- un appelant qui n'a pas besoin de distinguer les deux (le CLI
     direct, par exemple) peut se contenter d'attraper la classe de base."""
     assert issubclass(SevenZipArchiveError, UnsupportedImageFormatError)
+
+
+def test_estimate_total_bytes_gz_never_below_the_compressed_size(tmp_path):
+    """ISIZE = taille modulo 2**32 : un `.gz` de 10 000 octets annonçant 100
+    décompresse forcément au moins 2**32 + 100 octets (muOS RG40XX-V :
+    4,4 Go compressés, ISIZE = 179 306 496)."""
+    path = tmp_path / "gros.img.gz"
+    path.write_bytes(bytes(9996) + (100).to_bytes(4, "little"))
+
+    assert estimate_total_bytes(str(path)) == 2**32 + 100
+    assert is_size_exact(str(path)) is False
+    assert is_size_exact(str(tmp_path / "sd.img.xz")) is True

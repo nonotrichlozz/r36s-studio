@@ -1,5 +1,12 @@
 # Packaging, CI et diffusion
 
+> ⚠️ **Publier UNIQUEMENT avec `scripts/publish_release.sh`, jamais
+> `gh release edit --draft=false`.** Ce dernier publie le brouillon avec
+> son installeur attaché, téléchargeable par tous depuis GitHub alors qu'il
+> est vendu en boutique. Incident du 2026-10-17 : v0.1.2 à v0.1.13 publiées
+> avec `R36S-Studio-Setup.exe` (7 téléchargements au total), retiré le
+> 2026-10-18.
+
 **Diffusion (à jour, prime sur les paragraphes historiques ci-dessous).**
 Modèle : code public, installeurs **vendus sur une boutique**, jamais
 téléchargeables depuis GitHub. `release.yml` (tag `v*` = `v` +

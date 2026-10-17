@@ -111,10 +111,13 @@ def open_image_source(path: str) -> BinaryIO:
     )
 
 
-def _gzip_uncompressed_size(path: str) -> Optional[int]:
-    """Lit les 4 derniers octets d'un `.gz` (champ ISIZE) : la taille
-    décompressée modulo 2**32. Fiable pour un fichier gzip à un seul
-    membre — le cas normal pour une image disque."""
+# ISIZE (pied gzip) ne donne la taille décompressée que modulo 2**32.
+GZIP_ISIZE_MODULUS = 2**32
+
+
+def gzip_isize(path: str) -> Optional[int]:
+    """Les 4 derniers octets d'un `.gz` (champ ISIZE) : la taille
+    décompressée **modulo 2**32** d'un gzip à un seul membre."""
     try:
         with open(path, "rb") as f:
             f.seek(-4, os.SEEK_END)
@@ -122,6 +125,31 @@ def _gzip_uncompressed_size(path: str) -> Optional[int]:
         return isize
     except (OSError, struct.error):
         return None
+
+
+def _gzip_uncompressed_size(path: str) -> Optional[int]:
+    """Taille décompressée **minimale** d'un `.gz` : la plus petite valeur
+    congrue à ISIZE modulo 2**32 qui ne soit pas inférieure au fichier
+    compressé (deflate n'agrandit presque rien : 5 octets par bloc stocké
+    de 64 Kio, plus l'en-tête). Exacte sous 4 Gio ; au-delà, la vraie taille
+    peut valoir 2**32, 2*2**32… de plus, indiscernables sans tout
+    décompresser.
+
+    Bug corrigé (2026-10-17) : ISIZE seul servait de taille exacte, et
+    `flash_device` arrêtait la copie là -- l'image muOS RG40XX-V
+    (8 769 240 576 octets décompressés, ISIZE = 179 306 496) n'écrivait que
+    171 Mio, « vérifiés » puisque la source lue était tronquée pareil."""
+    isize = gzip_isize(path)
+    if isize is None:
+        return None
+    try:
+        compressed = os.path.getsize(path)
+    except OSError:
+        return isize
+    floor = compressed - compressed // 1000 - 1024
+    if isize >= floor:
+        return isize
+    return isize + -(-(floor - isize) // GZIP_ISIZE_MODULUS) * GZIP_ISIZE_MODULUS
 
 
 _XZ_FOOTER_MAGIC = b"YZ"
@@ -183,12 +211,20 @@ def _xz_uncompressed_size(path: str) -> Optional[int]:
     return total
 
 
+def is_size_exact(path: str) -> bool:
+    """Vrai si `estimate_total_bytes` donne la taille exacte (tout sauf
+    `.gz`, dont ISIZE n'est connu que modulo 2**32)."""
+    return not path.lower().endswith(".gz")
+
+
 def estimate_total_bytes(path: str) -> Optional[int]:
     """Taille (en octets) à écrire sur le périphérique.
 
-    Exacte pour `.img` (taille du fichier), `.img.gz` (champ ISIZE) et
-    `.img.xz` (Index du pied de l'archive, `_xz_uncompressed_size` —
-    aucune décompression nécessaire). Retourne None seulement si le pied
+    Exacte pour `.img` (taille du fichier) et `.img.xz` (Index du pied de
+    l'archive, `_xz_uncompressed_size` — aucune décompression nécessaire).
+    **Minimale seulement pour `.img.gz`** au-delà de 4 Gio
+    (`_gzip_uncompressed_size`) : ne jamais s'en servir pour borner une
+    copie (`is_size_exact`). Retourne None seulement si le pied
     `.xz`/`.gz` ne peut pas être lu (fichier tronqué, format non standard) :
     à `flash_device` (qui connaît la taille du périphérique cible) de
     retomber sur une estimation plutôt que de laisser la copie non bornée."""

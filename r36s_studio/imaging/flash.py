@@ -19,7 +19,14 @@ from typing import Callable, Optional
 from r36s_studio.devices import Device
 
 from .copy import BLOCK_SIZE, CancelCheck, ProgressCallback, ProgressEvent, copy_range
-from .image_source import check_image_format, estimate_total_bytes, is_unstable_image, open_image_source
+from .image_source import (
+    GZIP_ISIZE_MODULUS,
+    check_image_format,
+    estimate_total_bytes,
+    is_size_exact,
+    is_unstable_image,
+    open_image_source,
+)
 from .source_verify import check_image_digests, check_sidecar_matches_size
 from .write_target import WINDOWS_SECTOR_SIZE, prepared_write_target, reunmount_before_verify
 
@@ -48,6 +55,30 @@ WINDOWS_REMOUNT_SETTLE_SECONDS = 2.0
 class UnstableImageRefused(Exception):
     """Image `.img.instable` (sauvegarde d'une carte source instable) sans
     autorisation explicite (`allow_unstable`, mode expert seulement)."""
+
+
+class ImageLargerThanDevice(Exception):
+    """L'image décompressée ne tient pas sur la carte -- découvert en cours
+    d'écriture pour un `.gz` de plus de 4 Gio, dont la taille exacte n'est
+    pas connue d'avance (`image_source._gzip_uncompressed_size`). Jamais
+    une troncature silencieuse."""
+
+
+def _growing_total_progress(on_progress: Optional[ProgressCallback], estimate: int) -> Optional[ProgressCallback]:
+    """Total de la barre pour un `.gz` : `estimate` (taille minimale), puis
+    la prochaine taille possible (+2**32, ISIZE étant modulo 2**32) chaque
+    fois que la copie la dépasse -- toujours une vraie taille candidate,
+    jamais une valeur inventée (§2 n°5)."""
+    if on_progress is None:
+        return None
+
+    def _report(event: ProgressEvent) -> None:
+        total = estimate
+        if event.done > total:
+            total += -(-(event.done - total) // GZIP_ISIZE_MODULUS) * GZIP_ISIZE_MODULUS
+        on_progress(ProgressEvent(done=event.done, total=total, speed=event.speed))
+
+    return _report
 
 
 @dataclass
@@ -291,6 +322,12 @@ def flash_device(
         # `copy_range`, qui rapporte `done` comme `total` quand aucune borne
         # n'est connue).
         total_hint = device.size_bytes or None
+    # Taille d'un `.gz` connue seulement au minimum (ISIZE modulo 2**32) :
+    # la copie va jusqu'à la fin du flux, bornée par la carte seulement.
+    exact_size = is_size_exact(image_path)
+    copy_limit = total_hint if exact_size else (device.size_bytes or None)
+    if not exact_size and total_hint is not None:
+        on_progress = _growing_total_progress(on_progress, total_hint)
     sector_size = WINDOWS_SECTOR_SIZE if platform.system() == "Windows" else None
 
     tail_wiped = True
@@ -310,7 +347,7 @@ def flash_device(
                     body_written = copy_range(
                         hashing_source,
                         destination,
-                        total_bytes=(None if total_hint is None else max(total_hint - len(head), 0)),
+                        total_bytes=(None if copy_limit is None else max(copy_limit - len(head), 0)),
                         on_progress=_offset_progress(on_progress, len(head)),
                         block_size=block_size,
                         sector_size=sector_size,
@@ -323,6 +360,10 @@ def flash_device(
                     from .copy import OperationCancelled
 
                     raise OperationCancelled(0)
+                if not exact_size and copy_limit is not None and _read_up_to(hashing_source, 1):
+                    raise ImageLargerThanDevice(
+                        f"l'image décompressée dépasse la carte ({copy_limit} octets) : écriture arrêtée"
+                    )
             source_sha256 = hashing_source.hexdigest()
             written = len(head) + body_written
             tail_wiped = _wipe_stale_tail(destination, device, written, sector_size)

@@ -662,3 +662,45 @@ def test_flash_rereads_head_on_fresh_handle_if_write_handle_revoked(mock_prep, m
 
     mock_sleep.assert_called_once_with(flash.WINDOWS_REMOUNT_SETTLE_SECONDS)
     assert result.verified is True
+
+
+# --- .img.gz de plus de 4 Gio : ISIZE n'est connu que modulo 2**32 ----------
+# Bug corrigé (2026-10-17) : la copie s'arrêtait à ISIZE -- l'image muOS
+# RG40XX-V (8 769 240 576 octets) n'écrivait que 179 306 496 octets,
+# « vérifiés ». Simulé ici en réduisant le modulo à 4 096 octets.
+
+
+@patch("r36s_studio.imaging.flash.reunmount_before_verify")
+@patch("r36s_studio.imaging.flash.prepared_write_target", side_effect=_no_prep)
+def test_flash_gz_writes_the_whole_stream_when_isize_wrapped(mock_prep, mock_reunmount, tmp_path, monkeypatch):
+    monkeypatch.setattr(flash, "GZIP_ISIZE_MODULUS", 4096)
+    wrapped = len(FAKE_IMAGE_DATA) % 4096  # ce que donnerait ISIZE
+    monkeypatch.setattr(flash, "estimate_total_bytes", lambda _path: wrapped)
+    image_path = tmp_path / "src.img.gz"
+    image_path.write_bytes(gzip.compress(FAKE_IMAGE_DATA))
+    target_path = _make_fake_target(tmp_path, len(FAKE_IMAGE_DATA) + 1000)
+    device = _make_device(target_path, len(FAKE_IMAGE_DATA) + 1000)
+    events = []
+
+    result = flash_device(device, str(image_path), on_progress=events.append)
+
+    assert result.bytes_written == len(FAKE_IMAGE_DATA)
+    assert result.verified is True
+    with open(target_path, "rb") as f:
+        assert f.read(len(FAKE_IMAGE_DATA)) == FAKE_IMAGE_DATA
+    # Total de la barre : toujours une taille candidate (ISIZE + k*modulo), jamais dépassée.
+    assert all(e.done <= e.total and e.total % 4096 == wrapped for e in events)
+    assert events[-1].total == len(FAKE_IMAGE_DATA)
+
+
+@patch("r36s_studio.imaging.flash.reunmount_before_verify")
+@patch("r36s_studio.imaging.flash.prepared_write_target", side_effect=_no_prep)
+def test_flash_gz_larger_than_the_card_is_an_error_not_a_truncation(mock_prep, mock_reunmount, tmp_path, monkeypatch):
+    monkeypatch.setattr(flash, "estimate_total_bytes", lambda _path: 100)
+    image_path = tmp_path / "src.img.gz"
+    image_path.write_bytes(gzip.compress(FAKE_IMAGE_DATA))
+    target_path = _make_fake_target(tmp_path, 10_000)
+    device = _make_device(target_path, 10_000)
+
+    with pytest.raises(flash.ImageLargerThanDevice):
+        flash_device(device, str(image_path))

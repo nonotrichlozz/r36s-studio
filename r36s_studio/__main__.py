@@ -105,7 +105,7 @@ from r36s_studio.imaging.card_probe import is_darkosen_card, is_rocknix_card, is
 from r36s_studio.imaging.games_partition import GAMES_PARTITION_WORTHWHILE_BYTES, _peek_free_games_partition_bytes
 from r36s_studio.imaging.exfat_reader import ExFatError
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
-from r36s_studio.imaging.flash import UnstableImageRefused
+from r36s_studio.imaging.flash import ImageLargerThanDevice, UnstableImageRefused
 from r36s_studio.imaging.source import DEFAULT_STALL_TIMEOUT_SECONDS, SourceNotResponding, has_stuck_reads
 from r36s_studio.imaging.source_verify import ImageModified, SourceUnstable, sidecar_path
 from r36s_studio.imaging.mbr import SECTOR_SIZE
@@ -640,8 +640,10 @@ def cmd_flash(args: argparse.Namespace) -> int:
         # Pré-vol (§5 mode assisté, parcours de clonage) : une carte plus
         # petite que l'image tronque et corrompt la table GPT secondaire
         # (déjà rencontré) -- `estimate_total_bytes` est exacte et non
-        # privilégiée pour `.img`/`.img.gz`/`.img.xz` (lue depuis le pied
-        # du fichier, sans décompression). `None` seulement pour un pied
+        # privilégiée pour `.img`/`.img.xz` (lue depuis le pied du fichier,
+        # sans décompression), minimale pour `.img.gz` au-delà de 4 Gio
+        # (`flash_device` lève alors `ImageLargerThanDevice` en cours de
+        # route si l'image ne tient pas). `None` seulement pour un pied
         # tronqué/non standard (cas résiduel) : le contrôle est alors
         # sauté plutôt que bloqué -- `flash_device` échouera de toute
         # façon avec une vraie erreur d'écriture (ENOSPC) si ça ne rentre
@@ -671,6 +673,10 @@ def cmd_flash(args: argparse.Namespace) -> int:
             )
         except UnstableImageRefused as exc:
             emit_error("UNSTABLE_IMAGE", str(exc))
+            return 1
+        except ImageLargerThanDevice as exc:
+            emit_error("DESTINATION_TOO_SMALL", str(exc))
+            emit_done(False)
             return 1
         except ImageModified as exc:
             # Refusé avant `prepared_write_target` : la carte n'a pas été touchée.

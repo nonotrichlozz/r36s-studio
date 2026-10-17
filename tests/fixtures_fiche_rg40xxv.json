@@ -34,10 +34,22 @@
       },
       {
         "nom": "ROCKNIX",
-        "description": "Successeur de JELOS. Image commune H700 : après flash, copier sun50i-h700-anbernic-rg40xx-v.dtb (dossier device_trees) à la racine de la partition ROCKNIX et le renommer dtb.img. Les versions récentes existent en DDR3 et DDR4 : vérifier le type de RAM de la console.",
-        "url": "https://rocknix.org/configure/h700-installation/",
+        "description": "Successeur de JELOS. R36S Studio télécharge la dernière version H700 (variante DDR4 : la RG40XX V a de la mémoire LPDDR4) et pose automatiquement le fichier de la console (dtb.img) après le flash. Si l'écran reste noir au démarrage, signale-le : ce serait une console avec une autre mémoire.",
+        "url": "https://github.com/ROCKNIX/distribution/releases/latest",
         "licence": "GPL-2.0",
-        "source_url": "https://github.com/ROCKNIX/distribution"
+        "source_url": "https://github.com/ROCKNIX/distribution",
+        "installation": {
+          "depot": "ROCKNIX/distribution",
+          "motif_fichier": "^ROCKNIX-H700\\.aarch64-[0-9]+(-[a-z])?-DDR4\\.img\\.gz$",
+          "url_directe": "https://github.com/ROCKNIX/distribution/releases/download/20261001/ROCKNIX-H700.aarch64-20261001-DDR4.img.gz",
+          "apres_flash": [
+            {
+              "partition": "ROCKNIX",
+              "copier": "device_trees/sun50i-h700-anbernic-rg40xx-v.dtb",
+              "vers": "dtb.img"
+            }
+          ]
+        }
       },
       {
         "nom": "muOS (MustardOS)",

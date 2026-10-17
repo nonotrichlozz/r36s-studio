@@ -448,6 +448,9 @@ class MainWindow(QMainWindow):
         # une carte avec cette sauvegarde ».
         self._catalogue_flash_active = False
         self._catalogue_firmware_name = ""
+        # Copies après flash de la fiche (`Telechargement.apres_flash`),
+        # transmises au worker seulement si `_catalogue_flash_active`.
+        self._catalogue_post_copies = ()
         # « Utiliser toute la carte » pour une image SF3000 (`imaging/
         # sf3000_clone.py`) : choisi dans `WholeCardChoiceDialog` (mode
         # expert) ou automatiquement (mode assisté) -- remis à False avant
@@ -1606,6 +1609,9 @@ class MainWindow(QMainWindow):
             argv += ["--rocknix-r36s-panels", str(rocknix_r36s.panels_cache_dir())]
         if argv[0] == "flash" and self._original_screen_dir is not None:
             argv += ["--original-screen", str(self._original_screen_dir)]
+        if argv[0] == "flash" and self._catalogue_flash_active:
+            for copie in self._catalogue_post_copies:
+                argv += ["--copy-after-flash", copie.partition, copie.source, copie.destination]
 
         # Journalise la ligne de commande complète au lancement de tout
         # worker élevé (backup/flash) -- signalé sur du vrai matériel :
@@ -3423,6 +3429,7 @@ class MainWindow(QMainWindow):
         if telechargement is None:
             return
         self._catalogue_firmware_name = option.nom
+        self._catalogue_post_copies = tuple(telechargement.apres_flash)
         if self._app_config.ui_mode == "expert":
             self._main_view.show_home()
         else:

@@ -91,6 +91,14 @@ a = Analysis(
     binaries=[],
     datas=[(str(BUILD_TIMESTAMP_FILE), ".")] + EXTRA_DATAS,
     hiddenimports=[],
+    module_collection_mode={
+        # LGPL v2.1 : modules en clair, remplaçables (THIRD_PARTY_NOTICES.txt).
+        "py7zr": "py",
+        "pyppmd": "py",
+        "bcj": "py",  # paquet pybcj
+        "inflate64": "py",
+        "multivolumefile": "py",
+    },
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -287,3 +287,50 @@ def test_filter_warns_when_the_folder_contains_no_game(qapp, tmp_path):
     assert not screen._preview_risk_frame.isHidden()
     assert "aucun jeu" in screen._preview_verification_label.text()
     assert not screen._sort_button.isEnabled()
+
+
+def test_convert_screen_end_to_end_then_undo(qapp, tmp_path):
+    """« Convertir des jeux » : aperçu, confirmation jamais sautée,
+    conversion, original gardé, annulation."""
+    import py7zr
+
+    from r36s_studio.gui.tri_screen import ConvertScreen
+
+    folder = tmp_path / "md"
+    folder.mkdir()
+    with py7zr.SevenZipFile(folder / "Sonic.7z", "w") as archive:
+        archive.writestr(b"rom" * 1000, "Sonic.md")
+    screen = ConvertScreen()
+    screen.set_default_firmware("treefrogui")
+
+    screen.start_scan(str(tmp_path))
+    _wait(screen._plan_runner)
+
+    assert screen.current_page() == ConvertScreen.PAGE_PREVIEW
+    assert "1 jeu(x) en .7z à convertir en .zip" in screen._preview_summary_label.text()
+    assert screen._sort_button.text() == "Convertir"
+    screen._sort_button.click()
+    assert screen.current_page() == ConvertScreen.PAGE_CONFIRM
+    screen._confirm_button.click()
+    _wait(screen._apply_runner)
+
+    assert "1 jeu(x) converti(s) en .zip." in screen._result_label.text()
+    assert (folder / "Sonic.zip").exists() and (tmp_path / "_originaux/md/Sonic.7z").exists()
+    assert screen._undo_button.text() == "Annuler la conversion"
+    screen._undo_button.click()
+    _wait(screen._undo_runner)
+    assert (folder / "Sonic.7z").exists() and not (folder / "Sonic.zip").exists()
+
+
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_convert_row_of_expert_home_opens_its_screen_with_the_flash_firmware(mock_list, mock_filter, qapp):
+    window = MainWindow()
+    window._app_config.firmware = "treefrogui"
+
+    window._home.convert_games_requested.emit()
+
+    assert window._root_stack.currentWidget() is window._convert_screen
+    assert window._convert_screen.selected_firmware() == "treefrogui"
+    window._convert_screen.back_requested.emit()
+    assert window._root_stack.currentWidget() is not window._convert_screen

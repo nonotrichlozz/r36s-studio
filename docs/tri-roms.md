@@ -14,12 +14,15 @@ assisté, allégé pour le néophyte) :
   ou une collection déjà rangée, dont chaque sous-dossier est parcouru.
   Aucun firmware. Les mélanger produisait des refus sans raison (un
   dossier `SNES` refusé alors qu'on voulait justement le filtrer).
+- **Convertir des jeux** (§ « Convertir des jeux ») : signale les jeux
+  dans un format que le firmware choisi ne lit pas et les convertit.
+  Phase 1 : `.7z` → `.zip` seulement.
 
 Principes communs : aperçu avant action, déplacement vers un dossier à
 part (jamais de suppression), annulation -- avec **un journal par
-fonction** (`_rangement_journal.json`, `_filtre_journal.json`) : annuler
-un filtrage ne défait jamais un rangement fait avant dans le même
-dossier.
+fonction** (`_rangement_journal.json`, `_filtre_journal.json`,
+`_conversion_journal.json`) : annuler un filtrage ne défait jamais un
+rangement fait avant dans le même dossier.
 
 Code : `r36s_studio/tri/` (sans Qt ; `plan.py` tri, `filter.py` filtre,
 `regions.py` règle région/langue, `apply.py` déplacement et annulation
@@ -261,7 +264,8 @@ stricte (notamment `gba_header` pour des homebrews non passés par
   partagent les mêmes formats. Mises de côté dans `_non_identifies`, **en
   groupe** (`.m3u` → `.cue` → `.bin`, `doublons/linked_files.py`) ; un
   `.cue` dont un fichier manque est signalé (`disc_image_missing_files`).
-- **`.7z`** : contenu non lu (le projet ne dépend pas de py7zr).
+- **`.7z`** : contenu non lu par le tri (identification) ; « Convertir
+  des jeux » les transforme en `.zip`, que le tri sait ensuite lire.
 - **Arcade** (MAME, FBNeo, CPS, Neo Geo) : un zip à plusieurs fichiers.
 - **Ordinateurs** (C64, MSX, Amiga, DOS…), PSP, NDS, Dreamcast, N64DD.
 - Firmwares sans table : AmberELEC, MinUI, R36Droid/andr36oid (non
@@ -447,14 +451,61 @@ une langue.
   (`AppConfig.firmware`) s'il a une table, ROCKNIX sinon ; toujours
   remplaçable.
 
+## Convertir des jeux
+
+Code : `tri/convert.py` (sans Qt), écran `ConvertScreen` de
+`gui/tri_screen.py` (mêmes pages que le tri : choix, analyse, aperçu,
+confirmation, progression, résultat, annulation ; textes `convert_*`).
+Dépendance **py7zr** (LGPL v2.1, modules gardés en fichiers séparés dans
+le paquet : `module_collection_mode` des trois `.spec`).
+
+- **Analyse** : chaque `.7z` du dossier (récursif, mêmes dossiers ignorés
+  que le filtre, plus `_originaux`). Proposé à la conversion **sauf** si
+  son dossier est un dossier connu du firmware choisi et que la table
+  (`accepted_extensions`) y accepte `.7z` -- ArkOS, ROCKNIX, EmuELEC :
+  tout est laissé tel quel ; TreeFrogUI (listes non relevées, `.7z`
+  vérifiés illisibles, § Piège majeur) : tout est proposé. Dossier
+  inconnu : proposé (un `.zip` est lu partout où un `.7z` l'est).
+  Laissés tels quels, avec la raison : `.7z` déjà lu, `.zip` non lu non
+  plus dans ce dossier, `.zip` du même nom déjà présent.
+- **Conversion d'une archive** : place vérifiée (deux fois la taille
+  décompressée : extraction + `.zip`) ; refus d'une archive protégée par
+  mot de passe ou d'une entrée dangereuse (chemin absolu, `..`, lien) ;
+  extraction dans un dossier caché `.r36s_conversion_*` à côté de
+  l'archive ; `.zip` **deflate** (seul format lu par picoarch) écrit dans
+  ce même dossier puis vérifié -- taille et CRC de chaque fichier
+  comparés à ceux annoncés par le `.7z`, puis relecture complète
+  (`testzip`) -- et seulement ensuite renommé à côté. Ne jamais se fier à
+  `SevenZipFile.test()` : renvoie `None` même pour une archive corrompue
+  (constaté, py7zr 1.1.4).
+- **Originaux** : déplacés dans `<dossier>/_originaux/<chemin d'origine>`
+  (jamais supprimés, jamais écrasés : suffixe `_2`). Si ce déplacement
+  échoue, le `.zip` créé est retiré (jamais le jeu en double sur la
+  console).
+- **Journal** `_conversion_journal.json` (JSON Lines : `.7z` d'origine,
+  place dans `_originaux`, `.zip` créé et sa taille). Annulation : le
+  `.7z` revient, le `.zip` créé est retiré -- seulement s'il a gardé sa
+  taille (sinon conflit, rien n'est touché).
+- Échec sur une archive (abîmée, protégée) : consigné, la suite continue,
+  arrêt après 20 échecs de suite. Plus de place : arrêt immédiat, les
+  archives déjà converties restent annulables.
+- **Suite prévue** : RVZ → ISO (DolphinTool) puis `.chd` (chdman), avec
+  l'outil **déjà installé** sur l'ordinateur, jamais embarqué (licence GPL
+  de Dolphin et de MAME, poids) ; absent : message clair et lien vers où
+  l'obtenir ; RVZ : place vérifiée avant (une ISO Wii pèse jusqu'à
+  7,9 Gio).
+
 ## Points ouverts
 
 - Table dArkOS non vérifiée sur une vraie carte (validation ArkOS en
   attente) ; ROCKNIX et EmuELEC non vérifiées.
 - TreeFrogUI : affichage des jeux confirmé pour `gba`/`snes` seulement ;
-  les `.7z` sont listés mais jamais lus (écran noir) : un rangement vers
-  TreeFrogUI devrait refuser ou convertir les `.7z` (motif
-  `extension_not_accepted`), à décider.
+  les `.7z` sont listés mais jamais lus (écran noir) : « Convertir des
+  jeux » les convertit en `.zip` ; le tri lui-même ne refuse pas encore
+  un `.7z` rangé vers TreeFrogUI (motif `extension_not_accepted`).
+- « Convertir des jeux » : jamais lancé sur une vraie collection (les
+  2 131 `.7z` TreeFrogUI ont été convertis à la main) ; ni sur une carte
+  SD lente, ni sur un `.7z` de plusieurs centaines de Mo (PS1).
 - Aucun essai sur une vraie collection de ROMs (signatures d'en-tête).
 - BIOS mélangés aux jeux : non détectés, rangés comme des jeux. Il faut
   une liste de BIOS connus (nom/CRC), en excluant les jeux intégrés tagués

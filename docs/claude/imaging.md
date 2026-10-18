@@ -458,7 +458,7 @@ fichier .img qu'elle contient. »* — pour qu'un débutant sache quoi faire
 avant de se retrouver bloqué avec un fichier que le logiciel refuse,
 plutôt qu'après coup seulement via le message d'erreur ci-dessus.
 
-**Décompression native du `.7z` (py7zr) : envisagée, non retenue** (streaming impossible sans fichier temporaire + poids des dépendances C). Évaluation complète dans `docs/bugs-imaging-io.md` ; à revisiter seulement sur demande explicite.
+**Décompression native du `.7z` pour le flash : non retenue** (streaming impossible sans fichier temporaire, une image fait plusieurs Go ; évaluation dans `docs/bugs-imaging-io.md`). py7zr est en revanche une dépendance depuis le 2026-10-19 pour « Convertir des jeux » (`tri/convert.py`) : un ROM tient sans problème dans un fichier temporaire. Poids mesuré : ~7 Mo installé (dont 4,8 Mo pour `pycryptodomex`), ~2,5 Mo de plus dans l'installeur.
 
 **Taille décompressée d'un `.xz`** : lue sans décompression depuis l'Index au pied de l'archive (`image_source._xz_uncompressed_size`). **`.gz` : taille minimale seulement** (ISIZE = taille modulo 2³²) -- `flash_device` copie un `.gz` jusqu'à la fin du flux, borné par la carte, jamais par l'estimation (bug de troncature au-delà de 4 Gio, `docs/bugs-imaging-io.md`) ; si le format n'est pas standard, `flash_device` retombe sur la taille du périphérique cible plutôt que de traiter la copie comme non bornée (sinon la barre affiche 100 % dès le premier octet — récit dans `docs/bugs-imaging-io.md`).
 

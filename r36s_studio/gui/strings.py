@@ -1246,6 +1246,60 @@ STRINGS = {
     ),
     "filter_undo_button": "Annuler le filtrage",
     "filter_undo_previous_button": "Annuler le filtrage précédent de ce dossier",
+    # « Convertir des jeux » (`tri/convert.py`, `ConvertScreen`) : textes
+    # propres ; les autres retombent sur ceux du tri (`tri_*`).
+    "home_tile_convert_games": "Convertir des jeux",
+    "home_tile_convert_games_desc": (
+        "Repère les jeux dans un format que ta console ne lit pas (.7z) et les convertit en .zip."
+    ),
+    "convert_title": "Convertir des jeux",
+    "convert_hint": (
+        "Un jeu dans un format que ta console ne lit pas s'affiche, mais ne démarre pas ou donne "
+        "un écran noir. Choisis un dossier de jeux : les archives .7z que le système de ta console "
+        "ne lit pas seront converties en .zip. Les originaux sont gardés à part, rien n'est supprimé, "
+        "et tu verras tout avant de confirmer."
+    ),
+    "convert_choose_folder_button": "Choisir le dossier à convertir…",
+    "convert_preview_summary": (
+        "{count} jeu(x) en .7z à convertir en .zip ; {left} laissé(s) tel(s) quel(s). "
+        "Les originaux seront gardés dans « {folder} »."
+    ),
+    "convert_preview_nothing": "Rien à convertir dans ce dossier ({left} archive(s) .7z laissée(s) telle(s) quelle(s)).",
+    "convert_sort_button": "Convertir",
+    "convert_confirm_title": "Confirmer la conversion",
+    "convert_confirm_message": (
+        "{count} jeu(x) vont être convertis en .zip dans « {root} ». Chaque original est gardé dans "
+        "« {folder} », rien n'est supprimé, et tu pourras tout remettre comme avant avec "
+        "« Annuler la conversion »."
+    ),
+    "convert_move_title": "Conversion en cours",
+    "convert_move_count": "{done} / {total} jeu(x)",
+    "convert_result_title": "Conversion terminée",
+    "convert_result_cancelled_title": "Conversion interrompue",
+    "convert_result_moved": "{count} jeu(x) converti(s) en .zip.",
+    "convert_result_failures": (
+        "{count} jeu(x) n'ont pas pu être convertis (archive abîmée ou protégée par un mot de passe, "
+        "voir la liste ci-dessous) : ils sont restés tels quels."
+    ),
+    "convert_result_aborted": (
+        "La conversion s'est arrêtée après plusieurs échecs de suite. La carte ou le disque "
+        "a peut-être été retiré."
+    ),
+    "convert_result_skipped_existing": "{count} jeu(x) laissé(s) tel(s) quel(s) : un .zip du même nom existe déjà.",
+    "convert_undo_button": "Annuler la conversion",
+    "convert_undo_previous_button": "Annuler la conversion précédente de ce dossier",
+    "convert_undo_done": "{count} jeu(x) remis comme avant.",
+    "convert_undo_conflicts": (
+        "{count} jeu(x) n'ont pas pu être remis comme avant (un fichier occupe déjà leur place, "
+        "ou le .zip a été modifié depuis)."
+    ),
+    "convert_error_no_space": (
+        "Pas assez de place sur le disque pour continuer la conversion. Les jeux déjà convertis "
+        "le restent ; libère de la place ou annule la conversion."
+    ),
+    "tri_reason_seven_zip_read": "le système de ta console lit déjà les .7z dans ce dossier",
+    "tri_reason_zip_not_read": "le système de ta console ne lit pas non plus les .zip dans ce dossier",
+    "tri_reason_zip_exists": "un .zip du même nom existe déjà",
     "home_tile_filter_games": "Filtrer par région et par langue",
     "home_tile_filter_games_desc": (
         "Écarte les jeux d'autres régions ou langues, dans n'importe quel dossier."

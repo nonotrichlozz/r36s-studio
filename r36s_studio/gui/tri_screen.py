@@ -37,9 +37,18 @@ from PySide6.QtWidgets import (
 
 from r36s_studio.config import DEFAULT_DOUBLONS_IGNORED_FOLDERS
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
-from r36s_studio.tri.apply import ApplyResult, has_journal
+from r36s_studio.tri.apply import ApplyResult, apply_plan, has_journal, undo_sort
+from r36s_studio.tri.convert import apply_conversion, build_convert_plan, undo_conversion
 from r36s_studio.tri.filter import build_filter_plan
-from r36s_studio.tri.plan import FILTER_JOURNAL_FILENAME, SORT_JOURNAL_FILENAME, PlannedMove, SortPlan, build_plan
+from r36s_studio.tri.plan import (
+    CONVERT_JOURNAL_FILENAME,
+    FILTER_JOURNAL_FILENAME,
+    ORIGINALS_DIR_NAME,
+    SORT_JOURNAL_FILENAME,
+    PlannedMove,
+    SortPlan,
+    build_plan,
+)
 from r36s_studio.tri.regions import LANGUAGE_CHOICES, REGION_CHOICES, RegionFilter
 from r36s_studio.tri.tables import SORT_FIRMWARE_IDS, load_firmware_tables, load_systems
 
@@ -48,7 +57,7 @@ from .screens import Screen, _format_size
 from .strings import STRINGS, tr
 from .tri_runner import SortApplyRunner, SortPlanRunner, SortUndoRunner
 
-__all__ = ["TriScreen", "FilterScreen", "firmware_display_name"]
+__all__ = ["TriScreen", "FilterScreen", "ConvertScreen", "firmware_display_name"]
 
 DEFAULT_SORT_FIRMWARE = "rocknix"
 
@@ -110,6 +119,8 @@ class TriScreen(Screen):
     PAGE_CHOOSE, PAGE_SCAN, PAGE_PREVIEW, PAGE_CONFIRM, PAGE_MOVE, PAGE_RESULT = range(6)
     TEXT_PREFIX = "tri_"
     JOURNAL_NAME = SORT_JOURNAL_FILENAME
+    APPLY = staticmethod(apply_plan)
+    UNDO = staticmethod(undo_sort)
 
     def _t(self, key: str, **kwargs) -> str:
         """Texte propre à cet écran (`<TEXT_PREFIX><key>`) s'il existe,
@@ -170,18 +181,7 @@ class TriScreen(Screen):
 
     def _build_choose_options(self, root: QVBoxLayout) -> None:
         """Tri : firmware cible (noms des dossiers) et destination."""
-        firmware_row = QHBoxLayout()
-        firmware_row.addWidget(QLabel(self._t("firmware_label")))
-        self._firmware_combo = QComboBox()
-        for firmware_id in SORT_FIRMWARE_IDS:
-            self._firmware_combo.addItem(firmware_display_name(firmware_id), firmware_id)
-        self._firmware_combo.currentIndexChanged.connect(self._update_verification_label)
-        firmware_row.addWidget(self._firmware_combo)
-        firmware_row.addStretch()
-        root.addLayout(firmware_row)
-        self._verification_label = _secondary()
-        root.addWidget(self._verification_label)
-        self._update_verification_label()
+        self._add_firmware_row(root)
 
         destination_row = QHBoxLayout()
         destination_row.addWidget(QLabel(self._t("destination_label")))
@@ -196,6 +196,20 @@ class TriScreen(Screen):
         self._destination_reset_button.setVisible(False)
         destination_row.addWidget(self._destination_reset_button)
         root.addLayout(destination_row)
+
+    def _add_firmware_row(self, root: QVBoxLayout) -> None:
+        firmware_row = QHBoxLayout()
+        firmware_row.addWidget(QLabel(self._t("firmware_label")))
+        self._firmware_combo = QComboBox()
+        for firmware_id in SORT_FIRMWARE_IDS:
+            self._firmware_combo.addItem(firmware_display_name(firmware_id), firmware_id)
+        self._firmware_combo.currentIndexChanged.connect(self._update_verification_label)
+        firmware_row.addWidget(self._firmware_combo)
+        firmware_row.addStretch()
+        root.addLayout(firmware_row)
+        self._verification_label = _secondary()
+        root.addWidget(self._verification_label)
+        self._update_verification_label()
 
     def set_destination(self, path: Optional[str]) -> None:
         self._destination = path or None
@@ -475,7 +489,7 @@ class TriScreen(Screen):
         self._move_bar.setValue(0)
         self._move_count_label.setText(self._t("move_count", done=0, total=self._plan.file_count()))
         self._stack.setCurrentIndex(self.PAGE_MOVE)
-        self._apply_runner = SortApplyRunner(self._plan, parent=self, journal_name=self.JOURNAL_NAME)
+        self._apply_runner = SortApplyRunner(self._plan, parent=self, journal_name=self.JOURNAL_NAME, apply=self.APPLY)
         self._apply_runner.progress.connect(self._on_move_progress)
         self._apply_runner.finished_apply.connect(self.show_apply_result)
         self._apply_runner.error.connect(self._on_apply_error)
@@ -517,7 +531,7 @@ class TriScreen(Screen):
             return
         self._undo_button.setEnabled(False)
         self._undo_previous_button.setEnabled(False)
-        self._undo_runner = SortUndoRunner(self._root, parent=self, journal_name=self.JOURNAL_NAME)
+        self._undo_runner = SortUndoRunner(self._root, parent=self, journal_name=self.JOURNAL_NAME, undo=self.UNDO)
         self._undo_runner.finished_undo.connect(self.show_undo_result)
         self._undo_runner.error.connect(self._on_apply_error)
         self._undo_runner.start()
@@ -636,3 +650,39 @@ class FilterScreen(TriScreen):
 
     def _confirm_message(self, plan: SortPlan) -> str:
         return self._t("confirm_message", count=plan.file_count(), root=str(plan.root))
+
+
+class ConvertScreen(TriScreen):
+    """« Convertir des jeux » (`tri/convert.py`, phase 1 : `.7z` → `.zip`) :
+    signale les `.7z` que le firmware choisi ne lit pas et les convertit,
+    originaux mis de côté dans `_originaux`. Mêmes pages que le tri
+    (aperçu, confirmation, progression, annulation), journal distinct."""
+
+    TEXT_PREFIX = "convert_"
+    JOURNAL_NAME = CONVERT_JOURNAL_FILENAME
+    APPLY = staticmethod(apply_conversion)
+    UNDO = staticmethod(undo_conversion)
+
+    def _build_choose_options(self, root: QVBoxLayout) -> None:
+        self._add_firmware_row(root)
+
+    def _plan_builder(self, path: str):
+        return partial(build_convert_plan, path, self.selected_firmware(), DEFAULT_DOUBLONS_IGNORED_FOLDERS)
+
+    def _preview_summary(self, plan: SortPlan) -> str:
+        if not plan.moves:
+            return self._t("preview_nothing", left=len(plan.left_in_place))
+        return self._t("preview_summary", count=len(plan.moves), left=len(plan.left_in_place), folder=ORIGINALS_DIR_NAME)
+
+    def _show_preview_risk(self, plan: SortPlan) -> None:
+        self._preview_risk_frame.setVisible(False)
+
+    def _confirm_message(self, plan: SortPlan) -> str:
+        return self._t("confirm_message", count=len(plan.moves), root=str(plan.root), folder=ORIGINALS_DIR_NAME)
+
+    def _start_apply(self) -> None:
+        super()._start_apply()
+        # Une archive à la fois : la barre compte des archives, pas des fichiers.
+        total = len(self._plan.moves) if self._plan is not None else 0
+        self._move_bar.setRange(0, max(1, total))
+        self._move_count_label.setText(self._t("move_count", done=0, total=total))

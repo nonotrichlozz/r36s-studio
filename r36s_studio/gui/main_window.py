@@ -159,7 +159,7 @@ from .strings import (
     tr,
     tr_in,
 )
-from .tri_screen import FilterScreen, TriScreen
+from .tri_screen import ConvertScreen, FilterScreen, TriScreen
 from .wizard_flow import WizardFlow, WizardJob
 from .worker_runner import WorkerRunner
 
@@ -667,6 +667,7 @@ class MainWindow(QMainWindow):
         # gère lui-même ses pages et ses threads : un seul point d'entrée ici.
         self._tri_screen = TriScreen()
         self._filter_screen = FilterScreen()
+        self._convert_screen = ConvertScreen()
         self._android_download_runner: Optional[AndroidPlatformToolsDownloadRunner] = None
         self._android_search_runner: Optional[ConsoleSearchRunner] = None
         # URL de la dernière recherche lancée depuis cet écran -- retenue
@@ -695,6 +696,7 @@ class MainWindow(QMainWindow):
         self._root_stack.addWidget(self._doublons_move_progress_screen)
         self._root_stack.addWidget(self._tri_screen)
         self._root_stack.addWidget(self._filter_screen)
+        self._root_stack.addWidget(self._convert_screen)
         self.setCentralWidget(self._root_stack)
 
         # Fenêtres modales (§5, refonte navigation) : construites une fois,
@@ -907,10 +909,12 @@ class MainWindow(QMainWindow):
         self._home.find_duplicates_requested.connect(self._start_doublons_tool)
         self._home.sort_games_requested.connect(self._open_tri_screen)
         self._home.filter_games_requested.connect(self._open_filter_screen)
+        self._home.convert_games_requested.connect(self._open_convert_screen)
         self._home.language_selected.connect(self._on_language_selected)
         self._assisted_landing.language_selected.connect(self._on_language_selected)
         self._tri_screen.back_requested.connect(self._show_startup_screen)
         self._filter_screen.back_requested.connect(self._show_startup_screen)
+        self._convert_screen.back_requested.connect(self._show_startup_screen)
         self._assisted_landing.eject_requested.connect(lambda: self._start_assisted_ad_hoc_job("eject"))
         self._assisted_landing.help_requested.connect(self._on_assisted_help_requested)
         self._assisted_backup_kind_dialog.full_copy_requested.connect(
@@ -3375,6 +3379,13 @@ class MainWindow(QMainWindow):
         aucun firmware, n'importe quel dossier."""
         self._filter_screen.show_choose_page()
         self._root_stack.setCurrentWidget(self._filter_screen)
+
+    def _open_convert_screen(self) -> None:
+        """Ligne « Convertir des jeux » (`tri/convert.py`) : le firmware
+        choisi pour le flash est proposé, toujours remplaçable."""
+        self._convert_screen.set_default_firmware(self._app_config.firmware)
+        self._convert_screen.show_choose_page()
+        self._root_stack.setCurrentWidget(self._convert_screen)
 
     def _open_android_screen(self) -> None:
         self._root_stack.setCurrentWidget(self._android_screen)

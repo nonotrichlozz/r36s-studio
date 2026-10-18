@@ -59,8 +59,13 @@ SORT_JOURNAL_FILENAME = "_rangement_journal.json"
 # Journal du filtre (`tri/filter.py`), distinct : annuler un filtrage ne
 # doit jamais défaire un rangement fait avant dans le même dossier.
 FILTER_JOURNAL_FILENAME = "_filtre_journal.json"
-_JOURNAL_FILENAMES = frozenset({SORT_JOURNAL_FILENAME, FILTER_JOURNAL_FILENAME})
-_ALWAYS_IGNORED = frozenset({UNIDENTIFIED_DIR_NAME.lower(), FILTERED_DIR_NAME.lower(), "_doublons"})
+# « Convertir des jeux » (`tri/convert.py`) : originaux mis de côté, journal.
+ORIGINALS_DIR_NAME = "_originaux"
+CONVERT_JOURNAL_FILENAME = "_conversion_journal.json"
+_JOURNAL_FILENAMES = frozenset({SORT_JOURNAL_FILENAME, FILTER_JOURNAL_FILENAME, CONVERT_JOURNAL_FILENAME})
+_ALWAYS_IGNORED = frozenset(
+    {UNIDENTIFIED_DIR_NAME.lower(), FILTERED_DIR_NAME.lower(), ORIGINALS_DIR_NAME.lower(), "_doublons"}
+)
 # Dossiers de mise de côté : chemin d'origine conservé sous la racine analysée.
 SET_ASIDE_DIR_NAMES = (UNIDENTIFIED_DIR_NAME, FILTERED_DIR_NAME)
 

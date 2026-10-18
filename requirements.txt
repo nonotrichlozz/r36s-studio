@@ -1,3 +1,5 @@
 PySide6>=6.9,<7
 # Déchiffrement des téléchargements MEGA (Consoles diverses, muOS).
 cryptography>=44
+# Lecture des .7z (« Convertir des jeux », tri/convert.py).
+py7zr>=1.1,<2

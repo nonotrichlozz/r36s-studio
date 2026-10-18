@@ -58,10 +58,13 @@ class SortApplyRunner(QThread):
     finished_apply = Signal(object)  # ApplyResult
     error = Signal(str, str)
 
-    def __init__(self, plan: SortPlan, parent=None, journal_name: str = SORT_JOURNAL_FILENAME):
+    def __init__(self, plan: SortPlan, parent=None, journal_name: str = SORT_JOURNAL_FILENAME, apply=apply_plan):
+        """`apply` : `tri.apply.apply_plan` (tri, filtre) ou
+        `tri.convert.apply_conversion` -- même signature."""
         super().__init__(parent)
         self._plan = plan
         self._journal_name = journal_name
+        self._apply = apply
         self._cancel_requested = False
 
     def cancel(self) -> None:
@@ -69,7 +72,7 @@ class SortApplyRunner(QThread):
 
     def run(self) -> None:
         try:
-            result = apply_plan(
+            result = self._apply(
                 self._plan,
                 on_progress=self.progress.emit,
                 should_cancel=lambda: self._cancel_requested,
@@ -91,14 +94,15 @@ class SortUndoRunner(QThread):
     finished_undo = Signal(object)  # UndoResult
     error = Signal(str, str)
 
-    def __init__(self, root: str, parent=None, journal_name: str = SORT_JOURNAL_FILENAME):
+    def __init__(self, root: str, parent=None, journal_name: str = SORT_JOURNAL_FILENAME, undo=undo_sort):
         super().__init__(parent)
         self._root = root
         self._journal_name = journal_name
+        self._undo = undo
 
     def run(self) -> None:
         try:
-            result = undo_sort(self._root, self._journal_name)
+            result = self._undo(self._root, self._journal_name)
         except OSError as exc:
             self.error.emit("IO_ERROR", str(exc))
             return

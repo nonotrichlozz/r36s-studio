@@ -863,6 +863,58 @@ STRINGS_EN = {
     ),
     "filter_undo_button": "Undo the filtering",
     "filter_undo_previous_button": "Undo the previous filtering of this folder",
+    "home_tile_convert_games": "Convert games",
+    "home_tile_convert_games_desc": (
+        "Finds games in a format your console can't read (.7z) and converts them to .zip."
+    ),
+    "convert_title": "Convert games",
+    "convert_hint": (
+        "A game in a format your console can't read shows up but doesn't start, or gives a black "
+        "screen. Choose a games folder: the .7z archives your console's system can't read will be "
+        "converted to .zip. The originals are kept aside, nothing is deleted, and you'll see "
+        "everything before confirming."
+    ),
+    "convert_choose_folder_button": "Choose the folder to convert…",
+    "convert_preview_summary": (
+        "{count} .7z game(s) to convert to .zip; {left} left as they are. "
+        "The originals will be kept in “{folder}”."
+    ),
+    "convert_preview_nothing": "Nothing to convert in this folder ({left} .7z archive(s) left as they are).",
+    "convert_sort_button": "Convert",
+    "convert_confirm_title": "Confirm the conversion",
+    "convert_confirm_message": (
+        "{count} game(s) will be converted to .zip in “{root}”. Each original is kept in "
+        "“{folder}”, nothing is deleted, and you can put everything back with "
+        "“Undo the conversion”."
+    ),
+    "convert_move_title": "Converting",
+    "convert_move_count": "{done} / {total} game(s)",
+    "convert_result_title": "Conversion finished",
+    "convert_result_cancelled_title": "Conversion interrupted",
+    "convert_result_moved": "{count} game(s) converted to .zip.",
+    "convert_result_failures": (
+        "{count} game(s) could not be converted (damaged or password-protected archive, "
+        "see the list below): they were left as they are."
+    ),
+    "convert_result_aborted": (
+        "The conversion stopped after several failures in a row. The card or disk may "
+        "have been removed."
+    ),
+    "convert_result_skipped_existing": "{count} game(s) left as they are: a .zip with the same name already exists.",
+    "convert_undo_button": "Undo the conversion",
+    "convert_undo_previous_button": "Undo the previous conversion of this folder",
+    "convert_undo_done": "{count} game(s) put back as before.",
+    "convert_undo_conflicts": (
+        "{count} game(s) could not be put back (a file already takes their place, "
+        "or the .zip was changed since)."
+    ),
+    "convert_error_no_space": (
+        "Not enough space on the disk to continue the conversion. Games already converted "
+        "stay converted; free some space or undo the conversion."
+    ),
+    "tri_reason_seven_zip_read": "your console's system already reads .7z files in this folder",
+    "tri_reason_zip_not_read": "your console's system doesn't read .zip files in this folder either",
+    "tri_reason_zip_exists": "a .zip with the same name already exists",
     "home_tile_filter_games": "Filter by region and language",
     "home_tile_filter_games_desc": "Sets aside games from other regions or languages, in any folder.",
     "tri_scan_title": "Scanning your games",

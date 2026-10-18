@@ -500,6 +500,8 @@ STRINGS_EN = {
     ),
     "personal_use_checkbox": "I will use {firmware} for my personal use only",
     "personal_use_continue": "Continue",
+    "first_boot_note_title": "Before you turn on your console",
+    "first_boot_note_log": "Before you turn on your console: {consigne}",
     "catalogue_install_searching_log": "Looking for the latest version of {firmware} for {console}…",
     "catalogue_install_file_log": "File found: {name}",
     "catalogue_download_success": "{firmware} has been downloaded: {path}. Now choose the SD card to prepare.",

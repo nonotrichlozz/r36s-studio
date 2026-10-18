@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import QByteArray, QTimer, QUrl, Slot
+from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -494,6 +494,11 @@ class MainWindow(QMainWindow):
         # Copies après flash de la fiche (`Telechargement.apres_flash`),
         # transmises au worker seulement si `_catalogue_flash_active`.
         self._catalogue_post_copies = ()
+        # `Telechargement.consigne_premier_demarrage` (KNULLI : brancher sur
+        # secteur) : bandeau de la Confirmation, puis fenêtre à fermer et
+        # ligne du journal après un flash réussi (`_first_boot_note`).
+        self._catalogue_first_boot_note: Optional[str] = None
+        self._first_boot_dialog: Optional[QMessageBox] = None
         # « Utiliser toute la carte » pour une image SF3000 (`imaging/
         # sf3000_clone.py`) : choisi dans `WholeCardChoiceDialog` (mode
         # expert) ou automatiquement (mode assisté) -- remis à False avant
@@ -1427,7 +1432,7 @@ class MainWindow(QMainWindow):
         if self._is_flashing_rocknix():
             self._rocknix_console_dialog.open()
             return
-        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
         self._confirm_dialog.open()
 
     def _is_flashing_rocknix(self) -> bool:
@@ -1445,7 +1450,7 @@ class MainWindow(QMainWindow):
         if not is_r36s:
             if unknown:
                 self._log_panel.append_log(tr("rocknix_console_unknown_log"))
-            self._confirm_dialog.set_device(self._device)
+            self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
             self._confirm_dialog.open()
             return
         self._rocknix_r36s = True
@@ -1465,7 +1470,7 @@ class MainWindow(QMainWindow):
         self._log_panel.append_log(tr("rocknix_panels_log", count=count, total=total))
         if count == 0:
             self._log_panel.append_log(tr("rocknix_panels_none_log"))
-        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
         self._confirm_dialog.open()
 
     def _use_whole_card_automatically(self, used_bytes: int) -> None:
@@ -1480,7 +1485,7 @@ class MainWindow(QMainWindow):
         obligatoire (§2 n°6) dans les deux cas."""
         self._whole_card = whole_card
         self._whole_card_verify = verify
-        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
         self._confirm_dialog.open()
 
     def _on_reset_card_label_chosen(self, label: str, filesystem: str) -> None:
@@ -1512,7 +1517,7 @@ class MainWindow(QMainWindow):
         self._reset_card_filesystem = filesystem
         self._app_config.reset_card_filesystem = filesystem
         app_config.save_config(self._app_config)
-        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
         self._confirm_dialog.open()
 
     def _on_confirmed(self) -> None:
@@ -1898,6 +1903,26 @@ class MainWindow(QMainWindow):
         entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
         return entry is not None and entry.is_android
 
+    def _first_boot_note(self) -> Optional[str]:
+        """Consigne de premier démarrage de la fiche, seulement pour le flash
+        de l'image qu'elle vient de télécharger."""
+        if self._mode != "flash" or self._wizard_active or not self._catalogue_flash_active:
+            return None
+        return self._catalogue_first_boot_note
+
+    def _show_first_boot_note(self) -> None:
+        """Après un flash réussi : ligne du journal et fenêtre qu'il faut
+        fermer -- la consigne lue dans la Confirmation est oubliée après
+        plusieurs minutes d'écriture."""
+        note = self._first_boot_note()
+        if not note:
+            return
+        self._log_panel.append_log(tr("first_boot_note_log", consigne=note))
+        dialog = QMessageBox(QMessageBox.Information, tr("first_boot_note_title"), note, QMessageBox.Ok, self)
+        dialog.setTextFormat(Qt.PlainText)  # texte venu du catalogue
+        self._first_boot_dialog = dialog
+        dialog.open()
+
     def _flash_post_log_key(self) -> Optional[str]:
         """Consigne à journaliser après un flash réussi, reçue du worker qui
         l'a décidée sur la carte écrite (`post_flash_note`) -- jamais
@@ -2044,6 +2069,7 @@ class MainWindow(QMainWindow):
                 self._log_panel.append_log(tr(post_flash_key))
             if self._rocknix_r36s and self._is_flashing_rocknix():
                 self._log_panel.append_log(tr("rocknix_r36s_next_steps_log"))
+            self._show_first_boot_note()
         else:
             # `friendly_error_message` mappe déjà "CANCELLED" sur le
             # message d'annulation adéquat (`strings._ERROR_MESSAGE_KEYS`)
@@ -2067,6 +2093,7 @@ class MainWindow(QMainWindow):
             allow_eject = self._mode in _ALLOW_EJECT_AFTER_MODES
             reveal_path = self._file_path if self._mode in (_EXTRACTION_MODES | _INJECTION_MODES) else None
             self._log_panel.finish_success(self._success_message(), allow_eject=allow_eject, reveal_path=reveal_path)
+            self._show_first_boot_note()
         else:
             friendly = friendly_error_message(self._last_error_code or "")
             self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
@@ -3483,6 +3510,7 @@ class MainWindow(QMainWindow):
         self._catalogue_page_url = _safe_page_url(getattr(option, "url", None))
         self._catalogue_firmware_name = option.nom
         self._catalogue_post_copies = tuple(telechargement.apres_flash)
+        self._catalogue_first_boot_note = telechargement.consigne_premier_demarrage
         if self._app_config.ui_mode == "expert":
             self._main_view.show_home()
         else:
@@ -4106,7 +4134,7 @@ class MainWindow(QMainWindow):
         used_bytes = sf3000_clone.whole_card_used_bytes(self._file_path, self._device)
         if used_bytes is not None:
             self._use_whole_card_automatically(used_bytes)
-        self._confirm_dialog.set_device(self._device)
+        self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
         self._confirm_dialog.open()
 
     def _on_wizard_job_finished(self, ok: bool) -> None:

@@ -31,7 +31,10 @@ par un script obfusqué.
 
 Le champ optionnel `apres_flash` liste les fichiers à copier sur la carte
 juste après le flash (`partitions/post_flash_copy.py`, mêmes règles de
-chemin côté GUI et côté worker).
+chemin côté GUI et côté worker). Le champ optionnel
+`consigne_premier_demarrage` (texte court, ex. KNULLI : brancher sur
+secteur) est affiché dans la fenêtre Confirmation et à la fin du flash ;
+invalide ou trop long, il est ignoré sans retirer le bouton.
 
 Une fiche reste une donnée externe (`consoles_diverses/CLAUDE.md`,
 durcissement) : seul un dépôt au format `propriétaire/nom` est accepté,
@@ -69,6 +72,7 @@ _HOTE_AUTORISE = "github.com"
 # 4,4 Go compressés, 8,2 Gio décompressés).
 MAX_IMAGE_BYTES = 16 * 1024**3
 SOURCES = ("github", "mega")
+MAX_CONSIGNE_CHARS = 400
 
 Opener = Callable[..., Any]  # opener(url) en GET, opener(url, data) en POST (MEGA)
 
@@ -89,6 +93,9 @@ class Telechargement:
     apres_flash: Tuple[PostFlashCopy, ...] = ()
     source: str = "github"
     dossier: Optional[str] = None  # lien de dossier MEGA (`source == "mega"`)
+    # Ce que l'utilisateur doit savoir avant de mettre la carte dans la
+    # console (texte brut, `_consigne_depuis_json`).
+    consigne_premier_demarrage: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -144,7 +151,19 @@ def telechargement_depuis_json(data: Any) -> Optional[Telechargement]:
         apres_flash=tuple(copies),
         source=source,
         dossier=dossier,
+        consigne_premier_demarrage=_consigne_depuis_json(data.get("consigne_premier_demarrage")),
     )
+
+
+def _consigne_depuis_json(value: Any) -> Optional[str]:
+    """Texte brut sur une ligne (blancs et caractères de contrôle réduits à
+    une espace), `None` si absent, vide ou plus long que
+    `MAX_CONSIGNE_CHARS` -- jamais tronqué : une consigne coupée en plein
+    milieu serait pire que pas de consigne."""
+    if not isinstance(value, str):
+        return None
+    texte = " ".join("".join(c if c.isprintable() else " " for c in value).split())
+    return texte if 0 < len(texte) <= MAX_CONSIGNE_CHARS else None
 
 
 def url_github_sure(url: str) -> bool:

@@ -219,3 +219,28 @@ def test_apres_flash_invalide_retire_tout_le_telechargement():
 
 def test_sans_apres_flash_tuple_vide():
     assert telechargement_depuis_json({"depot": DEPOT, "motif_fichier": MOTIF}).apres_flash == ()
+
+
+CONSIGNE = (
+    "Branche la console sur secteur avant de l'allumer, même si la batterie est chargée à 100 % : "
+    "KNULLI ne lance son installation que sur secteur."
+)
+
+
+def test_consigne_premier_demarrage_lue_en_texte_brut_sur_une_ligne():
+    tel = telechargement_depuis_json(
+        {"depot": DEPOT, "motif_fichier": MOTIF, "consigne_premier_demarrage": "  Branche\n\tla console\x00 sur secteur. "}
+    )
+    assert tel.consigne_premier_demarrage == "Branche la console sur secteur."
+    assert telechargement_depuis_json(
+        {"depot": DEPOT, "motif_fichier": MOTIF, "consigne_premier_demarrage": CONSIGNE}
+    ).consigne_premier_demarrage == CONSIGNE
+
+
+@pytest.mark.parametrize("valeur", [None, 42, ["x"], "", "   ", "x" * 401])
+def test_consigne_absente_ou_invalide_ignoree_sans_retirer_le_bouton(valeur):
+    data = {"depot": DEPOT, "motif_fichier": MOTIF}
+    if valeur is not None:
+        data["consigne_premier_demarrage"] = valeur
+    tel = telechargement_depuis_json(data)
+    assert tel is not None and tel.consigne_premier_demarrage is None

@@ -748,6 +748,8 @@ STRINGS = {
     ),
     "personal_use_checkbox": "J'utiliserai {firmware} pour mon usage personnel uniquement",
     "personal_use_continue": "Continuer",
+    "first_boot_note_title": "Avant d'allumer ta console",
+    "first_boot_note_log": "Avant d'allumer ta console : {consigne}",
     "catalogue_install_searching_log": "Recherche de la dernière version de {firmware} pour {console}…",
     "catalogue_install_file_log": "Fichier trouvé : {name}",
     "catalogue_download_success": "{firmware} a été téléchargé : {path}. Choisis maintenant la carte SD à préparer.",

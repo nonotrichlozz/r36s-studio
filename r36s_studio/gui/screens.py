@@ -2041,6 +2041,20 @@ class ConfirmDialog(Dialog):
         self._message.setProperty("role", "dangerMessage")
         layout.addWidget(self._message)
 
+        # Consigne de premier démarrage d'une fiche du catalogue (KNULLI :
+        # brancher sur secteur) -- à lire avant de mettre la carte dans la
+        # console, donc ici, avant même l'écriture.
+        self._notice_frame = QFrame()
+        self._notice_frame.setProperty("role", "warning")
+        notice_layout = QVBoxLayout(self._notice_frame)
+        self._notice = QLabel()
+        self._notice.setWordWrap(True)
+        self._notice.setTextFormat(Qt.PlainText)  # texte venu du catalogue
+        self._notice.setProperty("role", "dangerMessage")
+        notice_layout.addWidget(self._notice)
+        self._notice_frame.setVisible(False)
+        layout.addWidget(self._notice_frame)
+
         self._checkbox = QCheckBox(tr("confirm_checkbox"))
         self._checkbox.stateChanged.connect(self._update_go_enabled)
         layout.addWidget(self._checkbox)
@@ -2059,9 +2073,11 @@ class ConfirmDialog(Dialog):
 
         self.resize(440, 300)
 
-    def set_device(self, device: Device) -> None:
+    def set_device(self, device: Device, notice: Optional[str] = None) -> None:
         size_go = _capacity_go(device.size_bytes)
         self._message.setText(tr("confirm_erase", display=device.display, size_go=size_go))
+        self._notice.setText(tr("first_boot_note_log", consigne=notice) if notice else "")
+        self._notice_frame.setVisible(bool(notice))
         self._checkbox.setChecked(False)
 
     def _update_go_enabled(self) -> None:

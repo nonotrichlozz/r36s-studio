@@ -6599,6 +6599,65 @@ def test_catalogue_download_success_asks_for_the_card_then_confirms_without_r36s
     assert window._confirm_dialog.isVisible() is True  # jamais sautée (§2 n°6)
 
 
+_KNULLI_FIRST_BOOT = "Branche la console sur secteur avant de l'allumer : KNULLI ne lance son installation que sur secteur."
+
+
+@pytest.mark.parametrize("ui_mode", ["expert", "assisted"])
+@pytest.mark.parametrize("consigne", [_KNULLI_FIRST_BOOT, None])
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_first_boot_note_is_shown_before_the_flash_and_after_success(
+    mock_list, mock_filter, mock_save, consigne, ui_mode, qapp
+):
+    """`consigne_premier_demarrage` (KNULLI : secteur) : bandeau dans la
+    Confirmation, fenêtre « Avant d'allumer ta console » et ligne du journal
+    après le flash ; rien de tout ça sans consigne."""
+    from dataclasses import replace
+
+    option = _knulli_option()
+    option = replace(option, telechargement=replace(option.telechargement, consigne_premier_demarrage=consigne))
+    with patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode=ui_mode)):
+        window = MainWindow()
+    with patch("r36s_studio.gui.main_window.FirmwareResolveRunner", _mock_rocknix_runner_class()):
+        window._on_consoles_diverses_install_requested(option, "RG40XXV")
+    window._on_catalogue_download_finished(True, "/tmp/knulli-h700-rg40xx-v-scarab-20260511.img.gz")
+    with patch("r36s_studio.gui.main_window.check_image_format"), patch.object(
+        window, "_check_flash_image_integrity_or_warn", return_value=True
+    ), patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=None):
+        window._on_device_chosen(_make_device())
+
+    assert window._confirm_dialog.isVisible() is True
+    assert window._confirm_dialog._notice_frame.isHidden() is (consigne is None)
+    if consigne:
+        assert consigne in window._confirm_dialog._notice.text()
+
+    window._on_worker_finished(True)
+
+    log_text = window._log_panel._log_view.toPlainText()
+    if consigne:
+        assert f"Avant d'allumer ta console : {consigne}" in log_text
+        assert window._first_boot_dialog.isVisible() is True
+        assert window._first_boot_dialog.windowTitle() == "Avant d'allumer ta console"
+        assert window._first_boot_dialog.text() == consigne
+        window._first_boot_dialog.close()
+    else:
+        assert "Avant d'allumer ta console" not in log_text
+        assert window._first_boot_dialog is None
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_first_boot_note_never_leaks_into_a_normal_flash(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window._catalogue_first_boot_note = _KNULLI_FIRST_BOOT
+    window._start_flow("flash")
+    window._device = _make_device()
+    assert window._first_boot_note() is None
+
+
 @patch("r36s_studio.gui.main_window.app_config.save_config")
 @patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])

@@ -168,6 +168,14 @@ moitié réglée. **Clé `installation` du catalogue** : même contenu que
 -- à utiliser dès qu'il y a `apres_flash`, sinon une 0.1.9 (qui ignore ce
 champ) afficherait un bouton qui laisse la console sans démarrer.
 
+**Consigne de premier démarrage (`consigne_premier_demarrage`, 0.1.15,
+KNULLI : secteur obligatoire)** : texte brut ramené sur une ligne, ≤ 400
+caractères, sinon ignoré (jamais tronqué, le bouton reste). Bandeau orange
+dans `ConfirmDialog`, puis après un flash réussi ligne du journal et
+fenêtre « Avant d'allumer ta console » à fermer (`_show_first_boot_note`,
+modes expert et assisté). Champ facultatif : les versions antérieures
+l'ignorent, rien à mettre sous `installation`.
+
 **Source MEGA (`"source": "mega"`, 2026-10-17, muOS)** : `dossier` = lien
 public `https://mega.nz/folder/<ID>#<CLÉ>`, fichier choisi par
 `motif_fichier`, SHA-256 lue dans le `hash.txt` du dossier, contenu

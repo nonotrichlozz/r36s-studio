@@ -87,22 +87,42 @@ class AndroidPlatformToolsDownloadRunner(QThread):
         self.finished_download.emit(True, str(adb_path))
 
 
+class KnulliSystemsRunner(QThread):
+    """Systèmes de la console (dossiers + extensions), lus une fois à
+    l'ouverture de l'écran : colonne « Système » de la liste de jeux."""
+
+    finished_systems = Signal(object)  # Dict[str, FrozenSet[str]]
+    error = Signal(str)
+
+    def __init__(self, adb_path: str, serial: str, parent=None):
+        super().__init__(parent)
+        self._adb_path, self._serial = adb_path, serial
+
+    def run(self) -> None:
+        try:
+            systems = knulli.read_systems(self._adb_path, self._serial)
+        except (adb.AdbCommandError, OSError) as exc:
+            self.error.emit(str(exc))
+            return
+        self.finished_systems.emit(systems)
+
+
 class KnulliPlanRunner(QThread):
     """Aperçu de la copie vers une console KNULLI (`android/knulli.py`) :
-    systèmes lus sur la console, rangement du dossier choisi, fichiers
+    systèmes relus sur la console, rangement de la liste de jeux, fichiers
     déjà présents et place libre."""
 
     finished_plan = Signal(object)  # knulli.CopyPlan
     error = Signal(str)  # détail brut, pour le journal
 
-    def __init__(self, adb_path: str, serial: str, root: str, parent=None):
+    def __init__(self, adb_path: str, serial: str, entries, parent=None):
         super().__init__(parent)
-        self._adb_path, self._serial, self._root = adb_path, serial, root
+        self._adb_path, self._serial, self._entries = adb_path, serial, list(entries)
 
     def run(self) -> None:
         try:
             systems = knulli.read_systems(self._adb_path, self._serial)
-            plan = knulli.build_copy_plan(self._root, systems)
+            plan = knulli.build_copy_plan_from(self._entries, systems)
             existing = knulli.read_existing(self._adb_path, self._serial, knulli.plan_folders(plan))
             knulli.attach_console_state(plan, existing, knulli.read_free_bytes(self._adb_path, self._serial))
         except (adb.AdbCommandError, OSError) as exc:
@@ -152,5 +172,6 @@ __all__ = [
     "AndroidPlatformToolsSizeRunner",
     "AndroidPlatformToolsDownloadRunner",
     "KnulliPlanRunner",
+    "KnulliSystemsRunner",
     "KnulliCopyRunner",
 ]

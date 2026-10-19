@@ -22,7 +22,6 @@ existant remplacé sans `CopyItem.replace` (décidé par l'utilisateur)."""
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
 import time
@@ -32,7 +31,8 @@ from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from r36s_studio.tri.identify import MANIFEST_EXTENSIONS, identify_file
-from r36s_studio.tri.plan import _ALWAYS_IGNORED, _JOURNAL_FILENAMES, _linked_groups
+from r36s_studio.tri.plan import _linked_groups
+from r36s_studio.tri.selection import walk_games
 from r36s_studio.tri.tables import load_firmware_tables
 
 from .adb import COMMAND_TIMEOUT_SECONDS, AdbCommandError, Runner
@@ -253,16 +253,6 @@ def safe_name(name: str) -> str:
     return "".join("_" if char in FORBIDDEN_NAME_CHARS or ord(char) < 32 else char for char in name)
 
 
-def _walk(root: Path) -> List[Path]:
-    files = []
-    for directory, dirs, names in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d.lower() not in _ALWAYS_IGNORED)
-        for name in sorted(names):
-            if not name.startswith(".") and name not in _JOURNAL_FILENAMES:
-                files.append(Path(directory) / name)
-    return files
-
-
 def _target(root: Path, path: Path, folders_lower: Dict[str, str]) -> Tuple[Optional[str], List[str]]:
     """Premier dossier de système du chemin en partant du haut (le dossier
     choisi compris : `psx/tools/x.cue` reste dans `psx`) et le reste du
@@ -276,20 +266,29 @@ def _target(root: Path, path: Path, folders_lower: Dict[str, str]) -> Tuple[Opti
 
 
 def build_copy_plan(root: str, systems: Dict[str, FrozenSet[str]]) -> CopyPlan:
-    """Range chaque fichier par système : d'abord le nom d'un dossier du
-    chemin (`psx/…`, `bios/…`), sinon l'identification du tri (extension
-    et en-tête, `tri/identify.py`). Lecture seule, rien n'est copié."""
+    """Tout un dossier, sous-dossiers compris (`build_copy_plan_from`)."""
     root_path = Path(root).resolve()
-    plan = CopyPlan(root=root_path)
+    return build_copy_plan_from([(root_path, path) for path in walk_games(root_path)], systems, root_path)
+
+
+def build_copy_plan_from(
+    entries: List[Tuple[Path, Path]], systems: Dict[str, FrozenSet[str]], root: Optional[Path] = None
+) -> CopyPlan:
+    """`entries` : (dossier de départ, fichier), ex. `tri/selection.py::
+    GameSelection.entries`. Range chaque fichier par système : d'abord le
+    nom d'un dossier de son chemin depuis le dossier de départ (`psx/…`,
+    `bios/…`), sinon l'identification du tri (extension et en-tête,
+    `tri/identify.py`). Lecture seule, rien n'est copié."""
+    plan = CopyPlan(root=root or Path())
     folders_lower = {folder.lower(): folder for folder in systems}
     folders_lower[BIOS_FOLDER] = BIOS_FOLDER
     knulli_folders = load_firmware_tables()["knulli"].folders
-    files = _walk(root_path)
+    files = [path for _root, path in entries]
 
     groups, missing = _linked_groups(files)
     group_of = {member: group for group in groups for member in group}
     taken: Dict[str, Path] = {}
-    for path in files:
+    for root_path, path in entries:
         folder, sub = _target(root_path, path, folders_lower)
         group = group_of.get(path)
         if folder is None:
@@ -456,6 +455,7 @@ __all__ = [
     "Skipped",
     "attach_console_state",
     "build_copy_plan",
+    "build_copy_plan_from",
     "copy_plan",
     "detect_linux_console",
     "identify_linux_console",

@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from r36s_studio.android.knulli import CopyItem, CopyPlan, CopyResult, SPACE_MARGIN_BYTES
 from r36s_studio.android.models import AndroidDeviceInfo, DetectionResult, LinuxConsole
 from r36s_studio.gui import knulli_screen
@@ -14,6 +16,27 @@ from r36s_studio.gui.screens import AndroidScreen
 from r36s_studio.gui.strings import tr
 
 CONSOLE = LinuxConsole("knulli", "20260511")
+
+
+class _NoThread:
+    """Remplace les threads de l'écran : rien ne part vers adb."""
+
+    def __init__(self, *args, **kwargs):
+        self.finished_systems = self.finished_plan = self.error = self.finished = self
+
+    def connect(self, slot):
+        pass
+
+    def deleteLater(self):
+        pass
+
+    def start(self):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _no_console_thread(monkeypatch):
+    monkeypatch.setattr(knulli_screen, "KnulliSystemsRunner", _NoThread)
 
 
 def _item(name, size=1000, existing=None):
@@ -87,3 +110,22 @@ def test_result_says_when_the_list_was_not_refreshed_because_a_game_runs(qapp):
     screen._show_result(CopyResult(copied=[_item("A.sfc")], failures=[(item, "size_mismatch")]), "game_running")
     assert screen._reload_label.text() == tr("knulli_reload_game_running")
     assert "B.sfc" in screen._failures_list.item(0).text()
+
+
+def test_the_list_page_names_each_game_system_and_enables_the_summary(qapp, tmp_path):
+    from r36s_studio.android.knulli import parse_es_systems
+
+    (tmp_path / "snes").mkdir()
+    (tmp_path / "snes" / "A.sfc").write_bytes(b"x")
+    (tmp_path / "notes.txt").write_text("x")
+    screen = KnulliCopyScreen()
+    screen.start("adb", "S", CONSOLE, str(tmp_path))
+    assert not screen._summary_button.isEnabled()
+
+    screen.game_list().add_paths([str(tmp_path / "snes" / "A.sfc"), str(tmp_path / "notes.txt")])
+    assert screen.game_list()._tree.topLevelItem(0).text(2) == "…"  # systèmes pas encore lus
+    screen._on_systems_read(parse_es_systems('<l><system><path>/userdata/roms/snes</path><extension>.sfc</extension></system></l>'))
+
+    tree = screen.game_list()._tree
+    assert [tree.topLevelItem(i).text(2) for i in range(2)] == ["snes", tr("knulli_list_skipped", reason=knulli_screen._reason("not_recognised"))]
+    assert screen._summary_button.isEnabled()

@@ -872,6 +872,7 @@ class MainWindow(QMainWindow):
         self._android_screen.search_catalog_requested.connect(self._on_android_search_catalog_requested)
         self._android_screen.knulli_copy_requested.connect(self._open_knulli_screen)
         self._knulli_screen.back_requested.connect(self._open_android_screen)
+        self._knulli_screen.last_folder_changed.connect(self._on_last_games_folder_changed)
 
         self._help_dialog.open_settings_requested.connect(self._on_open_settings_requested)
         self._fda_screen.open_settings_requested.connect(self._on_open_settings_requested)
@@ -3426,12 +3427,18 @@ class MainWindow(QMainWindow):
         self._android_last_detection = result
         self._android_screen.show_detection_result(result)
 
+    def _on_last_games_folder_changed(self, folder: str) -> None:
+        self._app_config.last_games_folder = folder
+        app_config.save_config(self._app_config)
+
     def _open_knulli_screen(self) -> None:
         result = self._android_last_detection
         adb_path = android_adb.resolve_adb_path()
         if result is None or result.linux_console is None or result.device is None or adb_path is None:
             return
-        self._knulli_screen.start(adb_path, result.device.serial, result.linux_console)
+        self._knulli_screen.start(
+            adb_path, result.device.serial, result.linux_console, self._app_config.last_games_folder
+        )
         self._root_stack.setCurrentWidget(self._knulli_screen)
 
     def _on_android_platform_tools_size_ready(self, size_bytes) -> None:

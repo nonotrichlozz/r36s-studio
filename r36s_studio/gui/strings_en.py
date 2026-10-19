@@ -799,12 +799,25 @@ STRINGS_EN = {
     "knulli_back_button": "← Back",
     "knulli_console_label": "KNULLI console connected (version {version}).",
     "knulli_hint": (
-        "Choose a games folder on the computer. Each game goes into the right folder on the console "
-        "(based on the folder it's in, e.g. “psx”, or its file type); a “bios” folder goes into the "
-        "console's BIOS. You'll see a summary before anything is copied."
+        "Build the list of games to copy: pick games (Ctrl or Shift to take several), whole folders, "
+        "or drag them here. Each game goes into the right folder on the console (based on the folder "
+        "it's in, e.g. “psx”, or its file type); a “bios” folder goes into the console's BIOS. "
+        "You'll see a summary before anything is copied."
     ),
-    "knulli_choose_folder_button": "Choose the games folder…",
-    "knulli_scanning": "Checking the folder and reading the console…",
+    "knulli_summary_button": "See the summary",
+    "knulli_edit_list_button": "Edit the list",
+    "knulli_list_skipped": "not copied: {reason}",
+    "game_list_add_files": "Add games…",
+    "game_list_add_folder": "Add a folder…",
+    "game_list_remove": "Remove",
+    "game_list_clear": "Clear all",
+    "game_list_col_name": "Game",
+    "game_list_col_size": "Size",
+    "game_list_col_system": "System",
+    "game_list_linked": "{name} (+ {count} linked file(s))",
+    "game_list_total": "{count} game(s), {size}",
+    "game_list_empty": "No games yet: add some with the buttons, or drag them into the list.",
+    "knulli_scanning": "Checking the games and reading the console…",
     "knulli_error_console": (
         "The console stopped responding. Check the cable is plugged in and the console is still in "
         "“ADB” USB mode, then try again."
@@ -822,7 +835,6 @@ STRINGS_EN = {
     "knulli_renamed_row": "Renamed for the console: “{old}” → {new}",
     "knulli_skipped_title": "{count} file(s) won't be copied:",
     "knulli_copy_button": "Copy to the console",
-    "knulli_other_folder_button": "Choose another folder",
     "knulli_copying": "Copying. Don't unplug the console.",
     "knulli_copy_count": "{done} / {total} MB copied",
     "knulli_cancel_button": "Cancel",

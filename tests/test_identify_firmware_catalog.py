@@ -14,11 +14,22 @@ def test_exactly_one_clone_safe_entry():
     assert clone_safe[0].id == "emuelec"
 
 
-def test_rocknix_is_the_only_automatic_download_entry():
+def test_rocknix_and_knulli_are_the_only_automatic_download_entries():
     manual = [entry.id for entry in FIRMWARE_CATALOG if entry.releases_url is not None]
     automatic = [entry.id for entry in FIRMWARE_CATALOG if entry.releases_url is None]
-    assert automatic == ["rocknix"]
+    assert automatic == ["rocknix", "knulli"]
     assert "rocknix" not in manual
+    # Seul KNULLI passe par `auto_download` (ROCKNIX a son choix de variante).
+    assert [entry.id for entry in FIRMWARE_CATALOG if entry.auto_download is not None] == ["knulli"]
+
+
+def test_knulli_is_experimental_non_commercial_and_r36s_only():
+    entry = FIRMWARE_BY_ID["knulli"]
+    assert entry.status == "experimental"
+    assert entry.non_commercial and entry.r36s_only and not entry.is_clone_safe
+    assert "non commerciale" in tr(entry.desc_key)
+    assert "TF2" in tr(entry.first_boot_note_key) and "secteur" in tr(entry.first_boot_note_key)
+    assert "Choisir l'écran de la console" in tr(entry.first_boot_note_key)
 
 
 def test_darkosen_is_a_separate_maintained_entry_never_offered_for_clones():

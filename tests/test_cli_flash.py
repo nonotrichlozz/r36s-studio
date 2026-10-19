@@ -857,3 +857,49 @@ def test_cmd_flash_copy_after_flash_refuses_unsafe_path_without_mounting(
 
     mock_locate.assert_not_called()
     assert "Réglage de la carte après installation non fait" in capsys.readouterr().out
+
+
+@patch("r36s_studio.__main__._peek_free_games_partition_bytes", return_value=60 * 1024**3)
+@patch("r36s_studio.__main__.create_and_format_games_partition_if_worthwhile")
+@patch("r36s_studio.__main__.flash_device")
+@patch("r36s_studio.__main__._confirm_flash", return_value=True)
+@patch("r36s_studio.__main__.list_devices")
+def test_cmd_flash_knulli_r36s_card_keeps_share_and_gets_no_easyroms(
+    mock_list, mock_confirm, mock_flash, mock_create_games, mock_free, tmp_path, capsys
+):
+    """Disposition de `knulli-rk3326-r36s-scarab-20260510.img.gz` (MBR :
+    FAT32 « KNULLI » puis ext4 « SHARE » de 512 Mio, réduites ici) : SHARE
+    reconnue, aucun espace de jeux créé, aucun réglage ROCKNIX ni dArkOSen."""
+    import struct
+
+    from r36s_studio.imaging.card_probe import is_rocknix_card, own_games_partition_bytes
+
+    fat_lba, fat_sectors, share_lba, share_sectors = 2048, 8, 4096, 8
+    card = bytearray((share_lba + share_sectors) * 512)
+    card[446 + 4] = 0x0C
+    card[446 + 8 : 446 + 16] = struct.pack("<II", fat_lba, fat_sectors)
+    card[462 + 4] = 0x83
+    card[462 + 8 : 462 + 16] = struct.pack("<II", share_lba, share_sectors)
+    card[510:512] = b"\x55\xaa"
+    boot = fat_lba * 512
+    card[boot + 71 : boot + 90] = b"KNULLI     FAT32   "
+    superblock = share_lba * 512 + 1024
+    card[superblock + 56 : superblock + 58] = b"\x53\xef"
+    card[superblock + 120 : superblock + 125] = b"SHARE"
+    card_path = tmp_path / "carte-knulli-r36s.bin"
+    card_path.write_bytes(bytes(card))
+    assert own_games_partition_bytes(str(card_path)) == share_sectors * 512
+    assert is_rocknix_card(str(card_path)) is False
+
+    mock_list.return_value = [_make_device(path=str(card_path))]
+    mock_flash.return_value = FlashResult(bytes_written=100, source_sha256="abc", written_sha256="abc", verified=True)
+    image = tmp_path / "knulli-rk3326-r36s-scarab-20260510.img.gz"
+    image.write_bytes(b"x" * 100)
+
+    args = _parse(["flash", "--image", str(image), "--device", str(card_path)])
+    assert args.func(args) == 0
+
+    mock_create_games.assert_not_called()
+    out = capsys.readouterr().out
+    assert "agrandir sa partition de jeux toute seule" in out
+    assert "ROCKNIX" not in out and "post_flash_note" not in out

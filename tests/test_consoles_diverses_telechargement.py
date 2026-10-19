@@ -244,3 +244,89 @@ def test_consigne_absente_ou_invalide_ignoree_sans_retirer_le_bouton(valeur):
         data["consigne_premier_demarrage"] = valeur
     tel = telechargement_depuis_json(data)
     assert tel is not None and tel.consigne_premier_demarrage is None
+
+
+# --- KNULLI R36S (sélecteur « Installer un système », SHA-256 exigée) ----------
+
+
+def _knulli_r36s():
+    from r36s_studio.identify.firmware_catalog import KNULLI_R36S_DOWNLOAD as k
+
+    return Telechargement(
+        depot=k.depot,
+        motif_fichier=k.motif_fichier,
+        url_directe=k.url_directe,
+        sha256_connus=k.sha256_connus,
+        exiger_sha256=True,
+    )
+
+
+# Noms et tableau des notes relevés sur la vraie release 20260511.
+_KNULLI_BODY = (
+    "<tr>\n<td>Game Console R36S</td>\n<td>2026/05/10</td>\n"
+    '<td><a href="https://github.com/x">knulli-rk3326-r36s-scarab-20260510.img.gz</a></td>\n</tr>\n'
+    "<tr>\n<td>BATLEXP G350</td>\n<td>2026/05/10</td>\n"
+    '<td><a href="https://github.com/y">knulli-rk3326-g350-scarab-20260510.img.gz</a></td>\n</tr>'
+)
+
+
+def _knulli_release(r36s_digest="sha256:" + "d" * 64, body=_KNULLI_BODY):
+    payload = _release(
+        _asset("knulli-rk3326-g350-scarab-20260510.img.gz", digest="sha256:" + "1" * 64),
+        _asset("knulli-rk3326-magicx-mini-m-scarab-20260510.img.gz", digest="sha256:" + "2" * 64),
+        _asset("knulli-rk3326-pixel2-scarab-20260510.img.gz", digest="sha256:" + "3" * 64),
+        _asset("knulli-rk3326-r36s-scarab-20260510.img.gz", size=1894042750, digest=r36s_digest),
+        _asset("knulli-h700-rg40xx-v-scarab-20260511.img.gz", digest="sha256:" + "4" * 64),
+    )
+    payload["body"] = body
+    return payload
+
+
+def test_knulli_r36s_choisit_le_seul_fichier_r36s_avec_son_digest_et_les_notes():
+    fichier = resoudre(_knulli_r36s(), opener=_opener_json(_knulli_release()))
+    assert fichier.nom == "knulli-rk3326-r36s-scarab-20260510.img.gz"
+    assert fichier.sha256 == "d" * 64 and fichier.taille == 1894042750
+    assert fichier.appareil_notes == "Game Console R36S"
+
+
+def test_knulli_r36s_notes_changees_ne_bloquent_jamais():
+    fichier = resoudre(_knulli_r36s(), opener=_opener_json(_knulli_release(body="nouveau format")))
+    assert fichier.nom.startswith("knulli-rk3326-r36s-") and fichier.appareil_notes is None
+
+
+def test_knulli_r36s_repli_url_directe_avec_la_sha_relevee():
+    from r36s_studio.identify.firmware_catalog import KNULLI_R36S_SHA256
+
+    fichier = resoudre(_knulli_r36s(), opener=_opener_en_panne)
+    assert fichier.nom == "knulli-rk3326-r36s-scarab-20260510.img.gz"
+    assert fichier.url.startswith("https://github.com/knulli-cfw/knulli-linux/releases/download/20260511/")
+    assert fichier.sha256 == KNULLI_R36S_SHA256 == "068f405b5edcb0414430ce5ed24119ea62a945fe1be088cf9ca0bf22aabda466"
+    assert fichier.depuis_derniere_release is False
+
+
+def test_knulli_r36s_repli_d_un_autre_nom_refuse_clairement():
+    from dataclasses import replace
+
+    tel = replace(_knulli_r36s(), url_directe="https://github.com/knulli-cfw/knulli-linux/releases/download/x/knulli-rk3326-r36s-autre.img.gz")
+    with pytest.raises(TelechargementErreur, match="SHA-256"):
+        resoudre(tel, opener=_opener_en_panne)
+
+
+def test_knulli_r36s_nouvelle_version_sans_digest_refusee():
+    payload = _knulli_release()
+    payload["assets"][3] = _asset("knulli-rk3326-r36s-scarab-20261101.img.gz")
+    with pytest.raises(TelechargementErreur, match="non vérifiée"):
+        resoudre(_knulli_r36s(), opener=_opener_json(payload))
+
+
+def test_knulli_r36s_meme_fichier_sans_digest_prend_la_sha_relevee():
+    from r36s_studio.identify.firmware_catalog import KNULLI_R36S_SHA256
+
+    fichier = resoudre(_knulli_r36s(), opener=_opener_json(_knulli_release(r36s_digest=None)))
+    assert fichier.depuis_derniere_release and fichier.sha256 == KNULLI_R36S_SHA256
+
+
+def test_fiche_du_catalogue_inchangee_sans_sha_exigee():
+    """Les fiches « Consoles diverses » gardent leur repli sans somme."""
+    fichier = resoudre(_tel(), opener=_opener_en_panne)
+    assert fichier.sha256 is None

@@ -35,7 +35,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from .boot_sets import ORIGINAL_SCREEN_DIR, SCREEN_FILE_SUFFIX
+from .boot_sets import ORIGINAL_SCREEN_DIR, SCREEN_FILE_SUFFIX, is_kernel_screen_dtb, knulli_kernel_dtb
 
 PathLike = Union[str, Path]
 
@@ -145,13 +145,23 @@ def has_screen_files(folder: PathLike) -> bool:
 def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optional[Dict[str, str]]:
     """Pose les `.dtb` sauvegardés dans `ecran-d-origine/` du BOOT flashé.
     `None` si le firmware écrit n'a aucun `.dtb` à la racine de son BOOT
-    (ROCKNIX : écran par overlay, rien à remplacer). Renvoie
+    (ROCKNIX : écran par overlay, rien à remplacer), ou pour une carte
+    KNULLI R36S sans exactement un .dtb noyau sauvegardé. Renvoie
     {nom d'origine: nom posé}."""
-    target = [p.name for p in _screen_files(boot_root)]
     saved = [p.name for p in _screen_files(saved_dir)]
-    if not target or not saved:
-        return None
-    names = target_names(saved, target)
+    knulli = knulli_kernel_dtb(boot_root)
+    if knulli is not None:
+        # KNULLI R36S : seul le .dtb noyau d'origine est posé, sous le nom du
+        # .dtb noyau de KNULLI (`boot_sets.py`) -- jamais celui d'u-boot.
+        kernels = [name for name in saved if is_kernel_screen_dtb(name)]
+        if len(kernels) != 1:
+            return None
+        names = {kernels[0]: Path(knulli).name}
+    else:
+        target = [p.name for p in _screen_files(boot_root)]
+        if not target or not saved:
+            return None
+        names = target_names(saved, target)
     folder = Path(boot_root) / ORIGINAL_SCREEN_DIR
     shutil.rmtree(folder, ignore_errors=True)  # un import précédent ne laisse aucun reste dans le jeu
     folder.mkdir()

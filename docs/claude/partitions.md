@@ -389,3 +389,22 @@ seul un démarrage réel le dit.
   essai déjà noté sur `ecran-d-origine` reste attaché à ce nom si un autre
   dossier est importé ensuite.
 
+
+## Carte KNULLI R36S (`boot_sets.knulli_kernel_dtb`, 2026-10-19)
+
+Reconnue à `boot/knulli.board` = « r36s » (casse ignorée : `BOOT/` sur la
+carte). u-boot lit `rk3326-odroidgo2-linux.dtb` à la racine, le noyau
+`boot/rk3326-rg351mp-linux.dtb`. **Bug corrigé** : `install_original_screen`
+renommait le .dtb noyau d'usine comme le seul `rk3326*` de la racine, donc
+`rk3326-odroidgo2-linux.dtb`, et « Choisir l'écran » l'aurait posé à la
+place du .dtb d'u-boot (le dossier `boot/` du système passait aussi pour un
+jeu, `knulli` de 1,9 Go compris). Désormais, sur cette carte :
+- écran d'origine (et import depuis l'ordinateur) : seul le .dtb noyau
+  (`rk3326-*-linux.dtb`, jamais `rk3326-odroidgo2-linux.dtb`), exactement un,
+  posé en `ecran-d-origine/rk3326-rg351mp-linux.dtb` ; sinon rien (`None`) ;
+- `list_sets` : `boot/` n'est jamais un jeu ; un jeu = exactement un .dtb
+  noyau, seule destination `boot/rk3326-rg351mp-linux.dtb` ; pas de jeu ROCKNIX
+  ni de nettoyage dArkOSRE ;
+- `apply_set` refuse toute autre destination (`ValueError`), même pour un jeu
+  forgé. Retour en arrière inchangé (`r36s-studio/origine/`).
+Testé sur l'arborescence réelle de l'image (`tests/test_knulli_r36s_screen.py`).

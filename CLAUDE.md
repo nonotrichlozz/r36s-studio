@@ -293,6 +293,7 @@ Détail et bancs de test : `docs/claude/testing.md`.
   au premier démarrage, alors que l'image téléchargée est identique à celle
   qui marchait (SHA-256 vérifiée) ; cause non trouvée
   (`consoles_diverses/CLAUDE.md`).
+- KNULLI sur R36S : jamais flashé sur la console (`firmwares-flash.md`).
 - ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,

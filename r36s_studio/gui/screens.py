@@ -1863,10 +1863,10 @@ class FileDialog(Dialog):
         self._download_hint.setProperty("role", "secondary")
         layout.addWidget(self._download_hint)
 
-        # ROCKNIX -- seule entrée du catalogue dont les images sont
-        # attachées directement aux releases GitHub
-        # (identify/rocknix.py) : téléchargement automatique possible,
-        # contrairement à toutes les autres entrées ci-dessus.
+        # ROCKNIX et KNULLI -- images attachées directement aux releases
+        # GitHub (identify/rocknix.py, `FirmwareEntry.auto_download`) :
+        # téléchargement automatique possible, contrairement aux autres
+        # entrées ci-dessus. `MainWindow` choisit le chemin selon l'entrée.
         self._rocknix_download_button = QPushButton(tr("file_rocknix_download_button"))
         self._rocknix_download_button.clicked.connect(self.rocknix_download_requested.emit)
         layout.addWidget(self._rocknix_download_button)

@@ -53,6 +53,7 @@ from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
 from r36s_studio.consoles_diverses.search_runner import ConsoleSearchRunner, FirmwareResolveRunner
 from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettingsDialog
 from r36s_studio.consoles_diverses.strings import friendly_error_message as consoles_diverses_friendly_error_message
+from r36s_studio.consoles_diverses.telechargement import Telechargement
 from r36s_studio.detect import ARKOS_ONLY_STEPS, CardSystem, arkos_step_refusal, detect_card
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons import scan_cache as doublons_scan_cache
@@ -74,7 +75,7 @@ from r36s_studio.doublons.report import build_report
 from r36s_studio.doublons.safety import is_filesystem_root, is_whole_user_folder
 from r36s_studio.doublons.scan import Unit
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, result_from_dict
-from r36s_studio.identify import rocknix_r36s
+from r36s_studio.identify import console_profile, rocknix_r36s
 from r36s_studio.identify.rocknix import RocknixAsset
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
 from r36s_studio.imaging import (
@@ -1445,8 +1446,60 @@ class MainWindow(QMainWindow):
         if self._is_flashing_rocknix():
             self._rocknix_console_dialog.open()
             return
+        entry = self._auto_download_flash_entry()
+        if entry is not None and entry.r36s_only:
+            self._start_clone_check()
+            return
         self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
         self._confirm_dialog.open()
+
+    def _auto_download_flash_entry(self):
+        """Entrée du catalogue à téléchargement automatique (KNULLI) dont le
+        fichier téléchargé va être écrit -- décidé sur le nom du fichier
+        (motif de l'entrée), pas seulement sur le firmware coché : un fichier
+        choisi à la main avec KNULLI coché ne reçoit ni consigne ni
+        avertissement KNULLI. Mode expert seulement."""
+        if self._mode != "flash" or self._wizard_active or self._assisted_ad_hoc_active or self._catalogue_flash_active:
+            return None
+        entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
+        if entry is None or entry.auto_download is None or not self._file_path:
+            return None
+        return entry if re.search(entry.auto_download.motif_fichier, Path(self._file_path).name) else None
+
+    def _start_clone_check(self) -> None:
+        """Image faite pour la vraie R36S (KNULLI) : la carte est lue avant la
+        Confirmation (`console_profile`, nom du .dtb et table dArkOSRE).
+        Clone : avertissement « Écrire quand même » d'abord, puis la
+        Confirmation rouge habituelle, jamais à sa place. Sinon : une ligne au
+        journal seulement. Sans élévation (un BOOT EFI illisible sous Windows
+        compte comme illisible)."""
+        self._home.set_busy(True)
+        self._assisted_landing.set_busy(True)
+        self._clone_check_runner = IdentifyRunner(self._device.path, parent=self)
+        self._clone_check_runner.finished_identify.connect(self._on_clone_check_finished)
+        self._clone_check_runner.start()
+
+    def _on_clone_check_finished(self, result: IdentifyResult) -> None:
+        self._home.set_busy(False)
+        self._assisted_landing.set_busy(False)
+        profile = console_profile.profile_from_identify(result)
+        if profile == console_profile.CLONE:
+            self._log_panel.append_log(tr("knulli_clone_log"))
+            if not self._ask_clone_write_anyway():
+                return
+        elif profile in (console_profile.UNKNOWN, console_profile.AMBIGUOUS):
+            self._log_panel.append_log(tr(f"knulli_console_{profile}_log"))
+        elif profile is None:
+            self._log_panel.append_log(tr("knulli_console_unreadable_log"))
+        self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
+        self._confirm_dialog.open()
+
+    def _ask_clone_write_anyway(self) -> bool:
+        box = QMessageBox(QMessageBox.Warning, tr("knulli_clone_title"), tr("knulli_clone_text"), parent=self)
+        write = box.addButton(tr("knulli_clone_write_anyway"), QMessageBox.AcceptRole)
+        box.setDefaultButton(box.addButton(QMessageBox.Cancel))
+        box.exec()
+        return box.clickedButton() is write
 
     def _is_flashing_rocknix(self) -> bool:
         """Mêmes conditions que `_is_flashing_android_firmware` : jamais le
@@ -1918,10 +1971,14 @@ class MainWindow(QMainWindow):
 
     def _first_boot_note(self) -> Optional[str]:
         """Consigne de premier démarrage de la fiche, seulement pour le flash
-        de l'image qu'elle vient de télécharger."""
-        if self._mode != "flash" or self._wizard_active or not self._catalogue_flash_active:
+        de l'image qu'elle vient de télécharger ; idem pour une entrée du
+        sélecteur à téléchargement automatique (KNULLI)."""
+        if self._mode != "flash" or self._wizard_active:
             return None
-        return self._catalogue_first_boot_note
+        if self._catalogue_flash_active:
+            return self._catalogue_first_boot_note
+        entry = self._auto_download_flash_entry()
+        return tr(entry.first_boot_note_key) if entry is not None and entry.first_boot_note_key else None
 
     def _show_first_boot_note(self) -> None:
         """Après un flash réussi : ligne du journal et fenêtre qu'il faut
@@ -2299,6 +2356,10 @@ class MainWindow(QMainWindow):
         disponible (`_on_rocknix_list_finished` ouvre ensuite
         `RocknixVariantDialog` pour que l'utilisateur choisisse) plutôt
         que de télécharger directement."""
+        entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
+        if entry is not None and entry.auto_download is not None:
+            self._start_auto_download(entry)
+            return
         self._file_dialog.close()
         self._log_panel.start_operation(tr("execute_title_list_rocknix"))
         self._home.set_busy(True)
@@ -2361,6 +2422,63 @@ class MainWindow(QMainWindow):
         self._log_panel.finish_success(tr("rocknix_download_success", path=path), allow_eject=False, reveal_path=path)
         self._file_path = path
         self._open_flash_confirmation()
+
+    def _start_auto_download(self, entry) -> None:
+        """« Télécharger la dernière version » d'une entrée à `auto_download`
+        (KNULLI) : même recherche que les fiches du catalogue en ligne
+        (`telechargement.resoudre`, dernière release puis `url_directe`),
+        SHA-256 toujours exigée (`digest` ou somme relevée pour ce fichier
+        précis) ; même téléchargement que ROCKNIX ; puis la Confirmation."""
+        title = tr(entry.title_key)
+        if entry.non_commercial and not _confirm_personal_use(self, title):
+            return
+        self._file_dialog.close()
+        download = entry.auto_download
+        telechargement = Telechargement(
+            depot=download.depot,
+            motif_fichier=download.motif_fichier,
+            url_directe=download.url_directe,
+            sha256_connus=download.sha256_connus,
+            exiger_sha256=True,
+        )
+        self._log_panel.start_operation(tr("execute_title_download_firmware", firmware=title))
+        self._set_catalogue_install_busy(True)
+        self._last_error_code = None
+        self._last_error_msg = None
+        self._runner = FirmwareResolveRunner(telechargement, parent=self)
+        self._runner.error.connect(self._on_auto_download_failed)
+        self._runner.resolved.connect(self._on_auto_download_resolved)
+        self._runner.start()
+
+    def _on_auto_download_failed(self, code: str, msg: str) -> None:
+        self._set_catalogue_install_busy(False)
+        self._log_panel.finish_error(friendly_error_message(code), details=error_log_detail(code, msg))
+
+    def _on_auto_download_resolved(self, fichier) -> None:
+        self._log_panel.append_log(tr("catalogue_install_file_log", name=fichier.nom))
+        # Croisement avec le tableau des notes de version : journal seulement.
+        if fichier.appareil_notes:
+            self._log_panel.append_log(tr("knulli_notes_device_log", device=fichier.appareil_notes))
+        elif fichier.depuis_derniere_release:
+            self._log_panel.append_log(tr("knulli_notes_missing_log"))
+        asset = RocknixAsset(name=fichier.nom, download_url=fichier.url, size_bytes=fichier.taille)
+        self._runner = RocknixDownloadRunner(asset, fichier.sha256, parent=self)
+        self._runner.progress.connect(self._on_progress)
+        self._runner.error.connect(self._on_worker_error)
+        self._runner.finished_download.connect(self._on_auto_download_finished)
+        self._runner.start()
+
+    @Slot(bool, str)
+    def _on_auto_download_finished(self, ok: bool, path: str) -> None:
+        self._set_catalogue_install_busy(False)
+        if not ok:
+            friendly = friendly_error_message(self._last_error_code or "")
+            self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
+            return
+        # Rien n'a encore été écrit sur la carte : pas d'éjection proposée.
+        self._log_panel.finish_success(tr("knulli_download_success", path=path), allow_eject=False, reveal_path=path)
+        self._file_path = path
+        self._proceed_to_flash_confirmation()
 
     # --- fenêtre Aide (macOS uniquement, §3) --------------------------------
 

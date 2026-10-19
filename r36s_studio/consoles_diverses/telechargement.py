@@ -96,6 +96,12 @@ class Telechargement:
     # Ce que l'utilisateur doit savoir avant de mettre la carte dans la
     # console (texte brut, `_consigne_depuis_json`).
     consigne_premier_demarrage: Optional[str] = None
+    # Firmwares du sélecteur R36S (`identify/firmware_catalog.py`, KNULLI) :
+    # SHA-256 relevées à la main, par nom de fichier exact, pour un fichier
+    # sans `digest` (repli `url_directe`) ; avec `exiger_sha256`, un fichier
+    # sans somme connue est refusé -- jamais d'image non vérifiée.
+    sha256_connus: Tuple[Tuple[str, str], ...] = ()
+    exiger_sha256: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,6 +114,10 @@ class FichierFirmware:
     # (clé AES-128, nonce) : contenu chiffré à déchiffrer en AES-CTR pendant
     # le téléchargement (`mega.dechiffreur`), `None` pour GitHub.
     dechiffrement: Optional[Tuple[bytes, bytes]] = None
+    # Appareil associé au fichier dans le tableau des notes de version
+    # (KNULLI : « Game Console R36S ») -- pour le journal seulement, jamais
+    # pour décider (`appareil_dans_notes`).
+    appareil_notes: Optional[str] = None
 
 
 def telechargement_depuis_json(data: Any) -> Optional[Telechargement]:
@@ -205,6 +215,21 @@ def _sha256_depuis_digest(digest: Any) -> Optional[str]:
     return None
 
 
+def appareil_dans_notes(body: Any, nom: str) -> Optional[str]:
+    """Appareil associé à `nom` dans le tableau HTML des notes de version
+    KNULLI (`<td>Game Console R36S</td><td>date</td><td><a …>nom</a></td>`,
+    relevé sur la release 20260511), `None` si absent ou changé."""
+    if not isinstance(body, str):
+        return None
+    motif = r"<td>\s*([^<]+?)\s*</td>\s*<td>[^<]*</td>\s*<td>\s*<a [^>]*>\s*" + re.escape(nom) + r"\s*</a>"
+    trouve = re.search(motif, body)
+    return trouve.group(1) if trouve else None
+
+
+def _sha256_connu(tel: Telechargement, nom: str) -> Optional[str]:
+    return next((sha.lower() for connu, sha in tel.sha256_connus if connu == nom), None)
+
+
 def _depuis_derniere_release(tel: Telechargement, opener: Opener) -> Optional[FichierFirmware]:
     with opener(API_RELEASE_LATEST.format(depot=tel.depot)) as response:
         raw = response.read(MAX_API_RESPONSE_BYTES + 1)
@@ -231,8 +256,9 @@ def _depuis_derniere_release(tel: Telechargement, opener: Opener) -> Optional[Fi
             nom=nom,
             url=url,
             taille=taille if isinstance(taille, int) and taille > 0 else 0,
-            sha256=_sha256_depuis_digest(asset.get("digest")),
+            sha256=_sha256_depuis_digest(asset.get("digest")) or _sha256_connu(tel, nom),
             depuis_derniere_release=True,
+            appareil_notes=appareil_dans_notes(payload.get("body"), nom),
         )
     return None
 
@@ -269,13 +295,17 @@ def resoudre(tel: Telechargement, *, opener: Opener = _default_opener) -> Fichie
         trouve = _depuis_derniere_release(tel, opener)
     except (OSError, ValueError):
         trouve = None
-    if trouve is not None:
-        return trouve
-
-    if tel.url_directe:
+    if trouve is None and tel.url_directe:
         nom = unquote(urlparse(tel.url_directe).path.rsplit("/", 1)[-1])
         if nom_fichier_sur(nom):
-            return FichierFirmware(nom=nom, url=tel.url_directe)
+            trouve = FichierFirmware(nom=nom, url=tel.url_directe, sha256=_sha256_connu(tel, nom))
+    if trouve is not None:
+        if tel.exiger_sha256 and not trouve.sha256:
+            raise TelechargementErreur(
+                f"Aucune somme de contrôle SHA-256 connue pour {trouve.nom} : téléchargement refusé "
+                "(jamais d'image non vérifiée)."
+            )
+        return trouve
 
     raise TelechargementErreur(f"Aucun fichier correspondant à {tel.motif_fichier!r} dans {tel.depot}.")
 
@@ -284,6 +314,7 @@ __all__ = [
     "Telechargement",
     "FichierFirmware",
     "TelechargementErreur",
+    "appareil_dans_notes",
     "telechargement_depuis_json",
     "url_github_sure",
     "nom_fichier_sur",

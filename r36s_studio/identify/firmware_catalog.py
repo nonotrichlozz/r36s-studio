@@ -16,9 +16,9 @@ firmware peut être oublié en silence (cas réel confirmé en lisant ce
 code : `_on_releases_requested` retombait déjà sur l'URL ArkOS pour tout
 firmware non reconnu, avant ce module).
 
-Seul ROCKNIX a un téléchargement automatique (images attachées
-directement aux releases GitHub, `identify/rocknix.py`) -- volontairement
-**pas généralisé ici** : vérifié directement sur les pages de releases
+Téléchargement automatique : ROCKNIX (images attachées directement aux
+releases GitHub, `identify/rocknix.py`) et KNULLI (`auto_download`, depuis
+le 2026-10-19). Les autres restent en lien manuel : vérifié directement sur les pages de releases
 avant d'ajouter ce catalogue, les releases officielles d'AmberELEC ne
 publient que des images taguées RG351/RG552 (aucun asset RK3326/R36S), et
 celles d'EmuELEC ne publient que des images Amlogic (aucun asset RK3326/
@@ -51,6 +51,36 @@ R36DROID_RELEASES_URL = "https://github.com/creeperxyz86/R36Droid/releases"
 ANDR36OID_RELEASES_URL = "https://github.com/andr36oid/releases/releases"
 
 
+# KNULLI (2026-10-19) : image dédiée « Game Console R36S » depuis la
+# release Scarab 20260511, attachée à la release GitHub avec son `digest`
+# SHA-256. Le motif exclut les autres images rk3326 (G350, Mini M, Pixel2).
+# `url_directe` = repli si l'API ne répond pas ; sa SHA-256 a été recalculée
+# sur le fichier téléchargé (identique au `digest` publié).
+KNULLI_RELEASES_URL = "https://github.com/knulli-cfw/knulli-linux/releases"
+KNULLI_R36S_FILE = "knulli-rk3326-r36s-scarab-20260510.img.gz"
+KNULLI_R36S_SHA256 = "068f405b5edcb0414430ce5ed24119ea62a945fe1be088cf9ca0bf22aabda466"
+
+
+@dataclass(frozen=True)
+class AutoDownload:
+    """Téléchargement direct depuis la dernière release GitHub, par
+    `consoles_diverses/telechargement.py::resoudre` (même chemin que les
+    fiches du catalogue en ligne). SHA-256 toujours exigée."""
+
+    depot: str
+    motif_fichier: str
+    url_directe: str
+    sha256_connus: Tuple[Tuple[str, str], ...]
+
+
+KNULLI_R36S_DOWNLOAD = AutoDownload(
+    depot="knulli-cfw/knulli-linux",
+    motif_fichier=r"^knulli-rk3326-r36s-.*\.img\.gz$",
+    url_directe=f"{KNULLI_RELEASES_URL}/download/20260511/{KNULLI_R36S_FILE}",
+    sha256_connus=((KNULLI_R36S_FILE, KNULLI_R36S_SHA256),),
+)
+
+
 @dataclass(frozen=True)
 class FirmwareEntry:
     id: str
@@ -67,9 +97,19 @@ class FirmwareEntry:
     # avertissement explicite dans le journal après le flash, et un
     # `--eject-after` best-effort côté CLI).
     is_android: bool = False
-    # None = ROCKNIX (téléchargement automatique, identify/rocknix.py) --
-    # le seul cas à ce jour, voir docstring de module.
+    # None = téléchargement automatique : ROCKNIX (identify/rocknix.py,
+    # choix de variante) ou `auto_download` (KNULLI).
     releases_url: Optional[str] = None
+    auto_download: Optional[AutoDownload] = None
+    # Composants à usage non commercial : fenêtre « Usage personnel
+    # uniquement » avant le téléchargement, comme « Consoles diverses ».
+    non_commercial: bool = False
+    # Image faite pour la vraie R36S seulement : avertissement avant la
+    # Confirmation si la carte vient d'un clone (`console_profile`).
+    r36s_only: bool = False
+    # Consigne de premier démarrage (clé de `gui/strings.py`), affichée dans
+    # la Confirmation et après le flash du fichier téléchargé.
+    first_boot_note_key: Optional[str] = None
 
 
 # ArkOS : seul le projet d'origine est archivé (lecture seule depuis
@@ -110,6 +150,21 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
         "file_firmware_rocknix_desc",
         status="maintained",
         releases_url=None,
+    ),
+    # KNULLI R36S (2026-10-19) : expérimental tant qu'il n'a pas été flashé
+    # sur une vraie R36S. Un seul écran (`boot/rk3326-rg351mp-linux.dtb`,
+    # « R35S/R36S fix by lxc »), aucun sélecteur ; écran d'origine posé pour
+    # « Choisir l'écran de la console » (`partitions/boot_sets.py`).
+    FirmwareEntry(
+        "knulli",
+        "file_firmware_knulli_title",
+        "file_firmware_knulli_desc",
+        status="experimental",
+        releases_url=None,
+        auto_download=KNULLI_R36S_DOWNLOAD,
+        non_commercial=True,
+        r36s_only=True,
+        first_boot_note_key="knulli_r36s_first_boot_note",
     ),
     FirmwareEntry(
         "emuelec",
@@ -153,4 +208,4 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
 
 FIRMWARE_BY_ID: Dict[str, FirmwareEntry] = {entry.id: entry for entry in FIRMWARE_CATALOG}
 
-__all__ = ["FirmwareEntry", "FIRMWARE_CATALOG", "FIRMWARE_BY_ID"]
+__all__ = ["AutoDownload", "FirmwareEntry", "FIRMWARE_CATALOG", "FIRMWARE_BY_ID", "KNULLI_R36S_DOWNLOAD"]

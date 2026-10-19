@@ -408,3 +408,53 @@ Contenu de l'image vérifié en lecture seule : `extlinux.conf.r36s` (ligne
 - **À confirmer sur du vrai matériel** : tout ce paragraphe (montage de la
   partition ROCKNIX par le worker élevé juste après le flash sous Windows,
   copie, démarrage de la console).
+
+**KNULLI sur R36S (2026-10-19, expérimental, jamais flashé sur la console).**
+Depuis la release Scarab 20260511, KNULLI publie une image dédiée « Game
+Console R36S » (`knulli-cfw/knulli-linux`). Entrée `knulli` du catalogue,
+juste après ROCKNIX, `auto_download` (`identify/firmware_catalog.py::
+KNULLI_R36S_DOWNLOAD`) :
+- **Téléchargement** : bouton « Télécharger la dernière version » (le même
+  que ROCKNIX), mais par `consoles_diverses/telechargement.py::resoudre`
+  (même chemin que les fiches du catalogue en ligne), motif
+  `^knulli-rk3326-r36s-.*\.img\.gz$` (exclut G350, Mini M, Pixel2). SHA-256 :
+  `digest` de l'API GitHub ; en repli `url_directe` (release 20260511), la
+  SHA-256 recalculée sur le fichier téléchargé (`068f405b…a466`, identique au
+  digest), par nom exact (`sha256_connus`). `exiger_sha256` : un fichier sans
+  somme connue (autre nom en repli, nouvelle version sans digest) est refusé,
+  jamais d'image non vérifiée. Le tableau des notes de version (« Game Console
+  R36S » -> fichier) n'est croisé que pour le journal
+  (`telechargement.appareil_dans_notes`). Fenêtre « Usage personnel
+  uniquement » avant (`non_commercial`), mention « Licence non commerciale »
+  dans la description, comme « Consoles diverses ».
+- **Image relevée** (lecture seule, 2026-10-19) : MBR, partition 1 FAT32
+  « KNULLI » 3 Gio (début 16 Mio), partition 2 ext4 « SHARE » 512 Mio, fin
+  réelle 3 774 873 600 octets ; idbloader/u-boot/trust de KNULLI hors
+  partitions (32 Kio, 8 Mio, 12 Mio). Racine : `boot.ini`, `knulli-boot.conf`
+  (`sharedevice=INTERNAL`, `autoresize=true`), `rk3326-odroidgo2-linux.dtb`
+  (lu par u-boot). `boot/` : `linux`, `uInitrd`, `knulli`, `knulli.board`
+  (« r36s »), `firmware.sig`, `rk3326-rg351mp-linux.dtb` -- seul .dtb du
+  noyau (`boot.ini`), modèle « Game Console R35S/R36S fix by lxc ».
+- **Écran** : aucun sélecteur ni fichier de rechange, aucun menu. Issue #64
+  (écran noir, R36S V21 écran P4) : remplacer `boot/rk3326-rg351mp-linux.dtb`
+  par le .dtb noyau d'origine. L'app ne change rien automatiquement : l'écran
+  d'origine mis de côté est posé dans `ecran-d-origine/` et « Choisir l'écran
+  de la console » ne peut remplacer que ce fichier (`partitions.md`).
+  `firmware.sig` (MD5 des fichiers de démarrage) ne sert qu'aux mises à jour
+  en ligne (`knulli-upgrade`) : non modifié. **Non vérifié** : une mise à jour
+  en ligne de KNULLI peut remettre l'écran par défaut.
+- **Clones** : image pour la vraie R36S seulement (`r36s_only`). Avant la
+  Confirmation, la carte est lue (`IdentifyRunner`, sans élévation) ;
+  `console_profile.profile_from_identify` = CLONE -> fenêtre « Écrire quand
+  même » (annuler par défaut), **puis** la Confirmation rouge, jamais à sa
+  place ; UNKNOWN/AMBIGUOUS/illisible : une ligne au journal. Limite : une
+  carte déjà sous dArkOS ne dit pas si la console est un clone.
+- **Consigne de premier démarrage** (`first_boot_note_key`) : secteur même
+  chargée, ne pas éteindre, retirer la TF2, « Choisir l'écran de la console »
+  si l'écran reste noir. Confirmation et après le flash. Décidée sur le nom
+  du fichier (motif), pas seulement sur KNULLI coché
+  (`MainWindow._auto_download_flash_entry`) -- même leçon que dArkOSen.
+- **Aucun réglage ROCKNIX** (`_is_flashing_rocknix` ne regarde que
+  `firmware == "rocknix"`, `is_rocknix_card` faux sur cette image) ; SHARE
+  reconnue (`card_probe.GAMES_LABELS`), aucune EASYROMS créée (vérifié sur
+  l'image réelle : `own_games_partition_bytes` = 536 870 912).

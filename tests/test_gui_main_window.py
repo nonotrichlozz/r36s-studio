@@ -6814,3 +6814,201 @@ def test_post_flash_copies_never_passed_outside_a_catalogue_flash(mock_list, moc
         window._start_worker()
 
     assert "--copy-after-flash" not in runner_class.instances[0].argv
+
+
+# --- KNULLI dans « Installer un système » (R36S, téléchargement automatique) --
+
+
+_KNULLI_CONFIG = AppConfig(ui_mode="expert", firmware="knulli")
+_KNULLI_R36S_PATH = "/tmp/knulli-rk3326-r36s-scarab-20260510.img.gz"
+
+
+def _knulli_flash_window():
+    window = MainWindow()
+    window.show()
+    window._device = _make_device()
+    window._mode = "flash"
+    return window
+
+
+def _knulli_downloaded(window, identify_class):
+    """Téléchargement fini : contrôles gratuits puis lecture de la carte
+    (avertissement clone) avant la Confirmation."""
+    with patch("r36s_studio.gui.main_window.check_image_format"), patch.object(
+        window, "_check_flash_image_integrity_or_warn", return_value=True
+    ), patch("r36s_studio.gui.main_window.sf3000_clone.whole_card_used_bytes", return_value=None), patch(
+        "r36s_studio.gui.main_window.IdentifyRunner", identify_class
+    ):
+        window._on_auto_download_finished(True, _KNULLI_R36S_PATH)
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_KNULLI_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_knulli_download_asks_personal_use_then_resolves_with_a_required_sha(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify.firmware_catalog import KNULLI_R36S_SHA256
+
+    window = _knulli_flash_window()
+    resolve_class = _mock_rocknix_runner_class()
+    list_class = _mock_rocknix_runner_class()
+
+    with patch("r36s_studio.gui.main_window._confirm_personal_use", return_value=False) as refused, patch(
+        "r36s_studio.gui.main_window.FirmwareResolveRunner", resolve_class
+    ):
+        window._on_rocknix_download_requested()
+    refused.assert_called_once_with(window, "KNULLI")
+    assert resolve_class.instances == []  # refusé : rien n'est téléchargé
+
+    with patch("r36s_studio.gui.main_window._confirm_personal_use", return_value=True), patch(
+        "r36s_studio.gui.main_window.FirmwareResolveRunner", resolve_class
+    ), patch("r36s_studio.gui.main_window.RocknixListRunner", list_class):
+        window._on_rocknix_download_requested()
+
+    assert list_class.instances == []  # jamais le choix de variante ROCKNIX
+    (telechargement,) = resolve_class.instances[0].init_args
+    assert telechargement.depot == "knulli-cfw/knulli-linux"
+    assert telechargement.motif_fichier == r"^knulli-rk3326-r36s-.*\.img\.gz$"
+    assert telechargement.exiger_sha256 is True
+    assert telechargement.url_directe.endswith("/20260511/knulli-rk3326-r36s-scarab-20260510.img.gz")
+    assert telechargement.sha256_connus == (("knulli-rk3326-r36s-scarab-20260510.img.gz", KNULLI_R36S_SHA256),)
+    resolve_class.instances[0].start.assert_called_once()
+
+
+@pytest.mark.parametrize("device_in_notes", ["Game Console R36S", None])
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_KNULLI_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_knulli_resolved_file_is_downloaded_with_its_sha_and_notes_only_logged(
+    mock_list, mock_filter, mock_load, mock_save, qapp, device_in_notes
+):
+    from r36s_studio.consoles_diverses.telechargement import FichierFirmware
+
+    window = _knulli_flash_window()
+    download_class = _mock_rocknix_runner_class()
+    fichier = FichierFirmware(
+        nom="knulli-rk3326-r36s-scarab-20260510.img.gz",
+        url="https://github.com/knulli-cfw/knulli-linux/releases/download/20260511/knulli-rk3326-r36s-scarab-20260510.img.gz",
+        taille=1894042750,
+        sha256="c" * 64,
+        depuis_derniere_release=True,
+        appareil_notes=device_in_notes,
+    )
+    with patch("r36s_studio.gui.main_window.RocknixDownloadRunner", download_class):
+        window._on_auto_download_resolved(fichier)
+
+    asset, sha = download_class.instances[0].init_args
+    assert asset.name == fichier.nom and asset.size_bytes == 1894042750 and sha == "c" * 64
+    download_class.instances[0].start.assert_called_once()
+    log_text = window._log_panel._log_view.toPlainText()
+    if device_in_notes:
+        assert "indiqué pour « Game Console R36S »" in log_text
+    else:
+        assert "n'apparaît pas dans leur tableau" in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_KNULLI_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_knulli_clone_is_warned_before_the_red_confirmation_never_instead(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    from r36s_studio.identify import IdentifyResult
+
+    window = _knulli_flash_window()
+    identify_class = _mock_rocknix_runner_class()
+    _knulli_downloaded(window, identify_class)
+
+    identify_class.instances[0].start.assert_called_once()
+    assert window._confirm_dialog.isVisible() is False  # pas avant la lecture de la carte
+
+    clone = IdentifyResult(is_clone=True)
+    with patch.object(window, "_ask_clone_write_anyway", return_value=False) as asked:
+        window._on_clone_check_finished(clone)
+    asked.assert_called_once()
+    assert window._confirm_dialog.isVisible() is False  # « Annuler » : rien n'est écrit
+    assert "Console clone détectée" in window._log_panel._log_view.toPlainText()
+
+    with patch.object(window, "_ask_clone_write_anyway", return_value=True):
+        window._on_clone_check_finished(clone)
+    assert window._confirm_dialog.isVisible() is True  # la fenêtre rouge reste obligatoire (§2 n°6)
+    assert "TF2" in window._confirm_dialog._notice.text()
+
+
+@pytest.mark.parametrize(
+    "profile, log_part",
+    [("unknown", "pas déterminé"), ("ambiguous", "ne permet pas de trancher"), (None, "carte neuve ou illisible"), ("origin", None)],
+)
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_KNULLI_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_knulli_non_clone_only_logs_then_confirms(mock_list, mock_filter, mock_load, mock_save, qapp, profile, log_part):
+    from r36s_studio.identify import IdentifyResult
+
+    window = _knulli_flash_window()
+    _knulli_downloaded(window, _mock_rocknix_runner_class())
+    with patch.object(window, "_ask_clone_write_anyway") as asked, patch(
+        "r36s_studio.gui.main_window.console_profile.profile_from_identify", return_value=profile
+    ):
+        window._on_clone_check_finished(IdentifyResult())
+
+    asked.assert_not_called()
+    assert window._confirm_dialog.isVisible() is True
+    log_text = window._log_panel._log_view.toPlainText()
+    if log_part:
+        assert log_part in log_text
+    else:
+        assert "KNULLI est fait pour la vraie R36S" not in log_text
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_KNULLI_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_knulli_flash_shows_first_boot_note_and_never_rocknix_settings(mock_list, mock_filter, mock_load, mock_save, qapp):
+    from r36s_studio.identify import IdentifyResult
+
+    window = _knulli_flash_window()
+    _knulli_downloaded(window, _mock_rocknix_runner_class())
+    window._on_clone_check_finished(IdentifyResult())
+
+    assert window._rocknix_console_dialog.isVisible() is False
+    assert window._is_flashing_rocknix() is False
+    note = window._confirm_dialog._notice.text()
+    assert "sur secteur" in note and "TF2" in note and "« Choisir l'écran de la console »" in note
+
+    worker_class = _mock_runner_class()
+    with patch("r36s_studio.gui.main_window.WorkerRunner", worker_class):
+        window._confirm_dialog.close()
+        window._on_confirmed()
+    argv = worker_class.instances[0].argv
+    assert argv[:2] == ["flash", "--image"] and "--rocknix-r36s-panels" not in argv
+
+    window._on_worker_finished(True)
+    assert "Avant d'allumer ta console : Branche la console sur secteur" in window._log_panel._log_view.toPlainText()
+    assert "TF2" in window._first_boot_dialog.text()
+    window._first_boot_dialog.close()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_KNULLI_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_knulli_checked_but_another_file_chosen_gets_no_knulli_note_nor_check(
+    mock_list, mock_filter, mock_load, mock_save, qapp
+):
+    window = _knulli_flash_window()
+    window._file_path = "/tmp/dArkOSen_R36S.img"
+    identify_class = _mock_rocknix_runner_class()
+
+    with patch("r36s_studio.gui.main_window.IdentifyRunner", identify_class):
+        window._open_flash_confirmation()
+
+    assert identify_class.instances == []
+    assert window._first_boot_note() is None
+    assert window._confirm_dialog.isVisible() is True

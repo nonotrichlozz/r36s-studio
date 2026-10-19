@@ -63,6 +63,16 @@ DARKOSRE_DEVICE_TABLE = "r36_devices.ini"
 # Écran de la carte d'origine, posé après le flash (`screen_backup.py`) :
 # toujours proposé en premier, seul jeu connu pour avoir fait démarrer la console.
 ORIGINAL_SCREEN_DIR = "ecran-d-origine"
+# KNULLI R36S (relevé sur `knulli-rk3326-r36s-scarab-20260510.img.gz`,
+# 2026-10-19) : u-boot lit `rk3326-odroidgo2-linux.dtb` à la racine, le
+# noyau `boot/rk3326-rg351mp-linux.dtb` (`boot.ini`). L'écran se change en
+# remplaçant ce dernier par le .dtb noyau d'origine (issue #64 de
+# knulli-linux) ; celui de la racine n'est jamais touché (bug corrigé : un
+# jeu posé à la racine écrasait le .dtb d'u-boot). Carte reconnue à
+# `boot/knulli.board` = « r36s ».
+KNULLI_BOARD_PATH = ("boot", "knulli.board")
+KNULLI_KERNEL_DTB_PATH = ("boot", "rk3326-rg351mp-linux.dtb")
+KNULLI_UBOOT_DTB = "rk3326-odroidgo2-linux.dtb"
 
 _TMP_SUFFIX = ".r36s-tmp"
 
@@ -92,8 +102,60 @@ class BootSetState:
 def list_sets(boot_root: PathLike) -> List[BootFileSet]:
     root = Path(boot_root)
     os.listdir(root)  # BOOT illisible (EFI sous Windows) : PermissionError, jamais « aucun jeu »
-    sets = _screen_folder_sets(root) + _rocknix_overlay_sets(root)
+    knulli = knulli_kernel_dtb(root)
+    if knulli is not None:
+        sets = _knulli_sets(root, knulli)
+    else:
+        sets = _screen_folder_sets(root) + _rocknix_overlay_sets(root)
     return sorted(sets, key=lambda s: s.set_id != ORIGINAL_SCREEN_DIR)  # tri stable
+
+
+def _find(root: Path, parts: Tuple[str, ...]) -> Optional[Path]:
+    """Chemin réel sous `root`, sans la casse (FAT : `BOOT/` sur la carte
+    KNULLI, `boot/` dans `boot.ini`)."""
+    current = root
+    for part in parts:
+        try:
+            current = next(p for p in current.iterdir() if p.name.lower() == part.lower())
+        except (OSError, StopIteration):
+            return None
+    return current
+
+
+def knulli_kernel_dtb(boot_root: PathLike) -> Optional[str]:
+    """Chemin (relatif, casse de la carte) du .dtb lu par le noyau d'une
+    carte KNULLI R36S, `None` pour toute autre carte."""
+    root = Path(boot_root)
+    board = _find(root, KNULLI_BOARD_PATH)
+    try:
+        if board is None or board.read_text(encoding="ascii", errors="replace").strip().lower() != "r36s":
+            return None
+    except OSError:
+        return None
+    dtb = _find(root, KNULLI_KERNEL_DTB_PATH)
+    return _rel(dtb, root) if dtb is not None and dtb.is_file() else None
+
+
+def is_kernel_screen_dtb(name: str) -> bool:
+    """.dtb lu par le noyau sur une R36S (`rk3326-r35s-linux.dtb` d'usine,
+    `rk3326-r36s-linux.dtb` de dArkOSen...), jamais celui d'u-boot de KNULLI."""
+    lower = name.lower()
+    return lower.startswith("rk3326-") and lower.endswith("-linux.dtb") and lower != KNULLI_UBOOT_DTB
+
+
+def _knulli_sets(root: Path, kernel_dtb: str) -> List[BootFileSet]:
+    """Carte KNULLI R36S : un jeu = exactement un .dtb noyau, posé à la
+    place de `boot/rk3326-rg351mp-linux.dtb` -- seule destination possible.
+    Le dossier `boot/` du système n'est jamais un jeu."""
+    boot_dir = KNULLI_KERNEL_DTB_PATH[0]
+    sets = []
+    for found in _screen_folder_sets(root):
+        if PurePosixPath(found.set_id).parts[0].lower() == boot_dir:
+            continue
+        kernels = [source for source, _ in found.files if is_kernel_screen_dtb(PurePosixPath(source).name)]
+        if len(kernels) == 1:
+            sets.append(BootFileSet(found.set_id, found.name, ((kernels[0], kernel_dtb),)))
+    return sets
 
 
 def _screen_folder_sets(root: Path) -> List[BootFileSet]:
@@ -146,13 +208,16 @@ def apply_set(boot_root: PathLike, set_id: str) -> BootSetState:
         raise UnknownBootSet(set_id)
     for _, dest in chosen.files:
         _inside(root, dest)
+    knulli = knulli_kernel_dtb(root)
+    if knulli is not None and any(dest.lower() != knulli.lower() for _, dest in chosen.files):
+        raise ValueError(f"Destination refusée sur une carte KNULLI : seul {knulli} peut être remplacé")
 
     state_dir = root / STATE_DIR
     card = _read_json(state_dir / CARD_FILE)
     card_id = card.get("card_id") if isinstance(card.get("card_id"), str) else uuid.uuid4().hex
 
     stale = []
-    if (root / PurePosixPath(set_id).parts[0] / DARKOSRE_DEVICE_TABLE).is_file():
+    if knulli is None and (root / PurePosixPath(set_id).parts[0] / DARKOSRE_DEVICE_TABLE).is_file():
         dests = {dest.lower() for _, dest in chosen.files}  # FAT ignore la casse
         stale = [p.name for p in root.iterdir() if p.is_file() and p.suffix.lower() == SCREEN_FILE_SUFFIX and p.name.lower() not in dests]
 
@@ -276,6 +341,8 @@ __all__ = [
     "UnknownBootSet",
     "apply_set",
     "describe",
+    "is_kernel_screen_dtb",
+    "knulli_kernel_dtb",
     "list_sets",
     "read_state",
     "restore_original",

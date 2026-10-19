@@ -1,2 +1,25 @@
+# Fins de ligne : LF dans le dépôt et dans la copie de travail, quel que
+# soit core.autocrlf (Windows) -- évite les fichiers « modifiés sur toutes
+# leurs lignes ».
+* text=auto eol=lf
+
 # Scripts shell : toujours LF, sinon sh plante sur les fins de ligne Windows.
 *.sh text eol=lf
+
+# Binaires : jamais convertis.
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.ico -text
+*.icns -text
+*.exe -text
+*.zip -text
+*.7z -text
+*.gz -text
+*.xz -text
+*.img -text
+*.dtb -text
+*.pdf -text
+*.ttf -text
+*.otf -text

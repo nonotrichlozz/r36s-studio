@@ -85,6 +85,11 @@ ROCKNIX_BOOT_LABEL = "ROCKNIX"
 # ArkOS et l'extraction et la copie des jeux échouaient après coup sur une erreur de
 # partition, comme si la carte avait été mal préparée.
 EMUELEC_BOOT_LABEL = "EMUELEC"
+# KNULLI : partition système FAT32 étiquetée « KNULLI » (relevé sur les images
+# R36S, MBR, et RG40XXV, GPT), jeux dans « SHARE » en ext4, que ni Windows ni
+# macOS ne savent écrire -- les jeux se copient depuis la console (réseau,
+# deuxième carte, câble USB), jamais par « Copier des jeux sur la carte ».
+KNULLI_BOOT_LABEL = "KNULLI"
 
 
 class CardSystem(Enum):
@@ -106,12 +111,17 @@ class CardSystem(Enum):
     ARKOS = "arkos"
     ROCKNIX = "rocknix"
     EMUELEC = "emuelec"
+    KNULLI = "knulli"
     UNKNOWN = "unknown"
 
 
 # Systèmes reconnus à l'étiquette de leur partition de démarrage, vérifiés
 # avant ArkOS (reconnu, lui, à la seule forme de ses partitions).
-_SYSTEM_BY_BOOT_LABEL = {ROCKNIX_BOOT_LABEL: CardSystem.ROCKNIX, EMUELEC_BOOT_LABEL: CardSystem.EMUELEC}
+_SYSTEM_BY_BOOT_LABEL = {
+    ROCKNIX_BOOT_LABEL: CardSystem.ROCKNIX,
+    EMUELEC_BOOT_LABEL: CardSystem.EMUELEC,
+    KNULLI_BOOT_LABEL: CardSystem.KNULLI,
+}
 
 # Étapes qui n'ont de sens que sur une carte ArkOS (BOOT sans étiquette +
 # EASYROMS, §4.4) -- refusées avant lancement sur toute autre carte lisible
@@ -125,7 +135,7 @@ ARKOS_ONLY_STEPS = tuple(_PARTITION_CHECK_BY_STEP)
 # Systèmes reconnus autres qu'ArkOS : leurs partitions peuvent passer les
 # tests structurels de BOOT/EASYROMS (première partition FAT...), sans
 # rien contenir de ce que ces étapes attendent.
-OTHER_SYSTEMS = (CardSystem.ROCKNIX, CardSystem.EMUELEC)
+OTHER_SYSTEMS = (CardSystem.ROCKNIX, CardSystem.EMUELEC, CardSystem.KNULLI)
 
 
 def _list_partitions_safe(device: Optional[Device]) -> Optional[List[PartitionInfo]]:
@@ -271,6 +281,7 @@ __all__ = [
     "CardSystem",
     "ROCKNIX_BOOT_LABEL",
     "EMUELEC_BOOT_LABEL",
+    "KNULLI_BOOT_LABEL",
     "ARKOS_ONLY_STEPS",
     "OTHER_SYSTEMS",
     "arkos_step_refusal",

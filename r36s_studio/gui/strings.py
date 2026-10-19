@@ -91,6 +91,16 @@ STRINGS = {
     # CardSystem) -- « non ArkOS » quand la carte n'est pas reconnue.
     "card_system_rocknix": "ROCKNIX",
     "card_system_emuelec": "EmuELEC",
+    "card_system_knulli": "KNULLI",
+    "knulli_copy_games_refused": (
+        "Ta carte contient KNULLI : ses jeux ne se copient pas depuis l'ordinateur sur la carte. Rien n'a été modifié. Trois façons de les ajouter :\n"
+        "1. Par le Wi-Fi : la console connectée au réseau, ouvre \\\\KNULLI\\share dans l'Explorateur de fichiers (active d'abord le partage SAMBA dans Paramètres système → Services).\n"
+        "2. Par la deuxième carte (TF2) : choisis-la dans Paramètres système → Stockage sur la console, puis copie tes jeux sur cette carte depuis l'ordinateur.\n"
+        "3. Par câble USB, avec « Copier des jeux sur ma console (USB) » de R36S Studio (vérifié sur la RG40XXV, non vérifié sur R36S)."
+    ),
+    "knulli_copy_games_detail_log": (
+        "[détail] KNULLI garde les jeux dans un espace « SHARE » en ext4, que Windows et macOS ne savent pas écrire. Partage réseau : identifiant root, mot de passe linux par défaut (doc KNULLI, « Network Transfer ») ; si \\\\KNULLI ne répond pas, utilise l'adresse IP de la console."
+    ),
     "card_system_unknown": "non ArkOS",
     "home_banner_state_other_system": "Carte {system} reconnue",
     # Bandeau carte détectée, en haut de l'accueil.

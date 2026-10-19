@@ -1219,10 +1219,14 @@ class MainWindow(QMainWindow):
             return False
         if refusal == CardSystem.UNKNOWN:
             message = tr("error_card_system_incompatible")
+        elif refusal == CardSystem.KNULLI and step == "copy_games":
+            message = tr("knulli_copy_games_refused")
         else:
             message = tr("step_refused_card_system", system=card_system_name(refusal))
         self._log_panel.append_log(message)
         self._log_panel.append_log(f"[détection] {device.display} ({device.path}) : système {refusal.value}")
+        if refusal == CardSystem.KNULLI and step == "copy_games":
+            self._log_panel.append_log(tr("knulli_copy_games_detail_log"))
         QMessageBox.warning(self, tr("app_title"), message)
         return True
 

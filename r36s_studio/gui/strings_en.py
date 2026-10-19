@@ -56,6 +56,16 @@ STRINGS_EN = {
     "status_system_incompatible": "Not applicable — {system} card",
     "card_system_rocknix": "ROCKNIX",
     "card_system_emuelec": "EmuELEC",
+    "card_system_knulli": "KNULLI",
+    "knulli_copy_games_refused": (
+        "Your card has KNULLI: its games aren't copied onto the card from the computer. Nothing was changed. Three ways to add them:\n"
+        "1. Over Wi-Fi: with the console on your network, open \\\\KNULLI\\share in the file explorer (first turn on SAMBA sharing in System settings → Services).\n"
+        "2. With the second card (TF2): pick it in System settings → Storage on the console, then copy your games onto that card from the computer.\n"
+        "3. With a USB cable, using R36S Studio's “Copy games to my console (USB)” (checked on the RG40XXV, not checked on R36S)."
+    ),
+    "knulli_copy_games_detail_log": (
+        "[detail] KNULLI keeps games in an ext4 storage area named “SHARE”, which Windows and macOS can't write. Network share: user root, password linux by default (KNULLI docs, “Network Transfer”); if \\\\KNULLI doesn't answer, use the console's IP address."
+    ),
     "card_system_unknown": "non-ArkOS",
     "home_banner_state_other_system": "{system} card recognized",
     "home_banner_line_device": "{display} — {size_go:.1f} GB",

@@ -7012,3 +7012,55 @@ def test_knulli_checked_but_another_file_chosen_gets_no_knulli_note_nor_check(
     assert identify_class.instances == []
     assert window._first_boot_note() is None
     assert window._confirm_dialog.isVisible() is True
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.arkos_step_refusal", return_value=CardSystem.KNULLI)
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.KNULLI, _all_status(StepStatus.AVAILABLE)))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_copy_games_on_knulli_card_explains_the_three_ways_simply(
+    mock_list, mock_filter, mock_detect, mock_refusal, mock_warning, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+
+    with patch("r36s_studio.gui.main_window.WorkerRunner") as mock_runner:
+        window = MainWindow()
+        window._home.copy_games_selected.emit()
+        window._device_dialog._list.setCurrentRow(0)
+        window._device_dialog._emit_chosen()
+
+    message = mock_warning.call_args.args[2]
+    wifi, tf2, usb = message.index(r"\\KNULLI\share"), message.index("TF2"), message.index("(USB)")
+    assert wifi < tf2 < usb  # dans cet ordre
+    assert "Paramètres système → Stockage" in message
+    assert "vérifié sur la RG40XXV, non vérifié sur R36S" in message
+    assert "Rien n'a été modifié" in message
+    for technical in ("SHARE", "ext4", "partition", "EASYROMS"):
+        assert technical not in message
+    log_text = window._log_panel._log_view.toPlainText()
+    assert "SHARE" in log_text and "ext4" in log_text  # détails au journal seulement
+    assert window._file_dialog.isVisible() is False
+    mock_runner.assert_not_called()
+
+
+@patch("r36s_studio.gui.main_window.QMessageBox.warning")
+@patch("r36s_studio.gui.main_window.arkos_step_refusal", return_value=CardSystem.KNULLI)
+@patch("r36s_studio.gui.main_window.detect_card", return_value=(CardSystem.KNULLI, _all_status(StepStatus.AVAILABLE)))
+@patch("r36s_studio.gui.main_window.filter_devices")
+@patch("r36s_studio.gui.main_window.list_devices")
+def test_extract_easyroms_on_knulli_card_keeps_the_generic_refusal(
+    mock_list, mock_filter, mock_detect, mock_refusal, mock_warning, qapp
+):
+    device = _make_device()
+    mock_list.return_value = [device]
+    mock_filter.return_value = [device]
+    window = MainWindow()
+    window._home.extract_easyroms_selected.emit()
+    window._device_dialog._list.setCurrentRow(0)
+    window._device_dialog._emit_chosen()
+
+    message = mock_warning.call_args.args[2]
+    assert "KNULLI" in message and "\\KNULLI" not in message

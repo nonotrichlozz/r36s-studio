@@ -114,3 +114,17 @@ c.-à-d. exactement les cas où le worker aurait échoué sur une partition
 introuvable. **Pas un refus de toute carte non ArkOS** : l'étape A sur la
 carte d'origine d'une console (une seule partition FAT, jamais ArkOS)
 reste possible. Partitions illisibles → pas de refus, le worker tranche.
+
+**Carte KNULLI (2026-10-20).** `CardSystem.KNULLI`, reconnue à l'étiquette
+« KNULLI » de sa partition système FAT32 (R36S en MBR, RG40XXV en GPT) et
+ajoutée à `OTHER_SYSTEMS` : badge « Non applicable — carte KNULLI » sur
+« Copier des jeux sur la carte » et « Copier les jeux sur l'ordinateur » sur
+les trois OS (avant : aucun badge sous Windows/Linux, « PC ou Linux » sous
+macOS). Les jeux sont dans SHARE (ext4), que ni Windows ni macOS n'écrivent.
+Au clic sur « Copier des jeux sur la carte », message dédié
+(`knulli_copy_games_refused`) : 1. Wi-Fi, `\KNULLI\share` (doc KNULLI
+« Network Transfer » : `\KNULLI` puis dossier `share`, service SAMBA à
+activer dans System settings → Services, root/linux par défaut) ; 2.
+deuxième carte (TF2), System settings → Storage → Storage device ; 3. câble
+USB, « Copier des jeux sur ma console (USB) », vérifié sur RG40XXV, non
+vérifié sur R36S. Détails techniques au journal seulement.

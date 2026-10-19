@@ -8,6 +8,8 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch
 
+import pytest
+
 from r36s_studio.detect import (
     COPY_GAMES,
     EJECT,
@@ -411,3 +413,34 @@ def test_identify_not_relevant_without_any_card():
     status = detect_workflow_status(None)
 
     assert status[IDENTIFY] == StepStatus.NOT_RELEVANT
+
+
+# --- carte KNULLI (R36S en MBR, RG40XXV en GPT) : jeux copiés depuis la console
+
+
+_KNULLI_R36S_PARTITIONS = [
+    PartitionInfo("/dev/fake-disk-test-3s1", "KNULLI", "fat32", "/Volumes/KNULLI"),
+    PartitionInfo("/dev/fake-disk-test-3s2", "SHARE", "ext4", None),
+]
+_KNULLI_RG40XXV_PARTITIONS = [
+    PartitionInfo("/dev/fake-disk-test-3s1", "", "", None),
+    PartitionInfo("/dev/fake-disk-test-3s2", "", "", None),
+    PartitionInfo("/dev/fake-disk-test-3s3", "KNULLI", "fat32", "/Volumes/KNULLI"),
+    PartitionInfo("/dev/fake-disk-test-3s4", "SHARE", "ext4", None),
+]
+
+
+@pytest.mark.parametrize("partitions", [_KNULLI_R36S_PARTITIONS, _KNULLI_RG40XXV_PARTITIONS])
+@pytest.mark.parametrize("system", ["Windows", "Darwin", "Linux"])
+def test_knulli_card_copy_games_is_not_applicable_on_every_os(system, partitions):
+    """Même badge « Non applicable — carte KNULLI » partout : jamais « PC ou
+    Linux » sur macOS (SHARE en ext4 ne s'écrit nulle part)."""
+    with patch("r36s_studio.detect.platform.system", return_value=system), patch(
+        "r36s_studio.detect.list_partitions", return_value=partitions
+    ):
+        card_system, status = detect_card(_make_device())
+        refusal = arkos_step_refusal(_make_device(), COPY_GAMES)
+
+    assert card_system == CardSystem.KNULLI and refusal == CardSystem.KNULLI
+    assert status[COPY_GAMES] == StepStatus.SYSTEM_INCOMPATIBLE
+    assert status[FLASH] == StepStatus.AVAILABLE

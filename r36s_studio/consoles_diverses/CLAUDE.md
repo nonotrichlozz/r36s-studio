@@ -188,6 +188,9 @@ fichier partiel gardé (`download_asset` : taille annoncée exigée).
 **Usage personnel** : toute option `restriction_commerciale` passe par la
 fenêtre « Usage personnel uniquement » (`main_window._confirm_personal_use`,
 case obligatoire) avant tout téléchargement.
+**Point ouvert (RG40XXV)** : muOS installé par le bouton s'éteint au logo
+au premier démarrage, alors que l'image téléchargée est identique à celle
+qui marchait (SHA-256 vérifiée) ; cause non trouvée.
 
 Durcissement : dépôt au format `propriétaire/nom`, téléchargement depuis
 `https://github.com/` (ou dossier `https://mega.nz/` et serveurs

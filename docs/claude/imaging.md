@@ -315,7 +315,9 @@ GPT : `boot`, `env`, `boot-resource` = FAT « KNULLI » 5 Go, `userdata` =
 ext4 « SHARE » 512 Mo, étiquette inconnue à l'époque, console figée plus d'une
 heure sur l'image KNULLI ; `knulli-boot.conf` (racine de la partition
 système) porte `autoresize=true`, « resize the userdata partition if unallocated
-space is present », relu sur l'image). Étiquette STORAGE (ext4) vérifiée sur
+space is present », relu sur l'image ; installé par le bouton et vérifié
+sur la RG40XXV le week-end du 2026-10-18 : image complète, SHARE agrandie au
+premier démarrage, stockage basculé ensuite sur la carte TF2). Étiquette STORAGE (ext4) vérifiée sur
 l'image ROCKNIX 20261001-a ; EASYROMS de dArkOSen d'après le constat, pas
 relue sur l'image. SHARE pas ajoutée à `system_backup.GAMES_PARTITION_LABELS` (elle contient
 aussi sauvegardes et réglages). Limite connue : une sauvegarde système d'avant le

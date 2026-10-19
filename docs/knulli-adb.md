@@ -101,11 +101,13 @@ résultat dit de faire « Mettre à jour la liste des jeux » dans le menu.
 Essai unique sur la console le 2026-10-19 : 200 immédiat, EmulationStation
 toujours joignable après.
 
+## Vérifié sur la console
+
+Parcours complet depuis l'app (0.1.17) sur la RG40XXV, 2026-10-19 : jeux
+copiés en USB (ADB), puis affichés par EmulationStation après le
+rafraîchissement automatique (`/reloadgames`), sans redémarrage.
+
 ## Points ouverts
 
-- Parcours complet depuis l'app jamais lancé sur la console (la copie d'un
-  fichier de 20 Mio par `copy_plan`, puis sa suppression, l'a été).
-- `/reloadgames` après une vraie copie : que les nouveaux jeux apparaissent
-  sans redémarrage reste à constater.
 - Console débranchée en pleine copie : fichier temporaire laissé sur la
   carte (supprimé à la prochaine copie dans ce dossier).

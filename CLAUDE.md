@@ -244,8 +244,9 @@ Détail et bancs de test : `docs/claude/testing.md`.
 - Partition de jeux recréée automatiquement seulement après la restauration
   d'une sauvegarde de l'app (`.sha256blocks`) sans partition de jeux : ligne
   « Espace de jeux recréé… » attendue ; un firmware téléchargé est laissé
-  s'agrandir seul (dArkOSen vérifié sur console le 2026-10-17 ; Knulli
-  `autoresize=true` lu sur l'image, pas revérifié sur la RG40XXV) (`imaging.md`).
+  s'agrandir seul (dArkOSen vérifié sur console le 2026-10-17 ; KNULLI
+  installé par le bouton vérifié sur la RG40XXV le week-end du 2026-10-18 :
+  SHARE agrandie au premier démarrage) (`imaging.md`).
 - Avertissement de formatage Windows après un flash « Linux » (`firmwares-flash.md`).
 - Tour complet UAC depuis le binaire Windows empaqueté ; paquets `apt` du job
   CI Linux ; `release.yml` (installeur Inno Setup, test de fumée `_internal`
@@ -288,10 +289,10 @@ Détail et bancs de test : `docs/claude/testing.md`.
   (2026-10-17), flash de l'image réelle vérifié (8 769 240 576 octets) ;
   le parcours complet depuis l'app (4,4 Go, quota gratuit de MEGA) jamais
   lancé (`consoles_diverses/CLAUDE.md`).
-- « Copier des jeux sur ma console (USB) » (KNULLI en ADB) : parcours
-  complet depuis l'app jamais lancé sur la console (copie d'un fichier de
-  test vérifiée) ; `/reloadgames` après une vraie copie non constaté
-  (`docs/knulli-adb.md`).
+- muOS installé par le bouton sur la RG40XXV : la console s'éteint au logo
+  au premier démarrage, alors que l'image téléchargée est identique à celle
+  qui marchait (SHA-256 vérifiée) ; cause non trouvée
+  (`consoles_diverses/CLAUDE.md`).
 - ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,

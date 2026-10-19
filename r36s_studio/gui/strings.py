@@ -1180,12 +1180,25 @@ STRINGS = {
     "knulli_back_button": "← Retour",
     "knulli_console_label": "Console KNULLI branchée (version {version}).",
     "knulli_hint": (
-        "Choisis un dossier de jeux sur l'ordinateur. Chaque jeu est rangé dans le bon dossier de la "
-        "console (d'après le dossier où il se trouve, ex. « psx », ou son type de fichier) ; un "
+        "Compose la liste des jeux à copier : choisis des jeux (Ctrl ou Maj pour en prendre "
+        "plusieurs), des dossiers entiers, ou glisse-les ici. Chaque jeu va dans le bon dossier de "
+        "la console (d'après le dossier où il se trouve, ex. « psx », ou son type de fichier) ; un "
         "dossier « bios » va dans les BIOS de la console. Tu verras le résumé avant toute copie."
     ),
-    "knulli_choose_folder_button": "Choisir le dossier de jeux…",
-    "knulli_scanning": "Analyse du dossier et lecture de la console…",
+    "knulli_summary_button": "Voir le résumé",
+    "knulli_edit_list_button": "Modifier la liste",
+    "knulli_list_skipped": "non copié : {reason}",
+    "game_list_add_files": "Ajouter des jeux…",
+    "game_list_add_folder": "Ajouter un dossier…",
+    "game_list_remove": "Retirer",
+    "game_list_clear": "Tout vider",
+    "game_list_col_name": "Jeu",
+    "game_list_col_size": "Taille",
+    "game_list_col_system": "Système",
+    "game_list_linked": "{name} (+ {count} fichier(s) lié(s))",
+    "game_list_total": "{count} jeu(x), {size}",
+    "game_list_empty": "Aucun jeu pour l'instant : ajoute-en avec les boutons, ou glisse-les dans la liste.",
+    "knulli_scanning": "Analyse des jeux et lecture de la console…",
     "knulli_error_console": (
         "La console ne répond plus. Vérifie que le câble est bien branché et qu'elle est toujours en "
         "mode USB « ADB », puis réessaie."
@@ -1204,7 +1217,6 @@ STRINGS = {
     "knulli_renamed_row": "Renommé pour la console : « {old} » → {new}",
     "knulli_skipped_title": "{count} fichier(s) ne seront pas copiés :",
     "knulli_copy_button": "Copier sur la console",
-    "knulli_other_folder_button": "Choisir un autre dossier",
     "knulli_copying": "Copie en cours. Ne débranche pas la console.",
     "knulli_copy_count": "{done} / {total} Mo copiés",
     "knulli_cancel_button": "Annuler",

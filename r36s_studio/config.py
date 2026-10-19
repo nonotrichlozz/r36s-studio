@@ -135,6 +135,9 @@ class AppConfig:
     doublons_simulation_mode: bool = DEFAULT_DOUBLONS_SIMULATION_MODE
     doublons_last_destination: Optional[str] = None
     doublons_recent_destinations: List[str] = field(default_factory=list)
+    # Dernier dossier ouvert pour choisir des jeux (liste de jeux, copie
+    # USB vers KNULLI) : seul point de départ des sélecteurs, rien d'autre.
+    last_games_folder: str = ""
     # Vérification des mises à jour (update_check.py) : au plus une par
     # jour, `last_update_check` = date ISO (AAAA-MM-JJ) du dernier essai.
     check_updates: bool = True
@@ -213,6 +216,9 @@ def load_config() -> AppConfig:
         isinstance(path, str) for path in doublons_recent_destinations
     ):
         doublons_recent_destinations = []
+    last_games_folder = raw.get("last_games_folder")
+    if not isinstance(last_games_folder, str):
+        last_games_folder = ""
     check_updates = raw.get("check_updates")
     if not isinstance(check_updates, bool):
         check_updates = True
@@ -244,6 +250,7 @@ def load_config() -> AppConfig:
         doublons_simulation_mode=doublons_simulation_mode,
         doublons_last_destination=doublons_last_destination,
         doublons_recent_destinations=doublons_recent_destinations[:_MAX_DOUBLONS_RECENT_DESTINATIONS],
+        last_games_folder=last_games_folder,
         check_updates=check_updates,
         last_update_check=last_update_check,
         latest_update_tag=latest_update_tag,

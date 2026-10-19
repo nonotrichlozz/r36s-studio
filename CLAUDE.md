@@ -104,7 +104,7 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 | `packaging/`, `.spec`, CI, releases, `config.json` | `docs/claude/packaging.md` |
 | Écrire/déboguer des tests, bancs de test matériel | `docs/claude/testing.md` |
 | `android/` (ADB) | `docs/android-adb.md` |
-| `android/knulli.py`, `gui/knulli_screen.py` (copier des jeux sur une console KNULLI en USB, ADB) | `docs/knulli-adb.md` |
+| `android/knulli.py`, `gui/knulli_screen.py` (copier des jeux sur une console KNULLI en USB, ADB), liste de jeux composable (`tri/selection.py`, `gui/game_list_widget.py`) | `docs/knulli-adb.md` |
 | `consoles_diverses/` | `r36s_studio/consoles_diverses/CLAUDE.md`, `docs/consoles-diverses-design.md`, `docs/consoles-diverses-recherche.md` |
 | `doublons/` | `docs/doublons.md`, `docs/doublons-selection.md` |
 | `tri/`, `gui/tri_screen.py` (Ranger des jeux mélangés, Filtrer par région et par langue, Convertir des jeux, tables de dossiers par firmware) | `docs/tri-roms.md` |

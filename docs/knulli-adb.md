@@ -52,9 +52,31 @@ n'a aucune commande de plus. Règle KNULLI : `OS_NAME=knulli`. Batocera seul
 - Non lus : `es_systems_*.cfg` personnels de `/userdata/system/configs/
   emulationstation/` (aucun sur la console du relevé).
 
-## Rangement (`build_copy_plan`, lecture seule)
+## Liste de jeux
 
-1. Le premier dossier du chemin (en partant du haut, dossier choisi compris)
+L'écran compose une **liste** (`tri/selection.py::GameSelection`, composant
+`gui/game_list_widget.py`, sans ADB : réutilisable par « Copier des jeux
+sur la carte ») :
+- « Ajouter des jeux… » (`QFileDialog.getOpenFileNames`, plusieurs
+  fichiers), « Ajouter un dossier… » (sous-dossiers compris), glisser-déposer
+  de fichiers et de dossiers ; ajouts répétés et dossiers mélangés ;
+- même fichier ajouté deux fois (même par un dossier) : une seule ligne ;
+- une ligne par jeu (fichiers liés d'un `.cue`/`.m3u` regroupés) : nom,
+  taille, système (rangement ci-dessous, avec les systèmes lus sur la
+  console à l'ouverture de l'écran ; « … » tant qu'ils ne le sont pas) ;
+  retrait par « Retirer » ou Suppr (tout le groupe part), « Tout vider » ;
+- choisir un `.cue`/`.m3u` ajoute ses fichiers (en chaîne) ; choisir un
+  `.bin` cité par un manifeste du même dossier ajoute ce manifeste ;
+- dernier dossier ouvert : `config.json::last_games_folder` (point de départ
+  des sélecteurs, rien d'autre).
+
+Chaque fichier garde son dossier de départ : le dossier ajouté, ou le
+dossier parent d'un fichier choisi seul (un `.sfc` choisi dans `snes/` va
+dans `snes`).
+
+## Rangement (`build_copy_plan_from`, lecture seule)
+
+1. Le premier dossier du chemin (en partant du haut, dossier de départ compris)
    dont le nom est un dossier de la console (`psx`, `snes`… casse ignorée)
    donne le système ; le reste du chemin est gardé dessous. Un dossier
    `bios` va dans `/userdata/bios`.

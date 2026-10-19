@@ -12,11 +12,11 @@ fichier déjà présent n'est remplacé qu'après une question explicite."""
 
 from __future__ import annotations
 
-from typing import Optional
+from pathlib import Path
+from typing import Dict, Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFileDialog,
     QHBoxLayout,
     QListWidget,
     QMessageBox,
@@ -27,10 +27,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from r36s_studio.android.knulli import CopyItem, CopyPlan, CopyResult
+from r36s_studio.android.knulli import CopyItem, CopyPlan, CopyResult, build_copy_plan_from
 from r36s_studio.android.models import LinuxConsole
 
-from .android_runner import KnulliCopyRunner, KnulliPlanRunner
+from .android_runner import KnulliCopyRunner, KnulliPlanRunner, KnulliSystemsRunner
+from .game_list_widget import GameListWidget
 from .screens import Screen, _format_size
 from .strings import tr
 from .tri_screen import _secondary, _title, _warning_frame
@@ -47,6 +48,7 @@ def _reason(reason: str, detail: str = "") -> str:
 
 class KnulliCopyScreen(Screen):
     back_requested = Signal()
+    last_folder_changed = Signal(str)  # config.json::last_games_folder
 
     PAGE_CHOOSE, PAGE_SCAN, PAGE_SUMMARY, PAGE_COPY, PAGE_RESULT = range(5)
 
@@ -57,6 +59,8 @@ class KnulliCopyScreen(Screen):
         self._plan: Optional[CopyPlan] = None
         self._plan_runner: Optional[KnulliPlanRunner] = None
         self._copy_runner: Optional[KnulliCopyRunner] = None
+        self._systems_runner: Optional[KnulliSystemsRunner] = None
+        self._systems = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 16, 24, 24)
@@ -90,15 +94,19 @@ class KnulliCopyScreen(Screen):
         self._console_label = _secondary()
         root.addWidget(self._console_label)
         root.addWidget(_secondary(tr("knulli_hint")))
-        choose = QPushButton(tr("knulli_choose_folder_button"))
-        choose.setProperty("role", "primary")
-        choose.clicked.connect(self._on_choose_folder_clicked)
-        root.addWidget(choose, 0, Qt.AlignLeft)
+        self._game_list = GameListWidget()
+        self._game_list.set_describer(self._describe)
+        self._game_list.changed.connect(self._on_list_changed)
+        self._game_list.folder_used.connect(self.last_folder_changed.emit)
+        root.addWidget(self._game_list, 1)
         self._choose_error_label = _secondary()
         self._choose_error_frame = _warning_frame(self._choose_error_label)
         self._choose_error_frame.setVisible(False)
         root.addWidget(self._choose_error_frame)
-        root.addStretch()
+        self._summary_button = QPushButton(tr("knulli_summary_button"))
+        self._summary_button.setProperty("role", "primary")
+        self._summary_button.clicked.connect(self.analyse)
+        root.addWidget(self._summary_button, 0, Qt.AlignLeft)
         return page
 
     def _build_scan_page(self) -> QWidget:
@@ -132,8 +140,8 @@ class KnulliCopyScreen(Screen):
         self._copy_button.setProperty("role", "primary")
         self._copy_button.clicked.connect(self._on_copy_clicked)
         buttons.addWidget(self._copy_button)
-        other = QPushButton(tr("knulli_other_folder_button"))
-        other.clicked.connect(self._on_choose_folder_clicked)
+        other = QPushButton(tr("knulli_edit_list_button"))
+        other.clicked.connect(self._show_list)
         buttons.addWidget(other)
         buttons.addStretch()
         root.addLayout(buttons)
@@ -168,26 +176,54 @@ class KnulliCopyScreen(Screen):
         root.addWidget(self._failures_list, 1)
         again = QPushButton(tr("knulli_again_button"))
         again.setProperty("role", "primary")
-        again.clicked.connect(self._on_choose_folder_clicked)
+        again.clicked.connect(self._show_list)
         root.addWidget(again, 0, Qt.AlignLeft)
         return page
 
     # --- entrée -----------------------------------------------------------
 
-    def start(self, adb_path: str, serial: str, console: LinuxConsole) -> None:
+    def start(self, adb_path: str, serial: str, console: LinuxConsole, start_folder: str = "") -> None:
         self._adb_path, self._serial = adb_path, serial
         self._console_label.setText(tr("knulli_console_label", version=console.version or "?"))
+        self._game_list.set_start_folder(start_folder)
+        self._systems = None
+        runner = KnulliSystemsRunner(adb_path, serial, self)
+        runner.finished_systems.connect(self._on_systems_read)
+        runner.error.connect(lambda detail: print(f"[KNULLI] systèmes : {detail}"))
+        runner.finished.connect(runner.deleteLater)
+        self._systems_runner = runner
+        runner.start()
+        self._show_list()
+
+    def _show_list(self) -> None:
         self._choose_error_frame.setVisible(False)
+        self._game_list.refresh()  # fichiers changés sur le disque entre-temps
         self._stack.setCurrentIndex(self.PAGE_CHOOSE)
 
-    def _on_choose_folder_clicked(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, tr("knulli_choose_folder_button"))
-        if path:
-            self.analyse(path)
+    def _on_systems_read(self, systems) -> None:
+        self._systems_runner = None
+        self._systems = systems
+        self._game_list.refresh()
 
-    def analyse(self, path: str) -> None:
+    def _describe(self, selection) -> Dict[Path, str]:
+        """Colonne « Système » : même rangement que l'aperçu de copie, avec
+        les systèmes lus sur la console (« … » tant qu'ils ne le sont pas)."""
+        if self._systems is None:
+            return {path: "…" for path in selection.files()}
+        plan = build_copy_plan_from(selection.entries(), self._systems)
+        described = {item.local: item.folder for item in plan.items}
+        described.update({s.local: tr("knulli_list_skipped", reason=_reason(s.reason, s.detail)) for s in plan.skipped})
+        return described
+
+    def _on_list_changed(self) -> None:
+        self._summary_button.setEnabled(bool(len(self._game_list.selection())))
+
+    def game_list(self) -> GameListWidget:
+        return self._game_list
+
+    def analyse(self) -> None:
         self._stack.setCurrentIndex(self.PAGE_SCAN)
-        runner = KnulliPlanRunner(self._adb_path, self._serial, path, self)
+        runner = KnulliPlanRunner(self._adb_path, self._serial, self._game_list.selection().entries(), self)
         runner.finished_plan.connect(self._show_summary)
         runner.error.connect(self._on_console_error)
         runner.finished.connect(runner.deleteLater)

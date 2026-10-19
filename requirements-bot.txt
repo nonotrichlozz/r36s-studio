@@ -1,0 +1,7 @@
+# Bot Telegram (python -m r36s_studio.bot), pour une machine sans interface
+# graphique (Eee PC i686 sous antiX : PySide6 n'existe pas en 32 bits).
+# Jamais dans requirements.txt : celui-ci contient PySide6 et ne s'installe
+# pas sur cette machine. Le bot n'a besoin d'aucune autre dépendance : son
+# cœur (doublons, tri, téléchargement de système) n'utilise que la
+# bibliothèque standard.
+python-telegram-bot>=21,<23

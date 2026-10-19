@@ -26,7 +26,7 @@ def _run_with_failures(reasons, answer):
             returns.append(on_file_error(MoveFileFailed("p", "copy", reason, "d")))
         return 0
 
-    with patch("r36s_studio.gui.doublons_runner.move_duplicates", fake_move):
+    with patch("r36s_studio.doublons.run.move_duplicates", fake_move):
         runner.run()
     return asked, returns
 

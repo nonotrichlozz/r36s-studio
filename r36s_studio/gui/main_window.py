@@ -53,7 +53,6 @@ from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
 from r36s_studio.consoles_diverses.search_runner import ConsoleSearchRunner, FirmwareResolveRunner
 from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettingsDialog
 from r36s_studio.consoles_diverses.strings import friendly_error_message as consoles_diverses_friendly_error_message
-from r36s_studio.consoles_diverses.telechargement import Telechargement
 from r36s_studio.detect import ARKOS_ONLY_STEPS, CardSystem, arkos_step_refusal, detect_card
 from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons import scan_cache as doublons_scan_cache
@@ -72,12 +71,13 @@ from r36s_studio.doublons.move import (
     skipped_reason_counts,
 )
 from r36s_studio.doublons.report import build_report
+from r36s_studio.doublons.run import preferred_destination as preferred_doublons_destination
 from r36s_studio.doublons.safety import is_filesystem_root, is_whole_user_folder
 from r36s_studio.doublons.scan import Unit
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, result_from_dict
 from r36s_studio.identify import console_profile, rocknix_r36s
-from r36s_studio.identify.rocknix import RocknixAsset
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID
+from r36s_studio.identify.firmware_download import asset_for as firmware_asset_for, telechargement_for
 from r36s_studio.imaging import (
     DEFAULT_RESET_LABEL,
     CardTooSmallForReset,
@@ -2437,14 +2437,7 @@ class MainWindow(QMainWindow):
         if entry.non_commercial and not _confirm_personal_use(self, title):
             return
         self._file_dialog.close()
-        download = entry.auto_download
-        telechargement = Telechargement(
-            depot=download.depot,
-            motif_fichier=download.motif_fichier,
-            url_directe=download.url_directe,
-            sha256_connus=download.sha256_connus,
-            exiger_sha256=True,
-        )
+        telechargement = telechargement_for(entry.auto_download)
         self._log_panel.start_operation(tr("execute_title_download_firmware", firmware=title))
         self._set_catalogue_install_busy(True)
         self._last_error_code = None
@@ -2465,7 +2458,7 @@ class MainWindow(QMainWindow):
             self._log_panel.append_log(tr("knulli_notes_device_log", device=fichier.appareil_notes))
         elif fichier.depuis_derniere_release:
             self._log_panel.append_log(tr("knulli_notes_missing_log"))
-        asset = RocknixAsset(name=fichier.nom, download_url=fichier.url, size_bytes=fichier.taille)
+        asset = firmware_asset_for(fichier)
         self._runner = RocknixDownloadRunner(asset, fichier.sha256, parent=self)
         self._runner.progress.connect(self._on_progress)
         self._runner.error.connect(self._on_worker_error)
@@ -3067,14 +3060,7 @@ class MainWindow(QMainWindow):
         valeur mémorisée est refusée pour ce dossier précis (ex. mémorisée
         pour un tout autre dossier analysé lors d'une session
         précédente, désormais à l'intérieur de celui-ci par coïncidence)."""
-        remembered = self._app_config.doublons_last_destination
-        if remembered:
-            try:
-                check_destination_allowed(root, remembered)
-                return remembered
-            except (DestinationInsideRootNotAllowed, DestinationIsFilesystemRoot, DestinationNotWritable):
-                pass
-        return default_doublons_destination(root)
+        return preferred_doublons_destination(root, self._app_config.doublons_last_destination)
 
     def _update_doublons_cross_volume_warning(self) -> None:
         if self._doublons_root is None or self._doublons_destination is None:
@@ -3719,7 +3705,7 @@ class MainWindow(QMainWindow):
 
     def _on_catalogue_firmware_resolved(self, fichier) -> None:
         self._log_panel.append_log(tr("catalogue_install_file_log", name=fichier.nom))
-        asset = RocknixAsset(name=fichier.nom, download_url=fichier.url, size_bytes=fichier.taille)
+        asset = firmware_asset_for(fichier)
         transform = consoles_diverses_mega.dechiffreur(*fichier.dechiffrement) if fichier.dechiffrement else None
         self._runner = RocknixDownloadRunner(asset, fichier.sha256, parent=self, transform=transform)
         self._runner.progress.connect(self._on_progress)

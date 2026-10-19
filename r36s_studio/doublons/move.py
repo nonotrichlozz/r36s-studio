@@ -75,7 +75,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
-from r36s_studio.gui import logs as gui_logs
+from r36s_studio import logs as gui_logs
 
 from .safety import is_filesystem_root
 from .scan import DUPLICATES_DIR_NAME, Unit

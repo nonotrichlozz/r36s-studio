@@ -1,0 +1,1802 @@
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
+
+"""Chaînes de l'interface, en français -- la langue de référence. Les
+autres langues vivent chacune dans leur fichier (`strings_en.py`), avec
+exactement les mêmes clés et les mêmes variables `{…}` ; `tr()` choisit
+selon `i18n.get_language()`, fixée au démarrage.
+
+Vocabulaire : aucun terme technique ('périphérique bloc', '/dev/sdb',
+'partition') ne doit apparaître ailleurs que dans le journal de bord
+(le détail brut du backend y suit le message principal, en ligne
+supplémentaire, §5 refonte navigation) — on dit "ta carte SD", pas "le
+périphérique bloc".
+
+Hors de `gui/` depuis le 2026-10-20 : le bot Telegram (`r36s_studio/bot/`)
+lit les mêmes chaînes sans jamais importer `gui` ni PySide6.
+`gui/strings.py`/`gui/strings_en.py` restent des alias de ces modules."""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from r36s_studio import i18n
+
+from r36s_studio.strings_en import STRINGS_EN
+
+STRINGS = {
+    "app_title": "R36S Studio",
+    "splash_starting": "Démarrage… recherche de ta carte SD",
+    # Accueil -- six étapes chronologiques fixes du workflow à deux cartes
+    # (§4.5), toujours toutes visibles et cliquables, plus la sauvegarde
+    # complète (opération de sécurité, en dehors des six étapes).
+    "home_title": "Que veux-tu faire ?",
+    "home_refresh": "Rafraîchir",
+    # Symétrique de "assisted_expert_mode_button" -- bouton de retour au
+    # mode assisté, en haut à droite de l'écran expert (§5 mode assisté).
+    "home_assisted_mode_button": "Mode assisté",
+    # Section « Consoles diverses » (consoles_diverses/, étape 1) -- bouton
+    # discret vers un écran indépendant, isolé dans son propre package
+    # (règle d'isolation, consoles_diverses/CLAUDE.md). Symétrique sur les
+    # deux accueils (expert et assisté).
+    "home_consoles_diverses_button": "Consoles diverses",
+    # Outil « Console Android » (android/, étape 1, docs/android-adb.md) --
+    # bouton discret, même emplacement/rôle que "home_consoles_diverses_
+    # button" : détection en USB via adb, indépendant du parcours carte SD.
+    "home_android_button": "Console Android",
+    "home_step_extract_easyroms_title": "Copier les jeux de la carte sur l'ordinateur",
+    "home_step_extract_easyroms_desc": "Enregistre tes jeux et leurs sauvegardes sur ton ordinateur, pour les remettre sur une autre carte.",
+    "home_step_flash_title": "Installer un système sur la carte",
+    "home_step_flash_desc": "Écrit le système de la console sur ta carte.",
+    "home_step_copy_games_title": "Copier des jeux sur la carte",
+    "home_step_copy_games_desc": "Remet sur ta carte des jeux enregistrés sur ton ordinateur.",
+    "home_step_eject_title": "Éjecter la carte en toute sécurité",
+    "home_step_eject_desc": "Démonte la carte pour qu'elle puisse être retirée sans risque.",
+    "home_backup_separator": "Par sécurité",
+    "home_tile_backup": "Sauvegarder l'image complète de ma carte",
+    "home_tile_backup_desc": "Enregistre le contenu actuel de ta carte SD dans un fichier, au cas où.",
+    # Sauvegarde système sans les jeux (§4.3/§4.6) -- s'arrête juste avant
+    # la partition de jeux (EASYROMS ou STORAGE), un fichier bien plus
+    # petit qu'une image complète.
+    "home_tile_backup_system": "Sauvegarder mon système sans les jeux",
+    "home_tile_backup_system_desc": (
+        "Enregistre l'écran et les réglages de ta carte, sans tes jeux — "
+        "un fichier bien plus petit qu'une sauvegarde complète."
+    ),
+    # Remise à zéro (§4.3 bis) : pour une carte laissée en plusieurs
+    # partitions illisibles après des essais de firmware -- efface tout et
+    # recrée un seul espace de stockage normal, comme une carte SD neuve.
+    "home_tile_reset_card": "Remettre la carte à zéro",
+    "home_tile_reset_card_desc": (
+        "Efface tout sur cette carte et la remet en un seul espace de stockage normal — "
+        "utile après avoir essayé plusieurs firmwares."
+    ),
+    # Aide macOS uniquement (§3/§5 -- HomeScreen n'ajoute ce bouton que sur
+    # macOS, seul OS concerné par cette autorisation).
+    "home_help": "Aide : autoriser l'accès à la carte (Mac)",
+    # Tuile personnelle « Web » (config.py::personal_web_url) -- jamais
+    # visible dans la version distribuée à un client (visible seulement
+    # si R36S_STUDIO_WEB_URL est définie en https).
+    "home_tile_web": "Web",
+    "home_tile_web_desc": "Ouvre le site dans ton navigateur.",
+    # Section « Outils » du mode expert -- outils autonomes sur un dossier,
+    # retirés de l'accueil assisté (allégé pour le néophyte, §1).
+    "home_tools_separator": "Outils",
+    "home_tile_find_duplicates": "Chercher les doublons",
+    "home_tile_find_duplicates_desc": "Trouve les jeux en double dans un dossier et les met de côté, sans rien supprimer.",
+    "home_tile_sort_games": "Ranger des jeux mélangés",
+    "home_tile_sort_games_desc": "Range un dossier de jeux mélangés dans un dossier par console.",
+    "status_available": "Faisable",
+    "status_done": "Déjà faite",
+    "status_not_relevant": "Non pertinente pour cette carte",
+    "status_platform_limited": "PC ou Linux",
+    "status_system_incompatible": "Non applicable — carte {system}",
+    # Nom du système affiché dans le badge ci-dessus et le bandeau (detect.
+    # CardSystem) -- « non ArkOS » quand la carte n'est pas reconnue.
+    "card_system_rocknix": "ROCKNIX",
+    "card_system_emuelec": "EmuELEC",
+    "card_system_knulli": "KNULLI",
+    "knulli_copy_games_refused": (
+        "Ta carte contient KNULLI : ses jeux ne se copient pas depuis l'ordinateur sur la carte. Rien n'a été modifié. Trois façons de les ajouter :\n"
+        "1. Par le Wi-Fi : la console connectée au réseau, ouvre \\\\KNULLI\\share dans l'Explorateur de fichiers (active d'abord le partage SAMBA dans Paramètres système → Services).\n"
+        "2. Par la deuxième carte (TF2) : choisis-la dans Paramètres système → Stockage sur la console, puis copie tes jeux sur cette carte depuis l'ordinateur.\n"
+        "3. Par câble USB, avec « Copier des jeux sur ma console (USB) » de R36S Studio (vérifié sur la RG40XXV, non vérifié sur R36S)."
+    ),
+    "knulli_copy_games_detail_log": (
+        "[détail] KNULLI garde les jeux dans un espace « SHARE » en ext4, que Windows et macOS ne savent pas écrire. Partage réseau : identifiant root, mot de passe linux par défaut (doc KNULLI, « Network Transfer ») ; si \\\\KNULLI ne répond pas, utilise l'adresse IP de la console."
+    ),
+    "card_system_unknown": "non ArkOS",
+    "home_banner_state_other_system": "Carte {system} reconnue",
+    # Bandeau carte détectée, en haut de l'accueil.
+    "home_banner_line_device": "{display} — {size_go:.1f} Go",
+    "home_banner_state_arkos": "Carte ArkOS reconnue",
+    "home_banner_state_unprepared": "Carte non préparée",
+    "home_banner_state_none": "Aucune carte détectée pour l'instant",
+    # Accueil du mode assisté (§5 mode assisté) -- écran par défaut au
+    # lancement, remplacé par le mode expert (six étapes) sur demande.
+    "assisted_prepare_button": "Préparer ma carte automatiquement",
+    "assisted_expert_mode_button": "Mode expert",
+    # Sauvegarde système sans les jeux (§4.3), aussi proposée comme option
+    # du mode assisté -- discrète, sous le bouton principal.
+    "assisted_backup_system_button": "Sauvegarder mon système sans les jeux",
+    # Libellés courts des 5 tuiles de l'accueil assisté (refonte menu de
+    # tuiles, §5) -- un seul libellé par tuile, bas-gauche, pas de
+    # description séparée contrairement aux lignes de HomeScreen (préfixe
+    # distinct de "home_tile_*", qui reste celui des lignes du mode
+    # expert -- même concept, texte plus court pour tenir dans une tuile).
+    # Tuile 1 seule à porter aussi une description (correctif visuel,
+    # icône/libellé agrandis) ; "Rechercher ma console"/"Consoles
+    # diverses" fusionnées en une seule tuile « Identifier ma console »
+    # (correctif visuel) -- l'accès au catalogue se fait désormais depuis
+    # l'écran de résultat de l'identification (`IdentifyResultDialog`).
+    "assisted_tile_prepare": "Préparer ma carte",
+    "assisted_tile_prepare_desc": "Copie complète de l'ancienne carte vers la neuve, étape par étape.",
+    "assisted_tile_identify": "Identifier ma console",
+    "assisted_tile_backup": "Sauvegarder ma carte",
+    "assisted_tile_eject": "Éjecter la carte",
+    "assisted_tile_help": "Aide",
+    # En-tête de l'accueil assisté (§5, correctif visuel -- manquait
+    # entièrement). Le nom de l'app lui-même réutilise "app_title", jamais
+    # dupliqué ici.
+    "assisted_brand_subtitle": "Choisis ce que tu veux faire avec ta carte SD.",
+    # Étiquette de section au-dessus de la grille (maquette de référence,
+    # docs/screenshots/maquette-accueil.png) -- manquait entièrement.
+    "assisted_section_label": "Pour commencer",
+    # Titre/message du nouveau dialogue "À propos" (Windows/Linux, tuile
+    # Aide) -- macOS ouvre HelpDialog (Accès complet au disque) à la
+    # place, sans rapport avec ces deux OS.
+    "about_title": "À propos de R36S Studio",
+    "about_orientation": (
+        "Chaque tuile de l'accueil correspond à une action sur ta carte SD. "
+        "Branche ta carte, l'appli détecte ce qu'il y a dessus et propose "
+        "l'action pertinente avec un badge (faisable, déjà faite, non "
+        "pertinente pour cette carte). Rien n'est jamais fait sans que tu "
+        "cliques dessus, et toute action qui efface quelque chose te le "
+        "demande explicitement avant de commencer."
+    ),
+    "about_licence": "Code consultable mais non libre : usage personnel uniquement, ni modification, ni redistribution, ni usage commercial sans accord (PolyForm Strict 1.0.0).",
+    "about_close": "Fermer",
+    # Résultat de la tuile « Rechercher ma console » (§5, refonte menu de
+    # tuiles) -- `identify/__init__.py::identify_from_boot_directory`,
+    # jamais un nom convivial inventé pour l'identifiant du .dtb (convention
+    # déjà suivie ailleurs dans ce projet, §4.6).
+    "identify_result_title": "Ta console",
+    "identify_result_board": "Identifiant détecté : {board}",
+    # Accès au catalogue (consoles_diverses/, ex-tuile « Consoles diverses »
+    # fusionnée ici, §5 correctif visuel) -- toujours affiché, succès ou
+    # échec de l'identification.
+    "identify_result_catalog_button": "Voir le catalogue des consoles",
+    "identify_result_clone_warning": (
+        "Cette carte semble être une console clone (matériel différent d'une R36S/R35S standard). "
+        "Les systèmes prévus pour la R36S standard peuvent ne pas démarrer dessus. "
+        "dArkOS et EmuELEC annoncent prendre en charge ces consoles ; "
+        "EmuELEC a été vérifié sur une vraie console clone."
+    ),
+    "identify_failed_mount_failed": (
+        "Impossible de lire le système de la carte. Débranche-la et rebranche-la, puis réessaie."
+    ),
+    "identify_failed_no_dtb_found": (
+        "Aucune information de modèle trouvée sur cette carte -- c'est normal pour une carte tout juste flashée."
+    ),
+    "identify_failed_all_dtb_invalid": (
+        "Les informations de modèle présentes sur cette carte sont illisibles ou corrompues."
+    ),
+    # Lecture du système de la carte refusée par l'ordinateur (Windows :
+    # partition protégée, lisible seulement avec autorisation) -- jamais
+    # présenté comme une carte abîmée ou mal préparée.
+    "identify_failed_access_denied": (
+        "Ton ordinateur a refusé de lire le système de la carte. Ta carte n'est pas en cause : "
+        "c'est une protection de l'ordinateur. Réessaie, et accepte la demande d'autorisation "
+        "si elle apparaît."
+    ),
+    "identify_failed_elevation_refused": (
+        "Pour lire le modèle de ta console, Windows a besoin de ton autorisation (fenêtre "
+        "« Voulez-vous autoriser cette application à apporter des modifications ? »). Elle a été "
+        "refusée ou fermée. Ta carte n'a rien d'anormal : relance l'identification et réponds « Oui »."
+    ),
+    # Outil « Doublons de jeux » (docs/doublons.md, remplace l'ancien flux
+    # carte-SD-uniquement) -- déplacement vers un dossier _doublons/,
+    # jamais une suppression : le vocabulaire choisi ("écarter") reflète
+    # ça, jamais "supprimer".
+    "doublons_back_button": "Retour",
+    "doublons_folder_title": "Choisir un dossier",
+    "doublons_folder_hint": (
+        "Choisis le dossier à analyser -- sur ton ordinateur, une carte SD ou un disque externe."
+    ),
+    "doublons_folder_no_shortcuts": "Aucune carte ni disque amovible détecté pour l'instant.",
+    # « Reprendre la dernière analyse » (signalé explicitement : « ne
+    # jamais obliger à relancer une analyse ») -- masqué tant qu'aucun
+    # résultat n'est en cache (`DoublonsFolderScreen.set_resume_available`).
+    "doublons_resume_button": "Reprendre la dernière analyse",
+    "doublons_resume_info": "{folder} -- analysé le {date}",
+    # Signalé, après vérification (taille/date de modification) au moment
+    # de la reprise -- affiché seulement si au moins un fichier a changé
+    # ou disparu depuis (§ demandé explicitement : « retirer ceux qui ont
+    # changé »), jamais pour une reprise où rien n'a bougé.
+    "doublons_resume_files_removed_notice": (
+        "{count} fichier(s) retiré(s) des résultats -- modifié(s) ou "
+        "supprimé(s) depuis la dernière analyse."
+    ),
+    "doublons_browse_button": "Parcourir…",
+    "doublons_options_title": "OPTIONS",
+    "doublons_simulation_checkbox": "Simuler sans rien déplacer",
+    "doublons_ignored_folders_title": "Dossiers ignorés :",
+    "doublons_scan_progress_title": "Analyse en cours",
+    "doublons_scan_progress_count": "{count} fichier(s) analysé(s)",
+    "doublons_scan_cancel_button": "Annuler",
+    "doublons_move_progress_title": "Déplacement en cours",
+    "doublons_move_progress_count": "{done} / {total} fichier(s)",
+    "doublons_risk_title": "Ce dossier peut prendre du temps à analyser",
+    "doublons_risk_cancel": "Annuler",
+    "doublons_risk_continue": "Continuer",
+    "doublons_risk_filesystem_root": (
+        "Tu as choisi la racine entière d'un disque -- l'analyse peut prendre très "
+        "longtemps et parcourir des dossiers sans rapport avec tes jeux. Continuer quand même ?"
+    ),
+    "doublons_risk_whole_user_folder": (
+        "Tu as choisi un dossier personnel entier plutôt qu'un dossier de jeux précis -- "
+        "l'analyse peut prendre très longtemps. Continuer quand même ?"
+    ),
+    "doublons_risk_large_folder": (
+        "Ce dossier contient déjà plus de 200 000 fichiers et l'analyse continue -- "
+        "ça peut prendre du temps. Continuer ?"
+    ),
+    "doublons_results_title": "Doublons trouvés",
+    "doublons_undo_button": "Tout annuler",
+    "doublons_undo_conflicts_warning": (
+        "{count} fichier(s) n'ont pas pu être restauré(s) automatiquement -- "
+        "vérifie le contenu du dossier _doublons/."
+    ),
+    "doublons_export_button": "Exporter le rapport",
+    # Emplacement du dossier de destination (signalé explicitement :
+    # « permettre de choisir l'emplacement... au lieu de _doublons imposé
+    # à la racine du dossier analysé »).
+    "doublons_destination_label": "Destination :",
+    "doublons_destination_change_button": "Changer…",
+    "doublons_destination_cross_volume_warning": (
+        "Destination sur un autre disque : les fichiers seront copiés puis "
+        "supprimés de la source (plus lent)."
+    ),
+    # Affiché dans la fenêtre de confirmation (§ demandé explicitement,
+    # « les avertissements associés... espace libre à destination ») --
+    # purement informatif, ne bloque jamais le bouton de validation
+    # (contrairement aux refus structurels de destination, ci-dessous).
+    "doublons_destination_space_warning": (
+        "Espace disponible à destination : {available} -- peut être insuffisant pour ce déplacement."
+    ),
+    # § demandé explicitement, point 6 : annoncé avant de commencer,
+    # jamais découvert en cours de route sur un fichier parmi d'autres.
+    "doublons_destination_fat_warning": (
+        "La destination est formatée en FAT, qui ne peut pas contenir de fichier de plus de 4 Go -- "
+        "{count} fichier(s) sélectionné(s) dépassent cette taille et ne pourront pas être déplacés."
+    ),
+    "doublons_simulation_banner": "Mode simulation actif -- rien ne sera déplacé.",
+    "doublons_auto_selection_banner": "Sélection automatique : vérifiez avant de déplacer.",
+    "doublons_select_all_button": "Tout cocher",
+    "doublons_select_none_button": "Tout décocher",
+    "doublons_keep_french_european_button": "Ne garder que les versions françaises et européennes",
+    "doublons_summary": (
+        "{files} fichier(s) analysé(s) -- {exact} groupe(s) de copies identiques, "
+        "{versions} groupe(s) de versions différentes."
+    ),
+    "doublons_empty": "Aucun doublon trouvé.",
+    "doublons_selection_summary": "{count} fichier(s) sélectionné(s) -- {size} récupérables",
+    "doublons_move_all_button": "Écarter les {count} fichiers sélectionnés ({size})",
+    "doublons_group_exact_title": "Copies identiques",
+    "doublons_exact_group_hash_label": "SHA-256 : {hash}",
+    "doublons_exact_group_identical_notice": (
+        "Contenu strictement identique (même empreinte SHA-256), malgré des noms différents."
+    ),
+    "doublons_move_this_one": "Écarter celui-ci",
+    "doublons_move_selected_button": "Écarter la sélection",
+    "doublons_excluded_title": "Groupes exclus -- fichier lié introuvable",
+    "doublons_excluded_entry": "{manifest} : {missing} introuvable(s)",
+    "doublons_confirm_title": "Écarter ces doublons ?",
+    "doublons_confirm_message": (
+        "{count} fichier(s) ({size}) seront déplacés dans un dossier _doublons/ -- "
+        "pas supprimés, tu peux les remettre à leur place plus tard si besoin."
+    ),
+    "doublons_confirm_message_simulation": (
+        "Simulation : {count} fichier(s) ({size}) seraient déplacés dans un dossier "
+        "_doublons/ -- rien ne sera réellement touché."
+    ),
+    "doublons_confirm_button": "Écarter",
+    "doublons_confirm_button_simulation": "Simuler",
+    "doublons_confirm_cancel": "Annuler",
+    "doublons_undo_confirm_title": "Tout annuler ?",
+    "doublons_undo_confirm_message": (
+        "Tous les fichiers déplacés dans _doublons/ seront remis à leur emplacement d'origine."
+    ),
+    "doublons_undo_confirm_button": "Tout annuler",
+    # Échec réel d'un fichier précis en cours de déplacement (§ demandé
+    # explicitement, points 3 et 4) -- fenêtre de confirmation dédiée
+    # (réutilise `DoublonsRiskConfirmDialog`, `set_title`), boutons «
+    # Continuer »/« Annuler » déjà génériques de cette même fenêtre :
+    # « Continuer » ignore ce fichier et poursuit, « Annuler » arrête le
+    # lot entier (ce qui a déjà été déplacé le reste, jamais annulé).
+    "doublons_file_error_title": "Impossible de déplacer ce fichier",
+    "doublons_file_error_message": "{path}\n\n{reason}\n\nIgnorer ce fichier et continuer avec les suivants ?",
+    "doublons_file_error_message_copy_succeeded": (
+        "{path}\n\nLa copie a réussi, mais l'original n'a pas pu être supprimé : {reason}\n\n"
+        "Ignorer ce fichier et continuer avec les suivants ?"
+    ),
+    # Raisons traduites (`move.py::REASON_*`, § demandé point 3) -- jamais
+    # le message brut de l'exception, réservé au journal (§5 vocabulaire).
+    "doublons_move_reason_access_denied": "accès refusé.",
+    "doublons_move_reason_read_only": "la destination est protégée en écriture (carte ou disque en lecture seule).",
+    "doublons_move_reason_path_too_long": "le chemin est trop long.",
+    "doublons_move_reason_drive_removed": "le disque semble avoir été débranché ou n'est plus accessible.",
+    "doublons_move_reason_insufficient_space": "espace insuffisant sur le disque de destination.",
+    "doublons_move_reason_source_missing": (
+        "le fichier n'est plus à cet endroit (déplacé ou supprimé depuis l'analyse -- relance l'analyse)."
+    ),
+    # Seule raison qui montre l'erreur système réelle : sans elle,
+    # « raison inconnue » ne permet aucun diagnostic (signalé).
+    "doublons_move_reason_unknown": "erreur système inattendue :\n{detail}",
+    "doublons_file_error_apply_to_following": "Appliquer ce choix aux fichiers suivants",
+    "doublons_partial_move_reason_line": "\n• {count} : {reason}",
+    "doublons_partial_move_completed": (
+        "{moved} fichier(s) déplacé(s), {skipped} ignoré(s) après échec -- voir le journal pour le détail."
+    ),
+    # Sauvegarde système lancée depuis l'accueil assisté (§4.3) : reste
+    # entièrement dans l'habillage assisté (WizardStepPanel), jamais
+    # l'écran expert -- correctif d'un défaut de parcours signalé (bascule
+    # vers le mode expert pendant l'opération, sans proposition de suite
+    # une fois terminée).
+    "assisted_backup_system_running_title": "Sauvegarde du système en cours",
+    "assisted_backup_system_running_instruction": "Ne débranche pas ta carte pendant la sauvegarde.",
+    "assisted_backup_system_done_title": "Sauvegarde terminée",
+    "assisted_backup_system_done_instruction": "Que veux-tu faire maintenant ?",
+    # Mécanisme ad-hoc généralisé (§5, refonte menu de tuiles) -- même
+    # principe que les paires backup_system ci-dessus, pour chacun des
+    # autres job_keys déclenchables depuis une tuile de l'accueil assisté.
+    # "flash" réutilise volontairement les paires "assisted_prepare_card_
+    # done_*" existantes (ci-dessous) : même situation finale ("carte
+    # préparée"), qu'on y soit arrivé via cette tuile ou via « Préparer une
+    # carte avec cette sauvegarde ».
+    "assisted_backup_running_title": "Sauvegarde de la carte en cours",
+    "assisted_backup_running_instruction": "Ne débranche pas ta carte pendant la sauvegarde.",
+    "assisted_backup_done_title": "Sauvegarde terminée",
+    "assisted_backup_done_instruction": "Que veux-tu faire maintenant ?",
+    "assisted_flash_running_title": "Installation du système en cours",
+    "assisted_flash_running_instruction": "Ne débranche pas ta carte pendant l'installation.",
+    "assisted_reset_card_running_title": "Remise à zéro de la carte en cours",
+    "assisted_reset_card_running_instruction": "Ne débranche pas ta carte pendant l'opération.",
+    "assisted_reset_card_done_title": "Carte remise à zéro",
+    "assisted_reset_card_done_instruction": "Que veux-tu faire maintenant ?",
+    "assisted_eject_running_title": "Éjection de la carte en cours",
+    "assisted_eject_running_instruction": "Ne débranche pas ta carte.",
+    "assisted_eject_done_title": "Carte éjectée",
+    "assisted_eject_done_instruction": "Tu peux retirer ta carte en toute sécurité.",
+    "assisted_prepare_card_button": "Préparer une carte avec cette sauvegarde",
+    "assisted_return_home_button": "Revenir à l'accueil",
+    "assisted_prepare_card_choose_device_title": "Choisis la carte à préparer",
+    "assisted_prepare_card_choose_device_instruction": (
+        "Branche la carte SD neuve que tu veux préparer avec cette sauvegarde."
+    ),
+    "assisted_prepare_card_done_title": "Carte préparée",
+    "assisted_prepare_card_done_instruction": "Que veux-tu faire maintenant ?",
+    # Panneau d'étape du mode assisté (WizardStepPanel) -- une étape à la
+    # fois, consigne claire + bouton pour continuer (§5 mode assisté).
+    "wizard_continue": "Continuer",
+    "wizard_resume": "Reprendre",
+    "wizard_cancel": "Annuler",
+    "wizard_status_waiting": "En attente de ta carte…",
+    "wizard_status_device_found": "Carte reconnue : {display}",
+    "wizard_status_same_card": "C'est la même carte — insère la carte neuve, pas l'ancienne.",
+    # Bug corrigé, confirmé sur du vrai matériel : ni le contenu (empreinte
+    # de BOOT indisponible) ni la taille ne peuvent alors prouver qu'il
+    # s'agit d'une carte différente -- et le chemin de périphérique ne peut
+    # pas servir de repli non plus sur Windows (certains lecteurs gardent
+    # le même chemin quelle que soit la carte insérée, §4.4). Plutôt qu'un
+    # blocage silencieux et définitif (l'approche précédente, qui bloquait
+    # indéfiniment sur ce type de lecteur, sans issue), `SameCardUnverified
+    # Dialog` (screens.py) exige une confirmation explicite -- ce statut
+    # s'affiche pendant qu'elle est ouverte.
+    "wizard_status_confirmation_needed": "Confirmation nécessaire — vérifie la fenêtre affichée.",
+    "wizard_status_multiple_candidates": "Plusieurs cartes détectées — choisis la bonne.",
+    # Journal de bord (§5 vocabulaire : le détail technique n'apparaît
+    # que là) -- combien de périphériques retenus/écartés à un sondage du
+    # mode assisté, avec la raison de chaque exclusion.
+    "wizard_diagnostic_summary": "Détection : {accepted} carte(s) retenue(s), {rejected} écartée(s)",
+    # Cycle de vie du minuteur de sondage automatique (`_start_wizard_poll_
+    # timer`/`_stop_wizard_poll_timer`), journalisé une fois par transition
+    # réelle (jamais à chaque relance interne pendant l'attente, §5 mode
+    # assisté) -- rend visible si le sondage démarre bien et reste actif,
+    # plutôt que de laisser deviner son état.
+    "wizard_poll_started": "Sondage automatique de la carte démarré.",
+    "wizard_poll_stopped": "Sondage automatique de la carte arrêté.",
+    # Chien de garde (§5 mode assisté, `_check_wizard_poll_stall`) : signale
+    # un sondage automatique resté silencieux anormalement longtemps et le
+    # relance -- une seule ligne par épisode de ralentissement, jamais
+    # répétée tant qu'il persiste (`_wizard_poll_stall_warned`).
+    "wizard_poll_stall_detected": (
+        "Le sondage automatique de la carte semblait interrompu depuis {seconds} s — relancé."
+    ),
+    "wizard_step1_title": "1. Insère ta carte SD d'origine",
+    "wizard_step1_instruction": "Branche l'ancienne carte SD de ta console sur ton ordinateur.",
+    "wizard_step2_title": "2. Copie de ta carte sur l'ordinateur",
+    "wizard_step2_instruction": "Choisis ce que tu veux sauvegarder, puis on l'enregistre sur ton ordinateur.",
+    # Étape 2 (§5 mode assisté, parcours de clonage) : choix entre copie
+    # complète et système seul, avant même d'ouvrir la fenêtre Choix du
+    # fichier -- image disque brute dans les deux cas, aucune opération au
+    # niveau fichier, ce qui rend ce choix indépendant du firmware
+    # installé sur la carte source.
+    "wizard_backup_kind_title": "Que veux-tu sauvegarder ?",
+    "wizard_backup_kind_full": "Copie complète",
+    "wizard_backup_kind_full_desc": "L'écran, les réglages et tous tes jeux. Jusqu'à environ {size}.",
+    "wizard_backup_kind_system": "Système seul, sans les jeux",
+    "wizard_backup_kind_system_desc": "L'écran et les réglages seulement — un fichier bien plus petit.",
+    "wizard_create_image_size_hint": "Taille maximale de la copie : environ {size}.",
+    # Remise à zéro (§4.3 bis, mode expert uniquement) -- choix de
+    # l'étiquette du volume avant la fenêtre Confirmation, valeur par
+    # défaut simple toujours remplaçable.
+    # Carte SF3000 plus grande que l'image (`WholeCardChoiceDialog`, mode
+    # expert) : la durée en plus et l'espace perdu, annoncés avant de choisir.
+    "whole_card_title": "Comment installer ce système ?",
+    "whole_card_instruction": (
+        "Ce fichier vient d'une carte de console SF3000, et ta carte est plus grande que lui. "
+        "Choisis comment l'utiliser."
+    ),
+    "whole_card_option_whole": "Utiliser toute la carte (recommandé)",
+    "whole_card_option_whole_desc": (
+        "Copie les fichiers un par un sur un seul espace qui occupe toute la carte : les {card} "
+        "seront utilisables pour tes jeux. Plus long : environ {extra} minutes de plus qu'une "
+        "copie brute."
+    ),
+    "whole_card_option_raw": "Copie brute de l'image",
+    "whole_card_option_raw_desc": (
+        "Plus rapide, mais seuls les {image} de l'image seront utilisables : les {remaining} "
+        "restants de la carte resteront inutilisables par la console."
+    ),
+    "whole_card_verify": "Vérifier chaque fichier après la copie (recommandé, environ {minutes} minutes de plus)",
+    "whole_card_continue": "Continuer",
+    "whole_card_wizard_log": (
+        "Carte de console SF3000 : toute la carte sera utilisée (copie des fichiers un par un, "
+        "puis vérification de chacun). Durée estimée : environ {minutes} minutes."
+    ),
+    "whole_card_marker_found": (
+        "« {display} » contient une copie interrompue : la carte est incomplète. "
+        "Relance l'installation pour la refaire depuis le début."
+    ),
+    "reset_card_label_title": "Nom de la carte",
+    "reset_card_label_instruction": (
+        "Choisis le nom qui s'affichera pour cette carte une fois vide — "
+        "tu peux garder celui-ci."
+    ),
+    "reset_card_label_continue": "Continuer",
+    # Choix du système de fichiers (§4.3 bis) -- ajouté suite à un
+    # signalement (carte de SF3000HD inutilisable après un formatage exFAT,
+    # vraisemblablement pour TreeFrogUI : la carte d'origine de cette
+    # console est en exFAT). exFAT reste le choix par défaut (le plus
+    # courant).
+    "reset_card_filesystem_title": "Comment formater la carte ?",
+    "reset_card_filesystem_exfat": "exFAT — recommandé",
+    "reset_card_filesystem_exfat_desc": "Accepte les gros fichiers. Fonctionne avec la plupart des consoles récentes.",
+    "reset_card_filesystem_fat32": "FAT32",
+    "reset_card_filesystem_fat32_desc": "Pour les consoles anciennes qui ne lisent pas l'exFAT.",
+    "reset_card_filesystem_fat32_note": "En FAT32, un seul fichier ne peut pas dépasser 4 Go.",
+    # Vérification préalable, jamais après coup (§4.3 bis) -- en pratique
+    # ne se déclenche jamais sur une vraie carte SD (le seuil se situe
+    # autour de quelques dizaines de Mio), garde-fou par principe.
+    "reset_card_fat32_impossible_warning": (
+        "Le FAT32 n'est pas possible sur une carte aussi petite. Choisis exFAT à la place."
+    ),
+    "wizard_image_created_log": "Image créée : {path}",
+    "wizard_step3_title": "3. Insère ta carte neuve",
+    "wizard_step3_instruction": "Branche maintenant la carte neuve à préparer.",
+    # Éjection de la carte source, en tout début de l'étape 3 -- avant même
+    # d'afficher la consigne d'insertion ci-dessus (§5 mode assisté,
+    # correctif : retirer la carte pendant qu'elle est encore montée
+    # risquait de corrompre des données).
+    "wizard_ejecting_source": "Éjection de ta carte d'origine…",
+    "wizard_source_ejected": "Tu peux maintenant retirer ta carte d'origine en toute sécurité.",
+    "wizard_step4_title": "4. Installation sur ta carte neuve",
+    "wizard_step4_instruction": "On installe ta sauvegarde sur ta carte neuve.",
+    "wizard_step5_title": "5. Éjection",
+    "wizard_step5_instruction": "On retire ta carte neuve en toute sécurité — elle est prête.",
+    "wizard_finished": "Ta carte est prête ! Tu peux la retirer et la mettre dans ta console.",
+    # Chemin de destination annoncé dès le début de la copie (étapes A/B du
+    # mode expert, §5 mode assisté historiquement) -- pas seulement à la
+    # fin, journal de bord uniquement (§5 vocabulaire).
+    "wizard_archive_destination_log": "Destination : {path}",
+    "boot_sets_title": "Choisir l'écran de la console",
+    "boot_sets_hint": "Si ta console reste sur un écran noir ou figé, essaie un autre écran de cette liste. Ceux déjà essayés sont barrés. Seul le démarrage de ta console dira si c'est le bon.",
+    "boot_sets_empty": "Cette carte ne propose pas d'écrans de rechange.",
+    "boot_sets_busy": "Lecture de la carte…",
+    "boot_sets_trial_tried": "essayé le {date}",
+    "boot_sets_trial_failed": "n'a pas marché ({date})",
+    "boot_sets_trial_booted": "a démarré ({date})",
+    "boot_sets_import_button": "Utiliser des fichiers d'écran de mon ordinateur…",
+    "boot_sets_import_choose": "Choisis le dossier qui contient les fichiers d'écran de ta console (fichiers .dtb)",
+    "boot_sets_imported": "Écran ajouté en tête de liste. Choisis-le, puis « Essayer cet écran ».",
+    "boot_sets_imported_log": "Fichiers d'écran de l'ordinateur posés sur la carte, renommés pour le système installé : proposés en tête de liste.",
+    "boot_sets_error_import_no_dtb": "Ce dossier ne contient aucun fichier d'écran (.dtb). Choisis le dossier où se trouvent directement ces fichiers, par exemple la copie du BOOT de ta carte d'origine.",
+    "boot_sets_error_import_unsupported": "Le système installé sur cette carte ne choisit pas son écran avec ces fichiers (par exemple ROCKNIX) : ils ne peuvent pas servir ici.",
+    "error_import_no_dtb": "Ce dossier ne contient aucun fichier d'écran (.dtb).",
+    "error_import_unsupported": "Le système installé sur cette carte n'utilise pas ces fichiers d'écran.",
+    "boot_sets_original_screen": "Écran d'origine de cette console (celui qui la faisait démarrer)",
+    "screen_backup_saved_log": "Fichiers d'écran de ta carte mis de côté sur l'ordinateur avant l'écriture : ils seront proposés en premier dans « Choisir l'écran de la console ».",
+    "screen_backup_already_log": "Fichiers d'écran de cette carte déjà mis de côté lors d'un flash précédent : ils seront proposés en premier dans « Choisir l'écran de la console ».",
+    "screen_backup_none_log": "Aucun fichier d'écran à mettre de côté sur cette carte (carte neuve ou système sans ces fichiers).",
+    "screen_backup_failed_log": "Fichiers d'écran de cette carte illisibles : rien n'a été mis de côté. L'écriture continue normalement.",
+    "boot_sets_current": "en place sur la carte",
+    "boot_sets_try_button": "Essayer cet écran",
+    "boot_sets_restore_button": "Revenir à l'écran d'origine",
+    "boot_sets_close": "Fermer",
+    "boot_sets_cancel": "Annuler",
+    "boot_sets_confirm_text": "Mettre l'écran « {name} » sur la carte ? Les fichiers actuels sont gardés sur la carte : tu pourras revenir en arrière.",
+    "boot_sets_confirm_yes": "Oui, essayer",
+    "boot_sets_restore_confirm": "Remettre sur la carte l'écran qu'elle avait au départ ?",
+    "boot_sets_done_text": "C'est fait : l'écran « {name} » est sur la carte. Éjecte-la, remets-la dans la console et allume-la. Si l'écran reste noir ou figé, remets la carte ici pour en essayer un autre.",
+    "boot_sets_eject": "Éjecter la carte",
+    "boot_sets_outcome_question": "La dernière fois, tu as essayé l'écran « {name} ». Est-ce que la console a démarré ?",
+    "boot_sets_outcome_booted": "Oui, elle a démarré",
+    "boot_sets_outcome_failed": "Non, l'écran est resté noir ou figé",
+    "boot_sets_outcome_later": "Je n'ai pas encore essayé",
+    "boot_sets_applied_log": "Écran « {name} » mis sur la carte.",
+    "boot_sets_restored_log": "Écran d'origine remis sur la carte.",
+    "boot_sets_ejected": "Carte éjectée, tu peux la retirer.",
+    "boot_sets_eject_failed": "La carte n'a pas pu être éjectée. Utilise « Retirer le périphérique » de Windows avant de la retirer.",
+    "boot_sets_error_no_boot": "Impossible de lire la carte. Vérifie qu'elle est bien branchée et que la console l'a déjà démarrée au moins une fois avec ce système.",
+    "boot_sets_error_access_denied": "Ton ordinateur refuse de lire cette carte sans autorisation.",
+    "boot_sets_error_elevation_refused": "Il faut accepter la demande d'autorisation de Windows pour lire cette carte.",
+    "boot_sets_error_unknown_set": "Cet écran n'est plus sur la carte. La liste a été relue.",
+    "boot_sets_error_originals_missing": "La copie de l'écran d'origine est incomplète : rien n'a été modifié.",
+    "boot_sets_error_io": "La carte n'a pas pu être lue ou modifiée. Rebranche-la et réessaie.",
+    "assisted_tile_not_booting": "Ma console ne démarre plus",
+    "assisted_tile_not_booting_desc": "Écran noir, figé, ou plus rien : on remet un système qui marche, étape par étape.",
+    "assisted_tile_new_card": "Préparer une carte neuve",
+    "assisted_tile_backup_working": "Sauvegarder ce qui marche",
+    "journey_title": "Remettre ta console en marche",
+    "journey_close": "Fermer",
+    "journey_start_title": "Qu'est-ce qui se passe ?",
+    "journey_start_text": "Choisis ce qui ressemble le plus à ta situation.",
+    "journey_start_reinstall": "Je veux remettre un système qui marche sur la carte",
+    "journey_start_frozen": "Je viens de remettre un système, mais l'écran reste noir ou figé",
+    "journey_console_title": "Quelle console as-tu ?",
+    "journey_console_text": "Mets la carte de la console dans l'ordinateur et clique sur « Lire la carte ». Si elle ne se lit pas, ouvre la console : une référence est imprimée sur la carte électronique à l'intérieur.",
+    "journey_console_read_card": "Lire la carte",
+    "journey_console_reading": "Lecture de la carte…",
+    "journey_console_unreadable": "La carte ne dit pas quelle console c'est. Tape la référence imprimée dans la console, ou choisis « Je ne sais pas ».",
+    "journey_console_reference_label": "Référence imprimée dans la console :",
+    "journey_console_reference_example": "par exemple G80CA-MB V1.2-20250422",
+    "journey_console_reference_continue": "Continuer avec cette référence",
+    "journey_console_unknown": "Je ne sais pas",
+    "journey_system_title": "Le système à mettre sur la carte",
+    "journey_system_origin": "C'est une console d'origine : le système conseillé est dArkOSen. Ouvre la page de téléchargement, prends la dernière version et ses deux fichiers .7z.001 et .7z.002, extrais-les avec 7-Zip pour obtenir le fichier .img, puis reviens ici et choisis-le. Après l'installation, si l'écran reste noir, ouvre « Choisir l'écran de la console ».",
+    "journey_system_clone": "C'est une console « clone » : le système conseillé est ArkOS-K36. Il n'est plus mis à jour depuis mars 2026, mais reste le seul prévu pour les clones. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz, sur Google Drive, Mediafire ou MEGA), puis reviens ici et choisis le fichier.",
+    "journey_system_ambiguous": "Cette référence existe à la fois sur des consoles d'origine et sur des clones : elle ne suffit pas à trancher. Essaie d'abord dArkOSen : il a fait redémarrer une R36S avec cette référence. Prends la dernière version et ses deux fichiers .7z.001 et .7z.002, extrais-les avec 7-Zip pour obtenir le fichier .img, puis reviens ici et choisis-le. Si la console ne démarre pas, c'est sans doute un clone : prends alors ArkOS-K36 (bouton ci-dessous).",
+    "journey_system_unknown": "Sans savoir quelle console c'est, le plus sûr est ArkOS-K36 : il contient plusieurs écrans de rechange, il a de bonnes chances de démarrer sur la plupart des consoles. Il n'est plus mis à jour depuis mars 2026. Ouvre la page de téléchargement et prends la version « K36 and Similar Clones » (fichier en .img.xz), puis reviens ici et choisis le fichier.",
+    "journey_system_open_page": "Ouvrir la page de téléchargement",
+    "journey_system_open_clone_page": "Ma console est un clone : page d'ArkOS-K36",
+    "journey_system_choose_file": "J'ai téléchargé le fichier : le choisir",
+    "journey_file_filter": "Fichiers du système de la console",
+    "journey_flash_done_title": "La carte est prête",
+    "journey_flash_done_instruction": "Mets la carte dans la console et allume-la. Le premier démarrage peut prendre quelques minutes. Si l'écran reste noir ou figé, remets la carte dans l'ordinateur, choisis « Ma console ne démarre plus », puis « l'écran reste noir ou figé ».",
+    "card_slow_read_warning": (
+        "Ta carte SD lit très lentement (environ {speed}/s, une bonne carte dépasse 50 Mo/s). "
+        "Ce n'est pas un problème du logiciel : les cartes fournies avec les consoles sont souvent "
+        "lentes, parfois contrefaites, et peuvent abîmer les données. Pour ta prochaine carte, "
+        "prends une carte de marque (SanDisk, Samsung, Kingston…)."
+    ),
+    # Fenêtre Choix du fichier, flash uniquement (§5 mode assisté, étape 5)
+    # -- l'image n'est pas hébergée sur GitHub (Mega, Google Drive,
+    # OneDrive, torrent), seul le lien vers la page des releases est ouvert.
+    "file_releases_button": "Voir les versions disponibles en ligne",
+    # Catalogue de firmwares, flash uniquement (§4.6, mode expert --
+    # identify/firmware_catalog.py). ROCKNIX est la seule entrée à
+    # téléchargement automatique (images attachées directement aux
+    # releases GitHub, file_rocknix_download_button, identify/rocknix.py)
+    # ; toutes les autres ouvrent leur page de releases dans le
+    # navigateur (file_releases_button) -- vérifié individuellement pour
+    # chacune avant l'ajout du catalogue, aucune n'a d'assets exploitables
+    # directement comme ROCKNIX.
+    "firmware_status_maintained": "Maintenu",
+    "firmware_status_archived": "Archivé",
+    "firmware_status_experimental": "Expérimental",
+    "file_firmware_arkos_title": "ArkOS / dArkOS",
+    "file_firmware_arkos_desc": (
+        "Le système de référence pour la R36S, qui annonce aussi prendre en "
+        "charge de nombreuses consoles clones. Mis à jour par la communauté (dArkOS)."
+    ),
+    # dArkOSen (identify/releases.py::DARKOSEN_R36S_RELEASES_URL) -- les
+    # trois points qu'un débutant découvrirait trop tard : consoles
+    # d'origine seulement, archive à extraire avant, modèle à choisir après.
+    "file_firmware_darkosen_title": "dArkOSen",
+    "file_firmware_darkosen_desc": (
+        "Conseillé pour une R36S d'origine. Version enrichie de dArkOS, mise à jour environ toutes "
+        "les deux semaines. Uniquement pour "
+        "les R36 d'origine (R36S, R36S Plus, R36H, R36H ProMax) : ne fonctionne sur aucune console "
+        "clone. Le téléchargement se fait en deux fichiers .7z.001 et .7z.002 : extrais-les avec "
+        "7-Zip pour obtenir le fichier .img. Après l'installation, choisis le modèle de ta console "
+        "(outil fourni sur la carte)."
+    ),
+    "file_firmware_rocknix_title": "ROCKNIX",
+    "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
+    "file_firmware_knulli_title": "KNULLI",
+    "file_firmware_knulli_desc": "Système complet et récent, image faite pour la vraie R36S (pas pour les clones). Pas encore essayé sur une R36S avec R36S Studio. Licence non commerciale : usage commercial interdit.",
+    "knulli_r36s_first_boot_note": "Branche la console sur secteur pour le premier démarrage, même si sa batterie est chargée, et laisse l'installation se terminer sans l'éteindre : elle peut prendre plusieurs minutes et redémarrer d'elle-même. Conseil : retire la deuxième carte (TF2) au premier démarrage. Si l'écran reste noir, remets la carte dans l'ordinateur : « Choisir l'écran de la console » propose l'écran d'origine de ta console.",
+    "knulli_notes_device_log": "Notes de version de KNULLI : ce fichier est indiqué pour « {device} ».",
+    "knulli_notes_missing_log": "Notes de version de KNULLI : ce fichier n'apparaît pas dans leur tableau des consoles (vérification indicative seulement).",
+    "knulli_download_success": "KNULLI a été téléchargé et vérifié : {path}",
+    "knulli_clone_title": "Console clone détectée",
+    "knulli_clone_text": "Ta carte vient d'une console clone de la R36S (carte mère différente). L'image KNULLI est faite pour la vraie R36S : sur un clone, la console risque de rester sur un écran noir. Tu peux écrire quand même : ta carte actuelle sera effacée, mais ses fichiers d'écran sont mis de côté sur l'ordinateur.",
+    "knulli_clone_write_anyway": "Écrire quand même",
+    "knulli_clone_log": "Console clone détectée sur la carte : KNULLI est fait pour la vraie R36S.",
+    "knulli_console_unknown_log": "Console d'origine ou clone : pas déterminé d'après la carte. KNULLI est fait pour la vraie R36S.",
+    "knulli_console_ambiguous_log": "Console d'origine ou clone : la carte ne permet pas de trancher. KNULLI est fait pour la vraie R36S.",
+    "knulli_console_unreadable_log": "Rien de lisible sur la carte avant l'écriture (carte neuve ou illisible) : impossible de savoir si la console est un clone. KNULLI est fait pour la vraie R36S.",
+    # EmuELEC (§4.6) -- seul fait vérifié : il démarre sur un clone réel
+    # (identify/__init__.py::CLONE_DTB_FILENAMES). L'ancienne mention
+    # « ArkOS et ROCKNIX n'y démarrent pas » est retirée : dArkOS prend en
+    # charge de nombreux clones (README de southoz/dArkOSRE-R36, vérifié
+    # le 2026-09-25). Pas de correspondance d'assets par SoC vérifiée à ce
+    # jour pour la R36S/RK3326, contrairement à ROCKNIX.
+    "file_firmware_emuelec_title": "EmuELEC",
+    "file_firmware_emuelec_desc": "Une autre option pour les consoles clones, déjà testée avec succès sur l'une d'elles.",
+    # AmberELEC/MinUI/R36Droid/andr36oid (§4.6) -- ajoutés au catalogue
+    # sans compatibilité R36S officiellement confirmée par leur projet
+    # (vérifié sur leurs pages de releases avant l'ajout) : descriptions
+    # honnêtes sur cette incertitude plutôt qu'une promesse non vérifiée.
+    "file_firmware_amberelec_title": "AmberELEC",
+    "file_firmware_amberelec_desc": (
+        "Conçu pour la même famille de puce (RK3326) que la R36S, "
+        "compatibilité R36S non officiellement confirmée."
+    ),
+    "file_firmware_minui_title": "MinUI",
+    "file_firmware_minui_desc": (
+        "Interface minimaliste. Portage communautaire pour R36S, distinct du projet officiel."
+    ),
+    "file_firmware_r36droid_title": "R36Droid (Android)",
+    "file_firmware_r36droid_desc": "Portage communautaire d'Android (LineageOS) pour R36S/RK3326.",
+    "file_firmware_andr36oid_title": "andr36oid (Android)",
+    "file_firmware_andr36oid_desc": "Autre portage communautaire d'Android (LineageOS) pour R36S/RK3326.",
+    # Avertissement après un flash Android (§4.6) : contrairement au reste
+    # de l'interface (§5, jamais de jargon), ce message nomme volontairement
+    # le vrai texte de la fenêtre Windows -- c'est une vraie fenêtre système
+    # à laquelle réagir correctement, pas la description d'une action de
+    # l'app (même principe que `HelpDialog`, §3).
+    "flash_android_format_prompt_warning": (
+        "Windows va sans doute proposer de formater ta carte (« Vous devez formater le "
+        "disque… »), parfois plusieurs fois de suite — clique sur Annuler à chaque fois, c'est normal : "
+        "Windows ne sait simplement pas lire le système Android que tu viens d'installer, "
+        "ce n'est pas un problème avec ta carte."
+    ),
+    # Constaté en usage réel : le même genre de boîte apparaît aussi après
+    # un flash non-Android (ArkOS/ROCKNIX/EmuELEC/AmberELEC/MinUI, une
+    # seule partition ext4 illisible plutôt que plusieurs) -- message
+    # générique, sans détailler un mécanisme (écrans de rechange...) propre
+    # à Android uniquement.
+    "flash_format_prompt_warning_generic": (
+        "Windows va peut-être proposer de formater la carte — clique sur Annuler, c'est normal."
+    ),
+    # Constaté en usage réel : une image Android démarre parfois sur un
+    # écran figé si l'écran choisi ne correspond pas à celui de la console
+    # -- le mécanisme de rechange existe déjà sur le BOOT (dossier "Panels"),
+    # mais rien ne l'indiquait dans l'app avant ce message (un débutant en
+    # aurait conclu que le logiciel ne marche pas).
+    "flash_android_panel_mismatch_warning": (
+        "Si l'écran reste noir ou figé au démarrage, ouvre le lecteur BOOT de la carte "
+        "(Windows l'affiche comme un lecteur à part, nommé BOOT) : un dossier « Panels » "
+        "contient un sous-dossier par type d'écran, chacun avec des fichiers .dtb à copier "
+        "à la racine du lecteur BOOT pour changer d'écran. Plusieurs essais "
+        "sont parfois nécessaires — et rien ne garantit qu'un de ces écrans corresponde à "
+        "ta console."
+    ),
+    # dArkOSen (identify/firmware_catalog.py::post_flash_log_key) -- son
+    # README : « use SELECT MODEL.bat to select your model », outil placé
+    # sur la partition de démarrage. Nomme le vrai fichier, comme
+    # `flash_android_panel_mismatch_warning` nomme le dossier « Panels ».
+    "flash_darkosen_model_selection_note": (
+        "Avant de démarrer la console : rebranche la carte sur un PC Windows, ouvre le lecteur "
+        "de la carte qui contient « SELECT MODEL.bat » et lance-le pour choisir le modèle de ta "
+        "console. Sans cette étape, dArkOSen peut mal fonctionner."
+    ),
+    "file_manual_download_hint": (
+        "Le fichier téléchargé peut être une archive (.7z, .zip…) : décompresse-la "
+        "d'abord si besoin, puis choisis ici le fichier .img qu'elle contient."
+    ),
+    "file_rocknix_download_button": "Télécharger la dernière version",
+    # Fenêtre de choix entre plusieurs variantes ROCKNIX (§5, étape de
+    # flash) -- une vraie release peut en publier plusieurs (ex. -a/-b),
+    # jamais de sélection automatique entre elles.
+    "rocknix_variant_consoles": "Pour : {consoles}",
+    "rocknix_variant_r36s": "★ Conseillée pour une R36S",
+    "rocknix_variant_title": "Choisis une version de ROCKNIX",
+    "rocknix_variant_hint": (
+        "Plusieurs versions sont disponibles, chacune pour d'autres consoles. "
+        "Pour une R36S, prends celle marquée « conseillée pour une R36S »."
+    ),
+    # Choix du périphérique
+    "device_title": "Choisis ta carte SD",
+    "device_refresh": "Rafraîchir",
+    "device_empty": "Aucune carte SD détectée. Branche-la puis clique sur Rafraîchir.",
+    "device_next": "Suivant",
+    "device_back": "Retour",
+    # Choix du fichier
+    "file_title_backup": "Où enregistrer la sauvegarde ?",
+    "file_title_backup_system": "Où enregistrer la sauvegarde du système ?",
+    "file_title_flash": "Choisis le fichier image",
+    "file_title_extract_easyroms": "Où enregistrer la sauvegarde des jeux ?",
+    "file_title_copy_games": "Choisis la sauvegarde de jeux à réinjecter",
+    "file_archive_empty": "Aucune sauvegarde trouvée sur cet ordinateur. Utilise « Parcourir… » pour en choisir une.",
+    "file_destination_hint": "Un dossier daté sera créé automatiquement à l'intérieur de cet emplacement.",
+    "file_browse": "Parcourir…",
+    "file_next": "Suivant",
+    "file_back": "Retour",
+    # Confirmation
+    "confirm_title": "Attention",
+    "confirm_checkbox": "Je comprends que toutes les données de cette carte seront effacées",
+    "confirm_erase": "Toutes les données de « {display} » ({size_go:.1f} Go) seront définitivement effacées.",
+    "confirm_go": "Effacer et écrire",
+    "confirm_cancel": "Annuler",
+    # SameCardUnverifiedDialog (§5 mode assisté, étape 3) : ni le contenu ni
+    # la taille de la carte détectée ne prouvent qu'il s'agit d'une carte
+    # différente de la carte d'origine -- garde-fou le plus critique du
+    # parcours (écrire par erreur sur la carte source détruirait la seule
+    # copie fonctionnelle de la console), donc une confirmation explicite
+    # plutôt qu'un passage silencieux. Bug corrigé, confirmé sur du vrai
+    # matériel : remplace un repli sur le chemin de périphérique qui ne
+    # fonctionnait pas sur certains lecteurs Windows (chemin identique quelle
+    # que soit la carte insérée).
+    "same_card_unverified_title": "Confirme qu'il s'agit d'une carte différente",
+    "same_card_unverified_message": (
+        "Assure-toi d'avoir bien retiré la carte d'origine : y écrire par erreur "
+        "détruirait la seule copie fonctionnelle de ta console.\n\n"
+        "Impossible de vérifier automatiquement que « {display} » ({size_go:.1f} Go) "
+        "est bien une carte différente de la carte d'origine — elle n'a pas de "
+        "système lisible pour comparer son contenu, et la taille seule ne suffit "
+        "pas à le prouver. Si c'est une carte neuve ou vierge, c'est normal."
+    ),
+    "same_card_unverified_checkbox": "Je confirme qu'il s'agit bien d'une carte différente de la carte d'origine.",
+    "same_card_unverified_confirm": "Continuer",
+    # Journal de bord (colonne droite, §5 -- remplace les anciens écrans
+    # Exécution et Résultat) : en-tête au repos ou pendant une opération.
+    "log_header_idle": "En attente",
+    "log_header_active": "OPÉRATION ACTIVE — {title}",
+    "execute_title_backup": "Sauvegarde en cours…",
+    "execute_title_backup_system": "Sauvegarde du système en cours…",
+    "execute_title_flash": "Écriture en cours…",
+    "execute_title_extract_easyroms": "Copie des jeux en cours…",
+    "execute_title_copy_games": "Copie des jeux en cours…",
+    "execute_title_reset_card": "Remise à zéro de la carte en cours…",
+    "execute_title_list_rocknix": "Recherche des versions ROCKNIX en ligne…",
+    "execute_title_download_rocknix": "Téléchargement de ROCKNIX en cours…",
+    "rocknix_download_success": "La dernière version de ROCKNIX a été téléchargée : {path}",
+    "execute_title_download_firmware": "Téléchargement de {firmware} en cours…",
+    "log_open_page": "Ouvrir la page",
+    "catalogue_open_page_hint": "Tu peux aussi télécharger le système toi-même depuis sa page officielle : bouton « Ouvrir la page ».",
+    "personal_use_title": "Usage personnel uniquement",
+    "personal_use_text": (
+        "{firmware} est distribué pour un usage personnel uniquement : ses auteurs interdisent de le "
+        "revendre, de le préinstaller sur des consoles vendues ou de le redistribuer sans leur "
+        "permission. R36S Studio le télécharge depuis sa source officielle, pour toi seul."
+    ),
+    "personal_use_checkbox": "J'utiliserai {firmware} pour mon usage personnel uniquement",
+    "personal_use_continue": "Continuer",
+    "first_boot_note_title": "Avant d'allumer ta console",
+    "first_boot_note_log": "Avant d'allumer ta console : {consigne}",
+    "catalogue_install_searching_log": "Recherche de la dernière version de {firmware} pour {console}…",
+    "catalogue_install_file_log": "Fichier trouvé : {name}",
+    "catalogue_download_success": "{firmware} a été téléchargé : {path}. Choisis maintenant la carte SD à préparer.",
+    "catalogue_install_running_title": "Installation de {firmware} sur {console}",
+    "catalogue_install_running_instruction": "Le système est en cours de téléchargement. Ensuite, tu choisiras la carte SD et tu confirmeras avant que quoi que ce soit ne soit effacé.",
+    # Question posée avant tout flash ROCKNIX en mode expert : les réglages
+    # R36S (identify/rocknix_r36s.py) empêcheraient une autre console de
+    # démarrer, donc seulement sur un « Oui » explicite.
+    "rocknix_console_title": "Pour quelle console est cette carte ?",
+    "rocknix_console_hint": (
+        "Sur une R36S, ROCKNIX ne démarre qu'avec deux réglages : R36S Studio les fait "
+        "pour toi. Sur une autre console, ces réglages l'empêcheraient de démarrer : "
+        "réponds Oui seulement si c'est bien une R36S."
+    ),
+    "rocknix_console_yes": "Oui, une R36S",
+    "rocknix_console_no": "Non, une autre console",
+    "rocknix_console_unknown": "Je ne sais pas",
+    "rocknix_console_unknown_log": (
+        "Carte non réglée pour une R36S. Si ta console est une R36S et que l'écran reste "
+        "noir ou gris, refais le flash en répondant « Oui, une R36S »."
+    ),
+    "execute_title_download_panels": "Téléchargement des fichiers d'écran R36S…",
+    "rocknix_panels_log": "Fichiers d'écran R36S prêts : {count} sur {total}.",
+    "rocknix_panels_none_log": (
+        "Aucun fichier d'écran n'a pu être téléchargé (pas d'internet ?). Le flash peut "
+        "continuer, mais l'écran de la console risque de rester gris."
+    ),
+    "rocknix_r36s_next_steps_log": (
+        "Mets la carte dans ta R36S et allume-la. Logo ROCKNIX : c'est bon, rien d'autre à "
+        "faire. Écran gris ou noir figé : remets la carte dans l'ordinateur pour essayer "
+        "l'écran suivant."
+    ),
+    "execute_cancel": "Annuler",
+    "execute_speed": "{speed:.1f} Mo/s",
+    "execute_eta": "Temps restant estimé : {eta}",
+    "execute_eta_unknown": "Temps restant estimé : —",
+    # Résultats de fin d'opération -- affichés comme lignes du journal de
+    # bord, plus un écran séparé (§5, refonte navigation).
+    "result_eject": "Éjecter la carte",
+    "result_archive_created": "Enregistrée dans : {path} — Taille : {size}",
+    "result_archive_source": "À partir de : {path}",
+    # Aide (macOS uniquement -- autorisation Accès complet au disque, §3)
+    "help_title": "Autoriser l'accès à ta carte SD",
+    "help_body": (
+        "Sur Mac, R36S Studio a besoin d'une autorisation spéciale pour accéder "
+        "directement à ta carte SD, même après avoir entré ton mot de passe "
+        "administrateur : l'Accès complet au disque.\n\n"
+        "1. Ouvre Réglages Système → Confidentialité et sécurité.\n"
+        "2. Descends jusqu'à « Accès complet au disque ».\n"
+        "3. Utilise le bouton ci-dessous pour y aller directement, ou vas-y "
+        "toi-même.\n"
+        "4. Clique sur « + », choisis R36S Studio dans la liste, puis active "
+        "le bouton à côté de son nom.\n"
+        "5. Reviens dans R36S Studio et relance l'opération.\n\n"
+        "Cette autorisation ne se fait qu'une fois par version de "
+        "l'application. Si l'accès est de nouveau bloqué après une mise à "
+        "jour, reviens simplement sur cet écran et recommence : reconstruire "
+        "l'application change sa signature, ce qui invalide l'autorisation "
+        "précédente."
+    ),
+    "help_back": "Retour",
+    "help_open_settings": "Ouvrir les réglages",
+    # Écran de bienvenue au premier lancement (macOS uniquement, §3) --
+    # affiché tant que l'Accès complet au disque n'est pas détecté
+    # (`elevate.has_full_disk_access`), à la place de l'accueil habituel.
+    "fda_welcome_title": "Bienvenue dans R36S Studio",
+    "fda_welcome_body": (
+        "Avant de commencer, ton Mac bloque deux choses par défaut : "
+        "ouvrir une application qui ne vient pas d'un développeur reconnu "
+        "par Apple, et laisser cette application accéder directement à une "
+        "carte SD.\n\n"
+        "1. Si ce n'est pas déjà fait : ferme cette fenêtre, fais un clic "
+        "droit sur R36S Studio dans le Finder, choisis « Ouvrir », puis "
+        "confirme — une seule fois.\n"
+        "2. Ouvre Réglages Système → Confidentialité et sécurité → Accès "
+        "complet au disque (utilise le bouton ci-dessous pour y aller "
+        "directement).\n"
+        "3. Clique sur « + », choisis R36S Studio dans la liste, puis "
+        "active le bouton à côté de son nom.\n"
+        "4. Reviens ici et clique sur « J'ai terminé ».\n\n"
+        "Cette autorisation ne se fait qu'une fois par version de "
+        "l'application : si elle est de nouveau bloquée après une mise à "
+        "jour, il faudra recommencer ces étapes."
+    ),
+    "fda_welcome_open_settings": "Ouvrir les réglages",
+    "fda_welcome_done": "J'ai terminé",
+    "fda_welcome_still_not_detected": (
+        "Autorisation pas encore détectée. Vérifie que R36S Studio est bien "
+        "coché dans la liste Accès complet au disque, puis réessaie."
+    ),
+    # Version + horodatage de construction (footer de l'accueil) -- sans ça,
+    # impossible de savoir si l'app testée contient les derniers correctifs.
+    "about_version": "R36S Studio v{version} ({suffix})",
+    "about_build": "build du {timestamp}",
+    "about_dev": "version de développement",
+    # Messages d'erreur (vocabulaire §5 : jamais de jargon technique dans le
+    # message principal -- le détail brut du backend suit, en ligne
+    # supplémentaire, directement dans le journal de bord (§5, refonte
+    # navigation -- plus de panneau "Détails" séparé à déplier).
+    "error_partition_not_found": (
+        "Impossible de trouver les fichiers de la console sur cette carte. "
+        "As-tu bien préparé cette carte avec R36S Studio ?"
+    ),
+    # Étapes A/B/D/E refusées avant lancement sur une carte non ArkOS
+    # (detect.arkos_step_refusal) -- jamais de reproche : la carte va bien.
+    "step_refused_card_system": (
+        "Cette étape est prévue pour les cartes ArkOS. Ta carte contient {system} : "
+        "elle fonctionne normalement, mais elle est organisée autrement, donc cette étape "
+        "ne s'y applique pas. Rien n'a été modifié."
+    ),
+    "error_card_system_incompatible": (
+        "Cette étape est prévue pour les cartes ArkOS, et cette carte n'est pas reconnue "
+        "comme telle. Elle n'est pas forcément abîmée : elle est peut-être préparée pour "
+        "un autre système. Rien n'a été modifié."
+    ),
+    "error_partition_not_mounted": (
+        "La carte n'a pas pu s'ouvrir correctement. Débranche-la, rebranche-la, puis réessaie."
+    ),
+    "error_easyroms_ntfs_macos": (
+        "Ton Mac ne peut pas copier des jeux sur cette carte à cause d'une limitation du "
+        "système. Utilise un PC Windows ou Linux pour cette étape."
+    ),
+    "error_mountpoint_not_writable": (
+        "Impossible d'écrire sur ta carte. Vérifie qu'elle n'est pas protégée en écriture, "
+        "puis réessaie."
+    ),
+    "error_device_not_allowed": "Cette carte n'est plus accessible. Débranche-la puis rebranche-la.",
+    "error_source_not_found": "Le dossier choisi est introuvable.",
+    "error_verify_failed": "La vérification après écriture a échoué. Réessaie avec une carte neuve.",
+    "error_cancelled": "L'opération a été annulée avant la fin.",
+    # Double lecture de la source et empreintes par bloc
+    # (`imaging/source_verify.py`) -- incident réel : une carte dégradée a
+    # renvoyé des données fausses sans erreur, l'image fausse a été flashée.
+    "error_source_unstable": (
+        "Carte source instable : elle renvoie des données différentes à chaque lecture. "
+        "Cette sauvegarde n'est pas fiable. Recommandation : installer une image neuve "
+        "plutôt que cloner cette carte."
+    ),
+    "error_image_modified": (
+        "Le fichier image a été modifié ou abîmé depuis la sauvegarde. Rien n'a été écrit "
+        "sur ta carte SD. Utilise une autre sauvegarde ou une image neuve."
+    ),
+    "error_unstable_image": (
+        "Ce fichier est la sauvegarde d'une carte instable : il n'est pas fiable et ne peut "
+        "pas être installé. Choisis une autre sauvegarde ou une image neuve."
+    ),
+    "unstable_image_expert_confirm": (
+        "Ce fichier est la sauvegarde d'une carte instable : certaines parties peuvent être "
+        "fausses, et la console risque de mal fonctionner.\n\nL'installer quand même ?"
+    ),
+    "unstable_image_expert_log": "Installation d'une sauvegarde instable confirmée explicitement (mode expert).",
+    "backup_verify_source_checkbox": "Vérifier la source par double lecture (recommandé)",
+    "progress_phase_copy": "Copie…",
+    "progress_phase_verify_source": "Vérification de la source…",
+    "progress_phase_verify_image": "Vérification de l'image…",
+    # Chien de garde de lecture (`imaging/source.py::StallWatchedReader`) --
+    # cas réel : carte noname bloquée des heures sans erreur ni donnée.
+    "error_source_not_responding": (
+        "La carte source ne répond plus : elle est probablement défaillante. "
+        "Recommandation : installer une image neuve plutôt que cloner cette carte."
+    ),
+    "execute_source_stalled": "⚠ La carte ne répond plus depuis {seconds} s (arrêt à {limit} s)…",
+    "log_source_stalled_start": "La carte source ne répond plus -- attente de ses données…",
+    "error_eject_failed": (
+        "Impossible d'éjecter la carte. Ferme les fichiers ouverts dessus, puis réessaie, "
+        "ou retire-la manuellement."
+    ),
+    # Bug corrigé (§4.4/§5) : distinct d'`error_eject_failed` -- une invite
+    # UAC refusée ou fermée n'a rien à voir avec des fichiers ouverts sur
+    # la carte, message dédié plutôt que le générique ci-dessus.
+    "error_elevation_refused": "L'autorisation Windows a été refusée. Réessaie et accepte l'invite.",
+    "error_reset_card_failed": (
+        "Impossible de remettre cette carte à zéro. Débranche-la puis rebranche-la, "
+        "ferme les fenêtres qui l'affichent, puis réessaie."
+    ),
+    # « Utiliser toute la carte » (carte SF3000, `imaging/sf3000_clone.py`).
+    "error_not_sf3000_image": (
+        "Ce fichier n'est pas une sauvegarde de carte SF3000 lisible fichier par fichier. "
+        "Choisis plutôt la copie brute de l'image."
+    ),
+    "error_invalid_file_names": (
+        "Certains fichiers de la sauvegarde ont un nom que Windows ne peut pas créer. "
+        "Rien n'a été écrit sur ta carte ; la liste est dans le journal."
+    ),
+    "error_whole_card_prepare_failed": (
+        "La préparation de ta carte a échoué : elle n'est pas utilisable en l'état. "
+        "Ferme les fenêtres qui l'affichent, puis relance l'opération depuis le début."
+    ),
+    "error_whole_card_copy_failed": (
+        "La copie des fichiers s'est arrêtée avant la fin : ta carte est incomplète. "
+        "Relance l'opération depuis le début."
+    ),
+    "error_macos_tcc_blocked": (
+        "Ton Mac empêche l'accès à la carte SD tant que R36S Studio n'a pas la permission "
+        "Accès complet au disque. Ouvre l'Aide pour l'activer."
+    ),
+    "error_macos_tcc_protected_folder": (
+        "Ton Mac bloque l'accès à ce fichier car il se trouve dans un dossier protégé "
+        "(Téléchargements, Bureau ou Documents). Déplace-le ailleurs, puis réessaie."
+    ),
+    # Format de l'image choisie pour le flash (§4.3/§5) -- détecté par les
+    # octets d'en-tête, pas seulement l'extension (imaging/image_source.py).
+    "error_seven_zip_archive": (
+        "Ce fichier est une archive 7-Zip. Décompresse-la d'abord — tu obtiendras "
+        "un fichier .img que tu pourras flasher directement."
+    ),
+    "error_unsupported_image_format": (
+        "Ce fichier n'est pas une image utilisable. Formats acceptés : .img, .img.gz, .img.xz."
+    ),
+    # Téléchargement automatique ROCKNIX (§5, étape de flash, identify/rocknix.py).
+    "error_rocknix_asset_not_found": (
+        "Impossible de trouver la version ROCKNIX pour ta console en ligne. "
+        "Réessaie plus tard, ou choisis un fichier déjà téléchargé."
+    ),
+    "error_rocknix_checksum_mismatch": (
+        "Le fichier téléchargé est corrompu ou incomplet. Réessaie."
+    ),
+    "error_firmware_not_found": "Impossible de trouver le fichier à télécharger pour ce système. Vérifie ta connexion internet, puis réessaie.",
+    "error_rocknix_download_failed": (
+        "Le téléchargement a échoué. Vérifie ta connexion internet, puis réessaie."
+    ),
+    "error_games_partition_not_found": (
+        "Impossible de reconnaître l'emplacement des jeux (EASYROMS ou STORAGE) sur "
+        "cette carte — la sauvegarde système sans les jeux ne sait pas où s'arrêter."
+    ),
+    # Pré-vol du parcours de clonage (§5 mode assisté) : jamais un échec
+    # après une longue copie déjà lancée -- ces deux vérifications
+    # s'exécutent avant d'écrire quoi que ce soit.
+    "error_insufficient_disk_space": (
+        "Ton ordinateur n'a pas assez de place libre pour créer cette sauvegarde. "
+        "Libère de l'espace, ou choisis un autre disque, puis réessaie."
+    ),
+    "error_destination_too_small": (
+        "Cette carte est trop petite pour la sauvegarde à installer. "
+        "Utilise une carte neuve d'au moins la même taille."
+    ),
+    # Codes émis par le worker élevé (`__main__.py`) mais absents de
+    # `_ERROR_MESSAGE_KEYS` jusqu'ici (bug corrigé) -- retombaient sur
+    # `error_generic` malgré une cause précise et déjà connue. `IO_ERROR`
+    # en particulier est le repli générique de la quasi-totalité des
+    # commandes CLI pour une erreur disque/E-S imprévue (carte débranchée
+    # en cours de copie, permission refusée...) : le plus susceptible
+    # d'apparaître en usage réel de tous les codes qui manquaient.
+    # Outil « Doublons de jeux » (docs/doublons.md, § garde-fous ajoutés
+    # après validation du plan) -- codes propres à `gui/doublons_runner.py`,
+    # jamais réutilisés depuis les messages carte-SD ci-dessus/dessous
+    # (`error_io_error` mentionne explicitement "la carte", trompeur pour
+    # un dossier quelconque du PC).
+    "error_doublons_io_error": (
+        "Une erreur de lecture ou d'écriture est survenue. Vérifie que le dossier est toujours accessible."
+    ),
+    "error_destination_not_writable": (
+        "Impossible d'écrire dans le dossier de destination -- vérifie qu'il n'est pas en lecture seule."
+    ),
+    "error_path_outside_root": "Un fichier à déplacer ne se trouve plus dans le dossier analysé.",
+    # Signalé explicitement : refus d'un dossier de destination situé à
+    # l'intérieur du dossier analysé ailleurs qu'en _doublons -- la
+    # prochaine analyse le retrouverait et le reproposerait comme doublon.
+    "error_destination_inside_root": (
+        "Ce dossier est à l'intérieur du dossier analysé -- la prochaine analyse le retrouverait. "
+        "Choisis un dossier en dehors, ou laisse la destination par défaut (_doublons)."
+    ),
+    "error_destination_filesystem_root": "Ce dossier est la racine d'un disque entier -- choisis un sous-dossier.",
+    "error_copy_verification_failed": (
+        "La copie vers l'autre disque n'a pas pu être vérifiée -- le fichier d'origine n'a pas été touché."
+    ),
+    # Repli générique si jamais `doublons_move_file_error_message`
+    # n'était pas utilisé pour construire le message précis (§ demandé
+    # explicitement, point 3) -- ne devrait normalement jamais s'afficher
+    # tel quel, `_on_doublons_move_finished` (main_window.py) préfère
+    # toujours le message riche quand un `MoveFileFailed` est disponible.
+    "error_move_file_failed": "Le déplacement d'un fichier a échoué. Voir le journal de bord pour le détail.",
+    "error_partial_move_completed": "Le déplacement s'est terminé avec au moins un fichier ignoré après échec.",
+    "error_fat_file_size_limit": (
+        "Le disque de destination est formaté en FAT, qui ne peut pas contenir de fichier de plus de 4 Go -- "
+        "au moins un fichier sélectionné dépasse cette taille."
+    ),
+    "error_output_exists": "Un fichier du même nom existe déjà à cet emplacement. Choisis un autre nom ou un autre dossier.",
+    "error_image_not_found": "Le fichier image choisi est introuvable. Il a peut-être été déplacé ou supprimé.",
+    "error_io_error": "Une erreur de lecture ou d'écriture est survenue. Vérifie que la carte est toujours branchée.",
+    # Bug corrigé, confirmé sur du vrai matériel : sans ce code dédié,
+    # FSCTL_LOCK_VOLUME refusé par un autre programme (Explorateur,
+    # indexeur, antivirus) retombait sur error_io_error ci-dessus -- « vérifie
+    # que la carte est branchée » est faux dans ce cas précis (la carte est
+    # bien branchée, le worker bien élevé) et n'aide pas à résoudre le
+    # problème réel.
+    "error_volume_in_use": (
+        "La carte semble utilisée par un autre programme (l'Explorateur de "
+        "fichiers, l'indexation de recherche, un antivirus…). Ferme les "
+        "fenêtres qui l'affichent puis réessaie."
+    ),
+    "error_unsupported_os": "Cette opération n'est pas prise en charge sur ce système.",
+    "error_confirmation_refused": "Écriture annulée : la confirmation n'a pas été reçue.",
+    # INVALID_ARGS : mauvaise combinaison d'options en ligne de commande
+    # (CLI direct, §1) -- la GUI construit toujours des arguments valides,
+    # ce code ne devrait donc jamais apparaître ici, mais mappé quand même
+    # par principe (aucun code connu du protocole ne doit retomber sur le
+    # message générique, ci-dessous).
+    "error_invalid_args": "Commande invalide.",
+    "error_generic": "Une erreur est survenue.",
+    # Estimation avant de lancer la sauvegarde système sans les jeux (§4.3)
+    # -- journal de bord, avant l'ouverture de la fenêtre Choix du fichier.
+    "system_backup_estimating": "Calcul de la taille estimée…",
+    "system_backup_estimate_result": "Taille estimée : environ {size} (sans les jeux).",
+    # Même information, affichée directement sur la fenêtre Choix du
+    # fichier plutôt que seulement dans le journal de bord (§4.3).
+    "file_system_backup_size": "Taille estimée : environ {size} (sans les jeux).",
+    # Outil « Console Android » (android/, étape 1, docs/android-adb.md) --
+    # écran dédié, câblé comme les autres écrans « comme le reste » (brief :
+    # jamais isolé dans son propre fichier de chaînes contrairement à
+    # consoles_diverses/, qui reste un package volontairement indépendant).
+    "android_screen_title": "Console Android",
+    "android_back_button": "← Retour à l'accueil",
+    "android_refresh_button": "Actualiser",
+    # Consentement au téléchargement d'adb (§ adb du brief : "après accord
+    # explicite de l'utilisateur (afficher l'URL et la taille)") -- jamais
+    # de téléchargement avant ce clic.
+    "android_consent_title": "adb n'est pas installé",
+    "android_consent_body": (
+        "Cet outil a besoin d'adb (les « platform-tools » officiels de "
+        "Google) pour lire les informations de ta console Android en USB. "
+        "Rien n'est encore installé — cette page ne fait que te le proposer."
+    ),
+    "android_consent_url_label": "Adresse : {url}",
+    "android_consent_size_label": "Taille du téléchargement : environ {size}",
+    "android_consent_size_unknown": "Taille du téléchargement : inconnue",
+    "android_consent_download_button": "Télécharger adb",
+    "android_downloading_status": "Téléchargement d'adb…",
+    "android_download_cancel_button": "Annuler",
+    "android_download_error": "Le téléchargement d'adb a échoué.",
+    "android_detecting_status": "Détection en cours…",
+    # État « aucun appareil » -- pas à pas, § Détection du brief : "écran
+    # d'aide expliquant, en français et pas à pas, comment activer le mode
+    # développeur et le débogage USB (7 appuis sur le numéro de build,
+    # etc.), avec la mention que ça varie selon la console."
+    "android_state_no_device_title": "Aucune console détectée",
+    "android_state_no_device_help": (
+        "1. Sur ta console, ouvre Réglages → À propos du téléphone.\n"
+        "2. Appuie 7 fois de suite sur le numéro de build (ou une ligne "
+        "équivalente) pour activer le mode développeur.\n"
+        "3. Ouvre Réglages → Options pour les développeurs, puis active le "
+        "débogage USB.\n"
+        "4. Branche la console à cet ordinateur avec un câble USB.\n"
+        "Le menu exact varie selon la console — cherche « débogage USB » "
+        "dans les réglages si ces étapes ne correspondent pas exactement."
+    ),
+    "android_state_unauthorized_title": "Console détectée, mais non autorisée",
+    "android_state_unauthorized_help": (
+        "Ta console est branchée, mais elle n'a pas encore accepté cet "
+        "ordinateur. Un message devrait s'afficher sur son écran : accepte "
+        "la demande de débogage USB, puis clique sur Actualiser."
+    ),
+    "android_state_multiple_title": "Plusieurs consoles détectées",
+    "android_state_multiple_help": (
+        "Plusieurs consoles Android sont branchées en même temps. "
+        "Débranche toutes les consoles sauf celle que tu veux préparer, "
+        "puis clique sur Actualiser."
+    ),
+    "android_state_adb_error_title": "adb n'a pas répondu",
+    "android_state_adb_error_help": (
+        "adb n'a pas répondu correctement. Vérifie que la console est bien "
+        "branchée, puis clique sur Actualiser. Si le problème persiste, "
+        "débranche et rebranche le câble USB."
+    ),
+    "android_device_card_title": "Console détectée",
+    "android_device_label_manufacturer": "Fabricant",
+    "android_device_label_model": "Modèle",
+    "android_device_label_product_name": "Nom de produit",
+    "android_device_label_android_version": "Version d'Android",
+    "android_device_label_abi": "Architecture",
+    "android_value_not_found": "Non trouvé",
+    "android_catalog_search_button": "Rechercher cette console dans le catalogue",
+    "android_catalog_searching": "Recherche en cours…",
+    "android_catalog_not_found": "Cette console n'a pas été trouvée dans le catalogue.",
+    "android_catalog_found_title": "Fiche trouvée",
+    "android_emulators_title": "Émulateurs recommandés",
+    # Signalé : « la liste d'émulateurs est identique quelle que soit la
+    # console » -- affiché quand aucun filtrage n'a pu être appliqué
+    # (architecture/version d'Android non lues, android/emulators.py::
+    # filter_for_device), jamais un filtrage silencieux ni une liste vide.
+    "android_emulators_generic_notice": (
+        "Liste générique : impossible d'adapter cette liste à ta console "
+        "(architecture ou version d'Android non lues)."
+    ),
+    "android_emulator_licence_a_verifier": "Licence à vérifier",
+    "android_emulator_prix_a_verifier": "Prix à vérifier",
+    # Statut du projet lui-même (android/emulators.py::STATUT_PROJET_VALUES,
+    # demandé explicitement) -- distinct de la licence/du prix ci-dessus.
+    "android_emulator_status_actif": "Projet actif",
+    "android_emulator_status_abandonne": "Projet abandonné",
+    "android_emulator_status_a_verifier": "Statut à vérifier",
+    "android_emulator_official_link": "Ouvrir la page officielle",
+    "android_emulator_source_link": "Voir la source",
+    # Choix de variante (§ écran Console Android, demandé explicitement --
+    # "un émulateur peut proposer plusieurs variantes (standard, edge,
+    # DS...)") : menu déroulant sur la carte, uniquement quand `android/
+    # emulators.py::EmulatorEntry.variantes` n'est pas vide.
+    "android_emulator_variant_label": "Variante :",
+    # Classement par console émulée (§ écran Console Android, demandé
+    # explicitement) -- colonne de gauche, pseudo-catégorie "Toutes" en
+    # tête de liste, suivie des quatorze catégories nommées.
+    "android_category_all": "Toutes ({count})",
+    "android_check_all_button": "Tout cocher",
+    "android_uncheck_all_button": "Tout décocher",
+    "android_checked_counter": "{checked}/{total} cochés",
+    "android_raw_output_title": "Sortie technique (adb)",
+    # Outil « Ranger mes jeux » (docs/tri-roms.md) -- répartit un dossier
+    # de jeux mélangés dans un dossier par console, nommé comme le système
+    # choisi l'attend. Risque principal : un nom de dossier faux, et la
+    # console n'affiche rien -- d'où l'indication, pour chaque système,
+    # de la façon dont ses noms ont été vérifiés.
+    "tri_title": "Ranger des jeux mélangés",
+    "tri_hint": (
+        "Choisis un dossier où tes jeux sont mélangés. Chaque jeu sera rangé dans le dossier "
+        "de sa console, avec le nom que le système de ta console attend. Rien n'est supprimé, "
+        "et tu verras tout avant de confirmer."
+    ),
+    "tri_firmware_label": "Système de ta console :",
+    "tri_firmware_treefrogui": "TreeFrogUI (SF3000, SF2000…)",
+    "tri_firmware_knulli": "KNULLI (RG40XXV, RG35XX…)",
+    "android_knulli_title": "Console KNULLI branchée",
+    "android_knulli_body": (
+        "Ta console tourne sous KNULLI (version {version}). Tu peux y copier des jeux et des BIOS "
+        "directement par le câble USB, sans retirer la carte SD."
+    ),
+    "android_knulli_copy_button": "Copier des jeux sur ma console (USB)",
+    "knulli_title": "Copier des jeux sur ma console (USB)",
+    "knulli_back_button": "← Retour",
+    "knulli_console_label": "Console KNULLI branchée (version {version}).",
+    "knulli_hint": (
+        "Compose la liste des jeux à copier : choisis des jeux (Ctrl ou Maj pour en prendre "
+        "plusieurs), des dossiers entiers, ou glisse-les ici. Chaque jeu va dans le bon dossier de "
+        "la console (d'après le dossier où il se trouve, ex. « psx », ou son type de fichier) ; un "
+        "dossier « bios » va dans les BIOS de la console. Tu verras le résumé avant toute copie."
+    ),
+    "knulli_summary_button": "Voir le résumé",
+    "knulli_edit_list_button": "Modifier la liste",
+    "knulli_list_skipped": "non copié : {reason}",
+    "game_list_add_files": "Ajouter des jeux…",
+    "game_list_add_folder": "Ajouter un dossier…",
+    "game_list_remove": "Retirer",
+    "game_list_clear": "Tout vider",
+    "game_list_col_name": "Jeu",
+    "game_list_col_size": "Taille",
+    "game_list_col_system": "Système",
+    "game_list_linked": "{name} (+ {count} fichier(s) lié(s))",
+    "game_list_total": "{count} jeu(x), {size}",
+    "game_list_empty": "Aucun jeu pour l'instant : ajoute-en avec les boutons, ou glisse-les dans la liste.",
+    "knulli_scanning": "Analyse des jeux et lecture de la console…",
+    "knulli_error_console": (
+        "La console ne répond plus. Vérifie que le câble est bien branché et qu'elle est toujours en "
+        "mode USB « ADB », puis réessaie."
+    ),
+    "knulli_summary": (
+        "{count} fichier(s) à copier ({size}). Place libre sur la console : {free} ; il restera "
+        "{after} après la copie."
+    ),
+    "knulli_summary_nothing": "Rien à copier depuis ce dossier.",
+    "knulli_space_refused": (
+        "Pas assez de place sur la console : il manque {missing} (en gardant 500 Mo de marge). "
+        "Retire des jeux de ce dossier ou fais de la place sur la console. Détail par système "
+        "ci-dessous."
+    ),
+    "knulli_folder_row": "{folder} : {count} fichier(s), {size}",
+    "knulli_renamed_row": "Renommé pour la console : « {old} » → {new}",
+    "knulli_skipped_title": "{count} fichier(s) ne seront pas copiés :",
+    "knulli_copy_button": "Copier sur la console",
+    "knulli_copying": "Copie en cours. Ne débranche pas la console.",
+    "knulli_copy_count": "{done} / {total} Mo copiés",
+    "knulli_cancel_button": "Annuler",
+    "knulli_conflict_title": "Déjà sur la console",
+    "knulli_conflict_message": (
+        "Ce fichier est déjà sur la console :\n{name}\n\nSur la console : {old}. Nouveau : {new}."
+    ),
+    "knulli_conflict_skip": "Ignorer",
+    "knulli_conflict_replace": "Remplacer",
+    "knulli_conflict_skip_all": "Tout ignorer",
+    "knulli_result": "{copied} fichier(s) copié(s), {failed} échec(s).",
+    "knulli_result_cancelled": (
+        "Copie annulée : {copied} fichier(s) copié(s) avant l'arrêt, rien n'est resté à moitié copié."
+    ),
+    "knulli_reload_reloaded": "La liste des jeux de la console a été rafraîchie.",
+    "knulli_reload_game_running": (
+        "Un jeu est en cours sur la console : la liste n'a pas été rafraîchie pour ne pas "
+        "l'interrompre. Quitte le jeu puis, dans le menu, « Mettre à jour la liste des jeux »."
+    ),
+    "knulli_reload_unavailable": (
+        "La liste des jeux n'a pas pu être rafraîchie : dans le menu de la console, « Mettre à jour "
+        "la liste des jeux », ou redémarre-la."
+    ),
+    "knulli_again_button": "Copier d'autres jeux",
+    "knulli_reason_not_recognised": (
+        "jeu non reconnu (mets-le dans un dossier au nom du système, ex. « psx »)"
+    ),
+    "knulli_reason_format_not_accepted": "format que ce système de la console ne lit pas ({detail})",
+    "knulli_reason_disc_missing_files": "disque incomplet, fichier(s) manquant(s) : {detail}",
+    "knulli_reason_name_in_disc": "nom refusé par la carte dans un jeu en plusieurs fichiers ({detail})",
+    "knulli_reason_same_destination": "un autre fichier va déjà au même endroit ({detail})",
+    "knulli_reason_exists": "déjà sur la console, ignoré",
+    "knulli_reason_push_failed": "la copie a échoué (câble débranché ?)",
+    "knulli_reason_size_mismatch": "fichier incomplet sur la console après la copie",
+    "knulli_reason_stalled": "la copie s'est arrêtée (console qui ne répond plus ?)",
+    "knulli_reason_adb_error": "la console ne répond plus",
+    "tri_firmware_verified": "Noms de dossiers vérifiés sur une vraie carte.",
+    "tri_firmware_unverified": (
+        "Noms de dossiers relevés dans la configuration officielle de ce système, "
+        "pas encore vérifiés sur une vraie carte."
+    ),
+    "tri_choose_folder_button": "Choisir le dossier à ranger…",
+    "tri_destination_label": "Où ranger les jeux :",
+    "tri_destination_same": "dans le dossier choisi lui-même",
+    "tri_destination_choose_button": "Choisir une autre destination…",
+    "tri_destination_reset_button": "Ranger sur place",
+    "tri_preview_destination": "Destination des jeux rangés : {path}",
+    "tri_group_filtered": "_hors_filtre — {count} jeu(x) mis de côté (région ou langue)",
+    "tri_group_no_region": "Sans région dans le nom, gardés — {count} jeu(x)",
+    "tri_reason_region_excluded": "région non retenue",
+    "tri_reason_language_excluded": "langue non retenue",
+    "tri_confirm_message_destination": (
+        "{count} fichier(s) vont être déplacés : les jeux rangés dans « {destination} », le "
+        "reste mis de côté dans « {root} ». Rien ne sera supprimé, et tu pourras tout "
+        "remettre en place avec « Annuler le rangement »."
+    ),
+    "tri_error_root_destination_system_folder": (
+        "La destination porte déjà le nom d'une console : choisis le dossier qui la contient."
+    ),
+    "tri_error_no_space": "Pas assez de place dans la destination pour ces jeux. Rien n'a été déplacé.",
+    "filter_title": "Filtrer par région et par langue",
+    "filter_hint": (
+        "Choisis un dossier de jeux : le dossier d'une seule console (snes…) ou toute ta "
+        "collection déjà rangée, dont chaque sous-dossier sera parcouru. Rien n'est "
+        "réorganisé : seuls les jeux qui ne correspondent pas à tes critères sont mis de côté"
+        " dans « _hors_filtre », jamais supprimés. Un jeu dont le nom n'indique aucune région"
+        " est toujours gardé, comme un jeu européen sans langue indiquée."
+    ),
+    "filter_regions_label": "Régions :",
+    "filter_languages_label": "Langues :",
+    "filter_region_europe": "Europe",
+    "filter_region_usa": "USA",
+    "filter_region_japan": "Japon",
+    "filter_region_world": "Monde",
+    "filter_language_fr": "Français",
+    "filter_language_en": "Anglais",
+    "filter_language_de": "Allemand",
+    "filter_language_es": "Espagnol",
+    "filter_language_it": "Italien",
+    "filter_criteria_needed": "Coche au moins une région ou une langue.",
+    "filter_choose_folder_button": "Choisir le dossier à filtrer…",
+    "filter_preview_summary": (
+        "{filtered} jeu(x) mis de côté dans « _hors_filtre », {kept} gardé(s) -- dont "
+        "{no_region} sans région dans leur nom, à vérifier."
+    ),
+    "filter_preview_nothing": (
+        "Aucun jeu à écarter : {kept} jeu(x) gardé(s), dont {no_region} sans région dans leur"
+        " nom."
+    ),
+    "filter_preview_card": "{card} — {count} jeu(x)",
+    "filter_preview_card_size": "{card}, {size} — {count} jeu(x)",
+    "filter_preview_no_games": "{files} fichier(s) examiné(s), aucun n'est un jeu reconnu.",
+    "filter_no_games_warning": (
+        "Ce dossier ne contient aucun jeu : rien à filtrer. Vérifie que tu as choisi le bon "
+        "dossier. Si ta carte apparaît comme plusieurs lecteurs, choisis celui de tes jeux "
+        "(souvent EASYROMS), pas celui du système."
+    ),
+    "filter_sort_button": "Écarter",
+    "filter_confirm_title": "Confirmer le filtrage",
+    "filter_confirm_message": (
+        "{count} fichier(s) vont être déplacés dans « _hors_filtre », à l'intérieur de « "
+        "{root} ». Rien ne sera supprimé, et tu pourras tout remettre en place avec « Annuler"
+        " le filtrage »."
+    ),
+    "filter_move_title": "Filtrage en cours",
+    "filter_result_title": "Filtrage terminé",
+    "filter_result_cancelled_title": "Filtrage interrompu",
+    "filter_result_skipped_existing": (
+        "{count} élément(s) laissé(s) à leur place : un fichier du même nom est déjà dans « "
+        "_hors_filtre »."
+    ),
+    "filter_undo_button": "Annuler le filtrage",
+    "filter_undo_previous_button": "Annuler le filtrage précédent de ce dossier",
+    # « Convertir des jeux » (`tri/convert.py`, `ConvertScreen`) : textes
+    # propres ; les autres retombent sur ceux du tri (`tri_*`).
+    "home_tile_convert_games": "Convertir des jeux",
+    "home_tile_convert_games_desc": (
+        "Repère les jeux dans un format que ta console ne lit pas (.7z) et les convertit en .zip."
+    ),
+    "convert_title": "Convertir des jeux",
+    "convert_hint": (
+        "Un jeu dans un format que ta console ne lit pas s'affiche, mais ne démarre pas ou donne "
+        "un écran noir. Choisis un dossier de jeux : les archives .7z que le système de ta console "
+        "ne lit pas seront converties en .zip. Les originaux sont gardés à part, rien n'est supprimé, "
+        "et tu verras tout avant de confirmer."
+    ),
+    "convert_choose_folder_button": "Choisir le dossier à convertir…",
+    "convert_preview_summary": (
+        "{count} jeu(x) en .7z à convertir en .zip ; {left} laissé(s) tel(s) quel(s). "
+        "Les originaux seront gardés dans « {folder} »."
+    ),
+    "convert_preview_nothing": "Rien à convertir dans ce dossier ({left} archive(s) .7z laissée(s) telle(s) quelle(s)).",
+    "convert_sort_button": "Convertir",
+    "convert_confirm_title": "Confirmer la conversion",
+    "convert_confirm_message": (
+        "{count} jeu(x) vont être convertis en .zip dans « {root} ». Chaque original est gardé dans "
+        "« {folder} », rien n'est supprimé, et tu pourras tout remettre comme avant avec "
+        "« Annuler la conversion »."
+    ),
+    "convert_move_title": "Conversion en cours",
+    "convert_move_count": "{done} / {total} jeu(x)",
+    "convert_result_title": "Conversion terminée",
+    "convert_result_cancelled_title": "Conversion interrompue",
+    "convert_result_moved": "{count} jeu(x) converti(s) en .zip.",
+    "convert_result_failures": (
+        "{count} jeu(x) n'ont pas pu être convertis (archive abîmée ou protégée par un mot de passe, "
+        "voir la liste ci-dessous) : ils sont restés tels quels."
+    ),
+    "convert_result_aborted": (
+        "La conversion s'est arrêtée après plusieurs échecs de suite. La carte ou le disque "
+        "a peut-être été retiré."
+    ),
+    "convert_result_skipped_existing": "{count} jeu(x) laissé(s) tel(s) quel(s) : un .zip du même nom existe déjà.",
+    "convert_undo_button": "Annuler la conversion",
+    "convert_undo_previous_button": "Annuler la conversion précédente de ce dossier",
+    "convert_undo_done": "{count} jeu(x) remis comme avant.",
+    "convert_undo_conflicts": (
+        "{count} jeu(x) n'ont pas pu être remis comme avant (un fichier occupe déjà leur place, "
+        "ou le .zip a été modifié depuis)."
+    ),
+    "convert_error_no_space": (
+        "Pas assez de place sur le disque pour continuer la conversion. Les jeux déjà convertis "
+        "le restent ; libère de la place ou annule la conversion."
+    ),
+    "tri_reason_seven_zip_read": "le système de ta console lit déjà les .7z dans ce dossier",
+    "tri_reason_zip_not_read": "le système de ta console ne lit pas non plus les .zip dans ce dossier",
+    "tri_reason_zip_exists": "un .zip du même nom existe déjà",
+    "home_tile_filter_games": "Filtrer par région et par langue",
+    "home_tile_filter_games_desc": (
+        "Écarte les jeux d'autres régions ou langues, dans n'importe quel dossier."
+    ),
+    "tri_scan_title": "Analyse de tes jeux",
+    "tri_scan_count": "{count} fichier(s) examiné(s)",
+    "tri_cancel_button": "Annuler",
+    "tri_back_button": "Retour",
+    "tri_preview_title": "Voici ce qui va se passer",
+    "tri_preview_summary": (
+        "{sorted} jeu(x) rangé(s) dans {folders} dossier(s), "
+        "{unidentified} fichier(s) mis de côté dans « _non_identifies »."
+    ),
+    "tri_preview_nothing": "Rien à ranger dans ce dossier : tout est déjà en place.",
+    "tri_preview_risk": (
+        "Vérifie les noms de dossiers ci-dessous : si un nom ne correspond pas à ce que "
+        "ta console attend, elle n'affichera aucun jeu de ce dossier."
+    ),
+    "tri_group_folder": "{folder} — {count} jeu(x), {size}",
+    "tri_group_unidentified": "_non_identifies — {count} élément(s) mis de côté",
+    "tri_group_left_in_place": "Laissés à leur place — {count} jeu(x)",
+    "tri_group_kept_folders": "Dossiers déjà rangés, non touchés — {count}",
+    "tri_case_warning": (
+        "Le dossier « {found} » existe déjà, mais le système de ta console attend « {expected} » "
+        "(majuscules et minuscules comptent). Renomme-le d'abord : les jeux de cette console "
+        "sont laissés à leur place."
+    ),
+    "tri_item_with_reason": "{name} — {reason}",
+    "tri_sort_button": "Ranger",
+    "tri_confirm_title": "Confirmer le rangement",
+    "tri_confirm_message": (
+        "{count} fichier(s) vont être déplacés dans « {root} ». Rien ne sera supprimé, "
+        "et tu pourras tout remettre en place avec « Annuler le rangement »."
+    ),
+    "tri_confirm_button": "Confirmer",
+    "tri_move_title": "Rangement en cours",
+    "tri_move_count": "{done} / {total} fichier(s)",
+    "tri_result_title": "Rangement terminé",
+    "tri_result_cancelled_title": "Rangement interrompu",
+    "tri_result_moved": "{count} fichier(s) déplacé(s).",
+    "tri_result_failures": "{count} fichier(s) n'ont pas pu être déplacés (voir la liste ci-dessous).",
+    "tri_result_aborted": (
+        "Le rangement s'est arrêté après plusieurs échecs de suite. La carte ou le disque "
+        "a peut-être été retiré."
+    ),
+    "tri_result_skipped_existing": (
+        "{count} élément(s) laissé(s) à leur place : un fichier du même nom est déjà dans « _non_identifies »."
+    ),
+    "tri_result_missing": "{count} fichier(s) avaient disparu depuis l'aperçu.",
+    "tri_undo_button": "Annuler le rangement",
+    "tri_undo_previous_button": "Annuler le rangement précédent de ce dossier",
+    "tri_undo_done": "{count} fichier(s) remis à leur place.",
+    "tri_undo_conflicts": "{count} fichier(s) n'ont pas pu être remis en place (un fichier occupe déjà leur place d'origine, ou ils ont été déplacés depuis).",
+    "tri_done_button": "Terminé",
+    "tri_error_root_filesystem_root": "Choisis un dossier plus précis que la racine d'un disque.",
+    "tri_error_root_user_folder": "Choisis un dossier plus précis que ton dossier personnel entier.",
+    "tri_error_root_system_folder": (
+        "Ce dossier porte déjà le nom d'une console : choisis le dossier qui le contient."
+    ),
+    "tri_error_too_many_files": "Ce dossier contient trop de fichiers. Choisis un dossier plus précis.",
+    "tri_error_not_writable": "Impossible d'écrire dans ce dossier (lecture seule ou accès refusé).",
+    "tri_error_io_error": "Impossible de lire ou d'écrire dans ce dossier.",
+    # Motifs (clés de `tri/identify.py`/`tri/plan.py`)
+    "tri_reason_header_mismatch": "le contenu ne correspond pas à son extension",
+    "tri_reason_bin_unknown": "fichier .bin dont la console n'a pas pu être déterminée",
+    "tri_reason_disc_image": "image de disque : console non déterminée automatiquement",
+    "tri_reason_disc_image_missing_files": "image de disque incomplète (fichier manquant : {detail})",
+    "tri_reason_archive_7z": "archive .7z : contenu non examiné",
+    "tri_reason_zip_multiple": "archive contenant plusieurs fichiers (jeu d'arcade ?)",
+    "tri_reason_zip_empty": "archive sans jeu",
+    "tri_reason_zip_unreadable": "archive illisible ou protégée",
+    "tri_reason_unknown_extension": "type de fichier non reconnu",
+    "tri_reason_unreadable": "fichier illisible",
+    "tri_reason_system_not_supported": "console {system} : non prise en charge par ce système",
+    "tri_reason_extension_not_accepted": "ce système n'affiche pas les fichiers {detail} pour cette console",
+    "tri_reason_folder_case_conflict": "le dossier attendu « {detail} » existe déjà, écrit autrement",
+    # Choix de la langue (i18n.py) -- libellé bilingue volontairement
+    # figé : quelqu'un qui ne lit pas la langue courante doit reconnaître
+    # le sélecteur. Les noms de langues eux-mêmes viennent de
+    # `i18n.LANGUAGE_NAMES`, jamais d'ici.
+    "language_selector_label": "Langue / Language",
+    "update_badge": "Nouvelle version disponible",
+    "update_check_label": "Rechercher les mises à jour",
+    "update_dialog_title": "R36S Studio {version} est disponible",
+    "update_dialog_later": "Plus tard",
+    "update_dialog_download": "Obtenir la nouvelle version",
+    "language_restart_title": "Langue / Language",
+    "language_restart_message": "La nouvelle langue s'appliquera au prochain démarrage de R36S Studio.",
+    # Unités de taille, base 1024 partout (CLAUDE.md §5) -- seules les
+    # lettres changent d'une langue à l'autre, jamais le calcul.
+    "unit_bytes": "o",
+    "unit_kb": "Ko",
+    "unit_mb": "Mo",
+    "unit_gb": "Go",
+    "unit_tb": "To",
+    "device_list_entry": "{display} — {size_go:.1f} Go — {bus}",
+    # Date d'une sauvegarde (`screens.format_datetime_label`).
+    "datetime_label": "{day} {month} {year} à {hour:02d}h{minute:02d}",
+    "month_01": "janvier",
+    "month_02": "février",
+    "month_03": "mars",
+    "month_04": "avril",
+    "month_05": "mai",
+    "month_06": "juin",
+    "month_07": "juillet",
+    "month_08": "août",
+    "month_09": "septembre",
+    "month_10": "octobre",
+    "month_11": "novembre",
+    "month_12": "décembre",
+    # Messages de réussite (`main_window._success_message`).
+    "success_backup": "{display} a été sauvegardée dans {path}.",
+    "success_backup_system": "Le système de {display} a été sauvegardé dans {path}.",
+    "success_extract_easyroms": "Tes jeux et sauvegardes ont été copiés sur ton ordinateur.",
+    "success_copy_games": "Les jeux ont été copiés sur {display}.",
+    "success_reset_card": "{display} a été remise à zéro.",
+    "success_ready": "{display} est prête.",
+    # Éjection sans carte unique (`main_window`, détail du journal).
+    "eject_multiple_cards": "Plusieurs cartes détectées -- débranche celles qui ne sont pas concernées, puis réessaie.",
+    "eject_card_not_found": "Carte introuvable -- vérifie qu'elle est toujours branchée, puis réessaie.",
+    # Partition de jeux sans lettre de lecteur (Windows, `main_window`,
+    # `partitions/drive_letter.py`).
+    "drive_letter_assigned": "L'espace de jeux de ta carte est disponible sous {letter}: dans l'Explorateur.",
+    "drive_letter_none": "Windows n'affiche pas l'espace de jeux de ta carte dans l'Explorateur.",
+    "drive_letter_refused": (
+        "L'espace de jeux de ta carte n'apparaît pas dans l'Explorateur : il faut ton autorisation "
+        "pour l'afficher. Relance R36S Studio pour réessayer."
+    ),
+    "cancelled_after_bytes": "Opération annulée après {done} octets",
+    "cancelled_or_elevation_failed": "L'opération a été annulée ou l'élévation a échoué.",
+    # Bouton « Afficher » (`reveal.reveal_label`), nom réel du gestionnaire
+    # de fichiers de chaque OS.
+    "reveal_finder": "Afficher dans le Finder",
+    "reveal_explorer": "Afficher dans l'Explorateur",
+    "reveal_file_manager": "Afficher dans le gestionnaire de fichiers",
+    # Indications macOS jointes au journal (`worker_runner.py`).
+    "macos_tcc_hint": (
+        "macOS empêche l'accès à la carte SD même avec les droits administrateur : "
+        "R36S Studio n'a pas (ou plus) la permission Accès complet au disque. Va "
+        "dans Réglages Système → Confidentialité et sécurité → Accès complet au "
+        "disque, ajoute R36S Studio (ou retire-le puis rajoute-le s'il y figure "
+        "déjà : la signature de l'app change à chaque reconstruction, ce qui "
+        "invalide l'autorisation précédente), puis relance l'opération. Voir "
+        "l'écran Aide depuis l'accueil pour le détail de la procédure."
+    ),
+    "macos_protected_folder_hint": (
+        "macOS bloque l'accès à ce fichier parce qu'il se trouve dans un dossier "
+        "protégé (Téléchargements, Bureau ou Documents) : le worker élevé n'a pas "
+        "la même autorisation que Terminal ou le Finder pour ces emplacements, "
+        "même si l'un d'eux l'a. Déplace le fichier ailleurs — par exemple "
+        "directement dans ton dossier personnel — puis réessaie."
+    ),
+    # Bot Telegram (`r36s_studio/bot/`) -- mêmes règles de vocabulaire (§5).
+    "bot_menu_firmware": "Télécharger un système pour la carte",
+    "bot_welcome": "Bonjour ! Choisis un outil dans le menu en bas de l'écran.",
+    "bot_help": "Choisis un outil dans le menu en bas de l'écran.",
+    "bot_busy": "Une opération est déjà en cours : attends qu'elle se termine, ou appuie sur « Annuler ».",
+    "bot_cancel": "Annuler",
+    "bot_continue": "Continuer",
+    "bot_cancelled": "Opération annulée. Ce qui était déjà fait le reste.",
+    "bot_nothing_changed": "D'accord, rien n'a été modifié.",
+    "bot_detail": "Détail : {detail}",
+    "bot_path": "📁 {path}",
+    "bot_and_more": "… et {count} autre(s).",
+    "bot_looking_for_card": "Je cherche ta carte SD…",
+    "bot_no_games_card": (
+        "Je ne trouve aucune carte avec un espace de jeux. Branche la carte de ta console sur cet "
+        "ordinateur, puis réessaie."
+    ),
+    "bot_choose_card": "Plusieurs cartes sont branchées. Laquelle utiliser ?",
+    "bot_doublons_scanning": "Recherche des doublons… {count} fichier(s) examiné(s).",
+    "bot_doublons_found": (
+        "{count} fichier(s) en double peuvent être mis de côté ({size}). Une copie de chaque jeu "
+        "est toujours gardée :"
+    ),
+    "bot_doublons_simulation": "Mode simulation activé : rien ne sera déplacé, c'est un essai.",
+    "bot_doublons_where": "Ils iront dans ce dossier, rien ne sera supprimé :",
+    "bot_doublons_confirm": "Mettre de côté les {count} fichier(s)",
+    "bot_doublons_moving": "Mise de côté… {done} fichier(s) sur {total}.",
+    "bot_doublons_done": (
+        "{count} fichier(s) mis de côté ({size}). Rien n'a été supprimé : R36S Studio peut tout "
+        "remettre en place avec « Tout annuler »."
+    ),
+    "bot_doublons_file_error": "Le fichier « {name} » n'a pas pu être mis de côté. Que faire ?",
+    "bot_doublons_skipped": "{count} fichier(s) laissé(s) à leur place.",
+    "bot_skip_file": "Ignorer ce fichier",
+    "bot_skip_all": "Ignorer les suivants aussi",
+    "bot_stop": "Arrêter",
+    "bot_filter_choose": (
+        "Quels jeux garder ? Touche les régions et les langues voulues, puis « Voir l'aperçu ». "
+        "Les autres seront mis de côté, jamais supprimés."
+    ),
+    "bot_filter_preview": "Voir l'aperçu",
+    "bot_filter_scanning": "Analyse des jeux… {count} fichier(s) examiné(s).",
+    "bot_filter_confirm": (
+        "{count} fichier(s) vont être déplacés dans « _hors_filtre », sur ta carte. Rien ne sera "
+        "supprimé."
+    ),
+    "bot_filter_moving": "Mise de côté… {done} fichier(s) sur {total}.",
+    "bot_filter_undo_hint": "R36S Studio peut tout remettre en place avec « Annuler le filtrage ».",
+    "bot_firmware_choose": (
+        "Quel système télécharger ? Il sera enregistré sur cet ordinateur, la carte n'est pas "
+        "touchée."
+    ),
+    "bot_firmware_manual": (
+        "{firmware} ne se télécharge pas automatiquement : ouvre sa page et télécharge-le "
+        "toi-même."
+    ),
+    "bot_download_progress": "Téléchargement de {firmware}… {done}",
+    "bot_download_progress_total": "Téléchargement de {firmware}… {done} sur {total} ({percent} %)",
+    "bot_firmware_downloaded": (
+        "{firmware} a été téléchargé et vérifié. Pour l'installer sur une carte, utilise R36S "
+        "Studio sur un ordinateur avec écran."
+    ),
+    "bot_started": "Bot R36S Studio lancé. Ctrl+C pour l'arrêter.",
+    "bot_config_missing": (
+        "Réglages du bot absents. Un modèle vient d'être créé : complète « token » et « chat_ids "
+        "» dans {path}, puis relance."
+    ),
+    "bot_config_permissions": (
+        "Ce fichier est lisible par d'autres comptes de cet ordinateur, il contient la clé du bot "
+        ": lance « chmod 600 {path} », puis relance."
+    ),
+    "bot_config_invalid": (
+        "Réglages du bot illisibles : {path} doit contenir « token » (la clé donnée par "
+        "BotFather) et « chat_ids » (la liste des conversations autorisées)."
+    ),
+    "bot_missing_dependency": (
+        "Il manque python-telegram-bot : installe-le avec « pip install -r requirements-bot.txt "
+        "», puis relance."
+    ),
+}
+
+
+# `STRINGS` (français) reste la référence : toute clé existe d'abord ici.
+_TRANSLATIONS = {
+    "fr": STRINGS,
+    "en": STRINGS_EN,
+}
+
+
+def tr(key: str, **kwargs) -> str:
+    """Traduit `key` dans la langue courante (`i18n.get_language`) et
+    l'interpole avec `kwargs` — point d'entrée unique vers les chaînes."""
+    return tr_in(i18n.get_language(), key, **kwargs)
+
+
+def tr_in(language: str, key: str, **kwargs) -> str:
+    """Comme `tr`, dans une langue donnée plutôt que la courante -- sert
+    au seul message qui doit parler la langue que l'utilisateur vient de
+    choisir, pas celle encore affichée (changement de langue, appliqué au
+    prochain démarrage). Une clé absente de cette langue retombe sur le
+    français, jamais sur une chaîne vide ; une clé absente du français
+    lève `KeyError` (faute de frappe dans le code, pas un trou de
+    traduction)."""
+    template = _TRANSLATIONS.get(language, STRINGS).get(key)
+    if template is None:
+        template = STRINGS[key]
+    return template.format(**kwargs) if kwargs else template
+
+
+# code du protocole (§3, r36s_studio.protocol) -> clé de message convivial
+_ERROR_MESSAGE_KEYS = {
+    "CANCELLED": "error_cancelled",
+    "PARTITION_NOT_FOUND": "error_partition_not_found",
+    "CARD_SYSTEM_INCOMPATIBLE": "error_card_system_incompatible",
+    "PARTITION_NOT_MOUNTED": "error_partition_not_mounted",
+    "EASYROMS_NTFS_MACOS": "error_easyroms_ntfs_macos",
+    "MOUNTPOINT_NOT_WRITABLE": "error_mountpoint_not_writable",
+    "DEVICE_NOT_ALLOWED": "error_device_not_allowed",
+    "SOURCE_NOT_FOUND": "error_source_not_found",
+    "IMPORT_NO_DTB": "error_import_no_dtb",
+    "IMPORT_UNSUPPORTED": "error_import_unsupported",
+    "VERIFY_FAILED": "error_verify_failed",
+    "EJECT_FAILED": "error_eject_failed",
+    "ELEVATION_REFUSED": "error_elevation_refused",
+    "RESET_CARD_FAILED": "error_reset_card_failed",
+    "NOT_SF3000_IMAGE": "error_not_sf3000_image",
+    "INVALID_FILE_NAMES": "error_invalid_file_names",
+    "WHOLE_CARD_PREPARE_FAILED": "error_whole_card_prepare_failed",
+    "WHOLE_CARD_COPY_FAILED": "error_whole_card_copy_failed",
+    "MACOS_TCC_BLOCKED": "error_macos_tcc_blocked",
+    "MACOS_TCC_PROTECTED_FOLDER": "error_macos_tcc_protected_folder",
+    "SEVEN_ZIP_ARCHIVE": "error_seven_zip_archive",
+    "UNSUPPORTED_IMAGE_FORMAT": "error_unsupported_image_format",
+    "ROCKNIX_ASSET_NOT_FOUND": "error_rocknix_asset_not_found",
+    "ROCKNIX_CHECKSUM_MISMATCH": "error_rocknix_checksum_mismatch",
+    "ROCKNIX_DOWNLOAD_FAILED": "error_rocknix_download_failed",
+    "FIRMWARE_NOT_FOUND": "error_firmware_not_found",
+    "GAMES_PARTITION_NOT_FOUND": "error_games_partition_not_found",
+    "INSUFFICIENT_DISK_SPACE": "error_insufficient_disk_space",
+    "DESTINATION_TOO_SMALL": "error_destination_too_small",
+    "OUTPUT_EXISTS": "error_output_exists",
+    "IMAGE_NOT_FOUND": "error_image_not_found",
+    "IO_ERROR": "error_io_error",
+    "VOLUME_IN_USE": "error_volume_in_use",
+    "SOURCE_UNSTABLE": "error_source_unstable",
+    "IMAGE_MODIFIED": "error_image_modified",
+    "UNSTABLE_IMAGE": "error_unstable_image",
+    "SOURCE_NOT_RESPONDING": "error_source_not_responding",
+    "UNSUPPORTED_OS": "error_unsupported_os",
+    "CONFIRMATION_REFUSED": "error_confirmation_refused",
+    "INVALID_ARGS": "error_invalid_args",
+    "DOUBLONS_IO_ERROR": "error_doublons_io_error",
+    "DESTINATION_NOT_WRITABLE": "error_destination_not_writable",
+    "PATH_OUTSIDE_ROOT": "error_path_outside_root",
+    "DESTINATION_INSIDE_ROOT": "error_destination_inside_root",
+    "DESTINATION_FILESYSTEM_ROOT": "error_destination_filesystem_root",
+    "COPY_VERIFICATION_FAILED": "error_copy_verification_failed",
+    "MOVE_FILE_FAILED": "error_move_file_failed",
+    "CARD_SYSTEM_INCOMPATIBLE": "error_card_system_incompatible",
+    "PARTIAL_MOVE_COMPLETED": "error_partial_move_completed",
+    "FAT_FILE_SIZE_LIMIT": "error_fat_file_size_limit",
+}
+
+
+def friendly_error_message(code: str) -> str:
+    """Message principal, sans jargon (§5), pour un code d'erreur du
+    protocole. Le message brut du backend (qui peut contenir un chemin
+    technique, un nom de système de fichiers...) n'est jamais affiché ici —
+    il suit comme ligne supplémentaire dans le journal de bord
+    (`LogPanel.finish_error`, §5 refonte navigation)."""
+    return tr(_ERROR_MESSAGE_KEYS.get(code, "error_generic"))
+
+
+def error_log_detail(code: Optional[str], msg: Optional[str]) -> str:
+    """Détail à journaliser à la suite du message convivial
+    (`LogPanel.finish_error`/`LogPanel.append_log`, §5) -- bug corrigé,
+    confirmé sur du vrai matériel : un code d'erreur sans traduction
+    connue (`friendly_error_message` retombe alors sur `error_generic`,
+    « Une erreur est survenue. ») ne laissait auparavant aucune trace du
+    code réel, seulement le message brut de l'exception (`msg`, souvent
+    peu parlant seul, ex. juste un chemin) -- rendant tout diagnostic après
+    coup impossible sans reproduire le bug avec un débogueur. Le code brut
+    du protocole (ex. `IO_ERROR`) précède désormais le message dans ce cas
+    précis ; un code déjà traduit (§5 vocabulaire : le message principal
+    reste sans jargon) n'a pas besoin de cette répétition, le message brut
+    seul suffit comme avant."""
+    code = code or ""
+    msg = msg or ""
+    if code and code not in _ERROR_MESSAGE_KEYS:
+        return f"{code} : {msg}" if msg else code
+    return msg
+
+
+# code de raison (`doublons/move.py::REASON_*`) -> clé de message traduit
+_DOUBLONS_MOVE_REASON_KEYS = {
+    "access_denied": "doublons_move_reason_access_denied",
+    "read_only": "doublons_move_reason_read_only",
+    "path_too_long": "doublons_move_reason_path_too_long",
+    "drive_removed": "doublons_move_reason_drive_removed",
+    "insufficient_space": "doublons_move_reason_insufficient_space",
+    "source_missing": "doublons_move_reason_source_missing",
+    "unknown": "doublons_move_reason_unknown",
+}
+
+
+def _doublons_move_reason_text(reason: str, system_error: str = "") -> str:
+    return tr(_DOUBLONS_MOVE_REASON_KEYS.get(reason, "doublons_move_reason_unknown"), detail=system_error)
+
+
+def doublons_move_file_error_message(exc) -> str:
+    """Message précis pour un échec réel de déplacement d'un fichier
+    (§ demandé explicitement, point 3 : « afficher... le fichier en cause
+    et la raison traduite... si la copie a réussi mais pas la suppression
+    de l'original, le dire explicitement ») -- `exc` : un `doublons.move.
+    MoveFileFailed` (type non importé ici, seulement ses attributs
+    `path`/`reason`/`copy_succeeded` lus par duck-typing, pour ne pas
+    faire dépendre ce module bas niveau de `doublons/`). Le message brut
+    de l'exception (`exc.detail`) n'apparaît jamais ici -- déjà
+    journalisé séparément (`doublons.log`, §5 vocabulaire, jamais de
+    jargon dans l'interface). Utilisée à la fois pour la fenêtre « ignorer
+    et continuer » (point 4) et pour le message final si l'utilisateur a
+    choisi d'arrêter."""
+    reason = _doublons_move_reason_text(exc.reason, getattr(exc, "system_error", "") or exc.detail)
+    key = "doublons_file_error_message_copy_succeeded" if exc.copy_succeeded else "doublons_file_error_message"
+    return tr(key, path=exc.path, reason=reason)
+
+
+def doublons_partial_move_message(moved: int, skipped: int, reason_counts=()) -> str:
+    """§ demandé explicitement, point 4 : le lot s'est terminé après
+    qu'au moins un fichier a été ignoré -- un résumé plutôt qu'un message
+    par fichier ignoré (déjà journalisé individuellement, `doublons.log`)."""
+    message = tr("doublons_partial_move_completed", moved=moved, skipped=skipped)
+    # `reason_counts` : `move.py::skipped_reason_counts` -- un millier
+    # d'échecs récapitulés en quelques lignes plutôt qu'une fenêtre chacun.
+    for reason, count in reason_counts:
+        message += tr("doublons_partial_move_reason_line", count=count, reason=_doublons_move_reason_text(reason).rstrip(" :\n"))
+    return message

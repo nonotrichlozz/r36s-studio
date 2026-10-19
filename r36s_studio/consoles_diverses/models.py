@@ -34,7 +34,7 @@ import datetime
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NoReturn, Optional
 
-from r36s_studio.gui import logs as gui_logs
+from r36s_studio import logs as gui_logs
 
 from .telechargement import Telechargement, telechargement_depuis_json
 

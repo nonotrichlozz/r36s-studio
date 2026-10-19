@@ -80,6 +80,7 @@ from r36s_studio.detect import (
 )
 from r36s_studio.devices import Device
 from r36s_studio.doublons.normalize import extract_tags, region_rank
+from r36s_studio.doublons.run import exact_group_default, prune_moved, version_group_default
 from r36s_studio.doublons.scan import ExactDuplicateGroup, ExclusionWarning, ScanResult, Unit, VersionGroup
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult
 from r36s_studio.identify.firmware_catalog import FIRMWARE_BY_ID, FIRMWARE_CATALOG
@@ -4671,38 +4672,9 @@ class DoublonsResultsScreen(Screen):
         deux fichiers de même taille/contenu."""
         if not moved_units:
             return
-        moved_ids = {id(unit) for unit in moved_units}
         previous_checked = {id(unit): checkbox.isChecked() for checkbox, unit in self._all_checkboxes.items()}
 
-        def _prune(units: List[Unit]) -> List[Unit]:
-            return [unit for unit in units if id(unit) not in moved_ids]
-
-        exact_groups: List[ExactDuplicateGroup] = []
-        for group in self._scan_result.exact_duplicate_groups:
-            remaining = _prune(group.units)
-            if len(remaining) >= 2:
-                exact_groups.append(ExactDuplicateGroup(units=remaining, sha256=group.sha256))
-
-        version_groups: List[VersionGroup] = []
-        for group in self._scan_result.version_groups:
-            remaining = _prune(group.units)
-            if len(remaining) >= 2:
-                suggested = group.suggested_keep if group.suggested_keep in remaining else remaining[0]
-                version_groups.append(
-                    VersionGroup(
-                        system_folder=group.system_folder,
-                        normalized_title=group.normalized_title,
-                        units=remaining,
-                        suggested_keep=suggested,
-                    )
-                )
-
-        new_result = ScanResult(
-            exact_duplicate_groups=exact_groups,
-            version_groups=version_groups,
-            excluded=self._scan_result.excluded,
-            files_scanned=self._scan_result.files_scanned,
-        )
+        new_result = prune_moved(self._scan_result, moved_units)
         self.set_results(new_result, self._macos_move_blocked)
         for checkbox, unit in self._all_checkboxes.items():
             previous = previous_checked.get(id(unit))
@@ -4774,13 +4746,14 @@ class DoublonsResultsScreen(Screen):
         layout.addWidget(notice)
 
         checkboxes: Dict[QCheckBox, Unit] = {}
-        for index, unit in enumerate(group.units):
+        # « Certain », donc précoché par défaut -- sauf le premier, gardé
+        # (§ garde-fou 1, seule exception documentée à la règle générale de
+        # ce projet contre toute présélection ; `doublons/run.py`).
+        preselected = {id(unit) for unit in exact_group_default(group)}
+        for unit in group.units:
             row = QHBoxLayout()
             checkbox = QCheckBox(tr("doublons_move_this_one"))
-            # « Certain », donc précoché par défaut -- sauf le premier,
-            # gardé (§ garde-fou 1, seule exception documentée à la règle
-            # générale de ce projet contre toute présélection).
-            checkbox.setChecked(index != 0)
+            checkbox.setChecked(id(unit) in preselected)
             checkboxes[checkbox] = unit
             self._all_checkboxes[checkbox] = unit
             checkbox.toggled.connect(self._update_selection_summary)
@@ -4828,6 +4801,7 @@ class DoublonsResultsScreen(Screen):
             any_checked = any(box.isChecked() for box in checkboxes)
             move_button.setEnabled(any_checked and not macos_move_blocked)
 
+        preselected = {id(unit) for unit in version_group_default(group)}
         for unit in group.units:
             row = QHBoxLayout()
             checkbox = QCheckBox(tr("doublons_move_this_one"))
@@ -4843,7 +4817,7 @@ class DoublonsResultsScreen(Screen):
             # fichiers sélectionnés). Toujours modifiable à la main
             # ensuite (point 5 du brief) -- une suggestion, pas une
             # garantie (bandeau ci-dessus).
-            checkbox.setChecked(unit is not group.suggested_keep)
+            checkbox.setChecked(id(unit) in preselected)
             row.addWidget(checkbox)
             suggested_marker = " ★" if unit is group.suggested_keep else ""
             path_label = QLabel(f"{unit.representative} — {_format_size(unit.total_size_bytes)}{suggested_marker}")

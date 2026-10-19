@@ -1,0 +1,1225 @@
+# Copyright (c) 2026 Arnaud
+# Licence : PolyForm Strict 1.0.0, voir LICENSE
+
+"""Chaînes anglaises de l'interface -- même clés que `strings.STRINGS`
+(français, source de référence), mêmes variables `{…}` dans chaque
+modèle (vérifié par `tests/test_gui_strings.py`).
+
+Une clé absente ici retombe sur le français (`strings.tr`), jamais sur
+une chaîne vide ni une exception -- mais le test exige qu'il n'en manque
+aucune. Même vocabulaire sans jargon qu'en français (§5) : « your SD
+card », « your games », jamais « block device » ni « partition »."""
+
+from __future__ import annotations
+
+STRINGS_EN = {
+    "app_title": "R36S Studio",
+    "splash_starting": "Starting… looking for your SD card",
+    "home_title": "What do you want to do?",
+    "home_refresh": "Refresh",
+    "home_assisted_mode_button": "Guided mode",
+    "home_consoles_diverses_button": "Other consoles",
+    "home_android_button": "Android console",
+    "home_step_extract_easyroms_title": "Copy the card's games to the computer",
+    "home_step_extract_easyroms_desc": "Saves your games and their saves to your computer, to put them on another card.",
+    "home_step_flash_title": "Install a system on the card",
+    "home_step_flash_desc": "Writes the console's system to your card.",
+    "home_step_copy_games_title": "Copy games to the card",
+    "home_step_copy_games_desc": "Puts games saved on your computer back on your card.",
+    "home_step_eject_title": "Safely eject the card",
+    "home_step_eject_desc": "Unmounts the card so it can be removed without risk.",
+    "home_backup_separator": "To be safe",
+    "home_tile_backup": "Back up a full image of my card",
+    "home_tile_backup_desc": "Saves the current contents of your SD card to a file, just in case.",
+    "home_tile_backup_system": "Back up my system without the games",
+    "home_tile_backup_system_desc": (
+        "Saves the screen and settings of your card, without your games — "
+        "a much smaller file than a full backup."
+    ),
+    "home_tile_reset_card": "Reset the card",
+    "home_tile_reset_card_desc": (
+        "Erases everything on this card and turns it back into a single normal storage space — "
+        "useful after trying several firmwares."
+    ),
+    "home_help": "Help: allow access to the card (Mac)",
+    "home_tile_web": "Web",
+    "home_tile_web_desc": "Opens the website in your browser.",
+    "home_tools_separator": "Tools",
+    "home_tile_find_duplicates": "Find duplicates",
+    "home_tile_find_duplicates_desc": "Finds duplicate games in a folder and sets them aside, without deleting anything.",
+    "home_tile_sort_games": "Sort mixed games",
+    "home_tile_sort_games_desc": "Sorts a folder of mixed games into one folder per console.",
+    "status_available": "Available",
+    "status_done": "Already done",
+    "status_not_relevant": "Not relevant for this card",
+    "status_platform_limited": "PC or Linux",
+    "status_system_incompatible": "Not applicable — {system} card",
+    "card_system_rocknix": "ROCKNIX",
+    "card_system_emuelec": "EmuELEC",
+    "card_system_knulli": "KNULLI",
+    "knulli_copy_games_refused": (
+        "Your card has KNULLI: its games aren't copied onto the card from the computer. Nothing was changed. Three ways to add them:\n"
+        "1. Over Wi-Fi: with the console on your network, open \\\\KNULLI\\share in the file explorer (first turn on SAMBA sharing in System settings → Services).\n"
+        "2. With the second card (TF2): pick it in System settings → Storage on the console, then copy your games onto that card from the computer.\n"
+        "3. With a USB cable, using R36S Studio's “Copy games to my console (USB)” (checked on the RG40XXV, not checked on R36S)."
+    ),
+    "knulli_copy_games_detail_log": (
+        "[detail] KNULLI keeps games in an ext4 storage area named “SHARE”, which Windows and macOS can't write. Network share: user root, password linux by default (KNULLI docs, “Network Transfer”); if \\\\KNULLI doesn't answer, use the console's IP address."
+    ),
+    "card_system_unknown": "non-ArkOS",
+    "home_banner_state_other_system": "{system} card recognized",
+    "home_banner_line_device": "{display} — {size_go:.1f} GB",
+    "home_banner_state_arkos": "ArkOS card recognized",
+    "home_banner_state_unprepared": "Card not prepared",
+    "home_banner_state_none": "No card detected yet",
+    "assisted_prepare_button": "Prepare my card automatically",
+    "assisted_expert_mode_button": "Expert mode",
+    "assisted_backup_system_button": "Back up my system without the games",
+    "assisted_tile_prepare": "Prepare my card",
+    "assisted_tile_prepare_desc": "Full copy from the old card to the new one, step by step.",
+    "assisted_tile_identify": "Identify my console",
+    "assisted_tile_backup": "Back up my card",
+    "assisted_tile_eject": "Eject the card",
+    "assisted_tile_help": "Help",
+    "assisted_brand_subtitle": "Choose what you want to do with your SD card.",
+    "assisted_section_label": "To get started",
+    "about_title": "About R36S Studio",
+    "about_orientation": (
+        "Each tile on the home screen is an action on your SD card. Plug in your card: the app "
+        "detects what is on it and suggests the relevant action with a badge (available, already "
+        "done, not relevant for this card). Nothing ever happens until you click, and any action "
+        "that erases something asks you explicitly before it starts."
+    ),
+    "about_licence": "Source available but not free: personal use only, no modification, redistribution or commercial use without permission (PolyForm Strict 1.0.0).",
+    "about_close": "Close",
+    "identify_result_title": "Your console",
+    "identify_result_board": "Detected identifier: {board}",
+    "identify_result_catalog_button": "See the console catalog",
+    "identify_result_clone_warning": (
+        "This card seems to come from a clone console (different hardware from a standard "
+        "R36S/R35S). Systems made for the standard R36S may not start on it. dArkOS and EmuELEC "
+        "say they support these consoles; EmuELEC has been checked on a real clone console."
+    ),
+    "identify_failed_mount_failed": "Could not read the card's system. Unplug it, plug it back in, then try again.",
+    "identify_failed_no_dtb_found": (
+        "No model information found on this card -- this is normal for a card that was just flashed."
+    ),
+    "identify_failed_all_dtb_invalid": "The model information on this card is unreadable or corrupted.",
+    "identify_failed_access_denied": (
+        "Your computer refused to read the card's system. Your card is not the problem: this is a "
+        "protection of the computer. Try again, and accept the permission request if it appears."
+    ),
+    "identify_failed_elevation_refused": (
+        "To read your console's model, Windows needs your permission (\"Do you want to allow this app "
+        "to make changes to your device?\" window). It was refused or closed. Nothing is wrong with "
+        "your card: start the identification again and answer \"Yes\"."
+    ),
+    "doublons_back_button": "Back",
+    "doublons_folder_title": "Choose a folder",
+    "doublons_folder_hint": "Choose the folder to scan -- on your computer, an SD card or an external drive.",
+    "doublons_folder_no_shortcuts": "No card or removable drive detected yet.",
+    "doublons_resume_button": "Resume the last scan",
+    "doublons_resume_info": "{folder} -- scanned on {date}",
+    "doublons_resume_files_removed_notice": (
+        "{count} file(s) removed from the results -- changed or deleted since the last scan."
+    ),
+    "doublons_browse_button": "Browse…",
+    "doublons_options_title": "OPTIONS",
+    "doublons_simulation_checkbox": "Simulate without moving anything",
+    "doublons_ignored_folders_title": "Ignored folders:",
+    "doublons_scan_progress_title": "Scanning",
+    "doublons_scan_progress_count": "{count} file(s) scanned",
+    "doublons_scan_cancel_button": "Cancel",
+    "doublons_move_progress_title": "Moving",
+    "doublons_move_progress_count": "{done} / {total} file(s)",
+    "doublons_risk_title": "This folder may take a while to scan",
+    "doublons_risk_cancel": "Cancel",
+    "doublons_risk_continue": "Continue",
+    "doublons_risk_filesystem_root": (
+        "You chose the whole root of a drive -- the scan may take a very long time and go through "
+        "folders unrelated to your games. Continue anyway?"
+    ),
+    "doublons_risk_whole_user_folder": (
+        "You chose a whole personal folder rather than a specific games folder -- the scan may take "
+        "a very long time. Continue anyway?"
+    ),
+    "doublons_risk_large_folder": (
+        "This folder already contains more than 200,000 files and the scan is still going -- it may "
+        "take a while. Continue?"
+    ),
+    "doublons_results_title": "Duplicates found",
+    "doublons_undo_button": "Undo all",
+    "doublons_undo_conflicts_warning": (
+        "{count} file(s) could not be restored automatically -- check the contents of the _doublons/ folder."
+    ),
+    "doublons_export_button": "Export the report",
+    "doublons_destination_label": "Destination:",
+    "doublons_destination_change_button": "Change…",
+    "doublons_destination_cross_volume_warning": (
+        "Destination on another drive: the files will be copied, then deleted from the source (slower)."
+    ),
+    "doublons_destination_space_warning": (
+        "Space available at the destination: {available} -- may not be enough for this move."
+    ),
+    "doublons_destination_fat_warning": (
+        "The destination is formatted as FAT, which cannot hold files larger than 4 GB -- {count} "
+        "selected file(s) are larger than that and cannot be moved."
+    ),
+    "doublons_simulation_banner": "Simulation mode on -- nothing will be moved.",
+    "doublons_auto_selection_banner": "Automatic selection: check it before moving.",
+    "doublons_select_all_button": "Check all",
+    "doublons_select_none_button": "Uncheck all",
+    "doublons_keep_french_european_button": "Keep only the French and European versions",
+    "doublons_summary": (
+        "{files} file(s) scanned -- {exact} group(s) of identical copies, {versions} group(s) of "
+        "different versions."
+    ),
+    "doublons_empty": "No duplicates found.",
+    "doublons_selection_summary": "{count} file(s) selected -- {size} can be freed",
+    "doublons_move_all_button": "Set aside the {count} selected files ({size})",
+    "doublons_group_exact_title": "Identical copies",
+    "doublons_exact_group_hash_label": "SHA-256: {hash}",
+    "doublons_exact_group_identical_notice": (
+        "Exactly the same content (same SHA-256 fingerprint), despite different names."
+    ),
+    "doublons_move_this_one": "Set this one aside",
+    "doublons_move_selected_button": "Set the selection aside",
+    "doublons_excluded_title": "Excluded groups -- linked file not found",
+    "doublons_excluded_entry": "{manifest}: {missing} not found",
+    "doublons_confirm_title": "Set these duplicates aside?",
+    "doublons_confirm_message": (
+        "{count} file(s) ({size}) will be moved to a _doublons/ folder -- not deleted, you can put "
+        "them back later if needed."
+    ),
+    "doublons_confirm_message_simulation": (
+        "Simulation: {count} file(s) ({size}) would be moved to a _doublons/ folder -- nothing will "
+        "actually be touched."
+    ),
+    "doublons_confirm_button": "Set aside",
+    "doublons_confirm_button_simulation": "Simulate",
+    "doublons_confirm_cancel": "Cancel",
+    "doublons_undo_confirm_title": "Undo all?",
+    "doublons_undo_confirm_message": "All the files moved to _doublons/ will be put back where they were.",
+    "doublons_undo_confirm_button": "Undo all",
+    "doublons_file_error_title": "Could not move this file",
+    "doublons_file_error_message": "{path}\n\n{reason}\n\nSkip this file and continue with the next ones?",
+    "doublons_file_error_message_copy_succeeded": (
+        "{path}\n\nThe copy succeeded, but the original could not be deleted: {reason}\n\n"
+        "Skip this file and continue with the next ones?"
+    ),
+    "doublons_move_reason_access_denied": "access denied.",
+    "doublons_move_reason_read_only": "the destination is write-protected (read-only card or drive).",
+    "doublons_move_reason_path_too_long": "the path is too long.",
+    "doublons_move_reason_drive_removed": "the drive seems to have been unplugged or is no longer accessible.",
+    "doublons_move_reason_insufficient_space": "not enough space on the destination drive.",
+    "doublons_move_reason_source_missing": (
+        "the file is no longer there (moved or deleted since the analysis -- run the analysis again)."
+    ),
+    "doublons_move_reason_unknown": "unexpected system error:\n{detail}",
+    "doublons_file_error_apply_to_following": "Apply this choice to the following files",
+    "doublons_partial_move_reason_line": "\n• {count}: {reason}",
+    "doublons_partial_move_completed": (
+        "{moved} file(s) moved, {skipped} skipped after a failure -- see the log for details."
+    ),
+    "assisted_backup_system_running_title": "Backing up the system",
+    "assisted_backup_system_running_instruction": "Don't unplug your card during the backup.",
+    "assisted_backup_system_done_title": "Backup complete",
+    "assisted_backup_system_done_instruction": "What do you want to do now?",
+    "assisted_backup_running_title": "Backing up the card",
+    "assisted_backup_running_instruction": "Don't unplug your card during the backup.",
+    "assisted_backup_done_title": "Backup complete",
+    "assisted_backup_done_instruction": "What do you want to do now?",
+    "assisted_flash_running_title": "Installing the system",
+    "assisted_flash_running_instruction": "Don't unplug your card during the installation.",
+    "assisted_reset_card_running_title": "Resetting the card",
+    "assisted_reset_card_running_instruction": "Don't unplug your card during the operation.",
+    "assisted_reset_card_done_title": "Card reset",
+    "assisted_reset_card_done_instruction": "What do you want to do now?",
+    "assisted_eject_running_title": "Ejecting the card",
+    "assisted_eject_running_instruction": "Don't unplug your card.",
+    "assisted_eject_done_title": "Card ejected",
+    "assisted_eject_done_instruction": "You can safely remove your card.",
+    "assisted_prepare_card_button": "Prepare a card with this backup",
+    "assisted_return_home_button": "Back to home",
+    "assisted_prepare_card_choose_device_title": "Choose the card to prepare",
+    "assisted_prepare_card_choose_device_instruction": (
+        "Plug in the new SD card you want to prepare with this backup."
+    ),
+    "assisted_prepare_card_done_title": "Card prepared",
+    "assisted_prepare_card_done_instruction": "What do you want to do now?",
+    "wizard_continue": "Continue",
+    "wizard_resume": "Resume",
+    "wizard_cancel": "Cancel",
+    "wizard_status_waiting": "Waiting for your card…",
+    "wizard_status_device_found": "Card recognized: {display}",
+    "wizard_status_same_card": "This is the same card — insert the new card, not the old one.",
+    "wizard_status_confirmation_needed": "Confirmation needed — check the window that opened.",
+    "wizard_status_multiple_candidates": "Several cards detected — choose the right one.",
+    "wizard_diagnostic_summary": "Detection: {accepted} card(s) kept, {rejected} set aside",
+    "wizard_poll_started": "Automatic card polling started.",
+    "wizard_poll_stopped": "Automatic card polling stopped.",
+    "wizard_poll_stall_detected": "Automatic card polling seemed stuck for {seconds} s — restarted.",
+    "wizard_step1_title": "1. Insert your original SD card",
+    "wizard_step1_instruction": "Plug your console's old SD card into your computer.",
+    "wizard_step2_title": "2. Copying your card to the computer",
+    "wizard_step2_instruction": "Choose what you want to back up, then it is saved to your computer.",
+    "wizard_backup_kind_title": "What do you want to back up?",
+    "wizard_backup_kind_full": "Full copy",
+    "wizard_backup_kind_full_desc": "The screen, the settings and all your games. Up to about {size}.",
+    "wizard_backup_kind_system": "System only, without the games",
+    "wizard_backup_kind_system_desc": "Only the screen and the settings — a much smaller file.",
+    "wizard_create_image_size_hint": "Maximum size of the copy: about {size}.",
+    "whole_card_title": "How should this system be installed?",
+    "whole_card_instruction": (
+        "This file comes from an SF3000 console card, and your card is larger than it. "
+        "Choose how to use it."
+    ),
+    "whole_card_option_whole": "Use the whole card (recommended)",
+    "whole_card_option_whole_desc": (
+        "Copies the files one by one to a single space that fills the whole card: all {card} "
+        "will be usable for your games. Slower: about {extra} minutes more than a raw copy."
+    ),
+    "whole_card_option_raw": "Raw copy of the image",
+    "whole_card_option_raw_desc": (
+        "Faster, but only the image's {image} will be usable: the remaining {remaining} of the "
+        "card will stay unusable by the console."
+    ),
+    "whole_card_verify": "Check every file after copying (recommended, about {minutes} minutes more)",
+    "whole_card_continue": "Continue",
+    "whole_card_wizard_log": (
+        "SF3000 console card: the whole card will be used (files copied one by one, then each "
+        "one checked). Estimated time: about {minutes} minutes."
+    ),
+    "whole_card_marker_found": (
+        "\"{display}\" holds an interrupted copy: the card is incomplete. "
+        "Start the installation again to redo it from the beginning."
+    ),
+    "reset_card_label_title": "Card name",
+    "reset_card_label_instruction": (
+        "Choose the name this card will show once it is empty — you can keep this one."
+    ),
+    "reset_card_label_continue": "Continue",
+    "reset_card_filesystem_title": "How should the card be formatted?",
+    "reset_card_filesystem_exfat": "exFAT — recommended",
+    "reset_card_filesystem_exfat_desc": "Accepts large files. Works with most recent consoles.",
+    "reset_card_filesystem_fat32": "FAT32",
+    "reset_card_filesystem_fat32_desc": "For older consoles that cannot read exFAT.",
+    "reset_card_filesystem_fat32_note": "With FAT32, a single file cannot be larger than 4 GB.",
+    "reset_card_fat32_impossible_warning": "FAT32 is not possible on a card this small. Choose exFAT instead.",
+    "wizard_image_created_log": "Image created: {path}",
+    "wizard_step3_title": "3. Insert your new card",
+    "wizard_step3_instruction": "Now plug in the new card to prepare.",
+    "wizard_ejecting_source": "Ejecting your original card…",
+    "wizard_source_ejected": "You can now safely remove your original card.",
+    "wizard_step4_title": "4. Installing on your new card",
+    "wizard_step4_instruction": "Your backup is being installed on your new card.",
+    "wizard_step5_title": "5. Ejecting",
+    "wizard_step5_instruction": "Your new card is being safely ejected — it is ready.",
+    "wizard_finished": "Your card is ready! You can remove it and put it in your console.",
+    "wizard_archive_destination_log": "Destination: {path}",
+    "boot_sets_title": "Choose the console's screen",
+    "boot_sets_hint": "If your console stays on a black or frozen screen, try another screen from this list. Those already tried are crossed out. Only starting your console will tell if it's the right one.",
+    "boot_sets_empty": "This card offers no spare screens.",
+    "boot_sets_busy": "Reading the card…",
+    "boot_sets_trial_tried": "tried on {date}",
+    "boot_sets_trial_failed": "didn't work ({date})",
+    "boot_sets_trial_booted": "started ({date})",
+    "boot_sets_import_button": "Use screen files from my computer…",
+    "boot_sets_import_choose": "Choose the folder containing your console's screen files (.dtb files)",
+    "boot_sets_imported": "Screen added at the top of the list. Select it, then “Try this screen”.",
+    "boot_sets_imported_log": "Screen files from the computer put on the card, renamed for the installed system: offered at the top of the list.",
+    "boot_sets_error_import_no_dtb": "This folder doesn't contain any screen file (.dtb). Choose the folder that directly holds these files, for example the copy of your original card's BOOT.",
+    "boot_sets_error_import_unsupported": "The system installed on this card doesn't pick its screen with these files (for example ROCKNIX): they can't be used here.",
+    "error_import_no_dtb": "This folder doesn't contain any screen file (.dtb).",
+    "error_import_unsupported": "The system installed on this card doesn't use these screen files.",
+    "boot_sets_original_screen": "This console's original screen (the one that made it start)",
+    "screen_backup_saved_log": "Your card's screen files were set aside on the computer before writing: they will be offered first in “Choose the console's screen”.",
+    "screen_backup_already_log": "This card's screen files were already set aside during a previous flash: they will be offered first in “Choose the console's screen”.",
+    "screen_backup_none_log": "No screen files to set aside on this card (new card, or a system without these files).",
+    "screen_backup_failed_log": "This card's screen files could not be read: nothing was set aside. Writing continues normally.",
+    "boot_sets_current": "currently on the card",
+    "boot_sets_try_button": "Try this screen",
+    "boot_sets_restore_button": "Go back to the original screen",
+    "boot_sets_close": "Close",
+    "boot_sets_cancel": "Cancel",
+    "boot_sets_confirm_text": "Put the screen “{name}” on the card? The current files are kept on the card: you can go back.",
+    "boot_sets_confirm_yes": "Yes, try it",
+    "boot_sets_restore_confirm": "Put back the screen the card had at the start?",
+    "boot_sets_done_text": "Done: the screen “{name}” is on the card. Eject it, put it back in the console and turn it on. If the screen stays black or frozen, bring the card back here to try another one.",
+    "boot_sets_eject": "Eject the card",
+    "boot_sets_outcome_question": "Last time, you tried the screen “{name}”. Did the console start?",
+    "boot_sets_outcome_booted": "Yes, it started",
+    "boot_sets_outcome_failed": "No, the screen stayed black or frozen",
+    "boot_sets_outcome_later": "I haven't tried yet",
+    "boot_sets_applied_log": "Screen “{name}” put on the card.",
+    "boot_sets_restored_log": "Original screen put back on the card.",
+    "boot_sets_ejected": "Card ejected, you can remove it.",
+    "boot_sets_eject_failed": "The card could not be ejected. Use Windows' “Safely Remove Hardware” before removing it.",
+    "boot_sets_error_no_boot": "The card can't be read. Check that it is plugged in and that the console has already started once with this system.",
+    "boot_sets_error_access_denied": "Your computer refuses to read this card without permission.",
+    "boot_sets_error_elevation_refused": "You need to accept Windows' permission request to read this card.",
+    "boot_sets_error_unknown_set": "This screen is no longer on the card. The list has been reread.",
+    "boot_sets_error_originals_missing": "The copy of the original screen is incomplete: nothing was changed.",
+    "boot_sets_error_io": "The card could not be read or changed. Plug it back in and try again.",
+    "assisted_tile_not_booting": "My console won't start",
+    "assisted_tile_not_booting_desc": "Black screen, frozen, or nothing at all: we put back a working system, step by step.",
+    "assisted_tile_new_card": "Prepare a new card",
+    "assisted_tile_backup_working": "Back up what works",
+    "journey_title": "Get your console working again",
+    "journey_close": "Close",
+    "journey_start_title": "What's happening?",
+    "journey_start_text": "Choose what looks most like your situation.",
+    "journey_start_reinstall": "I want to put a working system back on the card",
+    "journey_start_frozen": "I just put a system back, but the screen stays black or frozen",
+    "journey_console_title": "Which console do you have?",
+    "journey_console_text": "Put the console's card in the computer and click “Read the card”. If it can't be read, open the console: a reference is printed on the circuit board inside.",
+    "journey_console_read_card": "Read the card",
+    "journey_console_reading": "Reading the card…",
+    "journey_console_unreadable": "The card doesn't say which console it is. Type the reference printed inside the console, or choose “I don't know”.",
+    "journey_console_reference_label": "Reference printed inside the console:",
+    "journey_console_reference_example": "for example G80CA-MB V1.2-20250422",
+    "journey_console_reference_continue": "Continue with this reference",
+    "journey_console_unknown": "I don't know",
+    "journey_system_title": "The system to put on the card",
+    "journey_system_origin": "It's an original console: the recommended system is dArkOSen. Open the download page, take the latest version and its two files .7z.001 and .7z.002, extract them with 7-Zip to get the .img file, then come back here and choose it. After installing, if the screen stays black, open “Choose the console's screen”.",
+    "journey_system_clone": "It's a “clone” console: the recommended system is ArkOS-K36. It hasn't been updated since March 2026, but it's still the only one made for clones. Open the download page and take the “K36 and Similar Clones” version (.img.xz file, on Google Drive, Mediafire or MEGA), then come back here and choose the file.",
+    "journey_system_ambiguous": "This reference exists on both original consoles and clones: it isn't enough to tell them apart. Try dArkOSen first: it got an R36S with this reference to start again. Take the latest version and its two files .7z.001 and .7z.002, extract them with 7-Zip to get the .img file, then come back here and choose it. If the console doesn't start, it's probably a clone: take ArkOS-K36 instead (button below).",
+    "journey_system_unknown": "Without knowing which console it is, the safest choice is ArkOS-K36: it includes several spare screens and has a good chance of starting on most consoles. It hasn't been updated since March 2026. Open the download page and take the “K36 and Similar Clones” version (.img.xz file), then come back here and choose the file.",
+    "journey_system_open_page": "Open the download page",
+    "journey_system_open_clone_page": "My console is a clone: ArkOS-K36 page",
+    "journey_system_choose_file": "I downloaded the file: choose it",
+    "journey_file_filter": "Console system files",
+    "journey_flash_done_title": "The card is ready",
+    "journey_flash_done_instruction": "Put the card in the console and turn it on. The first start can take a few minutes. If the screen stays black or frozen, put the card back in the computer, choose “My console won't start”, then “the screen stays black or frozen”.",
+    "card_slow_read_warning": (
+        "Your SD card reads very slowly (about {speed}/s; a good card exceeds 50 MB/s). "
+        "This is not a problem with the software: cards shipped with consoles are often "
+        "slow, sometimes counterfeit, and can damage data. For your next card, "
+        "get a branded one (SanDisk, Samsung, Kingston…)."
+    ),
+    "file_releases_button": "See the versions available online",
+    "firmware_status_maintained": "Maintained",
+    "firmware_status_archived": "Archived",
+    "firmware_status_experimental": "Experimental",
+    "file_firmware_arkos_title": "ArkOS / dArkOS",
+    "file_firmware_arkos_desc": (
+        "The reference system for the R36S, which also says it supports many clone consoles. "
+        "Updated by the community (dArkOS)."
+    ),
+    "file_firmware_darkosen_title": "dArkOSen",
+    "file_firmware_darkosen_desc": (
+        "Recommended for an original R36S. An enhanced version of dArkOS, updated about every two "
+        "weeks. Only for genuine R36 consoles "
+        "(R36S, R36S Plus, R36H, R36H ProMax): it does not work on any clone console. The download "
+        "comes as two files, .7z.001 and .7z.002: extract them with 7-Zip to get the .img file. "
+        "After installing, choose your console's model (tool provided on the card)."
+    ),
+    "file_firmware_rocknix_title": "ROCKNIX",
+    "file_firmware_rocknix_desc": "A more recent system, with built-in game transfer over USB.",
+    "file_firmware_knulli_title": "KNULLI",
+    "file_firmware_knulli_desc": "A complete, recent system; the image is made for the genuine R36S (not clones). Not yet tried on an R36S with R36S Studio. Non-commercial licence: commercial use is forbidden.",
+    "knulli_r36s_first_boot_note": "Plug the console into mains power for the first start, even if its battery is charged, and let the installation finish without turning it off: it can take several minutes and restart on its own. Tip: remove the second card (TF2) for the first start. If the screen stays black, put the card back in the computer: “Choose the console's screen” offers your console's original screen.",
+    "knulli_notes_device_log": "KNULLI release notes: this file is listed for “{device}”.",
+    "knulli_notes_missing_log": "KNULLI release notes: this file is not in their console table (an indicative check only).",
+    "knulli_download_success": "KNULLI has been downloaded and verified: {path}",
+    "knulli_clone_title": "Clone console detected",
+    "knulli_clone_text": "Your card comes from an R36S clone (different motherboard). The KNULLI image is made for the genuine R36S: on a clone, the console may stay on a black screen. You can write anyway: your current card will be erased, but its screen files are set aside on the computer.",
+    "knulli_clone_write_anyway": "Write anyway",
+    "knulli_clone_log": "Clone console detected on the card: KNULLI is made for the genuine R36S.",
+    "knulli_console_unknown_log": "Original console or clone: could not tell from the card. KNULLI is made for the genuine R36S.",
+    "knulli_console_ambiguous_log": "Original console or clone: the card doesn't settle it. KNULLI is made for the genuine R36S.",
+    "knulli_console_unreadable_log": "Nothing readable on the card before writing (new or unreadable card): can't tell whether the console is a clone. KNULLI is made for the genuine R36S.",
+    "file_firmware_emuelec_title": "EmuELEC",
+    "file_firmware_emuelec_desc": "Another option for clone consoles, already tested successfully on one of them.",
+    "file_firmware_amberelec_title": "AmberELEC",
+    "file_firmware_amberelec_desc": (
+        "Made for the same chip family (RK3326) as the R36S; R36S compatibility not officially confirmed."
+    ),
+    "file_firmware_minui_title": "MinUI",
+    "file_firmware_minui_desc": "Minimalist interface. Community port for the R36S, separate from the official project.",
+    "file_firmware_r36droid_title": "R36Droid (Android)",
+    "file_firmware_r36droid_desc": "Community port of Android (LineageOS) for R36S/RK3326.",
+    "file_firmware_andr36oid_title": "andr36oid (Android)",
+    "file_firmware_andr36oid_desc": "Another community port of Android (LineageOS) for R36S/RK3326.",
+    "flash_android_format_prompt_warning": (
+        "Windows will probably offer to format your card (\"You need to format the disk…\"), "
+        "sometimes several times in a row — click Cancel every time, this is normal: Windows simply "
+        "cannot read the Android system you just installed, it is not a problem with your card."
+    ),
+    "flash_format_prompt_warning_generic": "Windows may offer to format the card — click Cancel, this is normal.",
+    "flash_android_panel_mismatch_warning": (
+        "If the screen stays black or frozen at startup, open the card's BOOT drive (Windows "
+        "shows it as a separate drive named BOOT): a \"Panels\" folder contains one subfolder per "
+        "screen type, each with .dtb files to copy to the root of the BOOT drive to change the "
+        "screen. It sometimes takes several tries — and there is no "
+        "guarantee that one of these screens matches your console."
+    ),
+    "flash_darkosen_model_selection_note": (
+        "Before starting the console: plug the card back into a Windows PC, open the card's drive "
+        "that contains \"SELECT MODEL.bat\" and run it to choose your console's model. "
+        "Without this step, dArkOSen may not work properly."
+    ),
+    "file_manual_download_hint": (
+        "The downloaded file may be an archive (.7z, .zip…): extract it first if needed, then "
+        "choose here the .img file it contains."
+    ),
+    "file_rocknix_download_button": "Download the latest version",
+    "rocknix_variant_consoles": "For: {consoles}",
+    "rocknix_variant_r36s": "★ Recommended for an R36S",
+    "rocknix_variant_title": "Choose a version of ROCKNIX",
+    "rocknix_variant_hint": (
+        "Several versions are available, each for other consoles. "
+        "For an R36S, take the one marked “recommended for an R36S”."
+    ),
+    "device_title": "Choose your SD card",
+    "device_refresh": "Refresh",
+    "device_empty": "No SD card detected. Plug it in, then click Refresh.",
+    "device_next": "Next",
+    "device_back": "Back",
+    "file_title_backup": "Where should the backup be saved?",
+    "file_title_backup_system": "Where should the system backup be saved?",
+    "file_title_flash": "Choose the image file",
+    "file_title_extract_easyroms": "Where should the games backup be saved?",
+    "file_title_copy_games": "Choose the games backup to put back",
+    "file_archive_empty": "No backup found on this computer. Use \"Browse…\" to choose one.",
+    "file_destination_hint": "A dated folder will be created automatically inside this location.",
+    "file_browse": "Browse…",
+    "file_next": "Next",
+    "file_back": "Back",
+    "confirm_title": "Warning",
+    "confirm_checkbox": "I understand that all the data on this card will be erased",
+    "confirm_erase": "All the data on \"{display}\" ({size_go:.1f} GB) will be permanently erased.",
+    "confirm_go": "Erase and write",
+    "confirm_cancel": "Cancel",
+    "same_card_unverified_title": "Confirm that this is a different card",
+    "same_card_unverified_message": (
+        "Make sure you have removed the original card: writing to it by mistake would destroy the "
+        "only working copy of your console.\n\n"
+        "Cannot automatically verify that \"{display}\" ({size_go:.1f} GB) really is a different "
+        "card from the original one — it has no readable system to compare its contents, and the "
+        "size alone is not enough to prove it. If it is a new or blank card, this is normal."
+    ),
+    "same_card_unverified_checkbox": "I confirm that this really is a different card from the original one.",
+    "same_card_unverified_confirm": "Continue",
+    "log_header_idle": "Waiting",
+    "log_header_active": "ACTIVE OPERATION — {title}",
+    "execute_title_backup": "Backing up…",
+    "execute_title_backup_system": "Backing up the system…",
+    "execute_title_flash": "Writing…",
+    "execute_title_extract_easyroms": "Copying the games…",
+    "execute_title_copy_games": "Copying the games…",
+    "execute_title_reset_card": "Resetting the card…",
+    "execute_title_list_rocknix": "Looking for ROCKNIX versions online…",
+    "execute_title_download_rocknix": "Downloading ROCKNIX…",
+    "rocknix_download_success": "The latest version of ROCKNIX has been downloaded: {path}",
+    "execute_title_download_firmware": "Downloading {firmware}…",
+    "log_open_page": "Open the page",
+    "catalogue_open_page_hint": "You can also download the system yourself from its official page: \"Open the page\" button.",
+    "personal_use_title": "Personal use only",
+    "personal_use_text": (
+        "{firmware} is distributed for personal use only: its authors forbid selling it, preinstalling "
+        "it on consoles that are sold, or redistributing it without their permission. R36S Studio "
+        "downloads it from its official source, for you alone."
+    ),
+    "personal_use_checkbox": "I will use {firmware} for my personal use only",
+    "personal_use_continue": "Continue",
+    "first_boot_note_title": "Before you turn on your console",
+    "first_boot_note_log": "Before you turn on your console: {consigne}",
+    "catalogue_install_searching_log": "Looking for the latest version of {firmware} for {console}…",
+    "catalogue_install_file_log": "File found: {name}",
+    "catalogue_download_success": "{firmware} has been downloaded: {path}. Now choose the SD card to prepare.",
+    "catalogue_install_running_title": "Installing {firmware} on {console}",
+    "catalogue_install_running_instruction": "The system is being downloaded. Next, you'll choose the SD card and confirm before anything is erased.",
+    "rocknix_console_title": "Which console is this card for?",
+    "rocknix_console_hint": (
+        "On an R36S, ROCKNIX only starts with two settings: R36S Studio makes them for "
+        "you. On another console, these settings would stop it from starting: answer "
+        "Yes only if it really is an R36S."
+    ),
+    "rocknix_console_yes": "Yes, an R36S",
+    "rocknix_console_no": "No, another console",
+    "rocknix_console_unknown": "I don't know",
+    "rocknix_console_unknown_log": (
+        "Card not set up for an R36S. If your console is an R36S and the screen stays "
+        "black or grey, flash again and answer \"Yes, an R36S\"."
+    ),
+    "execute_title_download_panels": "Downloading the R36S screen files…",
+    "rocknix_panels_log": "R36S screen files ready: {count} of {total}.",
+    "rocknix_panels_none_log": (
+        "No screen file could be downloaded (no internet?). The flash can go on, but "
+        "the console's screen may stay grey."
+    ),
+    "rocknix_r36s_next_steps_log": (
+        "Put the card in your R36S and switch it on. ROCKNIX logo: all good, nothing else "
+        "to do. Grey screen or frozen black screen: put the card back in the computer to "
+        "try the next screen."
+    ),
+    "execute_cancel": "Cancel",
+    "execute_speed": "{speed:.1f} MB/s",
+    "execute_eta": "Estimated time left: {eta}",
+    "execute_eta_unknown": "Estimated time left: —",
+    "result_eject": "Eject the card",
+    "result_archive_created": "Saved in: {path} — Size: {size}",
+    "result_archive_source": "From: {path}",
+    "help_title": "Allow access to your SD card",
+    "help_body": (
+        "On a Mac, R36S Studio needs a special permission to access your SD card directly, even "
+        "after you entered your administrator password: Full Disk Access.\n\n"
+        "1. Open System Settings → Privacy & Security.\n"
+        "2. Scroll down to \"Full Disk Access\".\n"
+        "3. Use the button below to go there directly, or go there yourself.\n"
+        "4. Click \"+\", choose R36S Studio in the list, then turn on the switch next to its name.\n"
+        "5. Come back to R36S Studio and start the operation again.\n\n"
+        "This permission is only needed once per version of the application. If access is blocked "
+        "again after an update, just come back to this screen and start over: rebuilding the "
+        "application changes its signature, which cancels the previous permission."
+    ),
+    "help_back": "Back",
+    "help_open_settings": "Open settings",
+    "fda_welcome_title": "Welcome to R36S Studio",
+    "fda_welcome_body": (
+        "Before you start, your Mac blocks two things by default: opening an application that does "
+        "not come from a developer recognized by Apple, and letting that application access an SD "
+        "card directly.\n\n"
+        "1. If you haven't done it yet: close this window, right-click R36S Studio in the Finder, "
+        "choose \"Open\", then confirm — only once.\n"
+        "2. Open System Settings → Privacy & Security → Full Disk Access (use the button below to "
+        "go there directly).\n"
+        "3. Click \"+\", choose R36S Studio in the list, then turn on the switch next to its name.\n"
+        "4. Come back here and click \"I'm done\".\n\n"
+        "This permission is only needed once per version of the application: if it is blocked again "
+        "after an update, you will need to repeat these steps."
+    ),
+    "fda_welcome_open_settings": "Open settings",
+    "fda_welcome_done": "I'm done",
+    "fda_welcome_still_not_detected": (
+        "Permission not detected yet. Check that R36S Studio is turned on in the Full Disk Access "
+        "list, then try again."
+    ),
+    "about_version": "R36S Studio v{version} ({suffix})",
+    "about_build": "build of {timestamp}",
+    "about_dev": "development version",
+    "error_partition_not_found": (
+        "Could not find the console's files on this card. Did you prepare this card with R36S Studio?"
+    ),
+    "step_refused_card_system": (
+        "This step is meant for ArkOS cards. Your card has {system} on it: it works normally, "
+        "but it is organized differently, so this step does not apply to it. Nothing was changed."
+    ),
+    "error_card_system_incompatible": (
+        "This step is meant for ArkOS cards, and this card is not recognized as one. It is not "
+        "necessarily damaged: it may be set up for another system. Nothing was changed."
+    ),
+    "error_partition_not_mounted": "The card could not be opened properly. Unplug it, plug it back in, then try again.",
+    "error_easyroms_ntfs_macos": (
+        "Your Mac cannot copy games to this card because of a system limitation. Use a Windows or "
+        "Linux PC for this step."
+    ),
+    "error_mountpoint_not_writable": "Could not write to your card. Check that it is not write-protected, then try again.",
+    "error_device_not_allowed": "This card is no longer accessible. Unplug it, then plug it back in.",
+    "error_source_not_found": "The chosen folder cannot be found.",
+    "error_verify_failed": "The check after writing failed. Try again with a new card.",
+    "error_cancelled": "The operation was cancelled before it finished.",
+    "error_source_unstable": (
+        "Unstable source card: it returns different data every time it is read. "
+        "This backup is not reliable. Recommendation: install a fresh image "
+        "rather than cloning this card."
+    ),
+    "error_image_modified": (
+        "The image file has been modified or damaged since the backup. Nothing was written "
+        "to your SD card. Use another backup or a fresh image."
+    ),
+    "error_unstable_image": (
+        "This file is the backup of an unstable card: it is not reliable and cannot "
+        "be installed. Choose another backup or a fresh image."
+    ),
+    "unstable_image_expert_confirm": (
+        "This file is the backup of an unstable card: some parts may be wrong, and the "
+        "console may not work properly.\n\nInstall it anyway?"
+    ),
+    "unstable_image_expert_log": "Installation of an unstable backup explicitly confirmed (expert mode).",
+    "backup_verify_source_checkbox": "Verify the source by reading it twice (recommended)",
+    "progress_phase_copy": "Copying…",
+    "progress_phase_verify_source": "Verifying the source…",
+    "progress_phase_verify_image": "Verifying the image…",
+    "error_source_not_responding": (
+        "The source card is no longer responding: it is probably failing. "
+        "Recommendation: install a fresh image rather than cloning this card."
+    ),
+    "execute_source_stalled": "⚠ The card has not responded for {seconds} s (stopping at {limit} s)…",
+    "log_source_stalled_start": "The source card is no longer responding -- waiting for its data…",
+    "error_eject_failed": (
+        "Could not eject the card. Close the files open on it, then try again, or remove it manually."
+    ),
+    "error_elevation_refused": "The Windows permission was refused. Try again and accept the prompt.",
+    "error_reset_card_failed": (
+        "Could not reset this card. Unplug it, plug it back in, close the windows showing it, then try again."
+    ),
+    "error_not_sf3000_image": (
+        "This file is not an SF3000 card backup that can be read file by file. "
+        "Choose the raw copy of the image instead."
+    ),
+    "error_invalid_file_names": (
+        "Some files in the backup have a name Windows cannot create. "
+        "Nothing was written to your card; the list is in the log."
+    ),
+    "error_whole_card_prepare_failed": (
+        "Preparing your card failed: it cannot be used as it is. "
+        "Close the windows showing it, then start the operation again from the beginning."
+    ),
+    "error_whole_card_copy_failed": (
+        "Copying the files stopped before the end: your card is incomplete. "
+        "Start the operation again from the beginning."
+    ),
+    "error_macos_tcc_blocked": (
+        "Your Mac blocks access to the SD card until R36S Studio has the Full Disk Access permission. "
+        "Open Help to turn it on."
+    ),
+    "error_macos_tcc_protected_folder": (
+        "Your Mac blocks access to this file because it is in a protected folder (Downloads, Desktop "
+        "or Documents). Move it somewhere else, then try again."
+    ),
+    "error_seven_zip_archive": (
+        "This file is a 7-Zip archive. Extract it first — you will get an .img file you can flash directly."
+    ),
+    "error_unsupported_image_format": "This file is not a usable image. Accepted formats: .img, .img.gz, .img.xz.",
+    "error_rocknix_asset_not_found": (
+        "Could not find the ROCKNIX version for your console online. Try again later, or choose a "
+        "file you already downloaded."
+    ),
+    "error_rocknix_checksum_mismatch": "The downloaded file is corrupted or incomplete. Try again.",
+    "error_firmware_not_found": "Couldn't find the file to download for this system. Check your internet connection, then try again.",
+    "error_rocknix_download_failed": "The download failed. Check your internet connection, then try again.",
+    "error_games_partition_not_found": (
+        "Could not recognize where the games are (EASYROMS or STORAGE) on this card — the system "
+        "backup without the games does not know where to stop."
+    ),
+    "error_insufficient_disk_space": (
+        "Your computer does not have enough free space to create this backup. Free up some space, or "
+        "choose another drive, then try again."
+    ),
+    "error_destination_too_small": (
+        "This card is too small for the backup to install. Use a new card at least the same size."
+    ),
+    "error_doublons_io_error": "A read or write error occurred. Check that the folder is still accessible.",
+    "error_destination_not_writable": "Could not write to the destination folder -- check that it is not read-only.",
+    "error_path_outside_root": "A file to move is no longer in the scanned folder.",
+    "error_destination_inside_root": (
+        "This folder is inside the scanned folder -- the next scan would find it again. Choose a "
+        "folder outside it, or keep the default destination (_doublons)."
+    ),
+    "error_destination_filesystem_root": "This folder is the root of a whole drive -- choose a subfolder.",
+    "error_copy_verification_failed": (
+        "The copy to the other drive could not be verified -- the original file was not touched."
+    ),
+    "error_move_file_failed": "Moving a file failed. See the log for details.",
+    "error_partial_move_completed": "The move finished with at least one file skipped after a failure.",
+    "error_fat_file_size_limit": (
+        "The destination drive is formatted as FAT, which cannot hold files larger than 4 GB -- at "
+        "least one selected file is larger than that."
+    ),
+    "error_output_exists": (
+        "A file with the same name already exists in this location. Choose another name or another folder."
+    ),
+    "error_image_not_found": "The chosen image file cannot be found. It may have been moved or deleted.",
+    "error_io_error": "A read or write error occurred. Check that the card is still plugged in.",
+    "error_volume_in_use": (
+        "The card seems to be used by another program (File Explorer, Windows Search, an "
+        "antivirus…). Close the windows showing it, then try again."
+    ),
+    "error_unsupported_os": "This operation is not supported on this system.",
+    "error_confirmation_refused": "Writing cancelled: the confirmation was not received.",
+    "error_invalid_args": "Invalid command.",
+    "error_generic": "An error occurred.",
+    "system_backup_estimating": "Calculating the estimated size…",
+    "system_backup_estimate_result": "Estimated size: about {size} (without the games).",
+    "file_system_backup_size": "Estimated size: about {size} (without the games).",
+    "android_screen_title": "Android console",
+    "android_back_button": "← Back to home",
+    "android_refresh_button": "Refresh",
+    "android_consent_title": "adb is not installed",
+    "android_consent_body": (
+        "This tool needs adb (Google's official \"platform-tools\") to read the information of your "
+        "Android console over USB. Nothing is installed yet — this page only offers it to you."
+    ),
+    "android_consent_url_label": "Address: {url}",
+    "android_consent_size_label": "Download size: about {size}",
+    "android_consent_size_unknown": "Download size: unknown",
+    "android_consent_download_button": "Download adb",
+    "android_downloading_status": "Downloading adb…",
+    "android_download_cancel_button": "Cancel",
+    "android_download_error": "The adb download failed.",
+    "android_detecting_status": "Detecting…",
+    "android_state_no_device_title": "No console detected",
+    "android_state_no_device_help": (
+        "1. On your console, open Settings → About phone.\n"
+        "2. Tap the build number (or an equivalent line) 7 times in a row to turn on developer mode.\n"
+        "3. Open Settings → Developer options, then turn on USB debugging.\n"
+        "4. Connect the console to this computer with a USB cable.\n"
+        "The exact menu varies from one console to another — look for \"USB debugging\" in the "
+        "settings if these steps don't match exactly."
+    ),
+    "android_state_unauthorized_title": "Console detected, but not authorized",
+    "android_state_unauthorized_help": (
+        "Your console is plugged in, but it has not accepted this computer yet. A message should "
+        "appear on its screen: accept the USB debugging request, then click Refresh."
+    ),
+    "android_state_multiple_title": "Several consoles detected",
+    "android_state_multiple_help": (
+        "Several Android consoles are plugged in at the same time. Unplug all the consoles except "
+        "the one you want to prepare, then click Refresh."
+    ),
+    "android_state_adb_error_title": "adb did not respond",
+    "android_state_adb_error_help": (
+        "adb did not respond correctly. Check that the console is plugged in, then click Refresh. If "
+        "the problem persists, unplug and plug the USB cable back in."
+    ),
+    "android_device_card_title": "Console detected",
+    "android_device_label_manufacturer": "Manufacturer",
+    "android_device_label_model": "Model",
+    "android_device_label_product_name": "Product name",
+    "android_device_label_android_version": "Android version",
+    "android_device_label_abi": "Architecture",
+    "android_value_not_found": "Not found",
+    "android_catalog_search_button": "Look up this console in the catalog",
+    "android_catalog_searching": "Searching…",
+    "android_catalog_not_found": "This console was not found in the catalog.",
+    "android_catalog_found_title": "Entry found",
+    "android_emulators_title": "Recommended emulators",
+    "android_emulators_generic_notice": (
+        "Generic list: this list could not be adapted to your console (architecture or Android "
+        "version not read)."
+    ),
+    "android_emulator_licence_a_verifier": "License to be checked",
+    "android_emulator_prix_a_verifier": "Price to be checked",
+    "android_emulator_status_actif": "Active project",
+    "android_emulator_status_abandonne": "Abandoned project",
+    "android_emulator_status_a_verifier": "Status to be checked",
+    "android_emulator_official_link": "Open the official page",
+    "android_emulator_source_link": "See the source",
+    "android_emulator_variant_label": "Variant:",
+    "android_category_all": "All ({count})",
+    "android_check_all_button": "Check all",
+    "android_uncheck_all_button": "Uncheck all",
+    "android_checked_counter": "{checked}/{total} checked",
+    "android_raw_output_title": "Technical output (adb)",
+    "tri_title": "Sort mixed games",
+    "tri_hint": (
+        "Choose a folder where your games are mixed together. Each game will be moved to its "
+        "console's folder, with the name your console's system expects. Nothing is deleted, and "
+        "you will see everything before confirming."
+    ),
+    "tri_firmware_label": "Your console's system:",
+    "tri_firmware_treefrogui": "TreeFrogUI (SF3000, SF2000…)",
+    "tri_firmware_knulli": "KNULLI (RG40XXV, RG35XX…)",
+    "android_knulli_title": "KNULLI console connected",
+    "android_knulli_body": (
+        "Your console runs KNULLI (version {version}). You can copy games and BIOS files to it "
+        "straight over the USB cable, without taking the SD card out."
+    ),
+    "android_knulli_copy_button": "Copy games to my console (USB)",
+    "knulli_title": "Copy games to my console (USB)",
+    "knulli_back_button": "← Back",
+    "knulli_console_label": "KNULLI console connected (version {version}).",
+    "knulli_hint": (
+        "Build the list of games to copy: pick games (Ctrl or Shift to take several), whole folders, "
+        "or drag them here. Each game goes into the right folder on the console (based on the folder "
+        "it's in, e.g. “psx”, or its file type); a “bios” folder goes into the console's BIOS. "
+        "You'll see a summary before anything is copied."
+    ),
+    "knulli_summary_button": "See the summary",
+    "knulli_edit_list_button": "Edit the list",
+    "knulli_list_skipped": "not copied: {reason}",
+    "game_list_add_files": "Add games…",
+    "game_list_add_folder": "Add a folder…",
+    "game_list_remove": "Remove",
+    "game_list_clear": "Clear all",
+    "game_list_col_name": "Game",
+    "game_list_col_size": "Size",
+    "game_list_col_system": "System",
+    "game_list_linked": "{name} (+ {count} linked file(s))",
+    "game_list_total": "{count} game(s), {size}",
+    "game_list_empty": "No games yet: add some with the buttons, or drag them into the list.",
+    "knulli_scanning": "Checking the games and reading the console…",
+    "knulli_error_console": (
+        "The console stopped responding. Check the cable is plugged in and the console is still in "
+        "“ADB” USB mode, then try again."
+    ),
+    "knulli_summary": (
+        "{count} file(s) to copy ({size}). Free space on the console: {free}; {after} will be left "
+        "after copying."
+    ),
+    "knulli_summary_nothing": "Nothing to copy from this folder.",
+    "knulli_space_refused": (
+        "Not enough space on the console: {missing} missing (keeping a 500 MB margin). Remove games "
+        "from this folder or free up space on the console. Details per system below."
+    ),
+    "knulli_folder_row": "{folder}: {count} file(s), {size}",
+    "knulli_renamed_row": "Renamed for the console: “{old}” → {new}",
+    "knulli_skipped_title": "{count} file(s) won't be copied:",
+    "knulli_copy_button": "Copy to the console",
+    "knulli_copying": "Copying. Don't unplug the console.",
+    "knulli_copy_count": "{done} / {total} MB copied",
+    "knulli_cancel_button": "Cancel",
+    "knulli_conflict_title": "Already on the console",
+    "knulli_conflict_message": (
+        "This file is already on the console:\n{name}\n\nOn the console: {old}. New: {new}."
+    ),
+    "knulli_conflict_skip": "Skip",
+    "knulli_conflict_replace": "Replace",
+    "knulli_conflict_skip_all": "Skip all",
+    "knulli_result": "{copied} file(s) copied, {failed} failure(s).",
+    "knulli_result_cancelled": (
+        "Copy cancelled: {copied} file(s) copied before stopping, nothing was left half-copied."
+    ),
+    "knulli_reload_reloaded": "The console's game list has been refreshed.",
+    "knulli_reload_game_running": (
+        "A game is running on the console: the list wasn't refreshed so as not to interrupt it. Quit "
+        "the game, then use “Update game lists” in the menu."
+    ),
+    "knulli_reload_unavailable": (
+        "The game list couldn't be refreshed: use “Update game lists” in the console's menu, or "
+        "restart it."
+    ),
+    "knulli_again_button": "Copy more games",
+    "knulli_reason_not_recognised": (
+        "game not recognised (put it in a folder named after the system, e.g. “psx”)"
+    ),
+    "knulli_reason_format_not_accepted": "format this console system can't read ({detail})",
+    "knulli_reason_disc_missing_files": "incomplete disc, missing file(s): {detail}",
+    "knulli_reason_name_in_disc": "name not allowed on the card in a multi-file game ({detail})",
+    "knulli_reason_same_destination": "another file already goes to the same place ({detail})",
+    "knulli_reason_exists": "already on the console, skipped",
+    "knulli_reason_push_failed": "copy failed (cable unplugged?)",
+    "knulli_reason_size_mismatch": "incomplete file on the console after copying",
+    "knulli_reason_stalled": "copy stopped (console not responding?)",
+    "knulli_reason_adb_error": "the console stopped responding",
+    "tri_firmware_verified": "Folder names checked on a real card.",
+    "tri_firmware_unverified": (
+        "Folder names taken from this system's official configuration, not yet checked on a real card."
+    ),
+    "tri_choose_folder_button": "Choose the folder to sort…",
+    "tri_destination_label": "Where to put the games:",
+    "tri_destination_same": "in the chosen folder itself",
+    "tri_destination_choose_button": "Choose another destination…",
+    "tri_destination_reset_button": "Sort in place",
+    "tri_preview_destination": "Destination of the sorted games: {path}",
+    "tri_group_filtered": "_hors_filtre — {count} game(s) set aside (region or language)",
+    "tri_group_no_region": "No region in the name, kept — {count} game(s)",
+    "tri_reason_region_excluded": "region not selected",
+    "tri_reason_language_excluded": "language not selected",
+    "tri_confirm_message_destination": (
+        "{count} file(s) will be moved: sorted games to \"{destination}\", the rest set aside "
+        "in \"{root}\". Nothing will be deleted, and you can put everything back with \"Undo the"
+        " sorting\"."
+    ),
+    "tri_error_root_destination_system_folder": (
+        "The destination already has a console's name: choose the folder that contains it."
+    ),
+    "tri_error_no_space": "Not enough space in the destination for these games. Nothing was moved.",
+    "filter_title": "Filter by region and language",
+    "filter_hint": (
+        "Choose a games folder: a single console's folder (snes…) or your whole collection, "
+        "already sorted, whose subfolders will all be scanned. Nothing is reorganized: only "
+        "games that don't match your criteria are set aside in \"_hors_filtre\", never deleted."
+        " A game whose name shows no region is always kept, as is a European game with no "
+        "language listed."
+    ),
+    "filter_regions_label": "Regions:",
+    "filter_languages_label": "Languages:",
+    "filter_region_europe": "Europe",
+    "filter_region_usa": "USA",
+    "filter_region_japan": "Japan",
+    "filter_region_world": "World",
+    "filter_language_fr": "French",
+    "filter_language_en": "English",
+    "filter_language_de": "German",
+    "filter_language_es": "Spanish",
+    "filter_language_it": "Italian",
+    "filter_criteria_needed": "Check at least one region or language.",
+    "filter_choose_folder_button": "Choose the folder to filter…",
+    "filter_preview_summary": (
+        "{filtered} game(s) set aside in \"_hors_filtre\", {kept} kept -- including {no_region}"
+        " with no region in their name, worth checking."
+    ),
+    "filter_preview_nothing": (
+        "No game to set aside: {kept} game(s) kept, including {no_region} with no region in "
+        "their name."
+    ),
+    "filter_preview_card": "{card} — {count} game(s)",
+    "filter_preview_card_size": "{card}, {size} — {count} game(s)",
+    "filter_preview_no_games": "{files} file(s) examined, none of them is a recognized game.",
+    "filter_no_games_warning": (
+        "This folder contains no games: nothing to filter. Check that you chose the right "
+        "folder. If your card shows up as several drives, choose the one with your games "
+        "(often EASYROMS), not the system one."
+    ),
+    "filter_sort_button": "Set aside",
+    "filter_confirm_title": "Confirm the filtering",
+    "filter_confirm_message": (
+        "{count} file(s) will be moved to \"_hors_filtre\", inside \"{root}\". Nothing will be "
+        "deleted, and you can put everything back with \"Undo the filtering\"."
+    ),
+    "filter_move_title": "Filtering in progress",
+    "filter_result_title": "Filtering finished",
+    "filter_result_cancelled_title": "Filtering interrupted",
+    "filter_result_skipped_existing": (
+        "{count} item(s) left where they are: a file with the same name is already in "
+        "\"_hors_filtre\"."
+    ),
+    "filter_undo_button": "Undo the filtering",
+    "filter_undo_previous_button": "Undo the previous filtering of this folder",
+    "home_tile_convert_games": "Convert games",
+    "home_tile_convert_games_desc": (
+        "Finds games in a format your console can't read (.7z) and converts them to .zip."
+    ),
+    "convert_title": "Convert games",
+    "convert_hint": (
+        "A game in a format your console can't read shows up but doesn't start, or gives a black "
+        "screen. Choose a games folder: the .7z archives your console's system can't read will be "
+        "converted to .zip. The originals are kept aside, nothing is deleted, and you'll see "
+        "everything before confirming."
+    ),
+    "convert_choose_folder_button": "Choose the folder to convert…",
+    "convert_preview_summary": (
+        "{count} .7z game(s) to convert to .zip; {left} left as they are. "
+        "The originals will be kept in “{folder}”."
+    ),
+    "convert_preview_nothing": "Nothing to convert in this folder ({left} .7z archive(s) left as they are).",
+    "convert_sort_button": "Convert",
+    "convert_confirm_title": "Confirm the conversion",
+    "convert_confirm_message": (
+        "{count} game(s) will be converted to .zip in “{root}”. Each original is kept in "
+        "“{folder}”, nothing is deleted, and you can put everything back with "
+        "“Undo the conversion”."
+    ),
+    "convert_move_title": "Converting",
+    "convert_move_count": "{done} / {total} game(s)",
+    "convert_result_title": "Conversion finished",
+    "convert_result_cancelled_title": "Conversion interrupted",
+    "convert_result_moved": "{count} game(s) converted to .zip.",
+    "convert_result_failures": (
+        "{count} game(s) could not be converted (damaged or password-protected archive, "
+        "see the list below): they were left as they are."
+    ),
+    "convert_result_aborted": (
+        "The conversion stopped after several failures in a row. The card or disk may "
+        "have been removed."
+    ),
+    "convert_result_skipped_existing": "{count} game(s) left as they are: a .zip with the same name already exists.",
+    "convert_undo_button": "Undo the conversion",
+    "convert_undo_previous_button": "Undo the previous conversion of this folder",
+    "convert_undo_done": "{count} game(s) put back as before.",
+    "convert_undo_conflicts": (
+        "{count} game(s) could not be put back (a file already takes their place, "
+        "or the .zip was changed since)."
+    ),
+    "convert_error_no_space": (
+        "Not enough space on the disk to continue the conversion. Games already converted "
+        "stay converted; free some space or undo the conversion."
+    ),
+    "tri_reason_seven_zip_read": "your console's system already reads .7z files in this folder",
+    "tri_reason_zip_not_read": "your console's system doesn't read .zip files in this folder either",
+    "tri_reason_zip_exists": "a .zip with the same name already exists",
+    "home_tile_filter_games": "Filter by region and language",
+    "home_tile_filter_games_desc": "Sets aside games from other regions or languages, in any folder.",
+    "tri_scan_title": "Scanning your games",
+    "tri_scan_count": "{count} file(s) examined",
+    "tri_cancel_button": "Cancel",
+    "tri_back_button": "Back",
+    "tri_preview_title": "Here is what will happen",
+    "tri_preview_summary": (
+        "{sorted} game(s) sorted into {folders} folder(s), {unidentified} file(s) set aside in \"_non_identifies\"."
+    ),
+    "tri_preview_nothing": "Nothing to sort in this folder: everything is already in place.",
+    "tri_preview_risk": (
+        "Check the folder names below: if a name does not match what your console expects, it will "
+        "not show any game from that folder."
+    ),
+    "tri_group_folder": "{folder} — {count} game(s), {size}",
+    "tri_group_unidentified": "_non_identifies — {count} item(s) set aside",
+    "tri_group_left_in_place": "Left where they are — {count} game(s)",
+    "tri_group_kept_folders": "Folders already sorted, not touched — {count}",
+    "tri_case_warning": (
+        "The folder \"{found}\" already exists, but your console's system expects \"{expected}\" "
+        "(upper and lower case matter). Rename it first: this console's games are left where they are."
+    ),
+    "tri_item_with_reason": "{name} — {reason}",
+    "tri_sort_button": "Sort",
+    "tri_confirm_title": "Confirm the sorting",
+    "tri_confirm_message": (
+        "{count} file(s) will be moved within \"{root}\". Nothing will be deleted, and you can put "
+        "everything back with \"Undo the sorting\"."
+    ),
+    "tri_confirm_button": "Confirm",
+    "tri_move_title": "Sorting",
+    "tri_move_count": "{done} / {total} file(s)",
+    "tri_result_title": "Sorting complete",
+    "tri_result_cancelled_title": "Sorting interrupted",
+    "tri_result_moved": "{count} file(s) moved.",
+    "tri_result_failures": "{count} file(s) could not be moved (see the list below).",
+    "tri_result_aborted": (
+        "The sorting stopped after several failures in a row. The card or drive may have been removed."
+    ),
+    "tri_result_skipped_existing": (
+        "{count} item(s) left where they are: a file with the same name is already in \"_non_identifies\"."
+    ),
+    "tri_result_missing": "{count} file(s) had disappeared since the preview.",
+    "tri_undo_button": "Undo the sorting",
+    "tri_undo_previous_button": "Undo the previous sorting of this folder",
+    "tri_undo_done": "{count} file(s) put back where they were.",
+    "tri_undo_conflicts": (
+        "{count} file(s) could not be put back (a file already takes their original place, or they "
+        "were moved since)."
+    ),
+    "tri_done_button": "Done",
+    "tri_error_root_filesystem_root": "Choose a more specific folder than the root of a drive.",
+    "tri_error_root_user_folder": "Choose a more specific folder than your whole personal folder.",
+    "tri_error_root_system_folder": "This folder already has the name of a console: choose the folder that contains it.",
+    "tri_error_too_many_files": "This folder contains too many files. Choose a more specific folder.",
+    "tri_error_not_writable": "Could not write to this folder (read-only or access denied).",
+    "tri_error_io_error": "Could not read or write in this folder.",
+    "tri_reason_header_mismatch": "the contents do not match its extension",
+    "tri_reason_bin_unknown": ".bin file whose console could not be determined",
+    "tri_reason_disc_image": "disc image: console not determined automatically",
+    "tri_reason_disc_image_missing_files": "incomplete disc image (missing file: {detail})",
+    "tri_reason_archive_7z": ".7z archive: contents not examined",
+    "tri_reason_zip_multiple": "archive containing several files (arcade game?)",
+    "tri_reason_zip_empty": "archive without a game",
+    "tri_reason_zip_unreadable": "unreadable or protected archive",
+    "tri_reason_unknown_extension": "file type not recognized",
+    "tri_reason_unreadable": "unreadable file",
+    "tri_reason_system_not_supported": "{system} console: not supported by this system",
+    "tri_reason_extension_not_accepted": "this system does not show {detail} files for this console",
+    "tri_reason_folder_case_conflict": "the expected folder \"{detail}\" already exists, spelled differently",
+    "language_selector_label": "Langue / Language",
+    "update_badge": "New version available",
+    "update_check_label": "Check for updates",
+    "update_dialog_title": "R36S Studio {version} is available",
+    "update_dialog_later": "Later",
+    "update_dialog_download": "Get the new version",
+    "language_restart_title": "Langue / Language",
+    "language_restart_message": "The new language will apply the next time you start R36S Studio.",
+    "unit_bytes": "B",
+    "unit_kb": "KB",
+    "unit_mb": "MB",
+    "unit_gb": "GB",
+    "unit_tb": "TB",
+    "device_list_entry": "{display} — {size_go:.1f} GB — {bus}",
+    "datetime_label": "{month} {day}, {year} at {hour:02d}:{minute:02d}",
+    "month_01": "January",
+    "month_02": "February",
+    "month_03": "March",
+    "month_04": "April",
+    "month_05": "May",
+    "month_06": "June",
+    "month_07": "July",
+    "month_08": "August",
+    "month_09": "September",
+    "month_10": "October",
+    "month_11": "November",
+    "month_12": "December",
+    "success_backup": "{display} has been backed up to {path}.",
+    "success_backup_system": "The system of {display} has been backed up to {path}.",
+    "success_extract_easyroms": "Your games and saves have been copied to your computer.",
+    "success_copy_games": "The games have been copied to {display}.",
+    "success_reset_card": "{display} has been reset.",
+    "success_ready": "{display} is ready.",
+    "eject_multiple_cards": "Several cards detected -- unplug the ones that are not involved, then try again.",
+    "eject_card_not_found": "Card not found -- check that it is still plugged in, then try again.",
+    "drive_letter_assigned": "Your card's games space is available as {letter}: in File Explorer.",
+    "drive_letter_none": "Windows does not show your card's games space in File Explorer.",
+    "drive_letter_refused": (
+        "Your card's games space does not show in File Explorer: your permission is needed "
+        "to show it. Restart R36S Studio to retry."
+    ),
+    "cancelled_after_bytes": "Operation cancelled after {done} bytes",
+    "cancelled_or_elevation_failed": "The operation was cancelled or the permission request failed.",
+    "reveal_finder": "Show in Finder",
+    "reveal_explorer": "Show in File Explorer",
+    "reveal_file_manager": "Show in the file manager",
+    "macos_tcc_hint": (
+        "macOS blocks access to the SD card even with administrator rights: R36S Studio does not "
+        "have (or no longer has) the Full Disk Access permission. Go to System Settings → Privacy & "
+        "Security → Full Disk Access, add R36S Studio (or remove it and add it again if it is already "
+        "there: the app's signature changes with every rebuild, which cancels the previous "
+        "permission), then start the operation again. See the Help screen from the home screen for "
+        "the detailed steps."
+    ),
+    "macos_protected_folder_hint": (
+        "macOS blocks access to this file because it is in a protected folder (Downloads, Desktop or "
+        "Documents): the elevated worker does not have the same permission as Terminal or the Finder "
+        "for these locations, even if one of them has it. Move the file somewhere else — for example "
+        "directly in your home folder — then try again."
+    ),
+    # Bot Telegram (`r36s_studio/bot/`) -- mêmes règles de vocabulaire (§5).
+    "bot_menu_firmware": "Download a system for the card",
+    "bot_welcome": "Hello! Pick a tool from the menu at the bottom of the screen.",
+    "bot_help": "Pick a tool from the menu at the bottom of the screen.",
+    "bot_busy": "Something is already running: wait for it to finish, or press “Cancel”.",
+    "bot_cancel": "Cancel",
+    "bot_continue": "Continue",
+    "bot_cancelled": "Cancelled. What was already done stays done.",
+    "bot_nothing_changed": "OK, nothing was changed.",
+    "bot_detail": "Detail: {detail}",
+    "bot_path": "📁 {path}",
+    "bot_and_more": "… and {count} more.",
+    "bot_looking_for_card": "Looking for your SD card…",
+    "bot_no_games_card": (
+        "I can't find any card with a games space. Plug your console's card into this computer, "
+        "then try again."
+    ),
+    "bot_choose_card": "Several cards are plugged in. Which one should I use?",
+    "bot_doublons_scanning": "Looking for duplicates… {count} file(s) checked.",
+    "bot_doublons_found": "{count} duplicate file(s) can be set aside ({size}). One copy of each game is always kept:",
+    "bot_doublons_simulation": "Simulation mode is on: nothing will be moved, it's a trial run.",
+    "bot_doublons_where": "They will go into this folder, nothing will be deleted:",
+    "bot_doublons_confirm": "Set aside the {count} file(s)",
+    "bot_doublons_moving": "Setting aside… {done} of {total} file(s).",
+    "bot_doublons_done": (
+        "{count} file(s) set aside ({size}). Nothing was deleted: R36S Studio can put everything "
+        "back with “Undo all”."
+    ),
+    "bot_doublons_file_error": "The file “{name}” couldn't be set aside. What should I do?",
+    "bot_doublons_skipped": "{count} file(s) left where they were.",
+    "bot_skip_file": "Skip this file",
+    "bot_skip_all": "Skip the next ones too",
+    "bot_stop": "Stop",
+    "bot_filter_choose": (
+        "Which games should be kept? Tap the regions and languages you want, then “See the "
+        "preview”. The others will be set aside, never deleted."
+    ),
+    "bot_filter_preview": "See the preview",
+    "bot_filter_scanning": "Checking games… {count} file(s) checked.",
+    "bot_filter_confirm": "{count} file(s) will be moved into “_hors_filtre” on your card. Nothing will be deleted.",
+    "bot_filter_moving": "Setting aside… {done} of {total} file(s).",
+    "bot_filter_undo_hint": "R36S Studio can put everything back with “Undo the filtering”.",
+    "bot_firmware_choose": (
+        "Which system should I download? It will be saved on this computer; the card isn't "
+        "touched."
+    ),
+    "bot_firmware_manual": "{firmware} can't be downloaded automatically: open its page and download it yourself.",
+    "bot_download_progress": "Downloading {firmware}… {done}",
+    "bot_download_progress_total": "Downloading {firmware}… {done} of {total} ({percent} %)",
+    "bot_firmware_downloaded": (
+        "{firmware} has been downloaded and verified. To install it on a card, use R36S Studio on "
+        "a computer with a screen."
+    ),
+    "bot_started": "R36S Studio bot started. Ctrl+C to stop it.",
+    "bot_config_missing": (
+        "Bot settings are missing. A template was just created: fill in “token” and “chat_ids” in "
+        "{path}, then start again."
+    ),
+    "bot_config_permissions": (
+        "This file can be read by other accounts on this computer, and it holds the bot's key: "
+        "run “chmod 600 {path}”, then start again."
+    ),
+    "bot_config_invalid": (
+        "Bot settings can't be read: {path} must contain “token” (the key given by BotFather) and "
+        "“chat_ids” (the list of allowed conversations)."
+    ),
+    "bot_missing_dependency": (
+        "python-telegram-bot is missing: install it with “pip install -r requirements-bot.txt”, "
+        "then start again."
+    ),
+}

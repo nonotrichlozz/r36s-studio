@@ -197,7 +197,7 @@ _VARIANT_A = RocknixAsset("ROCKNIX-RK3326.aarch64-20260801-a.img.gz", "https://e
 _VARIANT_B = RocknixAsset("ROCKNIX-RK3326.aarch64-20260801-b.img.gz", "https://example.invalid/b", 200)
 
 
-@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_assets")
+@patch("r36s_studio.identify.rocknix.resolve_latest_r36s_assets")
 def test_rocknix_list_runner_forwards_all_variants_unchosen(mock_resolve, qapp):
     mock_resolve.return_value = [(_VARIANT_A, "cafebabe" * 8), (_VARIANT_B, None)]
 
@@ -210,7 +210,7 @@ def test_rocknix_list_runner_forwards_all_variants_unchosen(mock_resolve, qapp):
     assert results == [[(_VARIANT_A, "cafebabe" * 8), (_VARIANT_B, None)]]
 
 
-@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_assets", side_effect=RocknixAssetNotFoundError("aucune image"))
+@patch("r36s_studio.identify.rocknix.resolve_latest_r36s_assets", side_effect=RocknixAssetNotFoundError("aucune image"))
 def test_rocknix_list_runner_maps_asset_not_found(mock_resolve, qapp):
     runner = RocknixListRunner()
     errors = []
@@ -224,7 +224,7 @@ def test_rocknix_list_runner_maps_asset_not_found(mock_resolve, qapp):
     assert results == [[]]
 
 
-@patch("r36s_studio.gui.partition_runner.resolve_latest_r36s_assets", side_effect=RocknixReleaseError("réseau indisponible"))
+@patch("r36s_studio.identify.rocknix.resolve_latest_r36s_assets", side_effect=RocknixReleaseError("réseau indisponible"))
 def test_rocknix_list_runner_maps_generic_release_error(mock_resolve, qapp):
     runner = RocknixListRunner()
     errors = []
@@ -253,8 +253,8 @@ def test_rocknix_list_runner_cancel_does_not_raise(qapp):
 # réel, comme pour les autres frontières externes de ce module.
 
 
-@patch("r36s_studio.gui.partition_runner.default_firmware_downloads_dir")
-@patch("r36s_studio.gui.partition_runner.download_asset")
+@patch("r36s_studio.identify.rocknix.default_firmware_downloads_dir")
+@patch("r36s_studio.identify.rocknix.download_asset")
 def test_rocknix_download_runner_success_emits_progress_and_final_path(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
 
@@ -279,8 +279,8 @@ def test_rocknix_download_runner_success_emits_progress_and_final_path(mock_down
     assert finished == [(True, str(tmp_path / _VARIANT_A.name))]
 
 
-@patch("r36s_studio.gui.partition_runner.default_firmware_downloads_dir")
-@patch("r36s_studio.gui.partition_runner.download_asset", side_effect=ChecksumMismatchError("somme invalide"))
+@patch("r36s_studio.identify.rocknix.default_firmware_downloads_dir")
+@patch("r36s_studio.identify.rocknix.download_asset", side_effect=ChecksumMismatchError("somme invalide"))
 def test_rocknix_download_runner_maps_checksum_mismatch(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
 
@@ -296,8 +296,8 @@ def test_rocknix_download_runner_maps_checksum_mismatch(mock_download, mock_dir,
     assert finished == [(False, "")]
 
 
-@patch("r36s_studio.gui.partition_runner.default_firmware_downloads_dir")
-@patch("r36s_studio.gui.partition_runner.download_asset", side_effect=RocknixReleaseError("réseau indisponible"))
+@patch("r36s_studio.identify.rocknix.default_firmware_downloads_dir")
+@patch("r36s_studio.identify.rocknix.download_asset", side_effect=RocknixReleaseError("réseau indisponible"))
 def test_rocknix_download_runner_maps_generic_release_error(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
 
@@ -313,8 +313,8 @@ def test_rocknix_download_runner_maps_generic_release_error(mock_download, mock_
     assert finished == [(False, "")]
 
 
-@patch("r36s_studio.gui.partition_runner.default_firmware_downloads_dir")
-@patch("r36s_studio.gui.partition_runner.download_asset")
+@patch("r36s_studio.identify.rocknix.default_firmware_downloads_dir")
+@patch("r36s_studio.identify.rocknix.download_asset")
 def test_rocknix_download_runner_cancel_passes_should_cancel_and_maps_to_cancelled(mock_download, mock_dir, qapp, tmp_path):
     mock_dir.return_value = tmp_path
     mock_download.side_effect = DownloadCancelledError("annulé après 5 octets")

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import platform
 import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -26,18 +25,10 @@ from PySide6.QtCore import QThread, Signal
 from r36s_studio import update_check
 from r36s_studio.devices import Device
 from r36s_studio.identify import IdentifyFailureReason, IdentifyResult, identify_from_boot_directory
-from r36s_studio.identify.rocknix import (
-    ChecksumMismatchError,
-    DownloadCancelledError,
-    RocknixAsset,
-    RocknixAssetNotFoundError,
-    RocknixReleaseError,
-    default_firmware_downloads_dir,
-    download_asset,
-    resolve_latest_r36s_assets,
-)
+from r36s_studio.identify.firmware_download import download_firmware, list_rocknix_variants
+from r36s_studio.identify.rocknix import RocknixAsset
 from r36s_studio.identify import rocknix_r36s
-from r36s_studio.imaging.copy import PROGRESS_INTERVAL, OperationCancelled, ProgressEvent
+from r36s_studio.imaging.copy import OperationCancelled, ProgressEvent
 from r36s_studio.imaging.system_backup import GamesPartitionNotFound, estimate_system_backup_size_unprivileged
 from r36s_studio.partitions import (
     BOOT_LABEL,
@@ -172,17 +163,10 @@ class RocknixListRunner(QThread):
         étape, plutôt que pour une vraie annulation coopérative."""
 
     def run(self) -> None:
-        try:
-            variants = resolve_latest_r36s_assets()
-        except RocknixAssetNotFoundError as exc:
-            self.error.emit("ROCKNIX_ASSET_NOT_FOUND", str(exc))
-            self.finished_list.emit([])
-            return
-        except RocknixReleaseError as exc:
-            self.error.emit("ROCKNIX_DOWNLOAD_FAILED", str(exc))
-            self.finished_list.emit([])
-            return
-        self.finished_list.emit(variants)
+        outcome = list_rocknix_variants()
+        if outcome.error_code is not None:
+            self.error.emit(outcome.error_code, outcome.error_detail)
+        self.finished_list.emit(outcome.variants)
 
 
 class UpdateCheckRunner(QThread):
@@ -234,47 +218,20 @@ class RocknixDownloadRunner(QThread):
         self._cancelled = True
 
     def run(self) -> None:
-        start = time.monotonic()
-        last_emit = start
-
-        def on_progress(done: int, total: int) -> None:
-            nonlocal last_emit
-            now = time.monotonic()
-            # Même limitation qu'`imaging/copy.py::copy_range` (règle §2
-            # n°5) -- mais toujours le dernier événement, `done == total`,
-            # pour que la barre de progression finisse bien à 100 %.
-            if now - last_emit < PROGRESS_INTERVAL and done != total:
-                return
-            last_emit = now
-            elapsed = now - start
-            speed = done / elapsed if elapsed > 0 else 0.0
-            self.progress.emit(done, total, speed)
-
-        destination = default_firmware_downloads_dir() / self._asset.name
-        try:
-            download_asset(
-                self._asset,
-                destination,
-                expected_sha256=self._expected_sha256,
-                on_progress=on_progress,
-                should_cancel=lambda: self._cancelled,
-                transform=self._transform,
-            )
-        except DownloadCancelledError as exc:
-            self.error.emit("CANCELLED", str(exc))
+        # Progression limitée (~4/s, toujours le dernier événement) et codes
+        # d'erreur : `identify/firmware_download.py`, partagé avec le bot.
+        outcome = download_firmware(
+            self._asset,
+            self._expected_sha256,
+            on_progress=self.progress.emit,
+            should_cancel=lambda: self._cancelled,
+            transform=self._transform,
+        )
+        if not outcome.ok:
+            self.error.emit(outcome.error_code, outcome.error_detail)
             self.finished_download.emit(False, "")
             return
-        except ChecksumMismatchError as exc:
-            self.error.emit("ROCKNIX_CHECKSUM_MISMATCH", str(exc))
-            self.finished_download.emit(False, "")
-            return
-        except RocknixReleaseError as exc:
-            self.error.emit("ROCKNIX_DOWNLOAD_FAILED", str(exc))
-            self.finished_download.emit(False, "")
-            return
-
-        self.finished_download.emit(True, str(destination))
-
+        self.finished_download.emit(True, str(outcome.path))
 
 
 class RocknixPanelDownloadRunner(QThread):

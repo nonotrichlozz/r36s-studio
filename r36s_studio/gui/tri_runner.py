@@ -11,10 +11,9 @@ from typing import Callable
 
 from PySide6.QtCore import QThread, Signal
 
-from r36s_studio.doublons.move import DestinationNotWritable, InsufficientDiskSpace
 from r36s_studio.tri.apply import apply_plan, undo_sort
-from r36s_studio.tri.plan import SORT_JOURNAL_FILENAME
-from r36s_studio.tri.plan import SortCancelled, SortPlan, SortRootRefused, TooManyFiles
+from r36s_studio.tri.plan import SORT_JOURNAL_FILENAME, SortPlan
+from r36s_studio.tri.run import run_apply, run_plan
 
 __all__ = ["SortPlanRunner", "SortApplyRunner", "SortUndoRunner"]
 
@@ -36,21 +35,13 @@ class SortPlanRunner(QThread):
         self._cancel_requested = True
 
     def run(self) -> None:
-        try:
-            plan = self._build(on_progress=self.progress.emit, should_cancel=lambda: self._cancel_requested)
-        except SortCancelled:
+        outcome = run_plan(self._build, on_progress=self.progress.emit, should_cancel=lambda: self._cancel_requested)
+        if outcome.cancelled:
             self.cancelled.emit()
-            return
-        except SortRootRefused as exc:
-            self.error.emit(f"ROOT_{exc.reason.upper()}", str(exc))
-            return
-        except TooManyFiles as exc:
-            self.error.emit("TOO_MANY_FILES", str(exc))
-            return
-        except OSError as exc:
-            self.error.emit("IO_ERROR", str(exc))
-            return
-        self.finished_plan.emit(plan)
+        elif outcome.error_code is not None:
+            self.error.emit(outcome.error_code, outcome.error_detail)
+        else:
+            self.finished_plan.emit(outcome.plan)
 
 
 class SortApplyRunner(QThread):
@@ -71,23 +62,17 @@ class SortApplyRunner(QThread):
         self._cancel_requested = True
 
     def run(self) -> None:
-        try:
-            result = self._apply(
-                self._plan,
-                on_progress=self.progress.emit,
-                should_cancel=lambda: self._cancel_requested,
-                journal_name=self._journal_name,
-            )
-        except DestinationNotWritable as exc:
-            self.error.emit("NOT_WRITABLE", str(exc))
-            return
-        except InsufficientDiskSpace as exc:
-            self.error.emit("NO_SPACE", str(exc))
-            return
-        except OSError as exc:
-            self.error.emit("IO_ERROR", str(exc))
-            return
-        self.finished_apply.emit(result)
+        outcome = run_apply(
+            self._plan,
+            on_progress=self.progress.emit,
+            should_cancel=lambda: self._cancel_requested,
+            journal_name=self._journal_name,
+            apply=self._apply,
+        )
+        if outcome.error_code is not None:
+            self.error.emit(outcome.error_code, outcome.error_detail)
+        else:
+            self.finished_apply.emit(outcome.result)
 
 
 class SortUndoRunner(QThread):

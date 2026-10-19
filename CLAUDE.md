@@ -107,6 +107,7 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 | `android/knulli.py`, `gui/knulli_screen.py` (copier des jeux sur une console KNULLI en USB, ADB), liste de jeux composable (`tri/selection.py`, `gui/game_list_widget.py`) | `docs/knulli-adb.md` |
 | `consoles_diverses/` | `r36s_studio/consoles_diverses/CLAUDE.md`, `docs/consoles-diverses-design.md`, `docs/consoles-diverses-recherche.md` |
 | `doublons/` | `docs/doublons.md`, `docs/doublons-selection.md` |
+| `bot/` (bot Telegram, machine sans GUI), `doublons/run.py`, `tri/run.py`, `identify/firmware_download.py` (cœur sans Qt partagé GUI/bot) | `docs/bot-telegram.md` |
 | `tri/`, `gui/tri_screen.py` (Ranger des jeux mélangés, Filtrer par région et par langue, Convertir des jeux, tables de dossiers par firmware) | `docs/tri-roms.md` |
 
 **Garde-fou `safety/` (toujours applicable)** — un périphérique est **refusé**
@@ -173,8 +174,9 @@ l'écran de la console » (`boot-sets`).
 - **Vocabulaire** : aucun terme technique dans l'interface (« ta carte SD »,
   « les jeux », « le système de la console ») ; chemin ou message brut en
   ligne supplémentaire du journal, jamais dans le message principal.
-  Chaînes dans `gui/strings.py` (français, référence) et
-  `gui/strings_en.py`, mêmes clés et mêmes `{…}` ; langue fixée au
+  Chaînes dans `strings.py` (français, référence) et `strings_en.py`, à la
+  racine du paquet (`gui/strings*.py` en sont des alias), mêmes clés et
+  mêmes `{…}` ; langue fixée au
   démarrage (`i18n.py`, `config.json::language`). Une langue n'est
   ajoutée que si quelqu'un peut la relire (§2 n°6).
 - **Tailles affichées en base 1024 partout** (`_capacity_go`/`_format_size`,
@@ -197,7 +199,10 @@ l'écran de la console » (`boot-sets`).
 - **Paquet** : tout fichier non-Python lu à l'exécution doit être déclaré dans
   les trois `packaging/*.spec` (vérifié par `tests/test_packaging_specs.py`).
 - **Dépendances de `partitions/`** : jamais d'import de `gui/` (points
-  d'extension, ex. `set_privileged_mount_hook`).
+  d'extension, ex. `set_privileged_mount_hook`). **`bot/`** : jamais rien
+  sous `gui/` ni PySide6, même indirectement (`tests/test_bot_imports.py`) ;
+  la logique métier d'un `*Runner`/`*Screen` Qt utile au bot va dans un
+  module sans Qt (`doublons/run.py`…).
 
 ---
 

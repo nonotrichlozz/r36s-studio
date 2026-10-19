@@ -15,7 +15,7 @@ from typing import Optional
 from PySide6.QtCore import QThread, Signal
 
 from .client import Opener, RechercheErreur, rechercher_console
-from .telechargement import Telechargement, TelechargementErreur, resoudre
+from .telechargement import Telechargement
 
 
 class ConsoleSearchRunner(QThread):
@@ -72,18 +72,15 @@ class FirmwareResolveRunner(QThread):
         self._opener = opener
 
     def run(self) -> None:
-        try:
-            if self._opener is not None:
-                fichier = resoudre(self._telechargement, opener=self._opener)
-            else:
-                fichier = resoudre(self._telechargement)
-        except TelechargementErreur as exc:
-            self.error.emit("FIRMWARE_NOT_FOUND", str(exc))
+        # Import local : `identify/firmware_download.py` importe ce paquet
+        # (`telechargement.py`), jamais l'inverse au chargement.
+        from r36s_studio.identify.firmware_download import resolve_firmware
+
+        outcome = resolve_firmware(self._telechargement, opener=self._opener)
+        if outcome.error_code is not None:
+            self.error.emit(outcome.error_code, outcome.error_detail)
             return
-        except Exception as exc:  # filet -- jamais d'exception qui traverse le thread
-            self.error.emit("FIRMWARE_NOT_FOUND", str(exc))
-            return
-        self.resolved.emit(fichier)
+        self.resolved.emit(outcome.fichier)
 
 
 __all__ = ["ConsoleSearchRunner", "FirmwareResolveRunner"]

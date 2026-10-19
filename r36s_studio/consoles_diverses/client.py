@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from r36s_studio import __version__
-from r36s_studio.gui import logs as gui_logs
+from r36s_studio import logs as gui_logs
 
 from .models import FicheConsole, fiche_depuis_json
 

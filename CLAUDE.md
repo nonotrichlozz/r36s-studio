@@ -104,6 +104,7 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 | `packaging/`, `.spec`, CI, releases, `config.json` | `docs/claude/packaging.md` |
 | Écrire/déboguer des tests, bancs de test matériel | `docs/claude/testing.md` |
 | `android/` (ADB) | `docs/android-adb.md` |
+| `android/knulli.py`, `gui/knulli_screen.py` (copier des jeux sur une console KNULLI en USB, ADB) | `docs/knulli-adb.md` |
 | `consoles_diverses/` | `r36s_studio/consoles_diverses/CLAUDE.md`, `docs/consoles-diverses-design.md`, `docs/consoles-diverses-recherche.md` |
 | `doublons/` | `docs/doublons.md`, `docs/doublons-selection.md` |
 | `tri/`, `gui/tri_screen.py` (Ranger des jeux mélangés, Filtrer par région et par langue, Convertir des jeux, tables de dossiers par firmware) | `docs/tri-roms.md` |
@@ -287,6 +288,10 @@ Détail et bancs de test : `docs/claude/testing.md`.
   (2026-10-17), flash de l'image réelle vérifié (8 769 240 576 octets) ;
   le parcours complet depuis l'app (4,4 Go, quota gratuit de MEGA) jamais
   lancé (`consoles_diverses/CLAUDE.md`).
+- « Copier des jeux sur ma console (USB) » (KNULLI en ADB) : parcours
+  complet depuis l'app jamais lancé sur la console (copie d'un fichier de
+  test vérifiée) ; `/reloadgames` après une vraie copie non constaté
+  (`docs/knulli-adb.md`).
 - ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,

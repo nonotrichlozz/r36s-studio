@@ -3647,6 +3647,9 @@ class AndroidScreen(Screen):
     consent_download_requested = Signal()
     cancel_download_requested = Signal()
     search_catalog_requested = Signal(str)  # référence (modèle lu par getprop)
+    # Console KNULLI reconnue (`DetectionResult.linux_console`) : ouvre
+    # « Copier des jeux sur ma console (USB) » (`gui/knulli_screen.py`).
+    knulli_copy_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3766,6 +3769,19 @@ class AndroidScreen(Screen):
         device_layout.addLayout(device_grid)
         content_layout.addWidget(self._device_frame)
 
+        # --- Console KNULLI (pas un Android : pas de fiche ni d'émulateurs)
+        self._knulli_frame = QFrame()
+        self._knulli_frame.setProperty("role", "row")
+        knulli_layout = QVBoxLayout(self._knulli_frame)
+        knulli_layout.addWidget(_android_plain_label(tr("android_knulli_title"), role="title"))
+        self._knulli_body_label = _android_plain_label("", role="rowDesc", wrap=True)
+        knulli_layout.addWidget(self._knulli_body_label)
+        knulli_button = QPushButton(tr("android_knulli_copy_button"))
+        knulli_button.setProperty("role", "primary")
+        knulli_button.clicked.connect(self.knulli_copy_requested.emit)
+        knulli_layout.addWidget(knulli_button, alignment=Qt.AlignLeft)
+        content_layout.addWidget(self._knulli_frame)
+
         # --- Catalogue (réutilise `consoles_diverses.client`, demandé
         # explicitement par le brief -- jamais de recherche automatique,
         # cohérent avec le reste du projet : `consoles_diverses/screen.py`
@@ -3846,6 +3862,7 @@ class AndroidScreen(Screen):
         self._device_frame.setVisible(zone == "ready")
         self._catalog_frame.setVisible(zone == "ready")
         self._emulators_frame.setVisible(zone == "ready")
+        self._knulli_frame.setVisible(zone == "knulli")
 
     # --- Consentement / téléchargement d'adb ---------------------------
 
@@ -3895,6 +3912,10 @@ class AndroidScreen(Screen):
         self._status_raw_output.setVisible(False)
 
     def show_detection_result(self, result: DetectionResult) -> None:
+        if result.state == "ready" and result.linux_console is not None:
+            self._show_zone("knulli")
+            self._knulli_body_label.setText(tr("android_knulli_body", version=result.linux_console.version or "?"))
+            return
         if result.state == "ready" and result.device is not None:
             self._show_zone("ready")
             self._populate_device(result.device)

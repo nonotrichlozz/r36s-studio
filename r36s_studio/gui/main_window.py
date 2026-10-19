@@ -159,6 +159,7 @@ from .strings import (
     tr,
     tr_in,
 )
+from .knulli_screen import KnulliCopyScreen
 from .tri_screen import ConvertScreen, FilterScreen, TriScreen
 from .wizard_flow import WizardFlow, WizardJob
 from .worker_runner import WorkerRunner
@@ -668,6 +669,10 @@ class MainWindow(QMainWindow):
         self._tri_screen = TriScreen()
         self._filter_screen = FilterScreen()
         self._convert_screen = ConvertScreen()
+        # « Copier des jeux sur ma console (USB) », KNULLI en ADB
+        # (docs/knulli-adb.md) : ouvert depuis l'écran Console Android.
+        self._knulli_screen = KnulliCopyScreen()
+        self._android_last_detection: Optional[DetectionResult] = None
         self._android_download_runner: Optional[AndroidPlatformToolsDownloadRunner] = None
         self._android_search_runner: Optional[ConsoleSearchRunner] = None
         # URL de la dernière recherche lancée depuis cet écran -- retenue
@@ -697,6 +702,7 @@ class MainWindow(QMainWindow):
         self._root_stack.addWidget(self._tri_screen)
         self._root_stack.addWidget(self._filter_screen)
         self._root_stack.addWidget(self._convert_screen)
+        self._root_stack.addWidget(self._knulli_screen)
         self.setCentralWidget(self._root_stack)
 
         # Fenêtres modales (§5, refonte navigation) : construites une fois,
@@ -864,6 +870,8 @@ class MainWindow(QMainWindow):
         self._android_screen.consent_download_requested.connect(self._on_android_consent_download_requested)
         self._android_screen.cancel_download_requested.connect(self._on_android_cancel_download_requested)
         self._android_screen.search_catalog_requested.connect(self._on_android_search_catalog_requested)
+        self._android_screen.knulli_copy_requested.connect(self._open_knulli_screen)
+        self._knulli_screen.back_requested.connect(self._open_android_screen)
 
         self._help_dialog.open_settings_requested.connect(self._on_open_settings_requested)
         self._fda_screen.open_settings_requested.connect(self._on_open_settings_requested)
@@ -3415,7 +3423,16 @@ class MainWindow(QMainWindow):
 
     def _on_android_detect_finished(self, result: DetectionResult) -> None:
         self._android_detect_runner = None
+        self._android_last_detection = result
         self._android_screen.show_detection_result(result)
+
+    def _open_knulli_screen(self) -> None:
+        result = self._android_last_detection
+        adb_path = android_adb.resolve_adb_path()
+        if result is None or result.linux_console is None or result.device is None or adb_path is None:
+            return
+        self._knulli_screen.start(adb_path, result.device.serial, result.linux_console)
+        self._root_stack.setCurrentWidget(self._knulli_screen)
 
     def _on_android_platform_tools_size_ready(self, size_bytes) -> None:
         self._android_screen.set_platform_tools_size(size_bytes)

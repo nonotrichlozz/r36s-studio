@@ -24,11 +24,11 @@ def test_every_firmware_table_is_offered_and_documented():
 
 
 def test_only_the_real_card_table_claims_hardware_verification():
-    # docs/tri-roms.md : seule TreeFrogUI a été relevée sur une vraie
-    # carte. Changer ce test = avoir vérifié une autre table sur du
-    # vrai matériel, et le documenter.
+    # docs/tri-roms.md : TreeFrogUI relevée sur une vraie carte, KNULLI lue
+    # sur une vraie console (RG40XXV, ADB). Changer ce test = avoir vérifié
+    # une autre table sur du vrai matériel, et le documenter.
     verified = {firmware for firmware, table in load_firmware_tables().items() if table.verified_on_hardware}
-    assert verified == {"treefrogui"}
+    assert verified == {"treefrogui", "knulli"}
 
 
 def test_catalogue_firmwares_share_their_id():
@@ -42,7 +42,7 @@ def test_tables_only_reference_known_systems():
         assert set(table.folders) <= systems
 
 
-@pytest.mark.parametrize("firmware", ["arkos", "rocknix", "emuelec"])
+@pytest.mark.parametrize("firmware", ["arkos", "rocknix", "emuelec", "knulli"])
 def test_every_routed_extension_is_accepted_by_its_folder(firmware):
     """Relevé dans les fichiers officiels : un fichier rangé dans un
     dossier qui n'accepte pas son extension serait invisible."""
@@ -67,6 +67,8 @@ def test_every_routed_extension_is_accepted_by_its_folder(firmware):
         ("treefrogui", "mastersystem", "sega"),
         ("treefrogui", "gbc", "gb"),
         ("treefrogui", "colecovision", "col"),
+        ("knulli", "wonderswan", "wswan"),
+        ("knulli", "atarilynx", "lynx"),
     ],
 )
 def test_folder_names_that_differ_between_firmwares(firmware, system_id, folder):

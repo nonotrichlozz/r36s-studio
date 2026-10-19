@@ -788,6 +788,77 @@ STRINGS_EN = {
     ),
     "tri_firmware_label": "Your console's system:",
     "tri_firmware_treefrogui": "TreeFrogUI (SF3000, SF2000…)",
+    "tri_firmware_knulli": "KNULLI (RG40XXV, RG35XX…)",
+    "android_knulli_title": "KNULLI console connected",
+    "android_knulli_body": (
+        "Your console runs KNULLI (version {version}). You can copy games and BIOS files to it "
+        "straight over the USB cable, without taking the SD card out."
+    ),
+    "android_knulli_copy_button": "Copy games to my console (USB)",
+    "knulli_title": "Copy games to my console (USB)",
+    "knulli_back_button": "← Back",
+    "knulli_console_label": "KNULLI console connected (version {version}).",
+    "knulli_hint": (
+        "Choose a games folder on the computer. Each game goes into the right folder on the console "
+        "(based on the folder it's in, e.g. “psx”, or its file type); a “bios” folder goes into the "
+        "console's BIOS. You'll see a summary before anything is copied."
+    ),
+    "knulli_choose_folder_button": "Choose the games folder…",
+    "knulli_scanning": "Checking the folder and reading the console…",
+    "knulli_error_console": (
+        "The console stopped responding. Check the cable is plugged in and the console is still in "
+        "“ADB” USB mode, then try again."
+    ),
+    "knulli_summary": (
+        "{count} file(s) to copy ({size}). Free space on the console: {free}; {after} will be left "
+        "after copying."
+    ),
+    "knulli_summary_nothing": "Nothing to copy from this folder.",
+    "knulli_space_refused": (
+        "Not enough space on the console: {missing} missing (keeping a 500 MB margin). Remove games "
+        "from this folder or free up space on the console. Details per system below."
+    ),
+    "knulli_folder_row": "{folder}: {count} file(s), {size}",
+    "knulli_renamed_row": "Renamed for the console: “{old}” → {new}",
+    "knulli_skipped_title": "{count} file(s) won't be copied:",
+    "knulli_copy_button": "Copy to the console",
+    "knulli_other_folder_button": "Choose another folder",
+    "knulli_copying": "Copying. Don't unplug the console.",
+    "knulli_copy_count": "{done} / {total} MB copied",
+    "knulli_cancel_button": "Cancel",
+    "knulli_conflict_title": "Already on the console",
+    "knulli_conflict_message": (
+        "This file is already on the console:\n{name}\n\nOn the console: {old}. New: {new}."
+    ),
+    "knulli_conflict_skip": "Skip",
+    "knulli_conflict_replace": "Replace",
+    "knulli_conflict_skip_all": "Skip all",
+    "knulli_result": "{copied} file(s) copied, {failed} failure(s).",
+    "knulli_result_cancelled": (
+        "Copy cancelled: {copied} file(s) copied before stopping, nothing was left half-copied."
+    ),
+    "knulli_reload_reloaded": "The console's game list has been refreshed.",
+    "knulli_reload_game_running": (
+        "A game is running on the console: the list wasn't refreshed so as not to interrupt it. Quit "
+        "the game, then use “Update game lists” in the menu."
+    ),
+    "knulli_reload_unavailable": (
+        "The game list couldn't be refreshed: use “Update game lists” in the console's menu, or "
+        "restart it."
+    ),
+    "knulli_again_button": "Copy more games",
+    "knulli_reason_not_recognised": (
+        "game not recognised (put it in a folder named after the system, e.g. “psx”)"
+    ),
+    "knulli_reason_format_not_accepted": "format this console system can't read ({detail})",
+    "knulli_reason_disc_missing_files": "incomplete disc, missing file(s): {detail}",
+    "knulli_reason_name_in_disc": "name not allowed on the card in a multi-file game ({detail})",
+    "knulli_reason_same_destination": "another file already goes to the same place ({detail})",
+    "knulli_reason_exists": "already on the console, skipped",
+    "knulli_reason_push_failed": "copy failed (cable unplugged?)",
+    "knulli_reason_size_mismatch": "incomplete file on the console after copying",
+    "knulli_reason_stalled": "copy stopped (console not responding?)",
+    "knulli_reason_adb_error": "the console stopped responding",
     "tri_firmware_verified": "Folder names checked on a real card.",
     "tri_firmware_unverified": (
         "Folder names taken from this system's official configuration, not yet checked on a real card."

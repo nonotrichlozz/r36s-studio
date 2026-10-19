@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
 
-from r36s_studio.android import adb, platform_tools
+from r36s_studio.android import adb, knulli, platform_tools
 
 
 class AndroidDetectRunner(QThread):
@@ -87,4 +87,70 @@ class AndroidPlatformToolsDownloadRunner(QThread):
         self.finished_download.emit(True, str(adb_path))
 
 
-__all__ = ["AndroidDetectRunner", "AndroidPlatformToolsSizeRunner", "AndroidPlatformToolsDownloadRunner"]
+class KnulliPlanRunner(QThread):
+    """Aperçu de la copie vers une console KNULLI (`android/knulli.py`) :
+    systèmes lus sur la console, rangement du dossier choisi, fichiers
+    déjà présents et place libre."""
+
+    finished_plan = Signal(object)  # knulli.CopyPlan
+    error = Signal(str)  # détail brut, pour le journal
+
+    def __init__(self, adb_path: str, serial: str, root: str, parent=None):
+        super().__init__(parent)
+        self._adb_path, self._serial, self._root = adb_path, serial, root
+
+    def run(self) -> None:
+        try:
+            systems = knulli.read_systems(self._adb_path, self._serial)
+            plan = knulli.build_copy_plan(self._root, systems)
+            existing = knulli.read_existing(self._adb_path, self._serial, knulli.plan_folders(plan))
+            knulli.attach_console_state(plan, existing, knulli.read_free_bytes(self._adb_path, self._serial))
+        except (adb.AdbCommandError, OSError) as exc:
+            self.error.emit(str(exc))
+            return
+        self.finished_plan.emit(plan)
+
+
+class KnulliCopyRunner(QThread):
+    """Copie fichier par fichier, progression réelle en octets, puis
+    rafraîchissement de la liste des jeux si aucun jeu ne tourne."""
+
+    progress = Signal("qint64", "qint64", str)  # done, total, fichier en cours
+    finished_copy = Signal(object, str)  # knulli.CopyResult, état du rafraîchissement
+    not_enough_space = Signal("qint64", "qint64")  # nécessaire, libre
+    error = Signal(str)
+
+    def __init__(self, adb_path: str, serial: str, plan, parent=None):
+        super().__init__(parent)
+        self._adb_path, self._serial, self._plan = adb_path, serial, plan
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        try:
+            result = knulli.copy_plan(
+                self._adb_path,
+                self._serial,
+                self._plan,
+                on_progress=self.progress.emit,
+                should_cancel=lambda: self._cancelled,
+            )
+        except knulli.NotEnoughSpace as exc:
+            self.not_enough_space.emit(exc.needed, exc.free)
+            return
+        except (adb.AdbCommandError, OSError) as exc:
+            self.error.emit(str(exc))
+            return
+        reload_status = knulli.reload_games_if_idle(self._adb_path, self._serial) if result.copied else "nothing_copied"
+        self.finished_copy.emit(result, reload_status)
+
+
+__all__ = [
+    "AndroidDetectRunner",
+    "AndroidPlatformToolsSizeRunner",
+    "AndroidPlatformToolsDownloadRunner",
+    "KnulliPlanRunner",
+    "KnulliCopyRunner",
+]

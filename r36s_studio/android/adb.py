@@ -168,9 +168,16 @@ def detect_connected_device(adb_path: Optional[str], *, runner: Runner = _defaul
 
     try:
         info = get_device_props(adb_path, ready[0].serial, runner=runner)
+        linux_console = None
+        if all(getattr(info, key) == VALEUR_INCONNUE for key in _GETPROP_KEYS):
+            # Aucune propriété lue : pas de `getprop`, peut-être une console
+            # Linux (KNULLI) -- une commande de plus seulement dans ce cas.
+            from .knulli import detect_linux_console
+
+            linux_console = detect_linux_console(adb_path, ready[0].serial, runner=runner)
     except AdbCommandError as exc:
         return DetectionResult(state="adb_error", error_detail=str(exc), devices=devices)
-    return DetectionResult(state="ready", device=info, devices=devices)
+    return DetectionResult(state="ready", device=info, devices=devices, linux_console=linux_console)
 
 
 __all__ = [

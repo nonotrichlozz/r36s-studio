@@ -40,6 +40,15 @@ class AndroidDeviceInfo:
 
 
 @dataclass
+class LinuxConsole:
+    """Console Linux joignable en ADB (KNULLI…), reconnue par
+    `/etc/os-release` faute de `getprop` (`android/knulli.py`)."""
+
+    id: str
+    version: str  # OS_DATE (« 20260511 ») ou VERSION
+
+
+@dataclass
 class DetectionResult:
     """Résultat de `adb.detect_connected_device` -- `state` pilote l'écran
     affiché (§ Interface du brief) :
@@ -64,6 +73,9 @@ class DetectionResult:
     device: Optional[AndroidDeviceInfo] = None
     devices: List[AdbDeviceEntry] = field(default_factory=list)
     error_detail: Optional[str] = None
+    # Renseigné quand l'appareil prêt n'est pas un Android mais une console
+    # Linux reconnue (KNULLI) : `device` porte alors des valeurs inconnues.
+    linux_console: Optional[LinuxConsole] = None
 
 
-__all__ = ["VALEUR_INCONNUE", "AdbDeviceEntry", "AndroidDeviceInfo", "DetectionResult"]
+__all__ = ["VALEUR_INCONNUE", "AdbDeviceEntry", "AndroidDeviceInfo", "DetectionResult", "LinuxConsole"]

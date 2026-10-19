@@ -61,6 +61,8 @@ Ne modifie jamais r36s-studio-cloud.
 
 ## Hors périmètre (étape 2)
 Installation d'APK, copie de ROMs, sauvegardes, réglages système.
+Exception : copie de jeux sur une console KNULLI (Linux, pas Android)
+reconnue en ADB -- `docs/knulli-adb.md`.
 
 ## Tests
 adb absent, aucun appareil, appareil non autorisé, plusieurs

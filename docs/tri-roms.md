@@ -112,8 +112,9 @@ dossier et l'utilisateur ne comprend pas pourquoi. Parades en place :
 | ROCKNIX (`rocknix`) | `ROCKNIX/distribution` @ `31d4f58d390a`, `config/emulators/<système>.conf` (`SYSTEM_PATH`, `SYSTEM_EXTENSION`) | 2026-07-11 | ❌ **non** -- relevé dans la configuration officielle |
 | EmuELEC (`emuelec`) | `EmuELEC/EmuELEC` @ `9909590417bc`, `packages/sx05re/emuelec-emulationstation/config/es_systems.json` | 2026-09-17 | ❌ **non** -- relevé dans la configuration officielle |
 | TreeFrogUI (`treefrogui`) | Carte SF3000 HD réelle (`roms\` sur la carte) + `docs/cores.md` présent sur la carte | 2026-09-25 | ✅ **oui** pour l'existence des dossiers ; jeux affichés confirmés pour `gba` et `snes`, pas encore pour les autres. Extensions acceptées non connues (`null`, aucun contrôle) |
+| KNULLI (`knulli`) | Console RG40XXV, KNULLI Scarab 20260511 : `/usr/share/emulationstation/es_systems.cfg` lu en ADB (`docs/knulli-adb.md`) | 2026-10-19 | ✅ **oui** pour la liste des dossiers et des extensions (fichier chargé par la console) ; jeux affichés non vérifiés système par système. `wswan`, `wswanc`, `lynx` au lieu de `wonderswan`, `wonderswancolor`, `atarilynx` |
 
-Seule `treefrogui` porte `verified_on_hardware: true` -- figé par
+Seules `treefrogui` et `knulli` portent `verified_on_hardware: true` -- figé par
 `test_tri_tables.py::test_only_the_real_card_table_claims_hardware_verification`.
 Passer une autre table à `true` exige une vérification sur du vrai
 matériel, documentée ici.

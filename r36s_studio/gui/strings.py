@@ -1169,6 +1169,78 @@ STRINGS = {
     ),
     "tri_firmware_label": "Système de ta console :",
     "tri_firmware_treefrogui": "TreeFrogUI (SF3000, SF2000…)",
+    "tri_firmware_knulli": "KNULLI (RG40XXV, RG35XX…)",
+    "android_knulli_title": "Console KNULLI branchée",
+    "android_knulli_body": (
+        "Ta console tourne sous KNULLI (version {version}). Tu peux y copier des jeux et des BIOS "
+        "directement par le câble USB, sans retirer la carte SD."
+    ),
+    "android_knulli_copy_button": "Copier des jeux sur ma console (USB)",
+    "knulli_title": "Copier des jeux sur ma console (USB)",
+    "knulli_back_button": "← Retour",
+    "knulli_console_label": "Console KNULLI branchée (version {version}).",
+    "knulli_hint": (
+        "Choisis un dossier de jeux sur l'ordinateur. Chaque jeu est rangé dans le bon dossier de la "
+        "console (d'après le dossier où il se trouve, ex. « psx », ou son type de fichier) ; un "
+        "dossier « bios » va dans les BIOS de la console. Tu verras le résumé avant toute copie."
+    ),
+    "knulli_choose_folder_button": "Choisir le dossier de jeux…",
+    "knulli_scanning": "Analyse du dossier et lecture de la console…",
+    "knulli_error_console": (
+        "La console ne répond plus. Vérifie que le câble est bien branché et qu'elle est toujours en "
+        "mode USB « ADB », puis réessaie."
+    ),
+    "knulli_summary": (
+        "{count} fichier(s) à copier ({size}). Place libre sur la console : {free} ; il restera "
+        "{after} après la copie."
+    ),
+    "knulli_summary_nothing": "Rien à copier depuis ce dossier.",
+    "knulli_space_refused": (
+        "Pas assez de place sur la console : il manque {missing} (en gardant 500 Mo de marge). "
+        "Retire des jeux de ce dossier ou fais de la place sur la console. Détail par système "
+        "ci-dessous."
+    ),
+    "knulli_folder_row": "{folder} : {count} fichier(s), {size}",
+    "knulli_renamed_row": "Renommé pour la console : « {old} » → {new}",
+    "knulli_skipped_title": "{count} fichier(s) ne seront pas copiés :",
+    "knulli_copy_button": "Copier sur la console",
+    "knulli_other_folder_button": "Choisir un autre dossier",
+    "knulli_copying": "Copie en cours. Ne débranche pas la console.",
+    "knulli_copy_count": "{done} / {total} Mo copiés",
+    "knulli_cancel_button": "Annuler",
+    "knulli_conflict_title": "Déjà sur la console",
+    "knulli_conflict_message": (
+        "Ce fichier est déjà sur la console :\n{name}\n\nSur la console : {old}. Nouveau : {new}."
+    ),
+    "knulli_conflict_skip": "Ignorer",
+    "knulli_conflict_replace": "Remplacer",
+    "knulli_conflict_skip_all": "Tout ignorer",
+    "knulli_result": "{copied} fichier(s) copié(s), {failed} échec(s).",
+    "knulli_result_cancelled": (
+        "Copie annulée : {copied} fichier(s) copié(s) avant l'arrêt, rien n'est resté à moitié copié."
+    ),
+    "knulli_reload_reloaded": "La liste des jeux de la console a été rafraîchie.",
+    "knulli_reload_game_running": (
+        "Un jeu est en cours sur la console : la liste n'a pas été rafraîchie pour ne pas "
+        "l'interrompre. Quitte le jeu puis, dans le menu, « Mettre à jour la liste des jeux »."
+    ),
+    "knulli_reload_unavailable": (
+        "La liste des jeux n'a pas pu être rafraîchie : dans le menu de la console, « Mettre à jour "
+        "la liste des jeux », ou redémarre-la."
+    ),
+    "knulli_again_button": "Copier d'autres jeux",
+    "knulli_reason_not_recognised": (
+        "jeu non reconnu (mets-le dans un dossier au nom du système, ex. « psx »)"
+    ),
+    "knulli_reason_format_not_accepted": "format que ce système de la console ne lit pas ({detail})",
+    "knulli_reason_disc_missing_files": "disque incomplet, fichier(s) manquant(s) : {detail}",
+    "knulli_reason_name_in_disc": "nom refusé par la carte dans un jeu en plusieurs fichiers ({detail})",
+    "knulli_reason_same_destination": "un autre fichier va déjà au même endroit ({detail})",
+    "knulli_reason_exists": "déjà sur la console, ignoré",
+    "knulli_reason_push_failed": "la copie a échoué (câble débranché ?)",
+    "knulli_reason_size_mismatch": "fichier incomplet sur la console après la copie",
+    "knulli_reason_stalled": "la copie s'est arrêtée (console qui ne répond plus ?)",
+    "knulli_reason_adb_error": "la console ne répond plus",
     "tri_firmware_verified": "Noms de dossiers vérifiés sur une vraie carte.",
     "tri_firmware_unverified": (
         "Noms de dossiers relevés dans la configuration officielle de ce système, "

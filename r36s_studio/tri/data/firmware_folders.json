@@ -726,6 +726,210 @@
      "extensions": null
     }
    }
+  },
+  "knulli": {
+   "source": "Console RG40XXV sous KNULLI Scarab 20260511 : /usr/share/emulationstation/es_systems.cfg (lu en ADB)",
+   "source_date": "2026-10-19",
+   "verified_on_hardware": true,
+   "systems": {
+    "nes": {
+     "folder": "nes",
+     "extensions": [
+      ".7z",
+      ".nes",
+      ".unf",
+      ".unif",
+      ".zip"
+     ]
+    },
+    "fds": {
+     "folder": "fds",
+     "extensions": [
+      ".7z",
+      ".fds",
+      ".zip"
+     ]
+    },
+    "snes": {
+     "folder": "snes",
+     "extensions": [
+      ".7z",
+      ".bsx",
+      ".dx2",
+      ".fig",
+      ".gd3",
+      ".gd7",
+      ".sfc",
+      ".smc",
+      ".swc",
+      ".zip"
+     ]
+    },
+    "gb": {
+     "folder": "gb",
+     "extensions": [
+      ".7z",
+      ".gb",
+      ".zip"
+     ]
+    },
+    "gbc": {
+     "folder": "gbc",
+     "extensions": [
+      ".7z",
+      ".gbc",
+      ".zip"
+     ]
+    },
+    "gba": {
+     "folder": "gba",
+     "extensions": [
+      ".7z",
+      ".gba",
+      ".zip"
+     ]
+    },
+    "n64": {
+     "folder": "n64",
+     "extensions": [
+      ".7z",
+      ".n64",
+      ".v64",
+      ".z64",
+      ".zip"
+     ]
+    },
+    "megadrive": {
+     "folder": "megadrive",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".gen",
+      ".md",
+      ".sg",
+      ".smd",
+      ".zip"
+     ]
+    },
+    "mastersystem": {
+     "folder": "mastersystem",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".sms",
+      ".zip"
+     ]
+    },
+    "gamegear": {
+     "folder": "gamegear",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".gg",
+      ".zip"
+     ]
+    },
+    "sega32x": {
+     "folder": "sega32x",
+     "extensions": [
+      ".32x",
+      ".7z",
+      ".bin",
+      ".chd",
+      ".md",
+      ".smd",
+      ".zip"
+     ]
+    },
+    "pcengine": {
+     "folder": "pcengine",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".pce",
+      ".zip"
+     ]
+    },
+    "ngp": {
+     "folder": "ngp",
+     "extensions": [
+      ".7z",
+      ".ngp",
+      ".zip"
+     ]
+    },
+    "ngpc": {
+     "folder": "ngpc",
+     "extensions": [
+      ".7z",
+      ".ngc",
+      ".zip"
+     ]
+    },
+    "wonderswan": {
+     "folder": "wswan",
+     "extensions": [
+      ".7z",
+      ".ws",
+      ".zip"
+     ]
+    },
+    "wonderswancolor": {
+     "folder": "wswanc",
+     "extensions": [
+      ".7z",
+      ".wsc",
+      ".zip"
+     ]
+    },
+    "atari2600": {
+     "folder": "atari2600",
+     "extensions": [
+      ".7z",
+      ".a26",
+      ".bin",
+      ".zip"
+     ]
+    },
+    "atari7800": {
+     "folder": "atari7800",
+     "extensions": [
+      ".7z",
+      ".a78",
+      ".bin",
+      ".zip"
+     ]
+    },
+    "atarilynx": {
+     "folder": "lynx",
+     "extensions": [
+      ".7z",
+      ".bll",
+      ".lnx",
+      ".lyx",
+      ".o",
+      ".zip"
+     ]
+    },
+    "virtualboy": {
+     "folder": "virtualboy",
+     "extensions": [
+      ".7z",
+      ".vb",
+      ".zip"
+     ]
+    },
+    "colecovision": {
+     "folder": "colecovision",
+     "extensions": [
+      ".7z",
+      ".bin",
+      ".col",
+      ".rom",
+      ".zip"
+     ]
+    }
+   }
   }
  }
 }

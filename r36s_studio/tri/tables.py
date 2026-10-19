@@ -36,7 +36,7 @@ _DATA_DIR = Path(__file__).parent / "data"
 # Ordre d'affichage dans le choix du firmware cible. Les autres entrées du
 # catalogue de flash (AmberELEC, MinUI, Android) n'ont pas de table : non
 # proposées plutôt qu'un nom de dossier supposé.
-SORT_FIRMWARE_IDS: Tuple[str, ...] = ("arkos", "rocknix", "emuelec", "treefrogui")
+SORT_FIRMWARE_IDS: Tuple[str, ...] = ("arkos", "rocknix", "emuelec", "treefrogui", "knulli")
 
 
 @dataclass(frozen=True)

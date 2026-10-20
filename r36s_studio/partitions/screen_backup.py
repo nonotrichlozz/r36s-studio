@@ -31,11 +31,13 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from .boot_sets import ORIGINAL_SCREEN_DIR, SCREEN_FILE_SUFFIX, is_kernel_screen_dtb, knulli_kernel_dtb
+from . import dtb_graft
+from .boot_sets import KNULLI_UBOOT_DTB, ORIGINAL_SCREEN_DIR, SCREEN_FILE_SUFFIX, is_kernel_screen_dtb, knulli_kernel_dtb
 
 PathLike = Union[str, Path]
 
@@ -91,8 +93,23 @@ def save_original_screen(
         shutil.copyfile(path, tmp / path.name)
     info = {"fingerprint": fingerprint, "date": stamp, "files": [p.name for p in files]}
     (tmp / INFO_FILE).write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.rename(dest)  # jamais une sauvegarde à moitié copiée sous son vrai nom
+    _rename_with_retry(tmp, dest)  # jamais une sauvegarde à moitié copiée sous son vrai nom
     return dest, True
+
+
+def _rename_with_retry(tmp: Path, dest: Path, attempts: int = 20, delay: float = 0.25) -> None:
+    """Windows : le renommage d'un dossier qu'on vient de remplir échoue
+    (`PermissionError`) tant que l'indexeur ou l'antivirus y garde un
+    fichier ouvert. Constaté le 2026-10-20 : trois sauvegardes sur quatre
+    restées en `.partiel`, donc jamais proposées après le flash."""
+    for attempt in range(attempts):
+        try:
+            tmp.rename(dest)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
 
 
 def _family(name: str) -> str:
@@ -142,6 +159,38 @@ def has_screen_files(folder: PathLike) -> bool:
         return False
 
 
+def _boot_ini_mentions(folder: Path, names: List[str]) -> List[str]:
+    """Noms parmi `names` que le `boot.ini` du dossier fait charger."""
+    ini = next((p for p in _root_files(folder) if p.name.lower() == BOOT_INI), None)
+    if ini is None:
+        return []
+    try:
+        text = ini.read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        return []
+    return [name for name in names if name.lower() in text]
+
+
+def knulli_donor(folder: PathLike) -> Optional[str]:
+    """Le .dtb du dossier dont l'écran sera greffé sur une carte KNULLI R36S
+    (`boot_sets._apply_knulli_screen`), `None` si on ne peut pas trancher.
+    1. les .dtb noyau (`rk3326-*-linux.dtb`) ; à défaut (clone : autres noms),
+       tout .dtb qui décrit un écran, sauf celui d'u-boot de KNULLI ;
+    2. à plusieurs, celui que charge le `boot.ini` du dossier (cas réel : un
+       BOOT ArkOS d'usine a `rk3326-r35s-linux.dtb` **et**
+       `rk3326-rg351mp-linux.dtb`, son `boot.ini` charge le premier)."""
+    root = Path(folder)
+    saved = [p.name for p in _screen_files(root)]
+    candidates = [name for name in saved if is_kernel_screen_dtb(name)]
+    if not candidates:
+        candidates = [
+            name for name in saved if name.lower() != KNULLI_UBOOT_DTB and dtb_graft.has_panel((root / name).read_bytes())
+        ]
+    if len(candidates) > 1:
+        candidates = _boot_ini_mentions(root, candidates)
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optional[Dict[str, str]]:
     """Pose les `.dtb` sauvegardés dans `ecran-d-origine/` du BOOT flashé.
     `None` si le firmware écrit n'a aucun `.dtb` à la racine de son BOOT
@@ -153,10 +202,10 @@ def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optiona
     if knulli is not None:
         # KNULLI R36S : seul le .dtb noyau d'origine est posé, sous le nom du
         # .dtb noyau de KNULLI (`boot_sets.py`) -- jamais celui d'u-boot.
-        kernels = [name for name in saved if is_kernel_screen_dtb(name)]
-        if len(kernels) != 1:
+        kernel = knulli_donor(saved_dir)
+        if kernel is None:
             return None
-        names = {kernels[0]: Path(knulli).name}
+        names = {kernel: Path(knulli).name}
     else:
         target = [p.name for p in _screen_files(boot_root)]
         if not target or not saved:
@@ -175,6 +224,7 @@ __all__ = [
     "ORIGINAL_SCREEN_DIR",
     "has_screen_files",
     "install_original_screen",
+    "knulli_donor",
     "save_original_screen",
     "target_names",
 ]

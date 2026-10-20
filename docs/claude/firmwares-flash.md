@@ -409,7 +409,7 @@ Contenu de l'image vérifié en lecture seule : `extlinux.conf.r36s` (ligne
   partition ROCKNIX par le worker élevé juste après le flash sous Windows,
   copie, démarrage de la console).
 
-**KNULLI sur R36S (2026-10-19, expérimental, jamais flashé sur la console).**
+**KNULLI sur R36S (2026-10-19 ; flashé sur une R36S noire d'origine le 2026-10-20 : démarrage avec l'image après greffe de l'écran d'usine, `partitions.md`).**
 Depuis la release Scarab 20260511, KNULLI publie une image dédiée « Game
 Console R36S » (`knulli-cfw/knulli-linux`). Entrée `knulli` du catalogue,
 juste après ROCKNIX, `auto_download` (`identify/firmware_catalog.py::
@@ -437,7 +437,9 @@ KNULLI_R36S_DOWNLOAD`) :
   noyau (`boot.ini`), modèle « Game Console R35S/R36S fix by lxc ».
 - **Écran** : aucun sélecteur ni fichier de rechange, aucun menu. Issue #64
   (écran noir, R36S V21 écran P4) : remplacer `boot/rk3326-rg351mp-linux.dtb`
-  par le .dtb noyau d'origine. L'app ne change rien automatiquement : l'écran
+  par le .dtb noyau d'origine -- **faux sur notre R36S** (plus de démarrage
+  du tout) : l'app greffe seulement les réglages d'écran (`dtb_graft.py`).
+  L'app ne change rien automatiquement : l'écran
   d'origine mis de côté est posé dans `ecran-d-origine/` et « Choisir l'écran
   de la console » ne peut remplacer que ce fichier (`partitions.md`).
   `firmware.sig` (MD5 des fichiers de démarrage) ne sert qu'aux mises à jour

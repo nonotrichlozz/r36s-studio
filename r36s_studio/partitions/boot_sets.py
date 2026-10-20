@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional, Tuple, Union
 
+from . import dtb_graft
+
 PathLike = Union[str, Path]
 
 STATE_DIR = "r36s-studio"
@@ -233,7 +235,10 @@ def apply_set(boot_root: PathLike, set_id: str) -> BootSetState:
     _write_json(originals / MANIFEST_FILE, {"files": manifest})
 
     for source, dest in chosen.files:
-        _copy_atomic(root / source, root / dest)
+        if knulli is not None:
+            _apply_knulli_screen(root / source, root / dest, originals / dest if manifest.get(dest) else None)
+        else:
+            _copy_atomic(root / source, root / dest)
     for name in stale:
         (root / name).unlink()
     _write_json(state_dir / CARD_FILE, {"card_id": card_id, "applied": set_id})
@@ -319,6 +324,31 @@ def _write_json(path: Path, data: dict) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(tmp, path)
+
+
+def _apply_knulli_screen(source: Path, dest: Path, knulli_original: Optional[Path]) -> None:
+    """Carte KNULLI : les réglages d'écran de `source` greffés dans le .dtb
+    de KNULLI (`dtb_graft.py`) -- remplacer tout le fichier empêchait la
+    R36S noire de démarrer (2026-10-20). La greffe part toujours du .dtb de
+    KNULLI d'origine (copie de `origine/`), jamais d'un essai précédent.
+    Repli : copie du fichier entier (méthode de l'issue #64) si l'un des
+    deux .dtb n'a pas d'écran reconnaissable."""
+    base = (knulli_original if knulli_original is not None and knulli_original.is_file() else dest).read_bytes()
+    grafted = dtb_graft.graft_panel(base, source.read_bytes())
+    if grafted is None:
+        _copy_atomic(source, dest)
+        return
+    _write_bytes_atomic(dest, grafted)
+
+
+def _write_bytes_atomic(dest: Path, data: bytes) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + _TMP_SUFFIX)
+    with open(tmp, "wb") as out:
+        out.write(data)
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(tmp, dest)
 
 
 def _copy_atomic(source: Path, dest: Path) -> None:

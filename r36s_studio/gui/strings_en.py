@@ -417,7 +417,7 @@ STRINGS_EN = {
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "A more recent system, with built-in game transfer over USB.",
     "file_firmware_knulli_title": "KNULLI",
-    "file_firmware_knulli_desc": "A complete, recent system; the image is made for the genuine R36S (not clones). Not yet tried on an R36S with R36S Studio. Non-commercial licence: commercial use is forbidden.",
+    "file_firmware_knulli_desc": "A complete, recent system; the image is made for the genuine R36S (not clones). Tried on a genuine R36S: if the screen stays black, « Choose the console's screen » puts your console's own screen back. Non-commercial licence: commercial use is forbidden.",
     "knulli_r36s_first_boot_note": "Plug the console into mains power for the first start, even if its battery is charged, and let the installation finish without turning it off: it can take several minutes and restart on its own. Tip: remove the second card (TF2) for the first start. If the screen stays black, put the card back in the computer: “Choose the console's screen” offers your console's original screen.",
     "knulli_notes_device_log": "KNULLI release notes: this file is listed for “{device}”.",
     "knulli_notes_missing_log": "KNULLI release notes: this file is not in their console table (an indicative check only).",

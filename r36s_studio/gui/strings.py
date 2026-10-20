@@ -611,7 +611,7 @@ STRINGS = {
     "file_firmware_rocknix_title": "ROCKNIX",
     "file_firmware_rocknix_desc": "Un système plus récent, avec le transfert de jeux par USB intégré.",
     "file_firmware_knulli_title": "KNULLI",
-    "file_firmware_knulli_desc": "Système complet et récent, image faite pour la vraie R36S (pas pour les clones). Pas encore essayé sur une R36S avec R36S Studio. Licence non commerciale : usage commercial interdit.",
+    "file_firmware_knulli_desc": "Système complet et récent, image faite pour la vraie R36S (pas pour les clones). Essayé sur une R36S d'origine : si l'écran reste noir, « Choisir l'écran de la console » remet celui de ta console. Licence non commerciale : usage commercial interdit.",
     "knulli_r36s_first_boot_note": "Branche la console sur secteur pour le premier démarrage, même si sa batterie est chargée, et laisse l'installation se terminer sans l'éteindre : elle peut prendre plusieurs minutes et redémarrer d'elle-même. Conseil : retire la deuxième carte (TF2) au premier démarrage. Si l'écran reste noir, remets la carte dans l'ordinateur : « Choisir l'écran de la console » propose l'écran d'origine de ta console.",
     "knulli_notes_device_log": "Notes de version de KNULLI : ce fichier est indiqué pour « {device} ».",
     "knulli_notes_missing_log": "Notes de version de KNULLI : ce fichier n'apparaît pas dans leur tableau des consoles (vérification indicative seulement).",

@@ -408,3 +408,38 @@ jeu, `knulli` de 1,9 Go compris). Désormais, sur cette carte :
 - `apply_set` refuse toute autre destination (`ValueError`), même pour un jeu
   forgé. Retour en arrière inchangé (`r36s-studio/origine/`).
 Testé sur l'arborescence réelle de l'image (`tests/test_knulli_r36s_screen.py`).
+
+**Greffe de l'écran (`partitions/dtb_graft.py`, 2026-10-20, vérifié sur la
+console).** R36S noire d'origine, KNULLI Scarab 20260510 : écran noir avec
+la musique (le .dtb de KNULLI décrit une autre dalle, `panel-init-sequence`
+de 773 octets). Le .dtb noyau d'usine posé **tel quel** (issue #64) :
+plus rien, ni image ni musique -- le noyau de KNULLI ne démarre pas avec.
+Ce qui a marché : le .dtb de KNULLI, dont seules les propriétés du nœud de
+l'écran (`/dsi@ff450000/panel@0` et `display-timings/*` : séquence
+d'initialisation, délais, fréquences, marges) sont remplacées par celles du
+.dtb d'usine (22 propriétés) -- démarrage avec l'image.
+- `apply_set` sur une carte KNULLI ne copie plus le fichier : il greffe
+  (`_apply_knulli_screen`), toujours à partir du .dtb de KNULLI d'origine
+  (`r36s-studio/origine/`), jamais d'un essai précédent. Seules les
+  propriétés présentes des deux côtés au même chemin relatif sont
+  remplacées ; aucun nœud ni propriété ajouté ; `phandle` et `native-mode`
+  (référence à un phandle) gardent les valeurs de KNULLI. Repli : copie du
+  fichier entier si l'un des deux .dtb n'a pas d'écran reconnaissable
+  (nœud `panel@…` portant `panel-init-sequence`, exactement un).
+- Résultat vérifié octet pour octet contre le fichier qui a démarré
+  (`tests/test_dtb_graft.py` reconstruit la même structure).
+- `screen_backup.knulli_donor` choisit le fichier dont l'écran est greffé :
+  les .dtb noyau ; à défaut (clone : autres noms), le seul .dtb qui décrit
+  un écran, sauf celui d'u-boot de KNULLI ; à plusieurs, celui que charge
+  le `boot.ini` du dossier. **Bug corrigé** : un BOOT ArkOS d'usine a
+  `rk3326-r35s-linux.dtb` **et** `rk3326-rg351mp-linux.dtb` ; l'import le
+  refusait (« ne choisit pas son écran avec ces fichiers »), son `boot.ini`
+  charge le premier.
+- **Non vérifié** : la greffe sur un clone (carte mère différente, autre
+  manette ou autres régulateurs que l'écran : la greffe ne les touche pas).
+
+**Bug corrigé, sauvegarde de l'écran restée en `.partiel` (Windows).**
+Trois sauvegardes sur quatre dans `Ecrans d'origine/` (14-17/10) : le
+renommage final du dossier échouait (`PermissionError`, fichier encore ouvert
+par l'indexeur ou l'antivirus), la sauvegarde n'était donc jamais proposée
+après le flash. `_rename_with_retry` réessaie 20 fois toutes les 0,25 s.

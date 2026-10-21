@@ -25,6 +25,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QUrl, Signa
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QPainter, QPen, QPixmap, QPolygon
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -156,6 +157,10 @@ class Screen(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
 
 
+# Taille maximale « sans limite » de Qt (QWIDGETSIZE_MAX).
+_QT_MAX_SIZE = 16777215
+
+
 class Dialog(QDialog):
     """Base commune aux fenêtres modales (§5, refonte navigation) : les
     choix qui demandaient un écran séparé (carte, fichier, confirmation,
@@ -176,28 +181,67 @@ class Dialog(QDialog):
         self.setModal(True)
 
     _FIT_EVENTS = (QEvent.LayoutRequest, QEvent.Resize, QEvent.Show)
+    # Barre de titre et bordures, quand la fenêtre n'est pas encore affichée
+    # (la vraie valeur est lue ensuite sur `frameGeometry`).
+    _FRAME_ALLOWANCE = 40
+
+    def available_height(self) -> int:
+        """Hauteur utilisable pour le contenu : l'écran disponible (barre
+        des tâches déduite) moins le cadre de la fenêtre."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return _QT_MAX_SIZE
+        frame = self.frameGeometry().height() - self.geometry().height() if self.isVisible() else 0
+        return max(200, screen.availableGeometry().height() - max(frame, self._FRAME_ALLOWANCE))
 
     def event(self, event) -> bool:  # noqa: N802 (nom imposé par Qt)
         """Hauteur minimale = celle du contenu à la largeur actuelle. Qt ne
         compte pas les lignes en plus des textes à retour à la ligne
         (`totalMinimumSize` ignore `heightForWidth`) : la hauteur restait
         celle de la première page affichée, et une page plus haute
-        (« Quelle console as-tu ? ») s'écrasait, boutons superposés."""
+        (« Quelle console as-tu ? ») s'écrasait, boutons superposés.
+
+        **Jamais plus haute que l'écran** (bug corrigé, 1366×768 à 150 % :
+        minimum 497 px pour 485 utilisables). Une hauteur minimale plus grande
+        que l'écran faisait déborder la fenêtre (boutons hors cadre) ; au
+        redimensionnement, Windows la ramenait à l'écran et Qt lui réimposait
+        son minimum, en boucle : fenêtre disparue, application bloquée
+        derrière une fenêtre modale. Minimum et maximum sont donc bornés à
+        l'écran disponible ; ce qui dépasse défile (liste des firmwares)."""
         handled = super().event(event)
         layout = self.layout()
-        if event.type() in self._FIT_EVENTS and layout is not None and layout.hasHeightForWidth():
-            # Une zone de défilement (liste des firmwares...) reste
-            # réductible jusqu'à sa hauteur minimale.
-            slack = sum(
-                max(0, area.sizeHint().height() - max(area.minimumSize().height(), area.minimumSizeHint().height()))
-                for area in self.findChildren(QAbstractScrollArea)
-                if area.isVisible()
-            )
-            base = layout.totalMinimumSize()
-            minimum = QSize(base.width(), max(base.height(), layout.totalHeightForWidth(self.width()) - slack))
-            if minimum != self.minimumSize():
-                self.setMinimumSize(minimum)
+        if event.type() in self._FIT_EVENTS and layout is not None:
+            available = self.available_height()
+            if self.maximumHeight() != available:
+                self.setMaximumHeight(available)
+            if layout.hasHeightForWidth():
+                # Une zone de défilement (liste des firmwares...) reste
+                # réductible jusqu'à sa hauteur minimale.
+                slack = sum(
+                    max(0, area.sizeHint().height() - max(area.minimumSize().height(), area.minimumSizeHint().height()))
+                    for area in self.findChildren(QAbstractScrollArea)
+                    if area.isVisible()
+                )
+                base = layout.totalMinimumSize()
+                wanted = max(base.height(), layout.totalHeightForWidth(self.width()) - slack)
+                minimum = QSize(base.width(), min(wanted, available))
+                if minimum != self.minimumSize():
+                    self.setMinimumSize(minimum)
+            if event.type() == QEvent.Show:
+                self._keep_on_screen()
         return handled
+
+    def _keep_on_screen(self) -> None:
+        """Ramène la fenêtre dans l'écran disponible si elle en dépasse."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        frame = self.frameGeometry()
+        x = min(max(frame.x(), area.x()), max(area.x(), area.right() - frame.width() + 1))
+        y = min(max(frame.y(), area.y()), max(area.y(), area.bottom() - frame.height() + 1))
+        if (x, y) != (frame.x(), frame.y()):
+            self.move(x, y)
 
 
 class ClickableFrame(QFrame):
@@ -1801,6 +1845,7 @@ class FileDialog(Dialog):
         # rester visible sans interaction (§5 vocabulaire : pas de
         # jargon, une phrase compréhensible par un néophyte).
         self._firmware_radios: Dict[str, QRadioButton] = {}
+        self._firmware_descs: Dict[str, QLabel] = {}
         self._firmware_rows: List[QWidget] = []
         self._firmware_group = QButtonGroup(self)
         # Lignes dans une zone qui défile, comme `HomeScreen._rows_scroll` --
@@ -1816,7 +1861,9 @@ class FileDialog(Dialog):
         self._firmware_scroll.setFrameShape(QFrame.NoFrame)
         self._firmware_scroll.setWidgetResizable(True)
         self._firmware_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._firmware_scroll.setMinimumHeight(260)
+        # Assez bas pour qu'une fenêtre bornée à l'écran (1366×768 à 150 %,
+        # 485 px utilisables) garde ses boutons visibles ; la liste défile.
+        self._firmware_scroll.setMinimumHeight(120)
         self._firmware_scroll.setWidget(firmware_container)
         layout.addWidget(self._firmware_scroll, 1)
         for entry in FIRMWARE_CATALOG:
@@ -1836,9 +1883,12 @@ class FileDialog(Dialog):
             desc = QLabel(tr(entry.desc_key))
             desc.setWordWrap(True)
             desc.setProperty("role", "secondary")
+            desc.setVisible(False)  # seulement pour le firmware choisi
             row_layout.addWidget(desc)
+            radio.setToolTip(tr(entry.desc_key))
             self._firmware_group.addButton(radio)
             self._firmware_radios[entry.id] = radio
+            self._firmware_descs[entry.id] = desc
             self._firmware_rows.append(row)
             firmware_layout.addWidget(row)
         firmware_layout.addStretch()
@@ -1981,6 +2031,11 @@ class FileDialog(Dialog):
 
     def _update_firmware_buttons_visibility(self) -> None:
         is_flash = self._mode == "flash"
+        # Neuf firmwares avec un paragraphe chacun : trop à lire pour qui veut
+        # juste réparer sa console. Seule la description du choix courant
+        # est affichée (les autres au survol, info-bulle du bouton).
+        for firmware_id, desc in self._firmware_descs.items():
+            desc.setVisible(is_flash and firmware_id == self._firmware)
         entry = FIRMWARE_BY_ID[self._firmware]
         is_manual_link = entry.releases_url is not None
         self._releases_button.setVisible(is_flash and is_manual_link)

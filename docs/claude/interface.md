@@ -241,3 +241,20 @@ Les tâches ad hoc « flash », « copy_games », « reset_card » de
 `main_window.py::_start_assisted_ad_hoc_job` ne sont plus déclenchées
 par aucune tuile ; le mécanisme reste en place (toujours utilisé par
 « backup », « backup_system », « eject »).
+
+**Fenêtres modales bornées à l'écran (`screens.py::Dialog`, 2026-10-21).**
+Signalé sur un portable 1366×768 : « Choisis le fichier image » (neuf
+firmwares) dépassait l'écran, boutons « Parcourir… »/« Suivant » hors cadre ;
+au redimensionnement, la fenêtre disparaissait et l'application restait
+bloquée derrière cette fenêtre modale (Gestionnaire des tâches). Reproduit
+hors écran : à 150 %, 485 px utilisables pour une hauteur minimale de 497 px
+(`Dialog.event` calculait le minimum sans borne) ; Windows ramène la fenêtre
+à l'écran, Qt lui réimpose son minimum, en boucle (la boucle elle-même n'est
+pas reproductible hors du vrai gestionnaire de fenêtres). Corrigé : minimum
+**et** maximum bornés à `Dialog.available_height()` (écran disponible moins
+le cadre), fenêtre ramenée dans l'écran à l'affichage ; liste des firmwares
+réductible jusqu'à 120 px (elle défile) ; description affichée seulement
+pour le firmware choisi, les autres en info-bulle. Vérifié hors écran
+(polices absentes, mise en page seule) en 1024/1280/1366/1920 de large à
+100/125/150 % ; `tests/test_gui_dialog_fits_screen.py`. **À confirmer sur le
+portable** (vrai Windows, vraie mise à l'échelle).

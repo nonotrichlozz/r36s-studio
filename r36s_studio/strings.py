@@ -1642,6 +1642,47 @@ STRINGS = {
         "Il manque python-telegram-bot : installe-le avec « pip install -r requirements-bot.txt "
         "», puis relance."
     ),
+    "bot_no_card": "Je ne trouve aucune carte SD. Branche la carte sur cet ordinateur, puis réessaie.",
+    "bot_sudo_missing": (
+        "Le bot n'a pas le droit de lire ou d'écrire la carte sur cet ordinateur : l'autorisation "
+        "n'est pas installée (voir docs/bot-telegram.md, « Autorisation »). Rien n'a été modifié."
+    ),
+    "bot_backup_estimating": "Je calcule la place nécessaire pour la carte « {card} »…",
+    "bot_backup_no_space": (
+        "Pas assez de place sur cet ordinateur : il manque {missing} ({needed} nécessaires, "
+        "{free} libres). Rien n'a été commencé. Libère de la place dans ce dossier, puis réessaie "
+        ":"
+    ),
+    "bot_backup_confirm": (
+        "Sauvegarder toute la carte « {card} », jeux compris ({size}) ? Rien ne sera effacé sur "
+        "la carte : elle est seulement lue. Un nouveau fichier sera créé sur cet ordinateur, "
+        "aucun fichier existant n'est remplacé :"
+    ),
+    "bot_backup_system_confirm": (
+        "Sauvegarder le système de la carte « {card} », sans les jeux ({size}) ? Rien ne sera "
+        "effacé sur la carte : elle est seulement lue. Un nouveau fichier sera créé sur cet "
+        "ordinateur, aucun fichier existant n'est remplacé :"
+    ),
+    "bot_backup_confirm_button": "Sauvegarder",
+    "bot_backup_starting": "Sauvegarde en cours…",
+    "bot_backup_copying": "Copie de la carte… {done} sur {total} ({percent} %)",
+    "bot_backup_verifying": "Vérification de la copie… {done} sur {total} ({percent} %)",
+    "bot_backup_stalled": "La carte ne répond plus depuis {seconds} s…",
+    "bot_backup_done": "Sauvegarde de la carte « {card} » terminée et vérifiée :",
+    "bot_reset_confirm": (
+        "Effacer la carte « {card} » ? TOUT ce qu'elle contient sera détruit définitivement : le "
+        "système de la console, les jeux et les sauvegardes de parties. Elle deviendra un seul "
+        "espace de stockage vide, comme une carte neuve. Pense à la sauvegarder avant si besoin."
+    ),
+    "bot_reset_confirm_button": "Effacer la carte",
+    "bot_reset_starting": "Remise à zéro en cours… ne retire pas la carte.",
+    "bot_reset_running": "Remise à zéro en cours… étape {step} sur {count}. Ne retire pas la carte.",
+    "bot_reset_done": "La carte « {card} » a été remise à zéro : elle est vide, prête à servir.",
+    "bot_web_none": (
+        "Aucun raccourci pour l'instant. Pour en ajouter, crée ce fichier sur cet ordinateur "
+        "(voir docs/bot-telegram.md) :"
+    ),
+    "bot_web_choose": "Quel raccourci ouvrir ?",
 }
 
 

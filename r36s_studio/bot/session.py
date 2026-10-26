@@ -51,7 +51,15 @@ class Port(Protocol):
 
 def menu_labels() -> List[List[str]]:
     """Mêmes libellés que les outils de l'accueil de la GUI."""
-    return [[tr("home_tile_find_duplicates")], [tr("home_tile_filter_games")], [tr("bot_menu_firmware")]]
+    return [
+        [tr("home_tile_find_duplicates")],
+        [tr("home_tile_filter_games")],
+        [tr("bot_menu_firmware")],
+        [tr("home_tile_backup")],
+        [tr("home_tile_backup_system")],
+        [tr("home_tile_reset_card")],
+        [tr("home_tile_web")],
+    ]
 
 
 def fit(text: str) -> str:

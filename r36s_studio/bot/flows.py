@@ -10,7 +10,12 @@
 - filtre par région et par langue (`tri/run.py`, `tri/filter.py`) : choix
   des critères, aperçu, confirmation, mise de côté dans `_hors_filtre` ;
 - choix et téléchargement d'un système (`identify/firmware_download.py`) :
-  jamais d'écriture sur une carte (pas de flash depuis le bot).
+  jamais d'écriture sur une carte (pas de flash depuis le bot) ;
+- sauvegarde d'une carte, avec ou sans les jeux, et remise à zéro : worker
+  élevé par sudo (`bot/worker.py`), espace vérifié avant toute sauvegarde,
+  carte choisie par un bouton (jamais présélectionnée, même seule, §4.2),
+  confirmation à deux boutons qui nomme la carte et ce qui sera détruit ;
+- raccourcis web personnels (`r36s_studio/shortcuts.py`, liste livrée vide).
 
 Vocabulaire (§5) : messages sans jargon ; chemins et messages bruts du
 cœur toujours sur une ligne à part (`bot_detail`/`bot_path`)."""
@@ -18,14 +23,23 @@ cœur toujours sur une ligne à part (`bot_detail`/`bot_path`)."""
 from __future__ import annotations
 
 import asyncio
+import shutil
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from r36s_studio import config as app_config
+from r36s_studio import shortcuts as web_shortcuts
+from r36s_studio.devices import Device, list_devices
 from r36s_studio.doublons import scan_cache
 from r36s_studio.doublons.run import default_units_to_move, preferred_destination, run_move, run_scan
 from r36s_studio.identify.firmware_catalog import FIRMWARE_CATALOG, FirmwareEntry
+from r36s_studio.imaging import DEFAULT_RESET_LABEL
+from r36s_studio.imaging.backup import required_free_bytes
+from r36s_studio.imaging.source import DEFAULT_STALL_TIMEOUT_SECONDS
+from r36s_studio.partitions import archives
+from r36s_studio.safety import filter_devices
 from r36s_studio.identify.firmware_download import (
     asset_for,
     download_firmware,
@@ -40,10 +54,21 @@ from r36s_studio.tri.run import run_apply, run_plan
 
 from .cards import GamesFolder, find_games_folders
 from .session import BotSession
+from .worker import run_worker
 
 MAX_LISTED = 15
 
-__all__ = ["doublons_flow", "filter_flow", "firmware_flow", "flows_by_label", "format_size"]
+__all__ = [
+    "backup_flow",
+    "doublons_flow",
+    "filter_flow",
+    "firmware_flow",
+    "flows_by_label",
+    "format_size",
+    "reset_flow",
+    "system_backup_flow",
+    "web_flow",
+]
 
 
 def format_size(num_bytes: int) -> str:
@@ -66,12 +91,39 @@ async def _choose_games_folder(session: BotSession) -> Optional[GamesFolder]:
     if not folders:
         await session.send(tr("bot_no_games_card"))
         return None
-    if len(folders) == 1:
-        return folders[0]
+    # Un bouton par carte, même s'il n'y en a qu'une : jamais de sélection
+    # par défaut (§4.2).
     choices = [[(f"{folder.card}", str(index))] for index, folder in enumerate(folders)]
     choices.append([(tr("bot_cancel"), "cancel")])
     answer = await session.ask(tr("bot_choose_card"), choices)
     return None if answer == "cancel" else folders[int(answer)]
+
+
+def _card_label(device: Device) -> str:
+    return f"{device.display} — {format_size(device.size_bytes)}"
+
+
+async def _choose_card(session: BotSession) -> Optional[Device]:
+    """Cartes acceptées par `safety` (jamais un disque système), un bouton
+    chacune, aucune présélection même seule (§4.2)."""
+    await session.send(tr("bot_looking_for_card"))
+    try:
+        devices = await asyncio.to_thread(lambda: filter_devices(list_devices()))
+    except (NotImplementedError, OSError) as exc:
+        await session.send(_error_text(tr("bot_no_card"), str(exc)))
+        return None
+    if not devices:
+        await session.send(tr("bot_no_card"))
+        return None
+    choices = [[(_card_label(device), str(index))] for index, device in enumerate(devices)]
+    choices.append([(tr("bot_cancel"), "cancel")])
+    answer = await session.ask(tr("bot_choose_card"), choices)
+    return None if answer == "cancel" else devices[int(answer)]
+
+
+def _worker_error_text(code: Optional[str], detail: str) -> str:
+    main = tr("bot_sudo_missing") if code == "ELEVATION_FAILED" else friendly_error_message(code or "")
+    return _error_text(main, detail)
 
 
 # --- doublons ---------------------------------------------------------------
@@ -377,10 +429,192 @@ async def firmware_flow(session: BotSession) -> None:
     await session.send(tr("bot_firmware_downloaded", firmware=title) + "\n" + tr("bot_path", path=str(outcome.path)))
 
 
+# --- sauvegarde d'une carte (avec ou sans les jeux) -------------------------
+
+
+def _new_backup_path(system_only: bool) -> Path:
+    """Convention de la GUI : `~/Documents/R36S Studio/`, jamais `~/.config`
+    (§6) ; nom horodaté, jamais un fichier existant écrasé."""
+    folder = archives.default_archives_dir()
+    stamp = datetime.now().strftime(archives.TIMESTAMP_FORMAT)
+    base = f"{'systeme' if system_only else 'sauvegarde'}_{stamp}"
+    path, index = folder / f"{base}.img", 2
+    while path.exists():
+        path, index = folder / f"{base}-{index}.img", index + 1
+    return path
+
+
+def _free_bytes(folder: Path) -> int:
+    existing = folder
+    while not existing.exists() and existing != existing.parent:
+        existing = existing.parent
+    return shutil.disk_usage(existing).free
+
+
+def _backup_render(values) -> str:
+    if not values:
+        return tr("bot_backup_starting")
+    phase, done, total, stalled = values
+    if stalled:
+        return tr("bot_backup_stalled", seconds=stalled)
+    key = "bot_backup_verifying" if phase == "verify_source" else "bot_backup_copying"
+    percent = done * 100 // total if total else 0
+    return tr(key, done=format_size(done), total=format_size(total), percent=percent)
+
+
+async def _backup(session: BotSession, system_only: bool) -> None:
+    device = await _choose_card(session)
+    if device is None:
+        return
+    settings = app_config.load_config()
+    base_args = ["backup", "--device", device.path] + (["--system-only"] if system_only else [])
+
+    # Taille exacte d'abord (sauvegarde intelligente, §4.3 ; image jamais
+    # compressée), comparée à l'espace libre : sur Telegram, on ne voit pas
+    # son disque -- refus avant de commencer, avec ce qui manque.
+    await session.send(tr("bot_backup_estimating", card=device.display))
+    estimate = await asyncio.to_thread(run_worker, [*base_args, "--estimate-only"])
+    if not estimate.ok or estimate.estimate is None:
+        await session.send(_worker_error_text(estimate.error_code, estimate.error_detail))
+        return
+    output = _new_backup_path(system_only)
+    needed = required_free_bytes(int(estimate.estimate))
+    free = await asyncio.to_thread(_free_bytes, output.parent)
+    if free < needed:
+        await session.send(
+            tr(
+                "bot_backup_no_space",
+                missing=format_size(needed - free),
+                needed=format_size(needed),
+                free=format_size(free),
+            )
+            + "\n"
+            + tr("bot_path", path=str(output.parent))
+        )
+        return
+
+    answer = await session.ask(
+        tr(
+            "bot_backup_system_confirm" if system_only else "bot_backup_confirm",
+            card=_card_label(device),
+            size=format_size(int(estimate.estimate)),
+        )
+        + "\n"
+        + tr("bot_path", path=str(output)),
+        [[(tr("bot_backup_confirm_button"), "go"), (tr("bot_cancel"), "cancel")]],
+    )
+    if answer != "go":
+        await session.send(tr("bot_nothing_changed"))
+        return
+
+    argv = [*base_args, "--output", str(output)]
+    if not settings.verify_backup_source:
+        argv.append("--no-source-verify")
+    if settings.source_stall_timeout_seconds != DEFAULT_STALL_TIMEOUT_SECONDS:
+        argv += ["--stall-timeout", str(settings.source_stall_timeout_seconds)]
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    def work(report, should_cancel):
+        state = {"phase": "copy", "done": 0, "total": 0}
+
+        def on_event(event: dict) -> None:
+            kind = event.get("type")
+            if kind == "phase":
+                state.update(phase=event.get("name"), done=0)
+            elif kind == "progress":
+                state.update(done=int(event.get("done", 0)), total=int(event.get("total", 0)))
+            elif kind != "stalled":
+                return
+            report(state["phase"], state["done"], state["total"], event.get("seconds") if kind == "stalled" else None)
+
+        return run_worker(argv, on_event=on_event, should_cancel=should_cancel)
+
+    result = await session.run_with_progress(_backup_render, work)
+    if result.ok:
+        await session.send(tr("bot_backup_done", card=device.display) + "\n" + tr("bot_path", path=str(output)))
+    elif result.error_code == "CANCELLED":
+        await session.send(tr("bot_cancelled"))
+    else:
+        await session.send(_worker_error_text(result.error_code, result.error_detail))
+
+
+async def backup_flow(session: BotSession) -> None:
+    await _backup(session, system_only=False)
+
+
+async def system_backup_flow(session: BotSession) -> None:
+    await _backup(session, system_only=True)
+
+
+# --- remise à zéro d'une carte ----------------------------------------------
+
+
+async def reset_flow(session: BotSession) -> None:
+    device = await _choose_card(session)
+    if device is None:
+        return
+    settings = app_config.load_config()
+    answer = await session.ask(
+        tr("bot_reset_confirm", card=_card_label(device)),
+        [[(tr("bot_reset_confirm_button"), "erase"), (tr("bot_cancel"), "cancel")]],
+    )
+    if answer != "erase":
+        await session.send(tr("bot_nothing_changed"))
+        return
+    argv = [
+        "reset-card",
+        "--device",
+        device.path,
+        "--label",
+        DEFAULT_RESET_LABEL,
+        "--filesystem",
+        settings.reset_card_filesystem,
+    ]
+
+    def work(report, _should_cancel):
+        def on_event(event: dict) -> None:
+            if event.get("type") == "step_progress":
+                report(int(event.get("step_index", 0)) + 1, int(event.get("step_count", 0)))
+
+        # Jamais interrompue en cours : une carte à moitié formatée serait pire.
+        return run_worker(argv, on_event=on_event)
+
+    result = await session.run_with_progress(
+        lambda values: tr("bot_reset_running", step=values[0], count=values[1]) if values else tr("bot_reset_starting"),
+        work,
+        cancellable=False,
+    )
+    if result.ok:
+        await session.send(tr("bot_reset_done", card=device.display))
+    else:
+        await session.send(_worker_error_text(result.error_code, result.error_detail))
+
+
+# --- raccourcis web -----------------------------------------------------------
+
+
+async def web_flow(session: BotSession) -> None:
+    shortcuts = await asyncio.to_thread(web_shortcuts.load_shortcuts)
+    if not shortcuts:
+        await session.send(tr("bot_web_none") + "\n" + tr("bot_path", path=str(web_shortcuts.shortcuts_path())))
+        return
+    choices = [[(shortcut.name, str(index))] for index, shortcut in enumerate(shortcuts)]
+    choices.append([(tr("bot_cancel"), "cancel")])
+    answer = await session.ask(tr("bot_web_choose"), choices)
+    if answer == "cancel":
+        return
+    shortcut = shortcuts[int(answer)]
+    await session.send(f"{shortcut.name}\n{shortcut.url}")
+
+
 def flows_by_label():
     """Libellé du menu (`session.menu_labels`) -> flux."""
     return {
         tr("home_tile_find_duplicates"): doublons_flow,
         tr("home_tile_filter_games"): filter_flow,
         tr("bot_menu_firmware"): firmware_flow,
+        tr("home_tile_backup"): backup_flow,
+        tr("home_tile_backup_system"): system_backup_flow,
+        tr("home_tile_reset_card"): reset_flow,
+        tr("home_tile_web"): web_flow,
     }

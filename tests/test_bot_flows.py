@@ -93,7 +93,15 @@ def real_moves():
 
 def test_menu_uses_the_gui_tool_labels():
     labels = [row[0] for row in menu_labels()]
-    assert labels == [tr("home_tile_find_duplicates"), tr("home_tile_filter_games"), tr("bot_menu_firmware")]
+    assert labels == [
+        tr("home_tile_find_duplicates"),
+        tr("home_tile_filter_games"),
+        tr("bot_menu_firmware"),
+        tr("home_tile_backup"),
+        tr("home_tile_backup_system"),
+        tr("home_tile_reset_card"),
+        tr("home_tile_web"),
+    ]
     assert set(flows.flows_by_label()) == set(labels)
 
 
@@ -126,6 +134,7 @@ def test_doublons_lists_then_asks_and_cancel_moves_nothing(tmp_path, real_moves)
             "r36s_studio.bot.flows.run_move"
         ) as run_move:
             task = asyncio.ensure_future(flows.doublons_flow(session))
+            await _click(session, port, "Carte")
             question = await _click(session, port, tr("bot_cancel"))
             await task
         run_move.assert_not_called()  # jamais sans confirmation (§2 n°6)
@@ -147,6 +156,7 @@ def test_doublons_confirmed_sets_one_copy_aside_and_reports_the_exact_count(tmp_
         session = _session(port)
         with patch("r36s_studio.bot.flows.find_games_folders", return_value=[GamesFolder("Carte", str(root))]):
             task = asyncio.ensure_future(flows.doublons_flow(session))
+            await _click(session, port, "Carte")
             await _click(session, port, tr("bot_doublons_confirm", count=1))
             await task
         return port
@@ -171,7 +181,9 @@ def test_doublons_error_keeps_the_raw_detail_on_its_own_line(tmp_path):
             "r36s_studio.bot.flows.run_scan",
             return_value=ScanOutcome(error_code="DOUBLONS_IO_ERROR", error_detail=f"[Errno 5] {tmp_path}"),
         ):
-            await flows.doublons_flow(session)
+            task = asyncio.ensure_future(flows.doublons_flow(session))
+            await _click(session, port, "Carte")
+            await task
         return port.texts()[-1]
 
     text = asyncio.run(main())
@@ -198,6 +210,7 @@ def test_filter_criteria_preview_then_confirm_sets_aside_the_other_regions(tmp_p
         session = _session(port)
         with patch("r36s_studio.bot.flows.find_games_folders", return_value=[GamesFolder("Carte", str(root))]):
             task = asyncio.ensure_future(flows.filter_flow(session))
+            await _click(session, port, "Carte")
             await _click(session, port, tr("bot_filter_preview"))  # aucun critère : refusé
             await _click(session, port, tr("filter_region_europe"))
             await _click(session, port, tr("bot_filter_preview"))
@@ -314,6 +327,7 @@ def test_a_file_that_resists_is_asked_about_from_the_worker_thread(tmp_path, rea
             "r36s_studio.bot.flows.run_move", side_effect=fake_move
         ):
             task = asyncio.ensure_future(flows.doublons_flow(session))
+            await _click(session, port, "Carte")
             await _click(session, port, tr("bot_doublons_confirm", count=1))
             question = await _click(session, port, tr("bot_skip_file"))
             await task

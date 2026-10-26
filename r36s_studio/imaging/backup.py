@@ -37,6 +37,22 @@ def compute_backup_size(
         return device_size_bytes
 
 
+def estimate_full_backup_size(device: Device, stall_timeout: float = DEFAULT_STALL_TIMEOUT_SECONDS) -> int:
+    """Taille exacte d'une sauvegarde complète (`compute_backup_size`,
+    sauvegarde intelligente : fin de la dernière partition MBR utilisée,
+    toute la carte en GPT). Accès brut : à appeler élevé (worker)."""
+    with prepared_source(device.path) as raw_path:
+        return compute_backup_size(raw_path, device.size_bytes, stall_timeout)
+
+
+def required_free_bytes(image_bytes: int, block_size: int = BLOCK_SIZE) -> int:
+    """Place nécessaire pour une sauvegarde de `image_bytes` : l'image
+    (jamais compressée : `.img` brut) plus son `.sha256blocks` (une ligne
+    de 65 octets par bloc, plus l'en-tête)."""
+    blocks = -(-image_bytes // block_size)
+    return image_bytes + 65 * blocks + SECTOR_SIZE
+
+
 def backup_device(
     device: Device,
     output_path: str,

@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from .config import BotConfig
-from .flows import flows_by_label
-from .session import BotSession, Keyboard
+from .dispatch import Dispatcher
+from .session import Keyboard
 
 __all__ = ["PtbPort", "run"]
 
@@ -83,31 +83,27 @@ def run(config: BotConfig) -> None:
     from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
     application = Application.builder().token(config.token).build()
-    port = PtbPort(application.bot)
-    sessions: Dict[int, BotSession] = {}
+    # Liste blanche vérifiée deux fois : filtre de la bibliothèque, puis
+    # `Dispatcher` (seul chemin vers une session et une opération).
+    dispatcher = Dispatcher(config, PtbPort(application.bot))
     allowed = filters.Chat(chat_id=list(config.chat_ids))
 
-    def session_for(chat_id: int) -> BotSession:
-        if chat_id not in sessions:
-            sessions[chat_id] = BotSession(port, chat_id)
-        return sessions[chat_id]
-
     async def on_start(update, _context) -> None:
-        await session_for(update.effective_chat.id).on_start()
+        await dispatcher.on_start(update.effective_chat.id)
 
     async def on_text(update, _context) -> None:
-        await session_for(update.effective_chat.id).on_text(update.message.text, flows_by_label())
+        await dispatcher.on_text(update.effective_chat.id, update.message.text)
 
     async def on_callback(update, _context) -> None:
         query = update.callback_query
         await query.answer()
-        chat_id = query.message.chat_id if query.message is not None else None
-        if chat_id in config.chat_ids:
-            await session_for(chat_id).on_callback(query.data)
+        if query.message is not None:
+            await dispatcher.on_callback(query.message.chat_id, query.data)
 
     async def on_refused(update, _context) -> None:
-        if update.effective_chat is not None:
-            print(f"[bot] conversation refusée (absente de chat_ids) : {update.effective_chat.id}", file=sys.stderr)
+        chat = update.effective_chat
+        if chat is not None and not dispatcher.allowed(chat.id):
+            print(f"[bot] conversation refusée (absente de chat_ids) : {chat.id}", file=sys.stderr)
 
     application.add_handler(CommandHandler("start", on_start, filters=allowed))
     application.add_handler(MessageHandler(allowed & filters.TEXT & ~filters.COMMAND, on_text))

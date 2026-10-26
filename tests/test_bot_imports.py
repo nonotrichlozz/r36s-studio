@@ -13,6 +13,9 @@ BOT_MODULES = (
     "r36s_studio.bot.session",
     "r36s_studio.bot.cards",
     "r36s_studio.bot.flows",
+    "r36s_studio.bot.worker",
+    "r36s_studio.bot.dispatch",
+    "r36s_studio.shortcuts",
     "r36s_studio.bot.telegram_app",
     "r36s_studio.bot.__main__",
 )

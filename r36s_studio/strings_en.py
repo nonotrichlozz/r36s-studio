@@ -1222,4 +1222,41 @@ STRINGS_EN = {
         "python-telegram-bot is missing: install it with “pip install -r requirements-bot.txt”, "
         "then start again."
     ),
+    "bot_no_card": "I can't find any SD card. Plug the card into this computer, then try again.",
+    "bot_sudo_missing": (
+        "The bot isn't allowed to read or write the card on this computer: the permission isn't "
+        "installed (see docs/bot-telegram.md, “Autorisation”). Nothing was changed."
+    ),
+    "bot_backup_estimating": "Working out how much space the card “{card}” needs…",
+    "bot_backup_no_space": (
+        "Not enough space on this computer: {missing} missing ({needed} needed, {free} free). "
+        "Nothing was started. Free some space in this folder, then try again:"
+    ),
+    "bot_backup_confirm": (
+        "Back up the whole card “{card}”, games included ({size})? Nothing will be erased on the "
+        "card: it is only read. A new file will be created on this computer; no existing file is "
+        "replaced:"
+    ),
+    "bot_backup_system_confirm": (
+        "Back up the system of the card “{card}”, without the games ({size})? Nothing will be "
+        "erased on the card: it is only read. A new file will be created on this computer; no "
+        "existing file is replaced:"
+    ),
+    "bot_backup_confirm_button": "Back up",
+    "bot_backup_starting": "Backing up…",
+    "bot_backup_copying": "Copying the card… {done} of {total} ({percent} %)",
+    "bot_backup_verifying": "Checking the copy… {done} of {total} ({percent} %)",
+    "bot_backup_stalled": "The card hasn't answered for {seconds} s…",
+    "bot_backup_done": "Backup of the card “{card}” finished and checked:",
+    "bot_reset_confirm": (
+        "Erase the card “{card}”? EVERYTHING on it will be destroyed for good: the console's "
+        "system, the games and the game saves. It will become a single empty storage space, like "
+        "a new card. Back it up first if needed."
+    ),
+    "bot_reset_confirm_button": "Erase the card",
+    "bot_reset_starting": "Resetting… don't remove the card.",
+    "bot_reset_running": "Resetting… step {step} of {count}. Don't remove the card.",
+    "bot_reset_done": "The card “{card}” has been reset: it is empty and ready to use.",
+    "bot_web_none": "No shortcuts yet. To add some, create this file on this computer (see docs/bot-telegram.md):",
+    "bot_web_choose": "Which shortcut should I open?",
 }

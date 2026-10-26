@@ -128,14 +128,51 @@ def test_estimate_only_does_not_require_output():
     assert args.output is None
 
 
+@patch("r36s_studio.__main__.estimate_full_backup_size", return_value=8_500_000_000)
+@patch("r36s_studio.__main__.backup_device")
 @patch("r36s_studio.__main__.list_devices")
-def test_estimate_only_without_system_only_is_rejected(mock_list, capsys):
+def test_estimate_only_for_a_full_backup_emits_the_smart_size(mock_list, mock_backup, mock_estimate, capsys):
+    """Sauvegarde complète (2026-10-20, bot Telegram : il ne voit pas son
+    disque) : taille de la sauvegarde intelligente, sans rien écrire."""
     mock_list.return_value = [_make_device()]
 
     args = _parse(["backup", "--device", "/dev/fake-disk-test-3", "--estimate-only"])
-    code = cli.cmd_backup(args)
+    assert cli.cmd_backup(args) == 0
 
-    assert code == 1
+    mock_backup.assert_not_called()
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert {"type": "estimate", "size_bytes": 8_500_000_000} in events
+
+
+@patch("r36s_studio.__main__.shutil.disk_usage")
+@patch("r36s_studio.__main__.estimate_full_backup_size", return_value=8_000_000_000)
+@patch("r36s_studio.__main__.backup_device", return_value=8_000_000_000)
+@patch("r36s_studio.__main__.list_devices")
+def test_full_backup_space_check_uses_the_smart_size_not_the_whole_card(
+    mock_list, mock_backup, mock_estimate, mock_disk_usage, tmp_path
+):
+    """Carte de 32 Go dont 8 Go utilisés, 10 Go libres : acceptée (même
+    calcul que le pré-contrôle du bot, jamais refusé après lui)."""
+    mock_list.return_value = [_make_device()]
+    mock_disk_usage.return_value = _fake_usage(10_000_000_000)
+
+    args = _parse(["backup", "--device", "/dev/fake-disk-test-3", "--output", str(tmp_path / "out.img")])
+    assert cli.cmd_backup(args) == 0
+    mock_backup.assert_called_once()
+
+
+@patch("r36s_studio.__main__.shutil.disk_usage")
+@patch("r36s_studio.__main__.estimate_full_backup_size", return_value=8_000_000_000)
+@patch("r36s_studio.__main__.backup_device")
+@patch("r36s_studio.__main__.list_devices")
+def test_full_backup_refused_when_the_smart_size_does_not_fit(mock_list, mock_backup, mock_estimate, mock_disk_usage, tmp_path, capsys):
+    mock_list.return_value = [_make_device()]
+    mock_disk_usage.return_value = _fake_usage(8_000_000_000)  # pile la taille : manque le .sha256blocks
+
+    args = _parse(["backup", "--device", "/dev/fake-disk-test-3", "--output", str(tmp_path / "out.img")])
+    assert cli.cmd_backup(args) == 1
+    mock_backup.assert_not_called()
+    assert "INSUFFICIENT_DISK_SPACE" in capsys.readouterr().out
 
 
 @patch("r36s_studio.__main__.list_devices")

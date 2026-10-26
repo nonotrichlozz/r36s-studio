@@ -106,6 +106,7 @@ from r36s_studio.imaging.games_partition import GAMES_PARTITION_WORTHWHILE_BYTES
 from r36s_studio.imaging.exfat_reader import ExFatError
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.flash import ImageLargerThanDevice, UnstableImageRefused
+from r36s_studio.imaging.backup import estimate_full_backup_size, required_free_bytes
 from r36s_studio.imaging.source import DEFAULT_STALL_TIMEOUT_SECONDS, SourceNotResponding, has_stuck_reads
 from r36s_studio.imaging.source_verify import ImageModified, SourceUnstable, sidecar_path
 from r36s_studio.imaging.mbr import SECTOR_SIZE
@@ -317,17 +318,18 @@ def cmd_backup(args: argparse.Namespace) -> int:
             return 1
 
         if args.estimate_only:
-            # Repli élevé pour l'estimation de la sauvegarde système sans
-            # les jeux (§4.3) -- appelé uniquement quand `partitions/
-            # locate.py::list_partitions` (non élevé) n'a pas pu produire
-            # d'estimation lui-même (taille manquante pour au moins une
-            # partition). N'écrit jamais rien, `--output` n'a pas de sens
-            # ici.
-            if not args.system_only:
-                emit_error("INVALID_ARGS", "--estimate-only n'est utilisable qu'avec --system-only")
-                return 1
+            # Estimation élevée, sans rien écrire (`--output` n'a pas de sens
+            # ici) : sauvegarde système sans les jeux (§4.3, repli quand
+            # `list_partitions` non élevé ne suffit pas), ou complète
+            # (sauvegarde intelligente : premier secteur lu, comme la copie
+            # elle-même -- vérification d'espace du bot Telegram, qui ne
+            # voit pas le disque de destination).
             try:
-                size_bytes = estimate_system_backup_size(device.path)
+                size_bytes = (
+                    estimate_system_backup_size(device.path)
+                    if args.system_only
+                    else estimate_full_backup_size(device, args.stall_timeout)
+                )
             except GamesPartitionNotFound as exc:
                 emit_error("GAMES_PARTITION_NOT_FOUND", str(exc))
                 return 1
@@ -353,22 +355,28 @@ def cmd_backup(args: argparse.Namespace) -> int:
         # après une longue copie déjà lancée -- vérifié ici, sur le
         # backend, comme seule autorité réelle (un pré-contrôle côté GUI,
         # plus rapide, ne fait qu'éviter de lancer ce worker élevé pour
-        # rien). `device.size_bytes` pour une copie complète est un
-        # majorant sûr, sans lecture supplémentaire : `backup_device` ne
-        # dépasse jamais la taille du périphérique source (il s'arrête à
-        # la fin de la dernière partition utilisée). Pour la sauvegarde
-        # système, réutilise l'estimation non élevée déjà disponible
-        # (`list_partitions`, §4.3) et ne retombe sur le calcul exact
-        # élevé que si elle manque une taille.
+        # rien). Copie complète : taille exacte de la sauvegarde
+        # intelligente (premier secteur lu, `estimate_full_backup_size`),
+        # `device.size_bytes` (majorant sûr) si la lecture échoue ici --
+        # la copie échouerait alors de toute façon. Même calcul que le
+        # pré-contrôle du bot Telegram (`--estimate-only`), pour ne jamais
+        # refuser ce qu'il a accepté. Sauvegarde système : estimation non
+        # élevée (`list_partitions`, §4.3), calcul exact élevé si elle
+        # manque une taille. Image jamais compressée, plus son
+        # `.sha256blocks` (`required_free_bytes`).
         try:
-            required_bytes = (
-                device.size_bytes
-                if not args.system_only
-                else (
-                    estimate_system_backup_size_unprivileged(device.path)
-                    or estimate_system_backup_size(device.path)
+            if args.system_only:
+                image_bytes = estimate_system_backup_size_unprivileged(device.path) or estimate_system_backup_size(
+                    device.path
                 )
-            )
+            else:
+                try:
+                    image_bytes = estimate_full_backup_size(device, args.stall_timeout)
+                except SourceNotResponding:
+                    raise
+                except OSError:
+                    image_bytes = device.size_bytes
+            required_bytes = required_free_bytes(image_bytes)
         except GamesPartitionNotFound as exc:
             emit_error("GAMES_PARTITION_NOT_FOUND", str(exc))
             return 1

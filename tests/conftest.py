@@ -391,6 +391,5 @@ def pytest_sessionfinish(session, exitstatus):  # DIAGNOSTIC CI temporaire
 
     app = QApplication.instance()
     vivants = [th.name for th in threading.enumerate() if th is not threading.main_thread()]
-    print(f"
-[diag] exitstatus={exitstatus} threads={vivants} "
+    print(f"\n[diag] exitstatus={exitstatus} threads={vivants} "
           f"toplevel={len(app.topLevelWidgets()) if app else None}", flush=True)

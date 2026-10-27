@@ -588,11 +588,15 @@ def _tile_label_reserved_height(label_role: str, lines: int) -> int:
     réservée) perdait le bas de ses « p »/« y », 18 px réservés pour 21
     nécessaires avec Segoe UI gras. Le français était touché aussi
     (« Préparer »), moins visiblement."""
+    return QFontMetrics(_tile_label_font(label_role)).lineSpacing() * lines
+
+
+def _tile_label_font(label_role: str) -> QFont:
     font = QFont()
     font.setFamilies([name.strip(" '\"") for name in theme.FONT_FAMILY.split(",")])
     font.setPixelSize(_TILE_LABEL_FONT_PIXEL_SIZE[label_role])
     font.setWeight(QFont.Weight(_TILE_LABEL_FONT_WEIGHT[label_role]))
-    return QFontMetrics(font).lineSpacing() * lines
+    return font
 
 
 class Tile(ClickableFrame):
@@ -690,7 +694,17 @@ class Tile(ClickableFrame):
         # (`_TILE_LABEL_FONT_PIXEL_SIZE`), pas depuis la police par défaut
         # de l'application (qui ne reflète pas la taille QSS avant que le
         # style ne soit appliqué).
-        self._label.setFixedHeight(_tile_label_reserved_height(label_role, label_lines))
+        # Jamais moins que la hauteur du texte réel à la largeur utile de la
+        # tuile : la police du thème n'est pas la même partout (Segoe UI sous
+        # Windows, police système sous macOS) -- constaté en CI macOS, « Ma
+        # console ne démarre plus » passait sur deux lignes et la seconde
+        # était coupée (une seule ligne réservée pour la tuile 1).
+        margins = layout.contentsMargins()
+        usable_width = (width or self.SIZE) - margins.left() - margins.right()
+        text_height = QFontMetrics(_tile_label_font(label_role)).boundingRect(
+            QRect(0, 0, usable_width, 100_000), Qt.TextWordWrap, label_text
+        ).height()
+        self._label.setFixedHeight(max(_tile_label_reserved_height(label_role, label_lines), text_height))
         if width and width > self.SIZE:
             # Tuile large (tuile 1 de l'accueil assisté) : le libellé prend
             # toute la largeur, sinon le retour à la ligne se cale sur la

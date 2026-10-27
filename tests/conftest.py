@@ -383,3 +383,14 @@ def _original_screen_save_is_synchronous(monkeypatch):
     if module is not None:
         monkeypatch.setattr(module, "OriginalScreenSaveRunner", _NoScreenToSave)
     yield
+
+
+def pytest_sessionfinish(session, exitstatus):  # DIAGNOSTIC CI temporaire
+    import threading
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    vivants = [th.name for th in threading.enumerate() if th is not threading.main_thread()]
+    print(f"
+[diag] exitstatus={exitstatus} threads={vivants} "
+          f"toplevel={len(app.topLevelWidgets()) if app else None}", flush=True)

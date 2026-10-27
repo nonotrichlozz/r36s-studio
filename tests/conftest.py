@@ -65,12 +65,23 @@ def _close_qt_windows():
     app = widgets.QApplication.instance() if widgets is not None else None
     if app is None:
         return
-    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtCore import QCoreApplication, QEvent, QThread
 
     for window in app.topLevelWidgets():
+        # Détruire un QThread encore en marche fait avorter le processus :
+        # on lui laisse quelques secondes, sinon la fenêtre est gardée.
+        threads = [t for t in window.findChildren(QThread) if t.isRunning()]
+        if any(not t.wait(5000) for t in threads):
+            _KEPT_WINDOWS.append(window)
+            continue
         window.close()
         window.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+# Fenêtres dont un thread tournait encore à la fin de leur test : jamais
+# détruites pendant la session (voir `_close_qt_windows`).
+_KEPT_WINDOWS: list = []
 
 
 class UnmockedSubprocessError(RuntimeError):

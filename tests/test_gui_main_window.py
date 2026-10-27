@@ -6638,8 +6638,8 @@ def test_first_boot_note_is_shown_before_the_flash_and_after_success(
     if consigne:
         assert f"Avant d'allumer ta console : {consigne}" in log_text
         assert window._first_boot_dialog.isVisible() is True
-        assert window._first_boot_dialog.windowTitle() == "Avant d'allumer ta console"
-        assert window._first_boot_dialog.text() == consigne
+        assert window._first_boot_dialog.text() == "Avant d'allumer ta console"  # visible aussi sous macOS
+        assert window._first_boot_dialog.informativeText() == consigne
         window._first_boot_dialog.close()
     else:
         assert "Avant d'allumer ta console" not in log_text
@@ -6991,7 +6991,7 @@ def test_knulli_flash_shows_first_boot_note_and_never_rocknix_settings(mock_list
 
     window._on_worker_finished(True)
     assert "Avant d'allumer ta console : Branche la console sur secteur" in window._log_panel._log_view.toPlainText()
-    assert "TF2" in window._first_boot_dialog.text()
+    assert "TF2" in window._first_boot_dialog.informativeText()
     window._first_boot_dialog.close()
 
 

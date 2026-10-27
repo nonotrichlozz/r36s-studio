@@ -130,6 +130,7 @@ from r36s_studio.protocol import (
     emit_boot_sets_result,
     emit_done,
     emit_drive_letter_result,
+    emit_drivers_result,
     emit_eject_result,
     emit_identify_result,
     emit_error,
@@ -1350,6 +1351,35 @@ def cmd_assign_letter(args: argparse.Namespace) -> int:
             progress_file.close()
 
 
+def cmd_install_unisoc_drivers(args: argparse.Namespace) -> int:
+    """Pilotes USB UniSoc depuis le zip d'outils d'une procédure
+    (`consoles_diverses/procedures/pilotes.py`, Windows, élevé). Le worker
+    revérifie lui-même la SHA-256 du zip avant d'en lancer quoi que ce
+    soit. Aucune écriture sur une carte : pas de confirmation."""
+    progress_file = _open_progress_file(args)
+    try:
+        if platform.system() != "Windows":
+            emit_error("UNSUPPORTED_OS", "Pilotes UniSoc : Windows uniquement.")
+            return 1
+        from r36s_studio.consoles_diverses.procedures import pilotes
+
+        try:
+            resultat = pilotes.installer(Path(args.zip), args.sha256)
+        except pilotes.PilotesErreur as exc:
+            code = "DRIVERS_CHECKSUM" if exc.code == "empreinte" else "DRIVERS_INSTALL_FAILED"
+            emit_error(code, str(exc))
+            return 1
+        except (OSError, ValueError) as exc:
+            emit_error("DRIVERS_INSTALL_FAILED", str(exc))
+            return 1
+        emit_log(f"Pilotes UniSoc : pnputil a rendu {resultat.code_retour}, installés : {resultat.installes}")
+        emit_drivers_result(pilotes.resultat_vers_dict(resultat))
+        return 0
+    finally:
+        if progress_file is not None:
+            progress_file.close()
+
+
 def cmd_boot_sets(args: argparse.Namespace) -> int:
     """Jeux de fichiers de rechange du BOOT (`partitions/boot_sets.py`) :
     liste par défaut, `--apply ID`, `--restore` ou `--import DOSSIER`
@@ -1819,6 +1849,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_worker_args(assign_letter_parser)
     _add_dev_args(assign_letter_parser)
     assign_letter_parser.set_defaults(func=cmd_assign_letter)
+
+    drivers_parser = subparsers.add_parser(
+        "install-unisoc-drivers",
+        help="Installe les pilotes USB UniSoc depuis le zip d'outils d'une console (Windows, administrateur)",
+    )
+    drivers_parser.add_argument("--zip", required=True, help="Zip d'outils Unisoc (ex. UnisocTools_RG_ROTATE.zip)")
+    drivers_parser.add_argument("--sha256", required=True, help="SHA-256 attendue du zip")
+    _add_worker_args(drivers_parser)
+    drivers_parser.set_defaults(func=cmd_install_unisoc_drivers)
 
     doublons_verify_journal_parser = subparsers.add_parser(
         "doublons-verify-journal",

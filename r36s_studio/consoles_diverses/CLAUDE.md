@@ -200,6 +200,122 @@ assumée à la règle d'isolation ci-dessus : ce flux réutilise le pipeline
 de flash, par `MainWindow` uniquement -- le package lui-même n'écrit
 toujours rien sur un disque.
 
+## Installations guidées par USB : mode Download Unisoc (2026-10-27)
+
+Première console : Anbernic RG Rotate, GammaOS Next 1.4.1. Ici on ne
+flashe **pas** une carte SD : le système s'écrit dans la mémoire interne,
+console branchée en USB en mode Download, **carte SD retirée**. Plan de
+test sur la vraie console : `docs/rg-rotate-test-console.md`.
+
+**Moteur générique, piloté par la fiche** (`procedures` du catalogue,
+`$defs/procedure` du schéma). Rien de propre à une console dans le code :
+une RG Vita ou une RG DS n'aura besoin que de sa fiche.
+
+- `procedures/fiche.py` : lecture défensive (une entrée inexploitable est
+  absente, jamais un rejet de la fiche), et plan. Chaque `action` tombe
+  dans une phase (`ACTION_VERS_PHASE`), parcourues dans l'ordre de
+  `PHASES` : prerequis, telechargement, pilotes, extraction,
+  verification_pac, consignes, flash, premier_demarrage. Un flash impose
+  toujours téléchargement des outils, pilotes et contrôle du .pac.
+  `motif_desactivation` : action inconnue (`etape` -- c'est le cas de
+  `selectionner_partitions`, restauration Super), autre `mode`, système
+  non listé dans `plateformes`, ou pas de `pac_produit` → procédure
+  affichée avec sa raison, sans bouton.
+- `procedures/telechargement.py` : reprise par `Range` (`<nom>.part`,
+  GitHub répond bien 206, vérifié), SHA-256 obligatoire (un fichier sans
+  `sha256` dans la fiche n'est jamais téléchargé automatiquement), fichier
+  déjà présent et juste = pas retéléchargé. Cache :
+  `~/Documents/R36S Studio/Firmwares/<id de la fiche>/`. Un lien non
+  GitHub (Google Drive du firmware d'origine) : l'utilisateur télécharge
+  lui-même puis choisit le .pac ou son archive.
+- `procedures/outils.py` : zip d'outils extrait une fois (« zip slip »
+  refusé), programmes cherchés **par leur nom** (le zip RG Rotate contient
+  en réalité `UnisocTools_RG_VITA/`).
+- `procedures/septzip.py` : **7-Zip fourni dans les outils**
+  (`SPRD_Download_Tool/System/Tools/7zip/32/7z.exe`, 19.02), préféré à
+  py7zr (natif, rapide sur 6,7 Go, progression `-bsp1`, morceaux suivis
+  seuls ; procédure Windows de toute façon). **Mot de passe sur l'entrée
+  standard**, jamais `-p` (visible des autres programmes, et l'appli
+  journalise les commandes). Vérifié avec ce 7z.exe : extraction
+  identique d'une archive chiffrée en 3 morceaux, mauvais mot de passe
+  détecté (« Wrong password » / « Can't open as archive » si en-têtes
+  chiffrés). Test du mot de passe avant extraction : `7z t` arrêté au
+  premier pourcentage. **Jamais essayé sur la vraie archive GammaOS.**
+- `procedures/pac.py` : en-tête `BP_R…` (positions relevées sur le vrai
+  .pac Lite : produit `ums512_1h10`, version `1.4.1`, nom
+  `RG_ROTATE_GAMMAOS_NEXT_LITE`). Comparé à `pac_produit` (procédure),
+  `version` (si c'est un numéro) et `pac_nom` (variante) : sinon refus,
+  rien d'écrit.
+- `procedures/usb.py` : `Get-CimInstance Win32_PnPEntity` en JSON (champs
+  indépendants de la langue). **Tout nouvel appareil USB est journalisé**
+  avec son VID:PID. Constaté sur le PC d'Arnaud (2026-10-27) : `SPRD U2S
+  Diag (COM5)` = `1782:4d00`, pilote `sprdvcom` (console exacte, Rotate ou
+  Vita, à confirmer). VID:PID sous Android : inconnu.
+- `procedures/pilotes.py` : `pnputil /add-driver …\*.inf /install`
+  (paquet `Win10`, sous-dossiers `amd64/`/`i386/` gardés) plutôt que
+  DPInst (clics bloqués, constaté). Détection : `sprdvcom.inf` dans
+  `pnputil /enum-drivers`. Codes 0 et 3010 (redémarrage conseillé) =
+  réussite. **Visual C++ non installé** : les outils n'importent que
+  `msvcr100`/`msvcp100`/`msvcp140`/`vcruntime140`, tous fournis dans
+  `System/Dependency/` -- à confirmer sur un Windows vierge.
+- `procedures/cmddloader.py` : syntaxe ci-dessous. `procedures/veille.py` :
+  `SetThreadExecutionState` pendant le flash.
+- `procedure_runner.py` (threads Qt) et `procedure_screen.py` (écran).
+  Entrée : section « Installations guidées » de la fiche, **seulement pour
+  une fiche du catalogue** (`trouve_dans_catalogue`), jamais une fiche IA ;
+  bandeau « Expérimental » tant que la fiche n'est pas `verifie`.
+
+**CmdDloader.exe** (27.24.2301, syntaxe lue dans le programme, jamais
+lancé sur une console) :
+
+    CmdDloader.exe -pac <fichier.pac> -Version 2 -Port 0 -Timeout <ms> -Reset
+
+`-Version` 0 Research (défaut) / 1 Factory / 2 **Upgrade** (même mode que
+l'outil graphique) ; `-Port 0` = détection auto ; `-Timeout` couvre aussi
+le chargement du .pac (~2 min), 15 min par défaut, réglable à l'écran ;
+`-Reset` redémarre la console à la fin (`-PowerOff` incompatible). Autres
+options : `-Policy`, `-Baudrate`, `-SkipFileID a,b`, `-SendFlag`,
+`-WriteSN1/2`, `-ReadNV`, `-WriteEfuse`, `-WriteTimeStamp`, `-EZMode`,
+`-DDDP`, `-Help`. Sortie lue : `Loading packet progress is N%`,
+`PACKET: …; Version: …;`, `Please connect the DUT in Ns`, `PORT = COMn`,
+`[Status] N%`, `Download Result = Passed;` / `Failed; Error Messag = …`.
+CmdDloader est lancé **avant** le branchement (il charge le .pac puis
+attend la console, comme UpgradeDownload) ; annulation possible tant que
+`PORT = COM` n'est pas apparu, plus après.
+
+**Sécurité** : case « tout sera effacé » jamais pré-cochée au début, puis
+de nouveau juste avant d'écrire (consignes) ; toute relance d'un flash
+repasse par cette confirmation. Pilotes : seul passage par le worker
+élevé (`install-unisoc-drivers --zip --sha256`, événement
+`drivers_result`), fonction injectée par `MainWindow`
+(`set_installateur_pilotes`), le worker revérifie la SHA-256 du zip.
+Mot de passe : en mémoire seulement, champ vidé dès la lecture.
+Jamais redistribué : .pac, archives, mot de passe ; crédit de l'auteur
+(propriétaire du dépôt GitHub de `source_url`) et page officielle affichés.
+
+**Repli** : échec de CmdDloader → bouton « Utiliser l'outil graphique »
+(UpgradeDownload, chemin du .pac copié dans le presse-papiers, consigne).
+La fin de ce flash-là n'est **pas** suivie dans `Log/` (format des lignes
+de résultat inconnu) : l'utilisateur lit le résultat dans l'outil.
+
+**Procédures secondaires** : restauration Super désactivée (raison
+affichée) -- `ResearchDownload.exe` absent, et la piste CmdDloader
+`-Version 0 -SkipFileID <toutes les entrées sauf Super>` écrirait d'autres
+partitions à la moindre entrée oubliée ; à n'activer qu'après un essai
+contrôlé. Firmware d'origine : téléchargé par l'utilisateur (Google
+Drive), puis même moteur ; il lui faut `pac_produit` dans la fiche.
+
+**Piste future, non implémentée** : flash multiplateforme (macOS/Linux)
+par `spd_dump` (fourni dans `UnlockBootloader/`), FDL et images extraits
+du .pac -- risque de brique trop élevé sans essais, écarté pour l'instant.
+
+**Points à vérifier** (plan de test : `docs/rg-rotate-test-console.md`) :
+CmdDloader jamais lancé ; sa sortie peut être mise en mémoire tampon quand
+elle n'arrive pas dans une console (progression en bloc à la fin) ; droits
+administrateur pour CmdDloader supposés inutiles ; VID:PID de la RG Rotate
+en mode Download et sous Android ; vraie archive (en-têtes chiffrés ou
+non) ; Visual C++ inutile sur un Windows vierge ; `pnputil` sans fenêtre.
+
 ## Hors périmètre (étape 1)
 
 Analyse de carte SD (`detection_sd` du schéma non affiché), options sans

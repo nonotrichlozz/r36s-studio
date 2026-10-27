@@ -49,6 +49,8 @@ from r36s_studio.android.models import DetectionResult
 from r36s_studio.consoles_diverses import mega as consoles_diverses_mega
 from r36s_studio.consoles_diverses import settings_store as consoles_diverses_settings_store
 from r36s_studio.consoles_diverses.client import ResultatRecherche
+from r36s_studio.consoles_diverses.procedure_screen import ProcedureScreen
+from r36s_studio.consoles_diverses.procedures import pilotes as consoles_diverses_pilotes
 from r36s_studio.consoles_diverses.screen import ConsolesDiversesScreen
 from r36s_studio.consoles_diverses.search_runner import ConsoleSearchRunner, FirmwareResolveRunner
 from r36s_studio.consoles_diverses.settings_dialog import ConsolesDiversesSettingsDialog
@@ -381,6 +383,22 @@ def _boot_sets_with_windows_elevation(
         return None, "IO_ERROR"
 
 
+def _install_unisoc_drivers_with_elevation(zip_path: str, sha256: str, parent_hwnd: Optional[int]) -> tuple:
+    """Pilotes USB UniSoc par le worker élevé (installation guidée d'une
+    console, `consoles_diverses/procedure_screen.py`) : `(installés,
+    redémarrage conseillé, code)` -- `"refus"` si l'invite UAC est refusée."""
+    try:
+        result, error = elevate.run_elevated_install_unisoc_drivers(zip_path, sha256, parent_hwnd=parent_hwnd)
+    except elevate.ElevationRefusedError:
+        return False, False, "refus"
+    except OSError:
+        return False, False, "ELEVATION_FAILED"
+    if result is None:
+        return False, False, error or "DRIVERS_INSTALL_FAILED"
+    installes, redemarrage = consoles_diverses_pilotes.resultat_depuis_dict(result)
+    return installes, redemarrage, ""
+
+
 def _assign_letter_with_windows_elevation(device_path: str, parent_hwnd: Optional[int]) -> object:
     """Lettre de lecteur de la partition de jeux par le worker élevé
     (`elevate.run_elevated_assign_letter`). Liste de dictionnaires
@@ -651,6 +669,12 @@ class MainWindow(QMainWindow):
         # pipeline flash/backup/worker élevé ci-dessus, un simple appel
         # réseau en lecture. Construit une fois, comme les autres écrans.
         self._consoles_diverses_screen = ConsolesDiversesScreen()
+        # Installation guidée par USB d'une console du catalogue (champ
+        # `procedures`) -- exception assumée à l'isolation : seul le worker
+        # élevé des pilotes USB passe par ici (`_install_unisoc_drivers_with_
+        # elevation`), injecté, jamais appelé par le paquet lui-même.
+        self._procedure_screen = ProcedureScreen()
+        self._procedure_screen.set_installateur_pilotes(self._install_unisoc_drivers)
         # Outil « Console Android » (android/, étape 1, docs/android-adb.md)
         # -- écran dédié, même principe que `_consoles_diverses_screen`
         # ci-dessus (pas un mode ad-hoc de `_main_view`) : détection en USB
@@ -695,6 +719,7 @@ class MainWindow(QMainWindow):
         self._root_stack.addWidget(self._main_view)
         self._root_stack.addWidget(self._fda_screen)
         self._root_stack.addWidget(self._consoles_diverses_screen)
+        self._root_stack.addWidget(self._procedure_screen)
         self._root_stack.addWidget(self._android_screen)
         self._root_stack.addWidget(self._doublons_folder_screen)
         self._root_stack.addWidget(self._doublons_scan_progress_screen)
@@ -861,6 +886,9 @@ class MainWindow(QMainWindow):
         self._consoles_diverses_screen.back_requested.connect(self._show_startup_screen)
         self._consoles_diverses_screen.settings_requested.connect(self._on_consoles_diverses_settings_requested)
         self._consoles_diverses_screen.install_requested.connect(self._on_consoles_diverses_install_requested)
+        self._consoles_diverses_screen.procedure_requested.connect(self._open_procedure)
+        self._procedure_screen.back_requested.connect(self._open_consoles_diverses)
+        self._procedure_screen.android_requested.connect(self._open_android_screen)
         self._consoles_diverses_settings_dialog.settings_saved.connect(self._on_consoles_diverses_settings_saved)
 
         # Outil « Console Android » (android/, étape 1) -- même principe
@@ -3517,6 +3545,22 @@ class MainWindow(QMainWindow):
         self._convert_screen.set_default_firmware(self._app_config.firmware)
         self._convert_screen.show_choose_page()
         self._root_stack.setCurrentWidget(self._convert_screen)
+
+    def _open_procedure(self, fiche_id: str, procedure, verifiee: bool) -> None:
+        # Fenêtre parente de l'invite UAC, lue ici (thread Qt) : jamais
+        # `winId()` depuis le thread `PilotesRunner`.
+        try:
+            self._procedure_parent_hwnd: Optional[int] = int(self.winId())
+        except (RuntimeError, TypeError, ValueError):
+            self._procedure_parent_hwnd = None
+        self._procedure_screen.start(fiche_id, procedure, verifiee)
+        self._root_stack.setCurrentWidget(self._procedure_screen)
+
+    def _install_unisoc_drivers(self, zip_path: str, sha256: str) -> tuple:
+        """Appelé depuis le thread `PilotesRunner` : bloque jusqu'à la fin
+        du worker élevé."""
+        print(f"[diagnostic] worker : install-unisoc-drivers --zip {zip_path}", file=sys.stderr)
+        return _install_unisoc_drivers_with_elevation(zip_path, sha256, getattr(self, "_procedure_parent_hwnd", None))
 
     def _open_android_screen(self) -> None:
         self._root_stack.setCurrentWidget(self._android_screen)

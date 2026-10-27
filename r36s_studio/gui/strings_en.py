@@ -723,6 +723,8 @@ STRINGS_EN = {
     ),
     "error_image_not_found": "The chosen image file cannot be found. It may have been moved or deleted.",
     "error_io_error": "A read or write error occurred. Check that the card is still plugged in.",
+    "error_drivers_checksum": "The console's tools file was modified after it was downloaded. Start the installation again to download it again.",
+    "error_drivers_install_failed": "Windows could not install the console's USB drivers.",
     "error_volume_in_use": (
         "The card seems to be used by another program (File Explorer, Windows Search, an "
         "antivirus…). Close the windows showing it, then try again."

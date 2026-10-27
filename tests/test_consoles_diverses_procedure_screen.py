@@ -188,6 +188,17 @@ def test_console_jamais_detectee(qapp, tmp_path, monkeypatch, windows):
     assert ecran._travail_statut.text() == tr("proc_flash_timeout")
 
 
+def test_mauvais_bouton_au_branchement(qapp, tmp_path, monkeypatch, windows):
+    ecran = _ecran(qapp, tmp_path, monkeypatch)
+    ecran._travail("x")
+    ecran._evenement_flash(cmddloader.Evenement("bouton"))
+    assert "Maintiens le bouton Retour, au centre de la manette" in ecran._travail_consigne.text()
+    flash = type("F", (), {"_flash_commence": True, "annule": False, "bouton": True})()
+    ecran._flash = flash
+    ecran._flash_termine(False, "User cancel")
+    assert ecran._travail_statut.text() == tr("proc_flash_bouton_retour")
+
+
 def test_fin_propose_la_console_android(qapp, tmp_path, monkeypatch, windows):
     ecran = _ecran(qapp, tmp_path, monkeypatch)
     recus = []

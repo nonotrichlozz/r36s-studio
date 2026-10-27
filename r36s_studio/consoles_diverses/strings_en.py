@@ -157,6 +157,7 @@ STRINGS_EN = {
     "proc_flash_running_title": "Do not unplug the console",
     "proc_flash_running": "Installing: {pourcent}%",
     "proc_flash_cancel_refused": "The installation has started: it can no longer be stopped safely.",
+    "proc_flash_bouton_retour": "The console was seen but did not answer: it was not in Download mode. Hold the Back button, in the middle of the controls, while you plug in the cable, then try again. Nothing was written.",
     "proc_flash_timeout": "The console was not detected in time. Nothing was written.",
     "proc_flash_failed": "The installation did not complete. {message}",
     "proc_fallback_button": "Use the graphical tool",

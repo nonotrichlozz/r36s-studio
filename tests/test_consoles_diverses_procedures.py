@@ -376,6 +376,32 @@ def test_echec_et_delai_cmddloader():
     assert cmddloader.analyser_ligne("Connect DUT timeout( 60s )").type == "delai"
 
 
+TRACE_MAUVAIS_BOUTON = (
+    "[2026-10-27 10:39:53:966][BMPlatform3 ][1 - Error      ] CheckBaudRate( CMD: 0x7E ( BSL_CMD_CHECK_BAUD ), "
+    "Timeout: 20 ): Fail. [276:[SW2276]Check baud time out]"
+)
+
+
+def test_mauvais_bouton_reconnu_dans_la_sortie():
+    assert cmddloader.analyser_ligne(TRACE_MAUVAIS_BOUTON).type == "bouton"
+    assert cmddloader.analyser_ligne("Check baud timeout").type == "bouton"
+
+
+def test_mauvais_bouton_reconnu_dans_les_journaux(tmp_path):
+    import os
+    import zipfile
+    jour = tmp_path / "Log" / "2026_10_27"
+    jour.mkdir(parents=True)
+    with zipfile.ZipFile(jour / "FAIL(262)_COM5.zip", "w") as archive:
+        archive.writestr("FAIL(262)_COM5/Trace.log", TRACE_MAUVAIS_BOUTON)
+    assert cmddloader.bouton_dans_journaux(tmp_path / "Log", 0)
+    os.utime(jour / "FAIL(262)_COM5.zip", (1000, 1000))  # échec d'un essai précédent : ignoré
+    assert not cmddloader.bouton_dans_journaux(tmp_path / "Log", 2000)
+    (jour / "DLFramework.log").write_text(TRACE_MAUVAIS_BOUTON, encoding="utf-8")
+    assert cmddloader.bouton_dans_journaux(tmp_path / "Log", 2000)
+    assert not cmddloader.bouton_dans_journaux(tmp_path / "absent", 0)
+
+
 # --- USB ----------------------------------------------------------------------------
 
 

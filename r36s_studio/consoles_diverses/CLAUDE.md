@@ -248,9 +248,20 @@ une RG Vita ou une RG DS n'aura besoin que de sa fiche.
   rien d'écrit.
 - `procedures/usb.py` : `Get-CimInstance Win32_PnPEntity` en JSON (champs
   indépendants de la langue). **Tout nouvel appareil USB est journalisé**
-  avec son VID:PID. Constaté sur le PC d'Arnaud (2026-10-27) : `SPRD U2S
-  Diag (COM5)` = `1782:4d00`, pilote `sprdvcom` (console exacte, Rotate ou
-  Vita, à confirmer). VID:PID sous Android : inconnu.
+  avec son VID:PID. **Confirmé (2026-10-27)** : le port COM5 du flash
+  réussi d'UpgradeDownload (journaux `SPRD_Download_Tool/Log/2026_10_27/`)
+  est `USB\VID_1782&PID_4D00` (registre des périphériques) : RG Rotate en
+  mode Download = `1782:4d00`, « SPRD U2S Diag », pilote `sprdvcom`. Sous
+  GammaOS Next : `1782:4003` (« GammaOS Next Lite », MTP + ADB, numéro de
+  série `ROTATE…`) ; `1782:d001` vu aussi (ADB seul).
+- **Mauvais bouton au branchement** (constaté le 2026-10-27) : seul le
+  bouton Retour (au centre de la manette, console ouverte en coulissant)
+  met la console en vrai mode Download. Avec un autre, elle apparaît en
+  « SPRD U2S Diag » mais ne répond pas au CHECK_BAUD (`[SW2276]Check baud
+  time out`), lâchée après ~4 s (`[PS2262]User cancel`). Reconnu dans la
+  sortie de CmdDloader et, après un échec, dans les journaux qu'il laisse
+  sous `Log/` (`cmddloader.bouton_dans_journaux`) : message
+  `proc_flash_bouton_retour`.
 - `procedures/pilotes.py` : `pnputil /add-driver …\*.inf /install`
   (paquet `Win10`, sous-dossiers `amd64/`/`i386/` gardés) plutôt que
   DPInst (clics bloqués, constaté). Détection : `sprdvcom.inf` dans
@@ -312,8 +323,8 @@ du .pac -- risque de brique trop élevé sans essais, écarté pour l'instant.
 **Points à vérifier** (plan de test : `docs/rg-rotate-test-console.md`) :
 CmdDloader jamais lancé ; sa sortie peut être mise en mémoire tampon quand
 elle n'arrive pas dans une console (progression en bloc à la fin) ; droits
-administrateur pour CmdDloader supposés inutiles ; VID:PID de la RG Rotate
-en mode Download et sous Android ; vraie archive (en-têtes chiffrés ou
+administrateur pour CmdDloader supposés inutiles ; que CmdDloader écrive
+bien ses journaux dans `SPRD_Download_Tool/Log/` ; vraie archive (en-têtes chiffrés ou
 non) ; Visual C++ inutile sur un Windows vierge ; `pnputil` sans fenêtre.
 
 ## Hors périmètre (étape 1)

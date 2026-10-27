@@ -297,8 +297,9 @@ Détail et bancs de test : `docs/claude/testing.md`.
 - KNULLI sur R36S : jamais flashé sur la console (`firmwares-flash.md`).
 - Installation guidée RG Rotate / GammaOS Next 1.4.1 (USB, mode Download
   Unisoc, `CmdDloader.exe`) : jamais lancée sur la console ; syntaxe de
-  CmdDloader lue dans le programme, VID:PID `1782:4d00` vu sur le PC (console
-  exacte à confirmer), VID:PID sous Android inconnu. Restauration Super
+  CmdDloader lue dans le programme ; VID:PID `1782:4d00` (mode Download) et
+  `1782:4003` (Android) confirmés par le flash UpgradeDownload du 2026-10-27,
+  comme le refus SW2276 sans le bouton Retour. Restauration Super
   désactivée. Flash multiplateforme par `spd_dump` : piste future, écartée
   (risque de brique) -- `consoles_diverses/CLAUDE.md`,
   `docs/rg-rotate-test-console.md`.

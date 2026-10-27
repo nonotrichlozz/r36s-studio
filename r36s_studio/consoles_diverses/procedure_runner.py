@@ -188,6 +188,7 @@ class FlashRunner(QThread):
         self._processus: Optional[subprocess.Popen] = None
         self._flash_commence = False
         self.annule = False
+        self.bouton = False  # console vue mais muette : mauvais bouton au branchement
         self._fin = threading.Event()
 
     def annuler(self) -> bool:
@@ -220,6 +221,7 @@ class FlashRunner(QThread):
         surveillance.start()
         resultat: Optional[cmddloader.Evenement] = None
         debut = time.monotonic()
+        debut_horloge = time.time() - 2  # marge : horodatage des fichiers
         try:
             with sans_veille():
                 self._processus = subprocess.Popen(
@@ -237,6 +239,8 @@ class FlashRunner(QThread):
                         self._flash_commence = True
                     if evenement.type == "resultat":
                         resultat = evenement
+                    if evenement.type == "bouton":
+                        self.bouton = True
                     self.evenement.emit(evenement)
                 code = self._processus.wait()
         except OSError as exc:
@@ -245,6 +249,11 @@ class FlashRunner(QThread):
             return
         self._fin.set()
         self.journal.emit(f"CmdDloader terminé (code {code}) en {time.monotonic() - debut:.0f} s")
+        reussi = resultat is not None and bool(resultat.valeur)
+        if not reussi and not self.bouton and cmddloader.bouton_dans_journaux(self._cmd.parent / "Log", debut_horloge):
+            self.bouton = True
+        if self.bouton:
+            self.journal.emit("[diagnostic] Check baud time out (SW2276) : console branchée sans le bouton Retour")
         if resultat is not None:
             self.termine.emit(bool(resultat.valeur), resultat.texte)
         else:

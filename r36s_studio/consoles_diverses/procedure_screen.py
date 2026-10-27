@@ -663,6 +663,8 @@ class ProcedureScreen(Screen):
             self._travail_barre.setRange(0, 100)
             self._travail_barre.setValue(evenement.valeur)
             self._travail_statut.setText(tr("proc_flash_running", pourcent=evenement.valeur))
+        elif evenement.type == "bouton":
+            self._travail_consigne.setText(tr("proc_flash_bouton_retour"))
 
     def _evenement_usb(self, genre: str, vid_pid: str, nom: str) -> None:
         if genre:
@@ -680,7 +682,10 @@ class ProcedureScreen(Screen):
         if reussi:
             self._phase_suivante()
             return
-        texte = tr("proc_flash_failed", message=message) if commence else tr("proc_flash_timeout")
+        if flash is not None and flash.bouton:
+            texte = tr("proc_flash_bouton_retour")
+        else:
+            texte = tr("proc_flash_failed", message=message) if commence else tr("proc_flash_timeout")
         self._erreur(texte, self._refaire_flash)
         self._travail_secours.setVisible(self._outils is not None and self._outils.upgradedownload is not None)
 

@@ -164,6 +164,7 @@ STRINGS = {
     "proc_flash_running_title": "Ne débranche pas la console",
     "proc_flash_running": "Installation en cours : {pourcent} %",
     "proc_flash_cancel_refused": "L'installation a commencé : elle ne peut plus être arrêtée sans risque.",
+    "proc_flash_bouton_retour": "La console a été vue mais n'a pas répondu : elle n'était pas en mode Download. Maintiens le bouton Retour, au centre de la manette, pendant que tu branches le câble, puis réessaie. Rien n'a été écrit.",
     "proc_flash_timeout": "La console n'a pas été détectée à temps. Rien n'a été écrit.",
     "proc_flash_failed": "L'installation n'a pas abouti. {message}",
     "proc_fallback_button": "Utiliser l'outil graphique",

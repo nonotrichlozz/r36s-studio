@@ -2020,7 +2020,11 @@ class MainWindow(QMainWindow):
         if not note:
             return
         self._log_panel.append_log(tr("first_boot_note_log", consigne=note))
-        dialog = QMessageBox(QMessageBox.Information, tr("first_boot_note_title"), note, QMessageBox.Ok, self)
+        # Titre aussi dans le texte : macOS ignore le titre de fenêtre d'un
+        # `QMessageBox` (règles de l'interface Apple, constaté en CI macOS) --
+        # sans ça, l'utilisateur Mac ne voyait que la consigne, sans en-tête.
+        dialog = QMessageBox(QMessageBox.Information, tr("first_boot_note_title"), tr("first_boot_note_title"), QMessageBox.Ok, self)
+        dialog.setInformativeText(note)
         dialog.setTextFormat(Qt.PlainText)  # texte venu du catalogue
         self._first_boot_dialog = dialog
         dialog.open()

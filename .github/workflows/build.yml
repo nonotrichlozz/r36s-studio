@@ -38,6 +38,8 @@ jobs:
 
       - name: Lancer la suite de tests
         run: python -m pytest
+        env:
+          PYTHONFAULTHANDLER: "1"
 
       - name: Construire l'application (PyInstaller)
         shell: pwsh
@@ -64,6 +66,8 @@ jobs:
 
       - name: Lancer la suite de tests
         run: python -m pytest
+        env:
+          PYTHONFAULTHANDLER: "1"
 
       # Cible "dist" (packaging/build_macos.sh) : construit puis empaquette
       # directement dist/R36S-Studio-macos.zip (app + LISEZ-MOI.txt) --
@@ -107,6 +111,8 @@ jobs:
 
       - name: Lancer la suite de tests
         run: python -m pytest
+        env:
+          PYTHONFAULTHANDLER: "1"
 
       - name: Construire l'application (PyInstaller)
         run: packaging/build_linux.sh

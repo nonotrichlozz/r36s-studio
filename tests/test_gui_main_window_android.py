@@ -53,7 +53,11 @@ def _device_info():
 def test_android_button_from_home_switches_screen_and_back_returns(mock_list, mock_filter, mock_load, mock_save, qapp):
     window = MainWindow()
 
-    with patch("r36s_studio.gui.main_window.android_adb.resolve_adb_path", return_value=None):
+    # Taille du paquet adb mockée : sans ça, une vraie requête réseau partait
+    # en CI (et son thread survivait au test).
+    with patch("r36s_studio.gui.main_window.android_adb.resolve_adb_path", return_value=None), patch(
+        "r36s_studio.gui.main_window.AndroidPlatformToolsSizeRunner", _mock_runner_class()
+    ):
         window._home.android_requested.emit()
 
     assert window._root_stack.currentWidget() is window._android_screen

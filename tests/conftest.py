@@ -51,6 +51,61 @@ def qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _close_qt_windows():
+    """Ferme et détruit les fenêtres laissées par chaque test, tant que la
+    `QApplication` existe encore. Sans ça, ~10 000 fenêtres survivaient à la
+    session et Qt les détruisait pendant l'arrêt de Python, dans le désordre
+    (« shared QObject was deleted directly ») : tous les tests passaient,
+    puis le processus plantait -- violation d'accès sous Windows (code 1),
+    abort sous Linux (134/139), segfault sous macOS (CI rouge depuis le
+    2026-10-03)."""
+    yield
+    widgets = sys.modules.get("PySide6.QtWidgets")
+    app = widgets.QApplication.instance() if widgets is not None else None
+    if app is None:
+        return
+    from PySide6.QtCore import QCoreApplication, QEvent, QThread
+
+    for window in app.topLevelWidgets():
+        # Détruire un QThread encore en marche fait avorter le processus :
+        # on lui laisse quelques secondes, sinon la fenêtre est gardée.
+        threads = [t for t in window.findChildren(QThread) if t.isRunning()]
+        if any(not t.wait(5000) for t in threads):
+            _KEPT_WINDOWS.append(window)
+            continue
+        window.close()
+        window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+# Fenêtres dont un thread tournait encore à la fin de leur test : jamais
+# détruites pendant la session (voir `_close_qt_windows`).
+_KEPT_WINDOWS: list = []
+
+_SESSION_EXIT_STATUS = [0]
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _SESSION_EXIT_STATUS[0] = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """Linux + Python 3.11 seulement : quitte sans la finalisation de
+    l'interpréteur. Constaté en CI (2026-10-27) : tous les tests passent,
+    puis `Fatal Python error: bool_dealloc` pendant le ramasse-miettes final
+    -- une extension C (PySide6 très probablement) rend une référence de
+    trop à `True`/`False` au fil de la session. Les booléens sont immortels
+    à partir de Python 3.12, d'où rien sous 3.14 en local.
+    ponytail: contournement, pas la cause ; à retirer en passant la CI à
+    Python 3.12+ ou quand l'appel fautif de PySide6 sera trouvé."""
+    if sys.platform.startswith("linux") and sys.version_info < (3, 12):
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(_SESSION_EXIT_STATUS[0])
+
+
 class UnmockedSubprocessError(RuntimeError):
     """Levée quand un test appelle `subprocess.run`/`subprocess.Popen` sans
     le mocker et sans la marque `@pytest.mark.real_subprocess`. Le message

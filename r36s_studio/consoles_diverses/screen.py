@@ -59,6 +59,7 @@ from r36s_studio.gui.screens import Screen
 from . import settings_store
 from .client import ResultatRecherche
 from .models import FicheConsole, Incompatible, OptionConsole
+from .procedures.fiche import NOMS_SYSTEMES, motif_desactivation, systeme_courant
 from .search_runner import ConsoleSearchRunner
 from .strings import friendly_error_message, tr
 
@@ -411,6 +412,9 @@ class ConsolesDiversesScreen(Screen):
     # (OptionConsole, nom de la console) -- câblé par `MainWindow`, qui
     # télécharge puis ouvre la fenêtre Confirmation habituelle.
     install_requested = Signal(object, str)
+    # (id de la fiche, Procedure, fiche vérifiée) -- installation guidée par
+    # USB, câblée par `MainWindow` vers `ProcedureScreen`.
+    procedure_requested = Signal(str, object, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -580,7 +584,7 @@ class ConsolesDiversesScreen(Screen):
         if resultat.console is None:
             self._on_search_error("reponse_invalide", "")
             return
-        self._afficher_fiche(resultat.console)
+        self._afficher_fiche(resultat.console, du_catalogue=resultat.statut == "trouve_dans_catalogue")
         self._show_zone("result")
 
     def _on_search_error(self, code: str, message_serveur: str) -> None:
@@ -635,7 +639,28 @@ class ConsolesDiversesScreen(Screen):
         layout.addWidget(content)
         return container
 
-    def _afficher_fiche(self, fiche: FicheConsole) -> None:
+    def _build_procedures_section(self, fiche: FicheConsole) -> QWidget:
+        """Installations guidées (champ `procedures`) : un bouton par
+        procédure, celles que le moteur ne sait pas mener jusqu'au bout
+        étant affichées avec leur raison mais sans bouton."""
+        frame, layout = _build_card(title=tr("procedures_title"))
+        systeme = systeme_courant()
+        for procedure in fiche.procedures:
+            layout.addWidget(_plain_label(procedure.titre, role="rowTitle", wrap=True))
+            motif = motif_desactivation(procedure, systeme)
+            if motif is not None:
+                systemes = ", ".join(NOMS_SYSTEMES.get(p, p) for p in procedure.plateformes)
+                layout.addWidget(_plain_label(tr(f"procedure_desactivee_{motif}", systemes=systemes), role="secondary", wrap=True))
+                continue
+            bouton = QPushButton(tr("procedure_button"))
+            bouton.setProperty("role", "primary")
+            bouton.clicked.connect(
+                lambda _checked=False, p=procedure: self.procedure_requested.emit(fiche.id, p, fiche.verifiee)
+            )
+            layout.addWidget(bouton, alignment=Qt.AlignLeft)
+        return frame
+
+    def _afficher_fiche(self, fiche: FicheConsole, du_catalogue: bool = False) -> None:
         _clear_layout(self._result_content_layout)
         layout = self._result_content_layout
 
@@ -651,6 +676,11 @@ class ConsolesDiversesScreen(Screen):
             fiche, lambda option, nom=fiche.nom: self.install_requested.emit(option, nom)
         ):
             layout.addWidget(widget)
+
+        # Jamais pour une fiche trouvée par IA : seule une fiche relue du
+        # catalogue peut proposer d'écrire dans la mémoire d'une console.
+        if du_catalogue and fiche.procedures:
+            layout.addWidget(self._build_procedures_section(fiche))
 
         if fiche.sources:
             layout.addWidget(self._build_sources_section(fiche.sources))

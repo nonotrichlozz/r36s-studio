@@ -128,3 +128,10 @@ def emit_drive_letter_result(result: list) -> None:
     """Lettres attribuées aux partitions de jeux par le worker élevé
     (`assign-letter`, Windows) : liste de `AssignedLetter.to_dict()`."""
     emit({"type": "drive_letter_result", "result": result})
+
+
+def emit_drivers_result(result: dict) -> None:
+    """Pilotes USB UniSoc installés par le worker élevé
+    (`install-unisoc-drivers`, Windows) : `code_retour`, `redemarrage`,
+    `installes` (`consoles_diverses/procedures/pilotes.py`)."""
+    emit({"type": "drivers_result", "result": result})

@@ -36,6 +36,7 @@ from typing import Any, Dict, List, NoReturn, Optional
 
 from r36s_studio.gui import logs as gui_logs
 
+from .procedures.fiche import Procedure, procedures_depuis_json
 from .telechargement import Telechargement, telechargement_depuis_json
 
 
@@ -105,6 +106,9 @@ class FicheConsole:
     restriction_commerciale: bool = False
     sources: List[Source] = field(default_factory=list)
     date_verification: Optional[str] = None
+    # Installations guidées par USB (`procedures/fiche.py`) -- une entrée
+    # inexploitable est simplement absente, jamais un rejet de la fiche.
+    procedures: List[Procedure] = field(default_factory=list)
 
     @property
     def verifiee(self) -> bool:
@@ -290,6 +294,7 @@ def fiche_depuis_json(data: Dict[str, Any]) -> FicheConsole:
         restriction_commerciale=bool(data.get("restriction_commerciale", False)),
         sources=_sources_depuis_json(data.get("sources")),
         date_verification=data.get("date_verification") if isinstance(data.get("date_verification"), str) else None,
+        procedures=procedures_depuis_json(data.get("procedures")),
     )
 
 

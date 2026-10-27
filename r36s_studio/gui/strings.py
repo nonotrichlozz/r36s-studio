@@ -1053,6 +1053,8 @@ STRINGS = {
     "error_output_exists": "Un fichier du même nom existe déjà à cet emplacement. Choisis un autre nom ou un autre dossier.",
     "error_image_not_found": "Le fichier image choisi est introuvable. Il a peut-être été déplacé ou supprimé.",
     "error_io_error": "Une erreur de lecture ou d'écriture est survenue. Vérifie que la carte est toujours branchée.",
+    "error_drivers_checksum": "Le fichier des outils de la console a été modifié depuis son téléchargement. Recommence l'installation pour le retélécharger.",
+    "error_drivers_install_failed": "Windows n'a pas pu installer les pilotes USB de la console.",
     # Bug corrigé, confirmé sur du vrai matériel : sans ce code dédié,
     # FSCTL_LOCK_VOLUME refusé par un autre programme (Explorateur,
     # indexeur, antivirus) retombait sur error_io_error ci-dessus -- « vérifie
@@ -1623,6 +1625,8 @@ _ERROR_MESSAGE_KEYS = {
     "OUTPUT_EXISTS": "error_output_exists",
     "IMAGE_NOT_FOUND": "error_image_not_found",
     "IO_ERROR": "error_io_error",
+    "DRIVERS_CHECKSUM": "error_drivers_checksum",
+    "DRIVERS_INSTALL_FAILED": "error_drivers_install_failed",
     "VOLUME_IN_USE": "error_volume_in_use",
     "SOURCE_UNSTABLE": "error_source_unstable",
     "IMAGE_MODIFIED": "error_image_modified",

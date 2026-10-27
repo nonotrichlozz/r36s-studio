@@ -1,0 +1,473 @@
+{
+  "id": "anbernic-rg-rotate",
+  "identite": {
+    "nom": "RG Rotate",
+    "fabricant": "Anbernic",
+    "alias": [
+      "Anbernic RG Rotate"
+    ]
+  },
+  "materiel": {
+    "soc": "Unisoc T618 (UMS512)",
+    "architecture": "ARM64",
+    "architecture_source_url": "https://retrohandhelds.gg/anbernic-rg-rotate-specs-revealed-ahead-of-official-relase/"
+  },
+  "os": {
+    "type": "Android (origine) ; GammaOS Next 1.4.1 = Android 14 / LineageOS 21"
+  },
+  "options": {
+    "frontend": [],
+    "systeme_cfw": [
+      {
+        "nom": "GammaOS Next 1.4.1 (Lite / Full)",
+        "description": "Android 14 basé sur LineageOS 21, optimisé émulation. Flash de la mémoire interne en mode Download Unisoc depuis Windows (UpgradeDownload.exe). Archive protégée par mot de passe réservé aux soutiens Patreon.",
+        "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE",
+        "licence": "Apache-2.0",
+        "licence_a_verifier": true,
+        "source_url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE"
+      }
+    ],
+    "firmware_origine": [
+      {
+        "nom": "Firmware d'origine Anbernic RG Rotate",
+        "description": "Archive .pac à flasher avec UpgradeDownload.exe (même manip que GammaOS). Sert aussi à débloquer une console.",
+        "url": "https://drive.google.com/file/d/1dPmJk1nY9gvTtups1CF1hXQ-WHGoiF3P/view?usp=sharing",
+        "source_url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE"
+      }
+    ],
+    "mises_a_jour": [
+      {
+        "nom": "OTA GammaOS Next",
+        "description": "Mises à jour OTA intégrées. En cas d'OTA ratée (écran noir), procédure de restauration de la partition Super sans perte de données.",
+        "source_url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE"
+      }
+    ]
+  },
+  "incompatibles": [],
+  "liens_officiels": [
+    "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE",
+    "https://github.com/TheGammaSqueeze/GammaOSNext"
+  ],
+  "licences": [
+    "Apache-2.0"
+  ],
+  "sources": [
+    {
+      "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE",
+      "type": "github"
+    },
+    {
+      "url": "https://github.com/TheGammaSqueeze/GammaOSNext",
+      "type": "github"
+    },
+    {
+      "url": "https://retrohandhelds.gg/anbernic-rg-rotate-specs-revealed-ahead-of-official-relase/",
+      "type": "web"
+    }
+  ],
+  "procedures": [
+    {
+      "id": "gammaos-next-1-4-1-installation",
+      "titre": "Installer GammaOS Next 1.4.1 (installation complète)",
+      "firmware": "GammaOS Next",
+      "version": "1.4.1",
+      "variantes": [
+        {
+          "id": "lite",
+          "nom": "GammaOS Lite",
+          "recommande": true,
+          "description": "Sans services Google : meilleures performances et autonomie.",
+          "fichiers": [
+            "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.001",
+            "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.002"
+          ],
+          "fichier_final": "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.pac",
+          "pac_nom": "RG_ROTATE_GAMMAOS_NEXT_LITE"
+        },
+        {
+          "id": "full",
+          "nom": "GammaOS Full",
+          "description": "Avec services Google (Play Store, applis de streaming).",
+          "fichiers": [
+            "ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.001",
+            "ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.002"
+          ],
+          "fichier_final": "ums512_1h10_rg_rotate_gammaos_1.4.1_full.pac",
+          "pac_nom": "RG_ROTATE_GAMMAOS_NEXT_FULL"
+        }
+      ],
+      "mode": "usb_download",
+      "efface_donnees": true,
+      "pac_produit": "ums512_1h10",
+      "plateformes": [
+        "windows"
+      ],
+      "detection": {
+        "usb_vid_pid": [
+          "1782:4d00"
+        ],
+        "description": "Mode « Download » Unisoc/Spreadtrum : port COM « SPRD U2S Diag », pilote sprdvcom. 1782:4d00 vu le 27/10/2026 sur le PC d'Arnaud (console exacte à confirmer) ; VID:PID sous Android inconnu.",
+        "a_verifier": true
+      },
+      "prerequis": [
+        "PC Windows 10/11",
+        "Microsoft Visual C++ Redistributable 2005, 2008 et 2010, x86 ET x64 (https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#latest-microsoft-visual-c-redistributable-version)",
+        "7-Zip (archives fractionnées .7z.001/.7z.002)",
+        "Câble USB fonctionnel",
+        "Mot de passe de l'archive (Discord GammaOS, rôle Supporter)"
+      ],
+      "telechargements": [
+        {
+          "nom": "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.001",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.001",
+          "variante": "lite",
+          "sha256": "73e81ca11213ac7fad2b511a2f2453842583ca7276aae1a9be62fd8112e9dbc7"
+        },
+        {
+          "nom": "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.002",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.002",
+          "variante": "lite",
+          "sha256": "6984f21214c355c7eb2a08e5718dedb49daa0088223a9a93796ddafc7da34975"
+        },
+        {
+          "nom": "ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.001",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.001",
+          "variante": "full",
+          "sha256": "79ad726867243cc63d5cbbef76f21c3d4a447b7c2f015b88b39c26476f2d9c54"
+        },
+        {
+          "nom": "ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.002",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.002",
+          "variante": "full",
+          "sha256": "a68ffb7134c37b2355f444b1aae35528fcf6fc04d621c5453537d6db3881a85f"
+        },
+        {
+          "nom": "UnisocTools_RG_ROTATE.zip",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/UnisocTools_RG_ROTATE.zip",
+          "description": "Contient en réalité un dossier UnisocTools_RG_VITA/ : pilotes UniSoc (UnisocDrivers), SPRD_Download_Tool (UpgradeDownload.exe, CmdDloader.exe, 7-Zip). ResearchDownload.exe absent.",
+          "sha256": "3b94905051d77abb014a091cedfcda4668ddd5f7e4e1430769000010a5913fdf"
+        }
+      ],
+      "mot_de_passe_archive": {
+        "requis": true,
+        "source": "Distribué uniquement sur le Discord GammaOS, aux membres ayant le rôle Supporter (compte Patreon ou Ko-fi relié à Discord) : https://www.patreon.com/GammaOS. L'utilisateur le saisit lui-même.",
+        "redistribuable": false
+      },
+      "etapes": [
+        {
+          "ordre": 1,
+          "action": "telecharger",
+          "automatisable": "oui",
+          "detail": "Télécharger les 2 parties de la variante choisie (Lite recommandée) + UnisocTools_RG_ROTATE.zip."
+        },
+        {
+          "ordre": 2,
+          "action": "installer_prerequis",
+          "automatisable": "partiel",
+          "detail": "Installer 7-Zip et les Visual C++ Redistributable 2005/2008/2010 x86 et x64 (installeurs silencieux possibles, droits admin requis)."
+        },
+        {
+          "ordre": 3,
+          "action": "installer_pilotes",
+          "automatisable": "partiel",
+          "detail": "Extraire UnisocTools_RG_ROTATE.zip, lancer UnisocTools/UnisocDrivers/DPInst64.exe. Sous Windows 11, le paquet Windows 10 convient. À sauter si déjà fait pour un flash GammaOS Next précédent.",
+          "outil": "DPInst64.exe",
+          "avertissement": "Élévation administrateur + validation de l'avertissement Windows sur le pilote."
+        },
+        {
+          "ordre": 4,
+          "action": "extraire_archive",
+          "automatisable": "oui",
+          "detail": "Placer .7z.001 et .7z.002 dans le même dossier, extraire depuis .7z.001 avec le mot de passe -> un seul fichier .pac.",
+          "outil": "7-Zip (7z x <fichier>.7z.001 -p<mdp>)"
+        },
+        {
+          "ordre": 5,
+          "action": "retirer_sd",
+          "automatisable": "non",
+          "detail": "Retirer TOUTES les cartes SD de la console.",
+          "avertissement": "Le SPL modifié peut tenter de démarrer sur la SD -> écran noir."
+        },
+        {
+          "ordre": 6,
+          "action": "preparer_console",
+          "automatisable": "non",
+          "detail": "Console éteinte, aucun câble USB branché."
+        },
+        {
+          "ordre": 7,
+          "action": "charger_pac",
+          "automatisable": "partiel",
+          "detail": "Lancer UnisocTools/SPRD_Download_Tool/UpgradeDownload.exe, « Charger le paquet », choisir le .pac. Vérifier que le nom d'appareil et la version affichés correspondent (RG Rotate, 1.4.1).",
+          "outil": "UpgradeDownload.exe"
+        },
+        {
+          "ordre": 8,
+          "action": "armer_flash",
+          "automatisable": "partiel",
+          "detail": "Cliquer sur Lecture/Démarrer dans UpgradeDownload.exe (l'outil attend la console).",
+          "outil": "UpgradeDownload.exe"
+        },
+        {
+          "ordre": 9,
+          "action": "mode_download",
+          "automatisable": "non",
+          "detail": "Ouvrir la console en position coulissante, MAINTENIR le bouton Retour (centre de la manette) et brancher le câble USB au PC. L'outil détecte la console et démarre.",
+          "duree_estimee_s": 10
+        },
+        {
+          "ordre": 10,
+          "action": "flasher",
+          "automatisable": "oui",
+          "detail": "Flash en cours (barre de progression). Ne rien débrancher.",
+          "outil": "UpgradeDownload.exe ; R36S Studio : CmdDloader.exe -pac <fichier.pac> -Version 2 -Port 0 -Timeout <ms> -Reset",
+          "avertissement": "Ne jamais débrancher pendant le flash."
+        },
+        {
+          "ordre": 11,
+          "action": "fin_flash",
+          "automatisable": "partiel",
+          "detail": "Statut « Réussi »/« OK »/« Reset » : la console redémarre et fait une réinitialisation d'usine. Débrancher le câble ensuite."
+        },
+        {
+          "ordre": 12,
+          "action": "attendre_premier_demarrage",
+          "automatisable": "non",
+          "detail": "Laisser le formatage se terminer puis redémarrer. Premier démarrage : jusqu'à 2-3 min, écran noir possible ~1 min (normal).",
+          "duree_estimee_s": 180
+        },
+        {
+          "ordre": 13,
+          "action": "configuration_initiale",
+          "automatisable": "non",
+          "detail": "Suivre l'assistant à l'écran jusqu'à l'accueil GammaOS Next."
+        }
+      ],
+      "depannage": [
+        {
+          "symptome": "L'outil ne détecte pas la console",
+          "solution": "Vérifier les pilotes UniSoc (Gestionnaire de périphériques), la position coulissante ouverte avec Retour maintenu fermement au branchement, le câble et le port USB."
+        },
+        {
+          "symptome": "Flash bloqué ou en erreur",
+          "solution": "Maintenir Retour + Volume Bas + Marche/Arrêt ensemble jusqu'à ce que le flash redémarre."
+        },
+        {
+          "symptome": "Écran noir au démarrage/redémarrage",
+          "solution": "SPL modifié qui tente de booter sur une SD invalide : retirer la SD, maintenir Volume Bas + Marche/Arrêt jusqu'au redémarrage."
+        },
+        {
+          "symptome": "Ne démarre pas sous GammaOS après le flash",
+          "solution": "Vérifier que le .pac est bien celui de la RG Rotate, laisser le reformatage automatique se faire, sinon reflasher. En dernier recours : issues GitHub GammaOS Next."
+        }
+      ],
+      "guide": "docs/anbernic-rg-rotate-gammaos-1.4.1.md",
+      "source_url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE"
+    },
+    {
+      "id": "gammaos-next-1-4-1-restauration-super",
+      "titre": "Récupération après OTA ratée : reflasher uniquement la partition Super (données conservées)",
+      "firmware": "GammaOS Next",
+      "version": "1.4.1",
+      "variantes": [
+        {
+          "id": "lite",
+          "nom": "GammaOS Lite",
+          "recommande": true,
+          "description": "Sans services Google : meilleures performances et autonomie.",
+          "fichiers": [
+            "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.001",
+            "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.002"
+          ],
+          "fichier_final": "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.pac",
+          "pac_nom": "RG_ROTATE_GAMMAOS_NEXT_LITE"
+        },
+        {
+          "id": "full",
+          "nom": "GammaOS Full",
+          "description": "Avec services Google (Play Store, applis de streaming).",
+          "fichiers": [
+            "ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.001",
+            "ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.002"
+          ],
+          "fichier_final": "ums512_1h10_rg_rotate_gammaos_1.4.1_full.pac",
+          "pac_nom": "RG_ROTATE_GAMMAOS_NEXT_FULL"
+        }
+      ],
+      "mode": "usb_download",
+      "efface_donnees": false,
+      "pac_produit": "ums512_1h10",
+      "plateformes": [
+        "windows"
+      ],
+      "detection": {
+        "usb_vid_pid": [
+          "1782:4d00"
+        ],
+        "description": "Mode « Download » Unisoc/Spreadtrum : port COM « SPRD U2S Diag », pilote sprdvcom. 1782:4d00 vu le 27/10/2026 sur le PC d'Arnaud (console exacte à confirmer) ; VID:PID sous Android inconnu.",
+        "a_verifier": true
+      },
+      "prerequis": [
+        "Symptôme précis : après une OTA, écran noir et Marche/Arrêt + Volume Bas ne relance rien",
+        "Même .pac (Lite ou Full) que l'installation"
+      ],
+      "telechargements": [
+        {
+          "nom": "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.001",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.001",
+          "variante": "lite",
+          "sha256": "73e81ca11213ac7fad2b511a2f2453842583ca7276aae1a9be62fd8112e9dbc7"
+        },
+        {
+          "nom": "ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.002",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/ums512_1h10_rg_rotate_gammaos_1.4.1_lite.7z.002",
+          "variante": "lite",
+          "sha256": "6984f21214c355c7eb2a08e5718dedb49daa0088223a9a93796ddafc7da34975"
+        },
+        {
+          "nom": "ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.001",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.001",
+          "variante": "full",
+          "sha256": "79ad726867243cc63d5cbbef76f21c3d4a447b7c2f015b88b39c26476f2d9c54"
+        },
+        {
+          "nom": "ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.002",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/ums512_1h10_rg_rotate_gammaos_1.4.1_full.7z.002",
+          "variante": "full",
+          "sha256": "a68ffb7134c37b2355f444b1aae35528fcf6fc04d621c5453537d6db3881a85f"
+        },
+        {
+          "nom": "UnisocTools_RG_ROTATE.zip",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/UnisocTools_RG_ROTATE.zip",
+          "description": "Contient en réalité un dossier UnisocTools_RG_VITA/ : pilotes UniSoc (UnisocDrivers), SPRD_Download_Tool (UpgradeDownload.exe, CmdDloader.exe, 7-Zip). ResearchDownload.exe absent.",
+          "sha256": "3b94905051d77abb014a091cedfcda4668ddd5f7e4e1430769000010a5913fdf"
+        },
+        {
+          "nom": "SPD Research Tool R27.25.4601 (si ResearchDownload.exe absent du paquet)",
+          "url": "https://spdflashtool.com/research-tool/spd-research-tool-r27-25-4601/"
+        }
+      ],
+      "mot_de_passe_archive": {
+        "requis": true,
+        "source": "Distribué uniquement sur le Discord GammaOS, aux membres ayant le rôle Supporter (compte Patreon ou Ko-fi relié à Discord) : https://www.patreon.com/GammaOS. L'utilisateur le saisit lui-même.",
+        "redistribuable": false
+      },
+      "etapes": [
+        {
+          "ordre": 1,
+          "action": "extraire_archive",
+          "automatisable": "oui",
+          "detail": "Obtenir le .pac (même procédure que l'installation) et extraire UnisocTools_RG_ROTATE.zip."
+        },
+        {
+          "ordre": 2,
+          "action": "charger_pac",
+          "automatisable": "partiel",
+          "detail": "Lancer SPRD_Download_Tool/ResearchDownload.exe (PAS UpgradeDownload.exe), « Charger le paquet », vérifier le titre (RG Rotate + version).",
+          "outil": "ResearchDownload.exe"
+        },
+        {
+          "ordre": 3,
+          "action": "selectionner_partitions",
+          "automatisable": "partiel",
+          "detail": "Paramètres (engrenage) > onglet principal : décocher « Sélectionner tous les fichiers », cocher UNIQUEMENT « Super », OK.",
+          "outil": "ResearchDownload.exe",
+          "avertissement": "Si d'autres partitions restent cochées, les données peuvent être effacées."
+        },
+        {
+          "ordre": 4,
+          "action": "armer_flash",
+          "automatisable": "partiel",
+          "detail": "Cliquer sur Lecture (flèche).",
+          "outil": "ResearchDownload.exe"
+        },
+        {
+          "ordre": 5,
+          "action": "mode_download",
+          "automatisable": "non",
+          "detail": "Brancher la console au PC en maintenant Volume Bas + Marche/Arrêt + Retour (centre de la manette)."
+        },
+        {
+          "ordre": 6,
+          "action": "flasher",
+          "automatisable": "oui",
+          "detail": "Réécriture de la seule partition Super, puis redémarrage normal. Si ça ne démarre toujours pas : installation complète."
+        }
+      ],
+      "guide": "docs/anbernic-rg-rotate-gammaos-1.4.1.md",
+      "source_url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE"
+    },
+    {
+      "id": "firmware-origine-restauration",
+      "titre": "Revenir au firmware Android d'origine Anbernic",
+      "firmware": "Firmware d'origine Anbernic",
+      "version": "origine",
+      "mode": "usb_download",
+      "efface_donnees": true,
+      "pac_produit": "ums512_1h10",
+      "plateformes": [
+        "windows"
+      ],
+      "detection": {
+        "usb_vid_pid": [
+          "1782:4d00"
+        ],
+        "description": "Mode « Download » Unisoc/Spreadtrum : port COM « SPRD U2S Diag », pilote sprdvcom. 1782:4d00 vu le 27/10/2026 sur le PC d'Arnaud (console exacte à confirmer) ; VID:PID sous Android inconnu.",
+        "a_verifier": true
+      },
+      "telechargements": [
+        {
+          "nom": "Firmware d'origine RG Rotate (.pac dans une archive, Google Drive)",
+          "url": "https://drive.google.com/file/d/1dPmJk1nY9gvTtups1CF1hXQ-WHGoiF3P/view?usp=sharing"
+        },
+        {
+          "nom": "UnisocTools_RG_ROTATE.zip",
+          "url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/download/v1.4.1-ANBERNICRGROTATE/UnisocTools_RG_ROTATE.zip",
+          "description": "Contient en réalité un dossier UnisocTools_RG_VITA/ : pilotes UniSoc (UnisocDrivers), SPRD_Download_Tool (UpgradeDownload.exe, CmdDloader.exe, 7-Zip). ResearchDownload.exe absent.",
+          "sha256": "3b94905051d77abb014a091cedfcda4668ddd5f7e4e1430769000010a5913fdf"
+        }
+      ],
+      "mot_de_passe_archive": {
+        "requis": false
+      },
+      "etapes": [
+        {
+          "ordre": 1,
+          "action": "extraire_archive",
+          "automatisable": "oui",
+          "detail": "Extraire l'archive jusqu'au .pac d'origine."
+        },
+        {
+          "ordre": 2,
+          "action": "retirer_sd",
+          "automatisable": "non",
+          "detail": "Retirer la carte SD."
+        },
+        {
+          "ordre": 3,
+          "action": "charger_pac",
+          "automatisable": "partiel",
+          "detail": "UpgradeDownload.exe, charger le .pac d'origine, Lecture.",
+          "outil": "UpgradeDownload.exe"
+        },
+        {
+          "ordre": 4,
+          "action": "mode_download",
+          "automatisable": "non",
+          "detail": "Ouvrir la console (coulissant), maintenir Retour (centre), brancher l'USB. Si ça bloque : Retour + Volume Bas + Marche/Arrêt."
+        },
+        {
+          "ordre": 5,
+          "action": "flasher",
+          "automatisable": "oui",
+          "detail": "Attendre la fin du flash."
+        }
+      ],
+      "guide": "docs/anbernic-rg-rotate-gammaos-1.4.1.md",
+      "source_url": "https://github.com/TheGammaSqueeze/GammaOSNext/releases/tag/v1.4.1-ANBERNICRGROTATE"
+    }
+  ],
+  "statut": "non_verifie",
+  "date_verification": null,
+  "signalements": 0
+}

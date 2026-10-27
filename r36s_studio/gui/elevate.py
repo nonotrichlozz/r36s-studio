@@ -947,6 +947,19 @@ def run_elevated_assign_letter(device_path: str, parent_hwnd: Optional[int] = No
     return _run_elevated_for_result(["assign-letter", "--device", device_path], "drive_letter_result", parent_hwnd)
 
 
+def run_elevated_install_unisoc_drivers(
+    zip_path: str, sha256: str, parent_hwnd: Optional[int] = None
+) -> Tuple[Optional[dict], Optional[str]]:
+    """`install-unisoc-drivers` dans le worker élevé (Windows, invite UAC) :
+    `(résultat drivers_result, code d'erreur du worker)`. Lève
+    `ElevationRefusedError` si l'invite est refusée."""
+    errors: List[str] = []
+    result = _run_elevated_for_result(
+        ["install-unisoc-drivers", "--zip", zip_path, "--sha256", sha256], "drivers_result", parent_hwnd, errors
+    )
+    return result, (errors[0] if errors else None)
+
+
 def _run_elevated_for_result(
     argv: List[str], event_type: str, parent_hwnd: Optional[int], errors: Optional[List[str]] = None
 ) -> Optional[dict]:

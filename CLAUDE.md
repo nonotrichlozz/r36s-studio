@@ -72,7 +72,8 @@ sans interface (c'est un CLI : `python -m r36s_studio <commande>`).
 `boot_sets_result` (`result` : jeux de fichiers du BOOT et état de la carte,
 `boot-sets`), `drive_letter_result` (`result` : lettres données à l'espace de
 jeux, `assign-letter`, Windows), `post_flash_note` (`name` : consigne décidée
-sur la carte écrite, ex. dArkOSen).
+sur la carte écrite, ex. dArkOSen), `drivers_result` (`result` : pilotes
+USB UniSoc installés, `install-unisoc-drivers`, Windows).
 
 **Élévation, par OS** (détail et pièges macOS : `docs/claude/elevation-macos.md`) :
 
@@ -105,7 +106,7 @@ demandé une fois) ; Windows/Linux redemandent l'élévation à chaque worker.
 | Écrire/déboguer des tests, bancs de test matériel | `docs/claude/testing.md` |
 | `android/` (ADB) | `docs/android-adb.md` |
 | `android/knulli.py`, `gui/knulli_screen.py` (copier des jeux sur une console KNULLI en USB, ADB), liste de jeux composable (`tri/selection.py`, `gui/game_list_widget.py`) | `docs/knulli-adb.md` |
-| `consoles_diverses/` | `r36s_studio/consoles_diverses/CLAUDE.md`, `docs/consoles-diverses-design.md`, `docs/consoles-diverses-recherche.md` |
+| `consoles_diverses/` (dont `procedures/` : installations guidées par USB, mode Download Unisoc, RG Rotate) | `r36s_studio/consoles_diverses/CLAUDE.md`, `docs/consoles-diverses-design.md`, `docs/consoles-diverses-recherche.md`, `docs/rg-rotate-test-console.md` |
 | `doublons/` | `docs/doublons.md`, `docs/doublons-selection.md` |
 | `tri/`, `gui/tri_screen.py` (Ranger des jeux mélangés, Filtrer par région et par langue, Convertir des jeux, tables de dossiers par firmware) | `docs/tri-roms.md` |
 
@@ -294,6 +295,14 @@ Détail et bancs de test : `docs/claude/testing.md`.
   qui marchait (SHA-256 vérifiée) ; cause non trouvée
   (`consoles_diverses/CLAUDE.md`).
 - KNULLI sur R36S : jamais flashé sur la console (`firmwares-flash.md`).
+- Installation guidée RG Rotate / GammaOS Next 1.4.1 (USB, mode Download
+  Unisoc, `CmdDloader.exe`) : jamais lancée sur la console ; syntaxe de
+  CmdDloader lue dans le programme ; VID:PID `1782:4d00` (mode Download) et
+  `1782:4003` (Android) confirmés par le flash UpgradeDownload du 2026-10-27,
+  comme le refus SW2276 sans le bouton Retour. Restauration Super
+  désactivée. Flash multiplateforme par `spd_dump` : piste future, écartée
+  (risque de brique) -- `consoles_diverses/CLAUDE.md`,
+  `docs/rg-rotate-test-console.md`.
 - ROCKNIX sur R36S : réglages automatiques après le flash (`extlinux.conf.r36s`,
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,

@@ -51,6 +51,28 @@ def qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _close_qt_windows():
+    """Ferme et détruit les fenêtres laissées par chaque test, tant que la
+    `QApplication` existe encore. Sans ça, ~10 000 fenêtres survivaient à la
+    session et Qt les détruisait pendant l'arrêt de Python, dans le désordre
+    (« shared QObject was deleted directly ») : tous les tests passaient,
+    puis le processus plantait -- violation d'accès sous Windows (code 1),
+    abort sous Linux (134/139), segfault sous macOS (CI rouge depuis le
+    2026-10-03)."""
+    yield
+    widgets = sys.modules.get("PySide6.QtWidgets")
+    app = widgets.QApplication.instance() if widgets is not None else None
+    if app is None:
+        return
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    for window in app.topLevelWidgets():
+        window.close()
+        window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
 class UnmockedSubprocessError(RuntimeError):
     """Levée quand un test appelle `subprocess.run`/`subprocess.Popen` sans
     le mocker et sans la marque `@pytest.mark.real_subprocess`. Le message
@@ -383,13 +405,3 @@ def _original_screen_save_is_synchronous(monkeypatch):
     if module is not None:
         monkeypatch.setattr(module, "OriginalScreenSaveRunner", _NoScreenToSave)
     yield
-
-
-def pytest_sessionfinish(session, exitstatus):  # DIAGNOSTIC CI temporaire
-    import threading
-    from PySide6.QtWidgets import QApplication
-
-    app = QApplication.instance()
-    vivants = [th.name for th in threading.enumerate() if th is not threading.main_thread()]
-    print(f"\n[diag] exitstatus={exitstatus} threads={vivants} "
-          f"toplevel={len(app.topLevelWidgets()) if app else None}", flush=True)

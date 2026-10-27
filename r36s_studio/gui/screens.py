@@ -208,6 +208,10 @@ class Dialog(QDialog):
         son minimum, en boucle : fenêtre disparue, application bloquée
         derrière une fenêtre modale. Minimum et maximum sont donc bornés à
         l'écran disponible ; ce qui dépasse défile (liste des firmwares)."""
+        if event.type() == QEvent.DeferredDelete:
+            # `super().event` détruit l'objet C++ : plus rien à ajuster, et
+            # `self.layout()` lèverait « already deleted » (`deleteLater`).
+            return super().event(event)
         handled = super().event(event)
         layout = self.layout()
         if event.type() in self._FIT_EVENTS and layout is not None:

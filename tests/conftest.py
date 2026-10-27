@@ -83,6 +83,28 @@ def _close_qt_windows():
 # détruites pendant la session (voir `_close_qt_windows`).
 _KEPT_WINDOWS: list = []
 
+_SESSION_EXIT_STATUS = [0]
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _SESSION_EXIT_STATUS[0] = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """Linux + Python 3.11 seulement : quitte sans la finalisation de
+    l'interpréteur. Constaté en CI (2026-10-27) : tous les tests passent,
+    puis `Fatal Python error: bool_dealloc` pendant le ramasse-miettes final
+    -- une extension C (PySide6 très probablement) rend une référence de
+    trop à `True`/`False` au fil de la session. Les booléens sont immortels
+    à partir de Python 3.12, d'où rien sous 3.14 en local.
+    ponytail: contournement, pas la cause ; à retirer en passant la CI à
+    Python 3.12+ ou quand l'appel fautif de PySide6 sera trouvé."""
+    if sys.platform.startswith("linux") and sys.version_info < (3, 12):
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(_SESSION_EXIT_STATUS[0])
+
 
 class UnmockedSubprocessError(RuntimeError):
     """Levée quand un test appelle `subprocess.run`/`subprocess.Popen` sans

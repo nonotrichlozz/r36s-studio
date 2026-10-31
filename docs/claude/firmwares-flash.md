@@ -126,6 +126,13 @@ d'origine en les renommant `rg351mp-uboot.dtb` et `rk3326-r36s-linux.dtb`
 Les 6 dossiers de modèles de `boot/dtb/r36s` (dépôt `dArkOSen-updates`)
 ne contiennent pas `rk3326-evb-lp3-v12-linux.dtb` : `identify` les traite
 comme des consoles standard, ce qui est cohérent avec dArkOSen.
+**Release `dArkOSen_R36_10152026` (2026-10-14)**, nouveautés qui nous
+concernent : « R36S-V12 2023-08-18 Panel 4 » corrigé dans le sélecteur
+(le `boot.ini` appelait le mauvais `.dtb`) ; ajout de « R36s-V21
+2024-12-18 2537 » ; « HL-R50S-V30 2025-12-18 » corrigé ; tous les `.dtb`
+repatchés en 60 Hz. Croisé avec `identify/hardware_table.py` : Panel 4 y
+était déjà (R36S), 2537 et HL-R50S-V30 ajoutés en famille R36S (dArkOSen
+ne vise que les consoles d'origine).
 
 Les deux dépôts ne se prêtent pas au même traitement, ce qui explique la
 dissymétrie entre les deux options :

@@ -13,6 +13,10 @@ suffixes « Variant N », « Panel N A », « 2550 »... sont ceux de dArkOSRE :
 le `model` des `.dtb` R36S-V21 vaut `R36S-V21 2024-12-18`, d'où la
 correspondance par préfixe.
 
+Ajouts hors dArkOSRE (marqués dans la table) : modèles du sélecteur de
+dArkOSen `dArkOSen_R36_10152026` (2026-10-14), firmware réservé aux
+consoles d'origine, d'où la famille R36S.
+
 Non vérifié : qu'un `.dtb` de carte d'usine porte bien ces chaînes
 (aucun disponible au moment de l'écriture)."""
 
@@ -34,6 +38,9 @@ HARDWARE_TABLE = (
     ("R36S-V22 2024-12-18", R36S),
     ("R36S-Y02 2024-12-18", R36S),
     ("R36XX-V21 2024-12-18", R36S),
+    # Sélecteur de dArkOSen 10152026, absents de r36_devices.ini.
+    ("R36S-V21 2024-12-18 2537", R36S),
+    ("HL-R50S-V30 2025-12-18", R36S),
     ("G80C-MB V1.1-20250319 Panel 8", CLONE),
     ("G80C-MB V1.1-20250319 Panel 9", CLONE),
     ("G80CA-MB V1.2-20250422 Panel 8", CLONE),

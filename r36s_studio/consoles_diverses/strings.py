@@ -85,7 +85,7 @@ STRINGS = {
     "error_licence_invalide": "Cette clé de licence n'est pas reconnue. Vérifie qu'elle a été copiée en entier (elle commence par « r36s- »), sans espace en trop.",
     "error_licence_expiree": "Ta clé de licence a expiré. Renouvelle-la pour continuer à chercher de nouvelles consoles ; les consoles déjà au catalogue restent consultables.",
     "error_licence_revoquee": "Cette clé de licence a été désactivée. Contacte le vendeur si tu penses que c'est une erreur.",
-    "error_quota_licence_depasse": "Ta clé a atteint son nombre de recherches pour aujourd'hui. Réessaie demain ; les consoles déjà au catalogue restent consultables.",
+    "error_quota_licence_depasse": "Tu as atteint le nombre de recherches gratuites pour aujourd'hui. Réessaie demain ; les consoles déjà au catalogue restent consultables.",
     "error_trop_de_requetes": "Trop de recherches d'affilée. Attends une minute, puis réessaie.",
     "error_erreur_interne": "Le serveur a rencontré un problème. Réessaie dans quelques minutes.",
     "error_recherche_ia_indisponible": "La recherche automatique est momentanément indisponible.{message_serveur}",

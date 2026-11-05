@@ -201,19 +201,14 @@ def test_search_error_shows_error_zone_with_friendly_message(qapp):
 # --- Licence : jamais un écran vide, un message précis par cas -----------------
 
 
-def test_without_a_key_the_idle_screen_explains_and_offers_to_enter_one(qapp):
-    """Signalé : écran vide sous le champ de recherche tant qu'aucune clé
-    n'est saisie. L'explication ne bloque rien -- le catalogue vérifié se
-    consulte sans clé."""
+def test_without_a_key_the_search_is_open_and_no_key_is_asked(qapp):
+    """Logiciel gratuit (2026-11-05) : le serveur accepte la recherche sans
+    clé, le cadre « Clé de licence » ne s'affiche plus jamais."""
     screen = ConsolesDiversesScreen()
     screen.show()
-    emitted = []
-    screen.settings_requested.connect(lambda: emitted.append(True))
 
-    assert screen._no_licence_frame.isVisible() is True
+    assert screen._no_licence_frame.isVisible() is False
     assert screen._search_button.isEnabled() is True
-    screen._no_licence_button.click()
-    assert emitted == [True]
 
 
 def test_the_no_key_explanation_disappears_once_a_key_is_saved(qapp):

@@ -548,7 +548,11 @@ class ConsolesDiversesScreen(Screen):
         self._result_frame.setVisible(zone == "result")
         self._no_info_frame.setVisible(zone == "no_info")
         self._error_frame.setVisible(zone == "error")
-        self._no_licence_frame.setVisible(zone == "idle" and not (self._licence_key or "").strip())
+        # Logiciel gratuit depuis le 2026-11-05 : le serveur accepte la
+        # recherche IA sans clé (mode « libre », quota par connexion). Le
+        # cadre « Clé de licence » n'est donc plus jamais affiché ; une clé
+        # déjà enregistrée reste envoyée (clé d'administration).
+        self._no_licence_frame.setVisible(False)
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         self._reference_edit.setEnabled(enabled)

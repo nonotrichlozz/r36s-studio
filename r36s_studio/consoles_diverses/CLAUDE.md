@@ -128,8 +128,15 @@ Refus serveur et message affiché (`strings.py::_ERROR_MESSAGE_KEYS`) :
 `licence_requise`, `licence_invalide`, `licence_expiree`,
 `licence_revoquee` (403, bouton « Saisir ma clé » sous le message),
 `quota_licence_depasse` (429, quota quotidien du client), `licence_non_
-supportee` (500, serveur mal réglé). Sans clé, l'écran l'explique d'emblée
-(`_no_licence_frame`) au lieu de rester vide.
+supportee` (500, serveur mal réglé).
+
+**Logiciel gratuit (2026-11-05)** : le serveur passe en `LICENCE_MODE=
+"libre"` (r36s-studio-cloud) -- recherche IA sans clé, limitée par adresse
+IP (`FREE_DAILY_QUOTA`, 429 `quota_licence_depasse` au-delà). Aucune clé
+n'est intégrée au logiciel : une clé commune serait publique (code et
+exécutable) et partagerait un seul quota entre tous. Le cadre
+`_no_licence_frame` n'est plus affiché ; une clé déjà enregistrée reste
+envoyée (clé d'administration, quota propre).
 `client.py::_journaliser_diagnostic_licence` consigne toujours, à chaque
 refus de licence, longueur/hash/URL (jamais la clé en clair).
 

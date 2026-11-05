@@ -77,7 +77,7 @@ STRINGS_EN = {
     ),
     "error_licence_revoquee": "This license key has been disabled. Contact the seller if you think this is a mistake.",
     "error_quota_licence_depasse": (
-        "Your key has reached its number of searches for today. Try again tomorrow; consoles already "
+        "You have reached the number of free searches for today. Try again tomorrow; consoles already "
         "in the catalog remain available."
     ),
     "error_trop_de_requetes": "Too many searches in a row. Wait a minute, then try again.",

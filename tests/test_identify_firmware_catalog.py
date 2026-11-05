@@ -8,19 +8,22 @@ def test_one_entry_per_id_no_duplicates():
     assert FIRMWARE_BY_ID.keys() == set(ids)
 
 
-def test_exactly_one_clone_safe_entry():
+def test_clone_safe_entries():
     clone_safe = [entry for entry in FIRMWARE_CATALOG if entry.is_clone_safe]
-    assert len(clone_safe) == 1
-    assert clone_safe[0].id == "emuelec"
+    assert [entry.id for entry in clone_safe] == ["archr_clone", "emuelec"]
 
 
-def test_rocknix_and_knulli_are_the_only_automatic_download_entries():
+def test_automatic_download_entries():
     manual = [entry.id for entry in FIRMWARE_CATALOG if entry.releases_url is not None]
     automatic = [entry.id for entry in FIRMWARE_CATALOG if entry.releases_url is None]
-    assert automatic == ["rocknix", "knulli"]
+    assert automatic == ["rocknix", "knulli", "archr", "archr_clone"]
     assert "rocknix" not in manual
     # Seul KNULLI passe par `auto_download` (ROCKNIX a son choix de variante).
-    assert [entry.id for entry in FIRMWARE_CATALOG if entry.auto_download is not None] == ["knulli"]
+    assert [entry.id for entry in FIRMWARE_CATALOG if entry.auto_download is not None] == [
+        "knulli",
+        "archr",
+        "archr_clone",
+    ]
 
 
 def test_knulli_is_experimental_non_commercial_and_r36s_only():
@@ -99,3 +102,20 @@ def test_darkosen_comes_first():
     """2026-10-14 : seul firmware actif aux images sur GitHub, sélecteur de
     .dtb intégré, a fait redémarrer une R36S d'origine."""
     assert FIRMWARE_CATALOG[0].id == "darkosen"
+
+
+def test_archr_entries_download_the_matching_image_only():
+    import re
+
+    original = FIRMWARE_BY_ID["archr"]
+    clone = FIRMWARE_BY_ID["archr_clone"]
+    assert original.r36s_only and not original.is_clone_safe
+    assert clone.is_clone_safe and not clone.r36s_only
+    names = ["ArchR-R36S.aarch64-20261105-original.img.gz", "ArchR-R36S.aarch64-20261105-clone.img.gz"]
+    assert [n for n in names if re.search(original.auto_download.motif_fichier, n)] == names[:1]
+    assert [n for n in names if re.search(clone.auto_download.motif_fichier, n)] == names[1:]
+    for entry in (original, clone):
+        fallback = entry.auto_download.url_directe.rsplit("/", 1)[-1]
+        assert re.search(entry.auto_download.motif_fichier, fallback)
+        assert dict(entry.auto_download.sha256_connus)[fallback]
+        assert "overlay-generator" in tr(entry.first_boot_note_key)

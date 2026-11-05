@@ -17,8 +17,8 @@ code : `_on_releases_requested` retombait déjà sur l'URL ArkOS pour tout
 firmware non reconnu, avant ce module).
 
 Téléchargement automatique : ROCKNIX (images attachées directement aux
-releases GitHub, `identify/rocknix.py`) et KNULLI (`auto_download`, depuis
-le 2026-10-19). Les autres restent en lien manuel : vérifié directement sur les pages de releases
+releases GitHub, `identify/rocknix.py`), KNULLI (`auto_download`, depuis
+le 2026-10-19) et Arch R (`auto_download`, depuis le 2026-11-05). Les autres restent en lien manuel : vérifié directement sur les pages de releases
 avant d'ajouter ce catalogue, les releases officielles d'AmberELEC ne
 publient que des images taguées RG351/RG552 (aucun asset RK3326/R36S), et
 celles d'EmuELEC ne publient que des images Amlogic (aucun asset RK3326/
@@ -78,6 +78,38 @@ KNULLI_R36S_DOWNLOAD = AutoDownload(
     motif_fichier=r"^knulli-rk3326-r36s-.*\.img\.gz$",
     url_directe=f"{KNULLI_RELEASES_URL}/download/20260511/{KNULLI_R36S_FILE}",
     sha256_connus=((KNULLI_R36S_FILE, KNULLI_R36S_SHA256),),
+)
+
+
+# Arch R (2026-11-05, v3.0 annoncée ce jour sur r/R36S) : images attachées
+# aux releases GitHub (`archr-linux/Arch-R`), une pour la vraie R36S
+# (`-original`) et une pour les clones (`-clone`), nommage stable depuis la
+# 2.0 RC-2 : `ArchR-R36S.aarch64-AAAAMMJJ-{original,clone}.img.gz`. La SHA-256
+# vient du `digest` GitHub de l'asset ; `url_directe` (repli si l'API ne
+# répond pas) pointe vers la 2.1.1, dont les sommes sont publiées dans ses
+# notes de version -- relevées le 2026-11-05. La 3.0 exige un flash neuf ; sa
+# partition de jeux exFAT (ARCHR_ROMS) n'apparaît qu'au premier démarrage.
+# L'écran : un overlay de dalle (mipi-panel.dtbo) se génère sur
+# arch-r.io/overlay-generator si l'écran reste noir -- R36S Studio ne le
+# pose pas lui-même (pas encore vérifié sur du vrai matériel).
+ARCHR_RELEASES_URL = "https://github.com/archr-linux/Arch-R/releases"
+ARCHR_FALLBACK_TAG = "v2.1.1"
+ARCHR_R36S_FILE = "ArchR-R36S.aarch64-20260709-original.img.gz"
+ARCHR_R36S_SHA256 = "035b58c446e0ffc7f6e23d1c8ef574fd0970307af6c3a41817abe82239aaf577"
+ARCHR_CLONE_FILE = "ArchR-R36S.aarch64-20260709-clone.img.gz"
+ARCHR_CLONE_SHA256 = "3ea0b970595e0086bd7478e0d17acf71adf1368499b45f1bba21ef6ab63660e2"
+
+ARCHR_R36S_DOWNLOAD = AutoDownload(
+    depot="archr-linux/Arch-R",
+    motif_fichier=r"^ArchR-R36S\.aarch64-\d{8}-original\.img\.gz$",
+    url_directe=f"{ARCHR_RELEASES_URL}/download/{ARCHR_FALLBACK_TAG}/{ARCHR_R36S_FILE}",
+    sha256_connus=((ARCHR_R36S_FILE, ARCHR_R36S_SHA256),),
+)
+ARCHR_CLONE_DOWNLOAD = AutoDownload(
+    depot="archr-linux/Arch-R",
+    motif_fichier=r"^ArchR-R36S\.aarch64-\d{8}-clone\.img\.gz$",
+    url_directe=f"{ARCHR_RELEASES_URL}/download/{ARCHR_FALLBACK_TAG}/{ARCHR_CLONE_FILE}",
+    sha256_connus=((ARCHR_CLONE_FILE, ARCHR_CLONE_SHA256),),
 )
 
 
@@ -166,6 +198,30 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
         r36s_only=True,
         first_boot_note_key="knulli_r36s_first_boot_note",
     ),
+    # Arch R (2026-11-05) : expérimental tant qu'il n'a pas été flashé sur
+    # une vraie console avec R36S Studio. Deux entrées, comme les deux images
+    # publiées : la vraie R36S (contrôle de clone avant la Confirmation,
+    # comme KNULLI) et les clones.
+    FirmwareEntry(
+        "archr",
+        "file_firmware_archr_title",
+        "file_firmware_archr_desc",
+        status="experimental",
+        releases_url=None,
+        auto_download=ARCHR_R36S_DOWNLOAD,
+        r36s_only=True,
+        first_boot_note_key="archr_first_boot_note",
+    ),
+    FirmwareEntry(
+        "archr_clone",
+        "file_firmware_archr_clone_title",
+        "file_firmware_archr_clone_desc",
+        status="experimental",
+        is_clone_safe=True,
+        releases_url=None,
+        auto_download=ARCHR_CLONE_DOWNLOAD,
+        first_boot_note_key="archr_first_boot_note",
+    ),
     FirmwareEntry(
         "emuelec",
         "file_firmware_emuelec_title",
@@ -208,4 +264,7 @@ FIRMWARE_CATALOG: Tuple[FirmwareEntry, ...] = (
 
 FIRMWARE_BY_ID: Dict[str, FirmwareEntry] = {entry.id: entry for entry in FIRMWARE_CATALOG}
 
-__all__ = ["AutoDownload", "FirmwareEntry", "FIRMWARE_CATALOG", "FIRMWARE_BY_ID", "KNULLI_R36S_DOWNLOAD"]
+__all__ = [
+    "ARCHR_CLONE_DOWNLOAD",
+    "ARCHR_R36S_DOWNLOAD",
+    "AutoDownload", "FirmwareEntry", "FIRMWARE_CATALOG", "FIRMWARE_BY_ID", "KNULLI_R36S_DOWNLOAD"]

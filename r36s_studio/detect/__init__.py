@@ -90,6 +90,16 @@ EMUELEC_BOOT_LABEL = "EMUELEC"
 # macOS ne savent écrire -- les jeux se copient depuis la console (réseau,
 # deuxième carte, câble USB), jamais par « Copier des jeux sur la carte ».
 KNULLI_BOOT_LABEL = "KNULLI"
+# Arch R (2026-11-05, documentation arch-r.io/docs/roms) : partition de
+# démarrage FAT32 étiquetée « ARCHR », racine ext4 « ARCHR_ROOT », données
+# ext4 « STORAGE », puis -- créée au PREMIER DÉMARRAGE de la console, absente
+# d'une carte tout juste flashée -- une partition de jeux exFAT
+# « ARCHR_ROMS » (un dossier par système à sa racine : nes, snes, gba...).
+# exFAT : inscriptible nativement par Windows, macOS et Linux, donc la copie
+# des jeux et leur sauvegarde (étapes EASYROMS) fonctionnent comme sur
+# ArkOS dès que cette partition existe (`partitions/locate.py` la reconnaît
+# comme partition de jeux).
+ARCHR_BOOT_LABEL = "ARCHR"
 
 
 class CardSystem(Enum):
@@ -112,6 +122,7 @@ class CardSystem(Enum):
     ROCKNIX = "rocknix"
     EMUELEC = "emuelec"
     KNULLI = "knulli"
+    ARCHR = "archr"
     UNKNOWN = "unknown"
 
 
@@ -121,6 +132,7 @@ _SYSTEM_BY_BOOT_LABEL = {
     ROCKNIX_BOOT_LABEL: CardSystem.ROCKNIX,
     EMUELEC_BOOT_LABEL: CardSystem.EMUELEC,
     KNULLI_BOOT_LABEL: CardSystem.KNULLI,
+    ARCHR_BOOT_LABEL: CardSystem.ARCHR,
 }
 
 # Étapes qui n'ont de sens que sur une carte ArkOS (BOOT sans étiquette +
@@ -136,6 +148,18 @@ ARKOS_ONLY_STEPS = tuple(_PARTITION_CHECK_BY_STEP)
 # tests structurels de BOOT/EASYROMS (première partition FAT...), sans
 # rien contenir de ce que ces étapes attendent.
 OTHER_SYSTEMS = (CardSystem.ROCKNIX, CardSystem.EMUELEC, CardSystem.KNULLI)
+
+# Systèmes reconnus qui ont, comme ArkOS, une partition de jeux inscriptible
+# depuis l'ordinateur : les étapes EASYROMS (sauvegarde et copie des jeux)
+# restent possibles dès que cette partition est trouvée. Arch R ne la crée
+# qu'au premier démarrage : sans elle, refus avec une consigne dédiée
+# (`arkos_step_refusal` renvoie alors ce système, l'appelant affiche
+# « démarre d'abord la console une fois »).
+GAMES_PARTITION_SYSTEMS = (CardSystem.ARCHR,)
+
+# Tous les systèmes reconnus autres qu'ArkOS, pour l'affichage (« Carte
+# Arch R reconnue »...).
+NAMED_SYSTEMS = OTHER_SYSTEMS + GAMES_PARTITION_SYSTEMS
 
 
 def _list_partitions_safe(device: Optional[Device]) -> Optional[List[PartitionInfo]]:
@@ -189,6 +213,8 @@ def arkos_step_refusal(device: Optional[Device], step: str) -> Optional[CardSyst
     system = detect_card_system(partitions)
     if system in OTHER_SYSTEMS:
         return system
+    if system in GAMES_PARTITION_SYSTEMS:
+        return None if _PARTITION_CHECK_BY_STEP[step](partitions) else system
     return None if _PARTITION_CHECK_BY_STEP[step](partitions) else CardSystem.UNKNOWN
 
 
@@ -217,6 +243,8 @@ def detect_card(device: Optional[Device]) -> Tuple[CardSystem, Dict[str, StepSta
     can_boot = has_card and partitions is not None and has_boot_partition(partitions)
     can_easyroms = has_card and partitions is not None and has_easyroms_partition(partitions)
     is_arkos = card_system == CardSystem.ARKOS
+    # Arch R : copie des jeux possible dès que sa partition exFAT existe.
+    has_games_card = is_arkos or (card_system in GAMES_PARTITION_SYSTEMS and can_easyroms)
     # Système de fichiers réel d'EASYROMS sur *cette* carte -- varie selon
     # le vendeur (NTFS constaté sur certaines cartes, exFAT sur d'autres,
     # confirmé sur du vrai matériel). Seul le NTFS est bloqué en écriture
@@ -264,7 +292,7 @@ def detect_card(device: Optional[Device]) -> Tuple[CardSystem, Dict[str, StepSta
             if system_incompatible
             else StepStatus.PLATFORM_LIMITED
             if platform.system() == "Darwin" and easyroms_is_ntfs_or_unknown
-            else _injection_status(is_arkos)
+            else _injection_status(has_games_card)
         ),
         EJECT: StepStatus.AVAILABLE if has_card else StepStatus.NOT_RELEVANT,
         # Accueil assisté (menu de tuiles) uniquement, ci-dessous -- pas de
@@ -282,6 +310,9 @@ __all__ = [
     "ROCKNIX_BOOT_LABEL",
     "EMUELEC_BOOT_LABEL",
     "KNULLI_BOOT_LABEL",
+    "ARCHR_BOOT_LABEL",
+    "GAMES_PARTITION_SYSTEMS",
+    "NAMED_SYSTEMS",
     "ARKOS_ONLY_STEPS",
     "OTHER_SYSTEMS",
     "arkos_step_refusal",

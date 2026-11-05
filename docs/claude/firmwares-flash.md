@@ -465,3 +465,30 @@ KNULLI_R36S_DOWNLOAD`) :
   `firmware == "rocknix"`, `is_rocknix_card` faux sur cette image) ; SHARE
   reconnue (`card_probe.GAMES_LABELS`), aucune EASYROMS créée (vérifié sur
   l'image réelle : `own_games_partition_bytes` = 536 870 912).
+
+**Arch R (2026-11-05, expérimental, jamais flashé avec R36S Studio).**
+Arch R 3.0 annoncée sur r/R36S le jour même. Deux entrées du catalogue,
+comme les deux images publiées sur `archr-linux/Arch-R` : `archr` (vraie
+R36S, `-original`, `r36s_only` → même contrôle de clone que KNULLI avant la
+Confirmation) et `archr_clone` (`-clone`, `is_clone_safe`). Téléchargement
+par `auto_download` (`ARCHR_R36S_DOWNLOAD`/`ARCHR_CLONE_DOWNLOAD`), motif
+`ArchR-R36S.aarch64-AAAAMMJJ-{original,clone}.img.gz` (stable depuis la 2.0
+RC-2), SHA-256 depuis le `digest` GitHub ; repli `url_directe` sur la 2.1.1
+dont les sommes sont publiées dans ses notes de version. Nommage des assets
+3.0 non vérifié au moment de l'ajout (page de releases encore servie sans
+la 3.0) : si le motif ne trouve rien, le repli 2.1.1 est téléchargé -- à
+contrôler au premier essai.
+- Structure (arch-r.io/docs/roms) : `ARCHR` FAT32 (démarrage), `ARCHR_ROOT`
+  ext4, `STORAGE` ext4, puis **au premier démarrage** `ARCHR_ROMS` exFAT
+  (un dossier par système à sa racine). `detect.CardSystem.ARCHR` par
+  l'étiquette `ARCHR` ; `ARCHR_ROMS` est reconnue comme partition de jeux
+  (`partitions/locate.py::EASYROMS_ALT_LABELS`) : sauvegarde et copie des
+  jeux comme sur ArkOS, y compris sur macOS (exFAT). Carte tout juste
+  flashée (pas encore de `ARCHR_ROMS`) : refus avant élévation avec la
+  consigne « démarre d'abord la console une fois »
+  (`archr_games_partition_missing`) -- jamais `STORAGE` (ext4, 3e partition)
+  prise pour la partition de jeux.
+- Écran : Arch R utilise un overlay de dalle (`mipi-panel.dtbo`) généré
+  sur arch-r.io/overlay-generator (ou par leur Flasher). R36S Studio ne le
+  pose pas : la consigne de premier démarrage renvoie vers le générateur si
+  l'écran reste noir. Piste : le générer depuis le .dtb d'origine sauvegardé.

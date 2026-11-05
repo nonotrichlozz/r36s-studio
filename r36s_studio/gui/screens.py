@@ -75,7 +75,7 @@ from r36s_studio.detect import (
     EJECT,
     FLASH,
     IDENTIFY,
-    OTHER_SYSTEMS,
+    NAMED_SYSTEMS,
     CardSystem,
     StepStatus,
 )
@@ -112,7 +112,7 @@ _BADGE_KIND_BY_STATUS = {
 def card_system_name(card_system: Optional[CardSystem]) -> str:
     """Nom du système d'une carte non ArkOS, tel qu'affiché (« EmuELEC »,
     « ROCKNIX », « non ArkOS » si non reconnu ou inconnu de l'appelant)."""
-    if card_system not in OTHER_SYSTEMS:
+    if card_system not in NAMED_SYSTEMS:
         card_system = CardSystem.UNKNOWN
     return tr(f"card_system_{card_system.value}")
 
@@ -126,7 +126,7 @@ def _banner_state_text(is_arkos: bool, card_system: Optional[CardSystem]) -> str
     carte d'un autre système reconnu n'a rien de mal préparé."""
     if is_arkos:
         return tr("home_banner_state_arkos")
-    if card_system in OTHER_SYSTEMS:
+    if card_system in NAMED_SYSTEMS:
         return tr("home_banner_state_other_system", system=card_system_name(card_system))
     return tr("home_banner_state_unprepared")
 

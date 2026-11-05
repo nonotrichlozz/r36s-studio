@@ -444,3 +444,51 @@ def test_knulli_card_copy_games_is_not_applicable_on_every_os(system, partitions
     assert card_system == CardSystem.KNULLI and refusal == CardSystem.KNULLI
     assert status[COPY_GAMES] == StepStatus.SYSTEM_INCOMPATIBLE
     assert status[FLASH] == StepStatus.AVAILABLE
+
+
+# --- Arch R (2026-11-05) ----------------------------------------------------
+#
+# Structure documentée (arch-r.io/docs/roms) : ARCHR (FAT32, démarrage),
+# ARCHR_ROOT (ext4), STORAGE (ext4) ; la partition de jeux ARCHR_ROMS (exFAT)
+# n'est créée qu'au premier démarrage de la console.
+
+_ARCHR_FRESH = [
+    PartitionInfo("/dev/fake-disk-test-3s1", "ARCHR", "fat32", "/Volumes/ARCHR"),
+    PartitionInfo("/dev/fake-disk-test-3s2", "ARCHR_ROOT", "ext4", None),
+    PartitionInfo("/dev/fake-disk-test-3s3", "STORAGE", "ext4", None),
+]
+_ARCHR_BOOTED = _ARCHR_FRESH + [
+    PartitionInfo("/dev/fake-disk-test-3s4", "ARCHR_ROMS", "exfat", "/Volumes/ARCHR_ROMS"),
+]
+
+
+def test_archr_card_is_recognized_by_its_boot_label():
+    assert detect_card_system(_ARCHR_FRESH) == CardSystem.ARCHR
+    assert detect_card_system(_ARCHR_BOOTED) == CardSystem.ARCHR
+
+
+@pytest.mark.parametrize("system_name", ["Darwin", "Windows", "Linux"])
+@patch("r36s_studio.detect.archives.list_archives", return_value=[])
+@patch("r36s_studio.detect.list_partitions", return_value=_ARCHR_BOOTED)
+def test_archr_games_steps_available_once_games_partition_exists(mock_list, mock_archives, system_name):
+    """exFAT : inscriptible partout, même sur macOS."""
+    with patch("r36s_studio.detect.platform.system", return_value=system_name):
+        card_system, status = detect_card(_make_device())
+    assert card_system == CardSystem.ARCHR
+    assert status[COPY_GAMES] == StepStatus.AVAILABLE
+    assert status[EXTRACT_EASYROMS] == StepStatus.AVAILABLE
+    assert status[FLASH] == StepStatus.AVAILABLE
+    assert arkos_step_refusal(_make_device(), COPY_GAMES) is None
+
+
+@patch("r36s_studio.detect.platform.system", return_value="Windows")
+@patch("r36s_studio.detect.archives.list_archives", return_value=[])
+@patch("r36s_studio.detect.list_partitions", return_value=_ARCHR_FRESH)
+def test_archr_fresh_card_refuses_games_steps_until_first_boot(mock_list, mock_archives, mock_platform):
+    """Carte tout juste flashée : pas encore de ARCHR_ROMS -- refus avec le
+    système Arch R (consigne « démarre d'abord la console »), jamais la
+    troisième partition STORAGE (ext4) prise pour celle des jeux."""
+    status = detect_workflow_status(_make_device())
+    assert status[COPY_GAMES] == StepStatus.NOT_RELEVANT
+    assert arkos_step_refusal(_make_device(), COPY_GAMES) == CardSystem.ARCHR
+    assert arkos_step_refusal(_make_device(), EXTRACT_EASYROMS) == CardSystem.ARCHR

@@ -92,6 +92,13 @@ STRINGS = {
     "card_system_rocknix": "ROCKNIX",
     "card_system_emuelec": "EmuELEC",
     "card_system_knulli": "KNULLI",
+    "card_system_archr": "Arch R",
+    "archr_games_partition_missing": "Ta carte contient Arch R, mais son espace pour les jeux n'existe pas encore : Arch R le crée au premier démarrage de la console. Rien n'a été modifié. Mets la carte dans la console, allume-la une fois jusqu'au menu, éteins-la, puis remets la carte dans l'ordinateur.",
+    "file_firmware_archr_title": "Arch R (R36S d'origine)",
+    "file_firmware_archr_desc": "Système récent basé sur Arch Linux, avec son propre menu. Les jeux vont dans un espace lisible par Windows, Mac et Linux. Image pour la vraie R36S. Pas encore essayé avec R36S Studio.",
+    "file_firmware_archr_clone_title": "Arch R (clones R36S)",
+    "file_firmware_archr_clone_desc": "Le même système Arch R, version pour les consoles clones de la R36S. Pas encore essayé avec R36S Studio.",
+    "archr_first_boot_note": "Laisse le premier démarrage se terminer sans éteindre la console : Arch R agrandit la carte et crée l'espace pour les jeux. Ensuite seulement, remets la carte dans l'ordinateur pour copier tes jeux. Si l'écran reste noir, génère le fichier d'écran de ta console sur arch-r.io/overlay-generator.",
     "knulli_copy_games_refused": (
         "Ta carte contient KNULLI : ses jeux ne se copient pas depuis l'ordinateur sur la carte. Rien n'a été modifié. Trois façons de les ajouter :\n"
         "1. Par le Wi-Fi : la console connectée au réseau, ouvre \\\\KNULLI\\share dans l'Explorateur de fichiers (active d'abord le partage SAMBA dans Paramètres système → Services).\n"
@@ -613,16 +620,16 @@ STRINGS = {
     "file_firmware_knulli_title": "KNULLI",
     "file_firmware_knulli_desc": "Système complet et récent, image faite pour la vraie R36S (pas pour les clones). Pas encore essayé sur une R36S avec R36S Studio. Licence non commerciale : usage commercial interdit.",
     "knulli_r36s_first_boot_note": "Branche la console sur secteur pour le premier démarrage, même si sa batterie est chargée, et laisse l'installation se terminer sans l'éteindre : elle peut prendre plusieurs minutes et redémarrer d'elle-même. Conseil : retire la deuxième carte (TF2) au premier démarrage. Si l'écran reste noir, remets la carte dans l'ordinateur : « Choisir l'écran de la console » propose l'écran d'origine de ta console.",
-    "knulli_notes_device_log": "Notes de version de KNULLI : ce fichier est indiqué pour « {device} ».",
-    "knulli_notes_missing_log": "Notes de version de KNULLI : ce fichier n'apparaît pas dans leur tableau des consoles (vérification indicative seulement).",
-    "knulli_download_success": "KNULLI a été téléchargé et vérifié : {path}",
+    "knulli_notes_device_log": "Notes de version de {firmware} : ce fichier est indiqué pour « {device} ».",
+    "knulli_notes_missing_log": "Notes de version de {firmware} : ce fichier n'apparaît pas dans leur tableau des consoles (vérification indicative seulement).",
+    "knulli_download_success": "{firmware} a été téléchargé et vérifié : {path}",
     "knulli_clone_title": "Console clone détectée",
-    "knulli_clone_text": "Ta carte vient d'une console clone de la R36S (carte mère différente). L'image KNULLI est faite pour la vraie R36S : sur un clone, la console risque de rester sur un écran noir. Tu peux écrire quand même : ta carte actuelle sera effacée, mais ses fichiers d'écran sont mis de côté sur l'ordinateur.",
+    "knulli_clone_text": "Ta carte vient d'une console clone de la R36S (carte mère différente). L'image {firmware} est faite pour la vraie R36S : sur un clone, la console risque de rester sur un écran noir. Tu peux écrire quand même : ta carte actuelle sera effacée, mais ses fichiers d'écran sont mis de côté sur l'ordinateur.",
     "knulli_clone_write_anyway": "Écrire quand même",
-    "knulli_clone_log": "Console clone détectée sur la carte : KNULLI est fait pour la vraie R36S.",
-    "knulli_console_unknown_log": "Console d'origine ou clone : pas déterminé d'après la carte. KNULLI est fait pour la vraie R36S.",
-    "knulli_console_ambiguous_log": "Console d'origine ou clone : la carte ne permet pas de trancher. KNULLI est fait pour la vraie R36S.",
-    "knulli_console_unreadable_log": "Rien de lisible sur la carte avant l'écriture (carte neuve ou illisible) : impossible de savoir si la console est un clone. KNULLI est fait pour la vraie R36S.",
+    "knulli_clone_log": "Console clone détectée sur la carte : {firmware} est fait pour la vraie R36S.",
+    "knulli_console_unknown_log": "Console d'origine ou clone : pas déterminé d'après la carte. {firmware} est fait pour la vraie R36S.",
+    "knulli_console_ambiguous_log": "Console d'origine ou clone : la carte ne permet pas de trancher. {firmware} est fait pour la vraie R36S.",
+    "knulli_console_unreadable_log": "Rien de lisible sur la carte avant l'écriture (carte neuve ou illisible) : impossible de savoir si la console est un clone. {firmware} est fait pour la vraie R36S.",
     # EmuELEC (§4.6) -- seul fait vérifié : il démarre sur un clone réel
     # (identify/__init__.py::CLONE_DTB_FILENAMES). L'ancienne mention
     # « ArkOS et ROCKNIX n'y démarrent pas » est retirée : dArkOS prend en

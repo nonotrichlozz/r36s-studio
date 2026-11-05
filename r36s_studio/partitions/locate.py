@@ -73,6 +73,10 @@ from r36s_studio.winprocess import no_console_kwargs
 
 BOOT_LABEL = "BOOT"
 EASYROMS_LABEL = "EASYROMS"
+# Autres étiquettes de partition de jeux reconnues comme EASYROMS : Arch R
+# (exFAT, créée au premier démarrage, voir detect/__init__.py).
+EASYROMS_ALT_LABELS = ("ARCHR_ROMS",)
+GAMES_PARTITION_LABELS = (EASYROMS_LABEL,) + EASYROMS_ALT_LABELS
 
 # "msdos" (macOS), "vfat" (Linux), "fat16"/"fat32"/"fat" (Windows, générique) :
 # toutes les graphies de FAT rencontrées selon l'OS.
@@ -175,7 +179,7 @@ def _select_easyroms(partitions: list[PartitionInfo], device_path: str) -> Parti
     ou exFAT -- varie selon le vendeur, confirmé sur du vrai matériel) si
     l'étiquette est absente."""
     for partition in partitions:
-        if partition.label.upper() == EASYROMS_LABEL:
+        if partition.label.upper() in GAMES_PARTITION_LABELS:
             return partition
     if len(partitions) > EASYROMS_PARTITION_INDEX:
         candidate = partitions[EASYROMS_PARTITION_INDEX]

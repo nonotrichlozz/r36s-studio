@@ -1135,3 +1135,16 @@ def test_mount_macos_leaves_partition_unchanged_on_failure(mock_run):
     result = _mount_macos(partition)
 
     assert result == partition
+
+
+def test_archr_roms_partition_is_selected_as_games_partition():
+    from r36s_studio.partitions.locate import PartitionInfo, selected_easyroms_partition
+
+    partitions = [
+        PartitionInfo("/dev/fake-disk-test-3s1", "ARCHR", "fat32", None),
+        PartitionInfo("/dev/fake-disk-test-3s2", "ARCHR_ROOT", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-3s3", "STORAGE", "ext4", None),
+        PartitionInfo("/dev/fake-disk-test-3s4", "ARCHR_ROMS", "exfat", None),
+    ]
+    assert selected_easyroms_partition(partitions).label == "ARCHR_ROMS"
+    assert selected_easyroms_partition(partitions[:3]) is None

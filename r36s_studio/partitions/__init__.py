@@ -18,6 +18,7 @@ from .jobs import (
 from .locate import (
     BOOT_LABEL,
     EASYROMS_LABEL,
+    GAMES_PARTITION_LABELS,
     PartitionInfo,
     PartitionNotFound,
     PartitionNotMounted,
@@ -40,6 +41,7 @@ __all__ = [
     "extract_easyroms",
     "BOOT_LABEL",
     "EASYROMS_LABEL",
+    "GAMES_PARTITION_LABELS",
     "PartitionInfo",
     "PartitionNotFound",
     "PartitionNotMounted",

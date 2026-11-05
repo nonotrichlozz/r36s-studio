@@ -28,7 +28,7 @@ from typing import List
 
 from r36s_studio.winprocess import no_console_kwargs
 
-from .locate import EASYROMS_LABEL, list_partitions
+from .locate import GAMES_PARTITION_LABELS, list_partitions
 
 # STORAGE (ROCKNIX, EmuELEC) est en ext4 : jamais de volume Windows à lettrer.
 _LETTER_MOUNTPOINT = re.compile(r"^[A-Za-z]:\\?$")
@@ -55,7 +55,7 @@ def games_partition_missing_letter(device_path: str) -> bool:
     except (OSError, ValueError, subprocess.CalledProcessError):
         return False
     return any(
-        p.label.upper() == EASYROMS_LABEL and not _LETTER_MOUNTPOINT.match(p.mountpoint or "") for p in partitions
+        p.label.upper() in GAMES_PARTITION_LABELS and not _LETTER_MOUNTPOINT.match(p.mountpoint or "") for p in partitions
     )
 
 
@@ -69,14 +69,14 @@ def assign_games_drive_letters(device_path: str) -> List[AssignedLetter]:
         "$diskNumber = %s\n"
         "Get-Partition -DiskNumber $diskNumber | ForEach-Object {\n"
         "    $volume = $_ | Get-Volume -ErrorAction SilentlyContinue\n"
-        "    if ($volume -and $volume.FileSystemLabel -eq '%s' -and -not [int][char]$_.DriveLetter) {\n"
+        "    if ($volume -and @(%s) -contains $volume.FileSystemLabel -and -not [int][char]$_.DriveLetter) {\n"
         "        $_ | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction SilentlyContinue\n"
         "        $updated = Get-Partition -DiskNumber $diskNumber -PartitionNumber $_.PartitionNumber\n"
         "        $letter = if ([int][char]$updated.DriveLetter) { [string]$updated.DriveLetter } else { '' }\n"
         "        Write-Output \"GAMES=$letter|$($volume.FileSystem)|$($_.NoDefaultDriveLetter)\"\n"
         "    }\n"
         "}\n"
-    ) % (match.group(1), EASYROMS_LABEL)
+    ) % (match.group(1), ", ".join(f"'{label}'" for label in GAMES_PARTITION_LABELS))
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", command],
         capture_output=True,

@@ -93,7 +93,7 @@ from r36s_studio.imaging import sf3000_clone
 from r36s_studio.imaging.fat32 import Fat32VolumeTooSmall
 from r36s_studio.imaging.image_source import is_unstable_image
 from r36s_studio.imaging.source_verify import ImageModified, check_sidecar_matches_size
-from r36s_studio.partitions import EASYROMS_LABEL, archives, list_partitions, set_privileged_mount_hook
+from r36s_studio.partitions import EASYROMS_LABEL, GAMES_PARTITION_LABELS, archives, list_partitions, set_privileged_mount_hook
 from r36s_studio.safety import SafetyConfig, describe_rejection, filter_devices
 from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_different_card
 
@@ -1249,6 +1249,10 @@ class MainWindow(QMainWindow):
             message = tr("error_card_system_incompatible")
         elif refusal == CardSystem.KNULLI and step == "copy_games":
             message = tr("knulli_copy_games_refused")
+        elif refusal == CardSystem.ARCHR:
+            # Partition de jeux exFAT d'Arch R pas encore créée : elle
+            # n'apparaît qu'au premier démarrage de la console.
+            message = tr("archr_games_partition_missing")
         else:
             message = tr("step_refused_card_system", system=card_system_name(refusal))
         self._log_panel.append_log(message)
@@ -1498,6 +1502,12 @@ class MainWindow(QMainWindow):
             return None
         return entry if re.search(entry.auto_download.motif_fichier, Path(self._file_path).name) else None
 
+    def _auto_firmware_title(self) -> str:
+        """Nom du firmware coché (KNULLI, Arch R...) pour les messages
+        communs du téléchargement automatique et du contrôle de clone."""
+        entry = FIRMWARE_BY_ID.get(self._app_config.firmware)
+        return tr(entry.title_key) if entry is not None else ""
+
     def _start_clone_check(self) -> None:
         """Image faite pour la vraie R36S (KNULLI) : la carte est lue avant la
         Confirmation (`console_profile`, nom du .dtb et table dArkOSRE).
@@ -1516,18 +1526,18 @@ class MainWindow(QMainWindow):
         self._assisted_landing.set_busy(False)
         profile = console_profile.profile_from_identify(result)
         if profile == console_profile.CLONE:
-            self._log_panel.append_log(tr("knulli_clone_log"))
+            self._log_panel.append_log(tr("knulli_clone_log", firmware=self._auto_firmware_title()))
             if not self._ask_clone_write_anyway():
                 return
         elif profile in (console_profile.UNKNOWN, console_profile.AMBIGUOUS):
-            self._log_panel.append_log(tr(f"knulli_console_{profile}_log"))
+            self._log_panel.append_log(tr(f"knulli_console_{profile}_log", firmware=self._auto_firmware_title()))
         elif profile is None:
-            self._log_panel.append_log(tr("knulli_console_unreadable_log"))
+            self._log_panel.append_log(tr("knulli_console_unreadable_log", firmware=self._auto_firmware_title()))
         self._confirm_dialog.set_device(self._device, notice=self._first_boot_note())
         self._confirm_dialog.open()
 
     def _ask_clone_write_anyway(self) -> bool:
-        box = QMessageBox(QMessageBox.Warning, tr("knulli_clone_title"), tr("knulli_clone_text"), parent=self)
+        box = QMessageBox(QMessageBox.Warning, tr("knulli_clone_title"), tr("knulli_clone_text", firmware=self._auto_firmware_title()), parent=self)
         write = box.addButton(tr("knulli_clone_write_anyway"), QMessageBox.AcceptRole)
         box.setDefaultButton(box.addButton(QMessageBox.Cancel))
         box.exec()
@@ -2494,9 +2504,9 @@ class MainWindow(QMainWindow):
         self._log_panel.append_log(tr("catalogue_install_file_log", name=fichier.nom))
         # Croisement avec le tableau des notes de version : journal seulement.
         if fichier.appareil_notes:
-            self._log_panel.append_log(tr("knulli_notes_device_log", device=fichier.appareil_notes))
+            self._log_panel.append_log(tr("knulli_notes_device_log", device=fichier.appareil_notes, firmware=self._auto_firmware_title()))
         elif fichier.depuis_derniere_release:
-            self._log_panel.append_log(tr("knulli_notes_missing_log"))
+            self._log_panel.append_log(tr("knulli_notes_missing_log", firmware=self._auto_firmware_title()))
         asset = RocknixAsset(name=fichier.nom, download_url=fichier.url, size_bytes=fichier.taille)
         self._runner = RocknixDownloadRunner(asset, fichier.sha256, parent=self)
         self._runner.progress.connect(self._on_progress)
@@ -2512,7 +2522,7 @@ class MainWindow(QMainWindow):
             self._log_panel.finish_error(friendly, details=error_log_detail(self._last_error_code, self._last_error_msg))
             return
         # Rien n'a encore été écrit sur la carte : pas d'éjection proposée.
-        self._log_panel.finish_success(tr("knulli_download_success", path=path), allow_eject=False, reveal_path=path)
+        self._log_panel.finish_success(tr("knulli_download_success", path=path, firmware=self._auto_firmware_title()), allow_eject=False, reveal_path=path)
         self._file_path = path
         self._proceed_to_flash_confirmation()
 
@@ -2979,7 +2989,7 @@ class MainWindow(QMainWindow):
             except OSError:
                 partitions = []
             for partition in partitions:
-                if partition.label == EASYROMS_LABEL and partition.mountpoint:
+                if partition.label.upper() in GAMES_PARTITION_LABELS and partition.mountpoint:
                     shortcuts.append((f"{device.display} — EASYROMS ({partition.mountpoint})", partition.mountpoint))
         self._doublons_folder_screen.set_shortcuts(shortcuts)
 

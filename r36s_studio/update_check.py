@@ -181,8 +181,10 @@ def _sha256_file(path: Path) -> str:
 
 # Options Inno Setup : installation sans questions (barre de progression
 # visible), l'installeur ferme R36S Studio s'il est encore ouvert, puis le
-# relance à la fin ([Run] de windows_installer.iss, sans `skipifsilent`).
-INSTALLER_ARGS = ("/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS")
+# relance à la fin (`/RELANCER=1`, lu par le [Code] de
+# windows_installer.iss -- jamais par défaut, sinon le test d'installation
+# silencieuse de la CI resterait bloqué sur l'app ouverte).
+INSTALLER_ARGS = ("/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RELANCER=1")
 
 
 def launch_installer(path: Path, popen=None) -> None:

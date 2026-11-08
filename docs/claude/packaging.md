@@ -72,9 +72,12 @@ s'ouvre d'elle-même une fois par lancement, seulement au repos
 (`_is_idle_for_update` : pas d'opération du journal, pas de copie KNULLI,
 pas d'écran d'installation guidée). Clic : `launch_installer` (détaché,
 `/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS`, pas d'UAC :
-`PrivilegesRequired=lowest`), puis l'app quitte ; le `[Run]` de
-`windows_installer.iss` n'a plus `skipifsilent`, donc l'app se relance
-seule. Ne fonctionne qu'à partir de la version qui contient ce code :
+`PrivilegesRequired=lowest`, `/RELANCER=1`), puis l'app quitte ; une
+entrée `[Run]` de `windows_installer.iss` (`Check: RelanceApresMiseAJour`)
+relance l'app seulement avec `/RELANCER=1`. Piège constaté le 2026-11-08 :
+retirer `skipifsilent` relançait l'app pendant le test d'installation
+silencieuse de `release.yml`, dont `Start-Process -Wait` attendait alors
+la fermeture de l'app, à l'infini. Ne fonctionne qu'à partir de la version qui contient ce code :
 une 0.1.22 ou antérieure se met à jour une dernière fois à la main.
 
 À lire quand tu touches à `packaging/`, aux fichiers `.spec`, à `.github/workflows/build.yml` ou à la publication d'une release.

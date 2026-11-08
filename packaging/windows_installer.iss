@@ -52,6 +52,15 @@ Name: "{group}\R36S Studio"; Filename: "{app}\R36S Studio.exe"
 Name: "{autodesktop}\R36S Studio"; Filename: "{app}\R36S Studio.exe"; Tasks: desktopicon
 
 [Run]
-; Sans `skipifsilent` : après une mise à jour automatique (/SILENT, lancée
-; par l'app, update_check.py::INSTALLER_ARGS), R36S Studio se relance seul.
-Filename: "{app}\R36S Studio.exe"; Description: "Lancer R36S Studio"; Flags: nowait postinstall
+Filename: "{app}\R36S Studio.exe"; Description: "Lancer R36S Studio"; Flags: nowait postinstall skipifsilent
+; Mise à jour automatique lancée par l'app (update_check.py::INSTALLER_ARGS,
+; /SILENT ... /RELANCER=1) : relance R36S Studio à la fin. Jamais sans ce
+; paramètre -- une installation silencieuse ordinaire (test de la CI,
+; release.yml) ne doit pas laisser l'app ouverte.
+Filename: "{app}\R36S Studio.exe"; Flags: nowait; Check: RelanceApresMiseAJour
+
+[Code]
+function RelanceApresMiseAJour: Boolean;
+begin
+  Result := ExpandConstant('{param:RELANCER|0}') = '1';
+end;

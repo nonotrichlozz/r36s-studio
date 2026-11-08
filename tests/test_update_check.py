@@ -120,7 +120,7 @@ def test_download_installer_refuses_a_release_without_checksum(tmp_path):
 def test_launch_installer_runs_it_silently(tmp_path):
     calls = []
     update_check.launch_installer(tmp_path / "setup.exe", popen=lambda args, **kwargs: calls.append(args))
-    assert calls == [[str(tmp_path / "setup.exe"), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]]
+    assert calls == [[str(tmp_path / "setup.exe"), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RELANCER=1"]]
 
 
 def test_auto_install_only_for_the_packaged_windows_app(monkeypatch):

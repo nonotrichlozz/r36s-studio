@@ -6252,6 +6252,70 @@ def test_update_dialog_button_opens_store(mock_list, mock_filter, mock_load, qap
     mock_open.assert_called_once_with(update_check.STORE_URL)
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_downloaded_update_opens_once_and_installs_in_one_click(mock_list, mock_filter, mock_load, qapp, tmp_path):
+    """Mise à jour automatique : installeur prêt = fenêtre ouverte d'elle-même
+    (une seule fois), « Installer maintenant » lance l'installeur puis
+    ferme l'app."""
+    from r36s_studio.gui.screens import UpdateDialog
+
+    installer = tmp_path / "R36S-Studio-Setup-v9.0.0.exe"
+    installer.write_bytes(b"MZ")
+    window = MainWindow()
+    window._on_update_available("v9.0.0", "Notes")
+    with patch.object(window, "_open_update_dialog", wraps=window._open_update_dialog) as opened:
+        window._on_update_installer_ready(str(installer))
+        window._show_update_badge_if_idle()
+    assert opened.call_count == 1
+    dialog = window.findChild(UpdateDialog)
+    assert dialog.download_button.text() == "Installer maintenant"
+
+    with patch("r36s_studio.gui.main_window.update_check.launch_installer") as launch, patch(
+        "r36s_studio.gui.main_window.QApplication.instance"
+    ) as instance:
+        dialog.download_requested.emit()
+    launch.assert_called_once_with(installer)
+    instance.return_value.quit.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_update_is_never_installed_during_a_disk_operation(mock_list, mock_filter, mock_load, qapp, tmp_path):
+    installer = tmp_path / "setup.exe"
+    installer.write_bytes(b"MZ")
+    window = MainWindow()
+    window._on_update_available("v9.0.0", "Notes")
+    window._log_panel.start_operation("Sauvegarde")
+    with patch.object(window, "_open_update_dialog") as opened:
+        window._on_update_installer_ready(str(installer))
+    opened.assert_not_called()
+
+    with patch("r36s_studio.gui.main_window.update_check.launch_installer") as launch, patch(
+        "r36s_studio.gui.main_window.QApplication.instance"
+    ) as instance:
+        window._install_update()
+    launch.assert_not_called()
+    instance.return_value.quit.assert_not_called()
+
+
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_no_background_download_outside_the_packaged_windows_app(mock_list, mock_filter, mock_load, qapp):
+    from r36s_studio import update_check
+
+    release = update_check.LatestRelease("v9.0.0", "Notes", "https://github.com/x", 10, "a" * 64)
+    window = MainWindow()
+    with patch("r36s_studio.gui.main_window.update_check.auto_install_supported", return_value=False), patch(
+        "r36s_studio.gui.main_window.UpdateDownloadRunner"
+    ) as runner:
+        window._on_release_available(release)
+    runner.assert_not_called()
+
+
 # --- identification élevée sous Windows (BOOT EFI) ---------------------------
 
 

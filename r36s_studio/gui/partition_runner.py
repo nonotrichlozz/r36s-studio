@@ -191,11 +191,37 @@ class UpdateCheckRunner(QThread):
     existe ; sinon (à jour, hors ligne, erreur) ne dit rien."""
 
     update_available = Signal(str, str)  # tag, notes
+    # Même Release, avec l'installeur Windows vérifiable
+    # (`update_check.LatestRelease`) -- pour la mise à jour automatique.
+    release_available = Signal(object)
 
     def run(self) -> None:
-        latest = update_check.fetch_latest()
-        if latest is not None and update_check.is_newer(latest[0]):
-            self.update_available.emit(*latest)
+        latest = update_check.fetch_latest_release()
+        if latest is not None and update_check.is_newer(latest.tag):
+            self.update_available.emit(latest.tag, latest.notes)
+            self.release_available.emit(latest)
+
+
+class UpdateDownloadRunner(QThread):
+    """Téléchargement en arrière-plan de l'installeur de la nouvelle
+    version (`update_check.download_installer`, taille + SHA-256
+    vérifiées). Silencieux pour l'utilisateur en cas d'échec : le bouton
+    « Nouvelle version disponible » reste, avec l'ancienne page."""
+
+    downloaded = Signal(str)  # chemin de l'installeur vérifié
+    failed = Signal(str)
+
+    def __init__(self, release, parent=None):
+        super().__init__(parent)
+        self._release = release
+
+    def run(self) -> None:
+        try:
+            path = update_check.download_installer(self._release)
+        except update_check.InstallerDownloadError as exc:
+            self.failed.emit(str(exc))
+            return
+        self.downloaded.emit(str(path))
 
 
 class RocknixDownloadRunner(QThread):

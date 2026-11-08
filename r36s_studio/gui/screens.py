@@ -1169,13 +1169,19 @@ class UpdateDialog(Dialog):
 
     download_requested = Signal()
 
-    def __init__(self, tag: str, notes: str, parent=None):
+    def __init__(self, tag: str, notes: str, installable: bool = False, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("update_dialog_title", version=tag))
         layout = QVBoxLayout(self)
         title = QLabel(tr("update_dialog_title", version=tag))
         title.setProperty("role", "title")
         layout.addWidget(title)
+        # Mise à jour automatique (Windows) : installeur déjà téléchargé et
+        # vérifié -- un clic, l'app se ferme, s'installe et se relance.
+        if installable:
+            ready = QLabel(tr("update_dialog_ready"))
+            ready.setWordWrap(True)
+            layout.addWidget(ready)
         browser = QTextBrowser()
         browser.setOpenExternalLinks(True)
         browser.setMarkdown(notes)
@@ -1183,7 +1189,8 @@ class UpdateDialog(Dialog):
         buttons = QHBoxLayout()
         later = QPushButton(tr("update_dialog_later"))
         later.clicked.connect(self.close)
-        download = QPushButton(tr("update_dialog_download"))
+        download = QPushButton(tr("update_dialog_install" if installable else "update_dialog_download"))
+        self.download_button = download
         download.setProperty("role", "primary")
         download.clicked.connect(self.download_requested.emit)
         buttons.addWidget(later)

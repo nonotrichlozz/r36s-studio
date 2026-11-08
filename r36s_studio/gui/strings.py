@@ -1502,6 +1502,8 @@ STRINGS = {
     "update_dialog_title": "R36S Studio {version} est disponible",
     "update_dialog_later": "Plus tard",
     "update_dialog_download": "Obtenir la nouvelle version",
+    "update_dialog_install": "Installer maintenant",
+    "update_dialog_ready": "La nouvelle version est déjà téléchargée et vérifiée. R36S Studio va se fermer, s'installer et se relancer tout seul.",
     "language_restart_title": "Langue / Language",
     "language_restart_message": "La nouvelle langue s'appliquera au prochain démarrage de R36S Studio.",
     # Unités de taille, base 1024 partout (CLAUDE.md §5) -- seules les

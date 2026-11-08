@@ -29,6 +29,7 @@ from typing import List, Optional, Tuple
 from PySide6.QtCore import QByteArray, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -112,6 +113,7 @@ from .partition_runner import (
     SystemBackupEstimate,
     SystemBackupEstimateRunner,
     UpdateCheckRunner,
+    UpdateDownloadRunner,
     WizardFingerprintRunner,
 )
 from .reveal import reveal
@@ -1014,6 +1016,11 @@ class MainWindow(QMainWindow):
         # (tag, notes) -- repris de config.json tant qu'APP_VERSION n'a pas
         # rattrapé la version mémorisée (badge persistant sans réseau).
         self._pending_update: Optional[tuple] = None
+        # Mise à jour automatique : installeur téléchargé et vérifié
+        # (`UpdateDownloadRunner`), fenêtre ouverte d'elle-même une fois.
+        self._update_installer: Optional[Path] = None
+        self._update_download_runner: Optional[UpdateDownloadRunner] = None
+        self._update_dialog_auto_shown = False
         if update_check.is_newer(self._app_config.latest_update_tag):
             self._pending_update = (self._app_config.latest_update_tag, self._app_config.latest_update_notes)
         for controls in (self._home.update_controls, self._assisted_landing.update_controls):
@@ -3444,17 +3451,48 @@ class MainWindow(QMainWindow):
     # --- mises à jour (update_check.py) -----------------------------------
 
     def start_update_check(self) -> None:
-        """Au plus une fois par jour, sur un thread séparé ; silence total
-        si rien de neuf ou hors ligne (`UpdateCheckRunner`). Appelée par
-        `app.py::run`, jamais par le constructeur (tests sans réseau)."""
-        today = datetime.now().date().isoformat()
-        if not self._app_config.check_updates or self._app_config.last_update_check == today:
+        """À chaque démarrage (depuis 2026-11-08 : avant, une fois par jour),
+        sur un thread séparé ; silence total si rien de neuf ou hors ligne
+        (`UpdateCheckRunner`). Appelée par `app.py::run`, jamais par le
+        constructeur (tests sans réseau)."""
+        if not self._app_config.check_updates:
             return
-        self._app_config.last_update_check = today
+        self._app_config.last_update_check = datetime.now().date().isoformat()
         app_config.save_config(self._app_config)
         self._update_runner = UpdateCheckRunner(parent=self)
         self._update_runner.update_available.connect(self._on_update_available)
+        self._update_runner.release_available.connect(self._on_release_available)
         self._update_runner.start()
+
+    def _on_release_available(self, release) -> None:
+        """Mise à jour automatique (Windows empaqueté) : télécharge et
+        vérifie l'installeur en arrière-plan, sans rien demander. Ailleurs,
+        ou sans SHA-256 publiée, le bouton ouvre la page comme avant."""
+        if not update_check.auto_install_supported() or not release.can_auto_install:
+            return
+        if self._update_download_runner is not None and self._update_download_runner.isRunning():
+            return
+        self._log_panel.append_log(f"[mise à jour] téléchargement de {release.tag} en arrière-plan")
+        runner = UpdateDownloadRunner(release, parent=self)
+        runner.downloaded.connect(self._on_update_installer_ready)
+        runner.failed.connect(
+            lambda message: self._log_panel.append_log(f"[mise à jour] téléchargement impossible : {message}")
+        )
+        self._update_download_runner = runner
+        runner.start()
+
+    def _on_update_installer_ready(self, path: str) -> None:
+        self._update_installer = Path(path)
+        self._log_panel.append_log(f"[mise à jour] installeur prêt et vérifié : {path}")
+        self._show_update_badge_if_idle()
+
+    def _is_idle_for_update(self) -> bool:
+        """Jamais d'installation (qui ferme l'app) pendant une écriture :
+        opération du journal de bord, copie KNULLI, ou écran d'installation
+        guidée par USB affiché."""
+        if self._log_panel.is_operation_active() or self._knulli_screen.is_busy():
+            return False
+        return self._root_stack.currentWidget() is not self._procedure_screen
 
     def _on_update_available(self, tag: str, notes: str) -> None:
         self._pending_update = (tag, notes)
@@ -3466,11 +3504,21 @@ class MainWindow(QMainWindow):
 
     def _show_update_badge_if_idle(self) -> None:
         """Jamais pendant une opération disque : rappelée à la fin de chaque
-        opération (`_on_worker_finished`)."""
+        opération (`_on_worker_finished`). Installeur déjà téléchargé :
+        la fenêtre « Installer maintenant » s'ouvre d'elle-même, une seule
+        fois par lancement."""
         if self._pending_update is None or self._log_panel.is_operation_active():
             return
         for controls in (self._home.update_controls, self._assisted_landing.update_controls):
             controls.badge.setVisible(self._app_config.check_updates)
+        if (
+            self._update_installer is not None
+            and not self._update_dialog_auto_shown
+            and self._app_config.check_updates
+            and self._is_idle_for_update()
+        ):
+            self._update_dialog_auto_shown = True
+            self._open_update_dialog()
 
     def _on_update_check_toggled(self, checked: bool) -> None:
         self._app_config.check_updates = checked
@@ -3485,9 +3533,32 @@ class MainWindow(QMainWindow):
     def _open_update_dialog(self) -> None:
         if self._pending_update is None:
             return
-        dialog = UpdateDialog(*self._pending_update, parent=self)
-        dialog.download_requested.connect(lambda: webbrowser.open(update_check.STORE_URL))
+        installable = self._update_installer is not None
+        dialog = UpdateDialog(*self._pending_update, installable=installable, parent=self)
+        if installable:
+            dialog.download_requested.connect(self._install_update)
+        else:
+            dialog.download_requested.connect(lambda: webbrowser.open(update_check.STORE_URL))
         dialog.open()
+
+    def _install_update(self) -> None:
+        """Lance l'installeur vérifié puis ferme R36S Studio : l'installeur
+        remplace l'app et la relance tout seul. Refusé pendant une écriture
+        (repli : il sera reproposé au prochain lancement)."""
+        if self._update_installer is None or not self._update_installer.is_file():
+            webbrowser.open(update_check.STORE_URL)
+            return
+        if not self._is_idle_for_update():
+            self._log_panel.append_log("[mise à jour] installation reportée : une opération est en cours")
+            return
+        try:
+            update_check.launch_installer(self._update_installer)
+        except OSError as exc:
+            self._log_panel.append_log(f"[mise à jour] lancement de l'installeur impossible : {exc}")
+            webbrowser.open(update_check.STORE_URL)
+            return
+        self._log_panel.append_log("[mise à jour] installation lancée, fermeture de R36S Studio")
+        QApplication.instance().quit()
 
     def _on_language_selected(self, code: str) -> None:
         """Choix de langue depuis l'un des deux accueils (i18n.py) --

@@ -1107,6 +1107,8 @@ STRINGS_EN = {
     "update_dialog_title": "R36S Studio {version} is available",
     "update_dialog_later": "Later",
     "update_dialog_download": "Get the new version",
+    "update_dialog_install": "Install now",
+    "update_dialog_ready": "The new version is already downloaded and verified. R36S Studio will close, install it and restart on its own.",
     "language_restart_title": "Langue / Language",
     "language_restart_message": "The new language will apply the next time you start R36S Studio.",
     "unit_bytes": "B",

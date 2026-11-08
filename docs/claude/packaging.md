@@ -46,7 +46,7 @@ Actions »). Icône :
 **Vérification des mises à jour** (`update_check.py`, `UpdateCheckRunner`,
 `UpdateControls`/`UpdateDialog` sur les deux accueils) : lancée par
 `app.py::run` (jamais par le constructeur de `MainWindow`, donc jamais en
-test), au plus une fois par jour (`config.json::last_update_check`),
+test), à chaque démarrage depuis 2026-11-08 (avant : une fois par jour),
 désactivable (`check_updates`). Toute erreur réseau = silence. Dernière
 version trouvée mémorisée (`latest_update_tag`/`latest_update_notes`) :
 badge aux lancements suivants sans réseau, jusqu'à ce qu'`APP_VERSION` la
@@ -58,6 +58,24 @@ téléchargement). À remplacer par l'adresse de la boutique quand elle
 existera. Badge
 masqué tant qu'une opération est en cours, réévalué à chaque
 `_on_worker_finished`.
+
+**Mise à jour automatique (2026-11-08, Windows empaqueté seulement,
+`update_check.auto_install_supported`)** : `fetch_latest_release` lit
+l'asset `R36S-Studio-Setup.exe` de la dernière Release -- adresse sous
+`github.com/nonotrichlozz/r36s-studio/releases/download/`, taille
+≤ 512 Mio et SHA-256 du champ `digest` exigées, sinon pas d'installation
+automatique (repli : bouton vers la page). `UpdateDownloadRunner`
+télécharge en arrière-plan dans `%TEMP%\R36S Studio\mise-a-jour\`
+(`.part`, renommé seulement si taille et SHA-256 justes ; fichier déjà
+juste réutilisé). Installeur prêt : la fenêtre « Installer maintenant »
+s'ouvre d'elle-même une fois par lancement, seulement au repos
+(`_is_idle_for_update` : pas d'opération du journal, pas de copie KNULLI,
+pas d'écran d'installation guidée). Clic : `launch_installer` (détaché,
+`/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS`, pas d'UAC :
+`PrivilegesRequired=lowest`), puis l'app quitte ; le `[Run]` de
+`windows_installer.iss` n'a plus `skipifsilent`, donc l'app se relance
+seule. Ne fonctionne qu'à partir de la version qui contient ce code :
+une 0.1.22 ou antérieure se met à jour une dernière fois à la main.
 
 À lire quand tu touches à `packaging/`, aux fichiers `.spec`, à `.github/workflows/build.yml` ou à la publication d'une release.
 

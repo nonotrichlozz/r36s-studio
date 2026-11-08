@@ -52,4 +52,6 @@ Name: "{group}\R36S Studio"; Filename: "{app}\R36S Studio.exe"
 Name: "{autodesktop}\R36S Studio"; Filename: "{app}\R36S Studio.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\R36S Studio.exe"; Description: "Lancer R36S Studio"; Flags: nowait postinstall skipifsilent
+; Sans `skipifsilent` : après une mise à jour automatique (/SILENT, lancée
+; par l'app, update_check.py::INSTALLER_ARGS), R36S Studio se relance seul.
+Filename: "{app}\R36S Studio.exe"; Description: "Lancer R36S Studio"; Flags: nowait postinstall

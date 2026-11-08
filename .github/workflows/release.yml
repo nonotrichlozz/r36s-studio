@@ -24,6 +24,7 @@ on:
     paths:
       - "r36s_studio/__init__.py"
       - ".github/workflows/release.yml"
+      - "packaging/windows_installer.iss"
 
 jobs:
   version:

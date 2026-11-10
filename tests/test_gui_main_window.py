@@ -6316,6 +6316,25 @@ def test_no_background_download_outside_the_packaged_windows_app(mock_list, mock
     runner.assert_not_called()
 
 
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=AppConfig(ui_mode="assisted"))
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_update_search_result_is_always_written_in_the_log(mock_list, mock_filter, mock_load, qapp):
+    """Une recherche sans rien de neuf doit se voir dans le journal (sinon on
+    croit qu'elle n'a pas eu lieu, constaté le 2026-11-10)."""
+    from r36s_studio import APP_VERSION
+
+    window = MainWindow()
+    with patch.object(window._log_panel, "append_log") as log:
+        window._on_update_checked("a_jour", f"v{APP_VERSION}")
+        window._on_update_checked("erreur", "")
+    lines = [call.args[0] for call in log.call_args_list]
+    assert lines == [
+        f"Tu as la dernière version ({APP_VERSION}).",
+        "Impossible de vérifier les mises à jour (pas de connexion internet ?).",
+    ]
+
+
 # --- identification élevée sous Windows (BOOT EFI) ---------------------------
 
 

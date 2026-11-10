@@ -46,7 +46,10 @@ Actions »). Icône :
 **Vérification des mises à jour** (`update_check.py`, `UpdateCheckRunner`,
 `UpdateControls`/`UpdateDialog` sur les deux accueils) : lancée par
 `app.py::run` (jamais par le constructeur de `MainWindow`, donc jamais en
-test), à chaque démarrage depuis 2026-11-08 (avant : une fois par jour),
+test), à chaque démarrage depuis 2026-11-08 (avant : une fois par jour) ;
+chaque recherche et son résultat sont écrits dans le journal (`update_log_*`,
+`UpdateCheckRunner.checked`, 2026-11-10 : une recherche sans rien de neuf
+passait pour absente),
 désactivable (`check_updates`). Toute erreur réseau = silence. Dernière
 version trouvée mémorisée (`latest_update_tag`/`latest_update_notes`) :
 badge aux lancements suivants sans réseau, jusqu'à ce qu'`APP_VERSION` la

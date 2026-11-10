@@ -194,12 +194,21 @@ class UpdateCheckRunner(QThread):
     # Même Release, avec l'installeur Windows vérifiable
     # (`update_check.LatestRelease`) -- pour la mise à jour automatique.
     release_available = Signal(object)
+    # Résultat de chaque recherche, pour le journal (2026-11-10 : une
+    # recherche sans rien de neuf passait inaperçue, on croyait qu'elle
+    # n'avait pas lieu) : "a_jour" ou "erreur", avec la version vue.
+    checked = Signal(str, str)
 
     def run(self) -> None:
         latest = update_check.fetch_latest_release()
-        if latest is not None and update_check.is_newer(latest.tag):
+        if latest is None:
+            self.checked.emit("erreur", "")
+            return
+        if update_check.is_newer(latest.tag):
             self.update_available.emit(latest.tag, latest.notes)
             self.release_available.emit(latest)
+        else:
+            self.checked.emit("a_jour", latest.tag)
 
 
 class UpdateDownloadRunner(QThread):

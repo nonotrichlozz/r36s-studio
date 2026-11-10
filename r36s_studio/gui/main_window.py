@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from r36s_studio import config as app_config
-from r36s_studio import update_check
+from r36s_studio import APP_VERSION, update_check
 from r36s_studio.android import adb as android_adb
 from r36s_studio.android import emulators as android_emulators
 from r36s_studio.android import platform_tools as android_platform_tools
@@ -3459,10 +3459,21 @@ class MainWindow(QMainWindow):
             return
         self._app_config.last_update_check = datetime.now().date().isoformat()
         app_config.save_config(self._app_config)
+        self._log_panel.append_log(tr("update_log_checking"))
         self._update_runner = UpdateCheckRunner(parent=self)
         self._update_runner.update_available.connect(self._on_update_available)
+        self._update_runner.update_available.connect(
+            lambda tag, _notes: self._log_panel.append_log(tr("update_log_found", version=tag))
+        )
         self._update_runner.release_available.connect(self._on_release_available)
+        self._update_runner.checked.connect(self._on_update_checked)
         self._update_runner.start()
+
+    def _on_update_checked(self, result: str, tag: str) -> None:
+        if result == "a_jour":
+            self._log_panel.append_log(tr("update_log_up_to_date", version=APP_VERSION))
+        else:
+            self._log_panel.append_log(tr("update_log_failed"))
 
     def _on_release_available(self, release) -> None:
         """Mise à jour automatique (Windows empaqueté) : télécharge et

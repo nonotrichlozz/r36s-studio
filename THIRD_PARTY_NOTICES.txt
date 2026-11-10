@@ -30,6 +30,17 @@ Les composants de Qt eux-mêmes sous licence tierce (zlib, libpng, libjpeg,
 FreeType, HarfBuzz, PCRE2...) sont listés par Qt :
 https://doc.qt.io/qt-6/licenses-used-in-qt.html
 
+Application Android (android-app/)
+---------------------------------
+L'application Android n'embarque aucun des composants ci-dessus. Elle
+embarque :
+
+| Composant | Licence | Source |
+|---|---|---|
+| AndroidX (Core, Activity, Lifecycle) et Jetpack Compose (UI, Foundation, Material 3) | Apache License 2.0 | https://developer.android.com/jetpack/androidx |
+| Kotlin (bibliothèque standard) et kotlinx.coroutines | Apache License 2.0 | https://kotlinlang.org/ -- https://github.com/Kotlin/kotlinx.coroutines |
+| XZ for Java (décompression .img.xz) | 0BSD | https://tukaani.org/xz/java.html |
+
 Remplacer py7zr et ses dépendances LGPL v2.1
 --------------------------------------------
 py7zr, pyppmd, pybcj, inflate64 et multivolumefile sont livrés sous forme

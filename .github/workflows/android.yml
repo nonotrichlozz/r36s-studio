@@ -1,0 +1,51 @@
+name: Android
+
+# Application Android (android-app/) : tests du coeur (faux lecteur USB,
+# flash, sauvegarde, table de partitions) puis construction de l'APK.
+# L'APK est a telecharger dans l'onglet Actions (artefact "R36S-Studio-Android").
+on:
+  push:
+    branches: [main, android-app]
+    paths:
+      - "android-app/**"
+      - ".github/workflows/android.yml"
+      - "r36s_studio/__init__.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - "android-app/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: APK Android
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Lancer les tests du coeur
+        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
+
+      - name: Construire l'APK
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Publier l'APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: R36S-Studio-Android
+          path: android-app/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

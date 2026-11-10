@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Silhouette de console portable, dessinée (aucune image embarquée). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#12222F"
+        android:strokeColor="#2DD4E8"
+        android:strokeWidth="2.5"
+        android:pathData="M36,26h36a5,5 0,0 1,5 5v46a5,5 0,0 1,-5 5h-36a5,5 0,0 1,-5 -5v-46a5,5 0,0 1,5 -5z" />
+    <path
+        android:fillColor="#2DD4E8"
+        android:pathData="M38,32h32v22h-32z" />
+    <path
+        android:fillColor="#2DD4E8"
+        android:pathData="M41,62h3v-3h4v3h3v4h-3v3h-4v-3h-3z" />
+    <path
+        android:fillColor="#2DD4E8"
+        android:pathData="M63,61a2.5,2.5 0,1 0,0.01 0zM69,67a2.5,2.5 0,1 0,0.01 0z" />
+</vector>

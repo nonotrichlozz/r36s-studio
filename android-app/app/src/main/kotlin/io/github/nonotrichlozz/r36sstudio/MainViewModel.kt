@@ -137,6 +137,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (ignored: Exception) {
         }
         cancelToken.cancelled = true
+        OperationService.stop()
     }
 
     // ------------------------------------------------------------------
@@ -480,6 +481,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isCardOperation = cardOperation
         // Le journal est vidé au démarrage d'une opération, jamais entre-temps.
         _state.update { it.copy(op = OpState(title, phase), log = emptyList()) }
+        // Au mieux : si Android refuse, l'opération continue, mais il faut alors garder l'appli affichée.
+        if (!OperationService.start(app, title)) log(Strings.LOG_NO_BACKGROUND)
         job = viewModelScope.launch(Dispatchers.IO) {
             try {
                 body(token)
@@ -496,6 +499,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (!detail.isNullOrBlank()) log(Strings.logDetail("${e.javaClass.simpleName} : $detail"), LogKind.DETAIL)
                 }
             } finally {
+                OperationService.stop()
                 isCardOperation = false
                 _state.update { it.copy(op = null) }
                 if (cardOperation) refreshCards(force = true)

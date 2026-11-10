@@ -75,7 +75,10 @@ object Strings {
     const val PHASE_VERIFY_SOURCE = "Seconde lecture de contrôle"
     const val PHASE_DOWNLOAD = "Téléchargement"
     const val PHASE_CHECK_FILE = "Vérification du fichier"
-    const val KEEP_OPEN = "Garde l'appli ouverte et ne débranche pas la carte."
+    const val KEEP_OPEN = "Ne débranche pas la carte et ne ferme pas R36S Studio."
+    const val NOTIFICATION_CHANNEL = "Opération en cours"
+    const val NOTIFICATION_TEXT = "Ne débranche pas la carte."
+    const val LOG_NO_BACKGROUND = "Garde R36S Studio affiché à l'écran jusqu'à la fin."
 
     const val LOG_RESOLVING = "Recherche de la dernière version…"
     fun logDownloading(name: String) = "Téléchargement de $name"

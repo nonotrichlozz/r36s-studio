@@ -38,6 +38,7 @@ la carte après le flash, `identify/rocknix_r36s.py`).
 | `usb/UsbCards.kt` | Détection et ouverture du lecteur (API USB Host d'Android) |
 | `Firmwares.kt` | Catalogue, dernière release GitHub, téléchargement vérifié |
 | `MainViewModel.kt` | État de l'écran, opérations, journal |
+| `OperationService.kt` | Garde l'appli en vie pendant une opération (aucun travail propre) |
 | `ui/Screens.kt`, `ui/Theme.kt` | Interface ; palette recopiée de `gui/theme.py` |
 | `Strings.kt` | Tous les textes (équivalent de `gui/strings.py`) |
 
@@ -78,8 +79,15 @@ matériel réel.
   « système sans les jeux ».
 - Sauvegarde d'une carte GPT : la copie de secours de la table (fin de carte)
   n'est pas dans l'image.
-- L'écran reste allumé pendant une opération, mais il n'y a **pas de service
-  d'avant-plan** : quitter l'appli pendant une écriture peut l'interrompre.
+- **Opération en arrière-plan** : `OperationService` (service d'avant-plan de
+  type `connectedDevice`, notification permanente, verrou d'éveil de 6 h au
+  plus) garde l'appli en vie quand on passe à une autre appli ou que l'écran
+  s'éteint. Il ne fait aucun travail : l'opération reste dans
+  `MainViewModel`, donc **fermer l'appli depuis les applis récentes
+  l'interrompt toujours**. S'il ne peut pas démarrer, l'opération continue
+  et le journal demande de garder l'appli affichée. Arrêt sans
+  `stopService` (plantage si appelé juste après le démarrage) : le service
+  s'arrête lui-même (`wanted`).
 
 ## Construction
 
@@ -90,7 +98,9 @@ nouvelle. Pas encore d'APK signé pour diffusion.
 
 ## Jamais vérifié sur du vrai matériel
 
-Tout ce qui touche au téléphone : détection du lecteur, demande
+Tout ce qui touche au téléphone : `OperationService` (accepté ou non par
+Android 14+ avec la seule autorisation USB, survie réelle écran éteint),
+détection du lecteur, demande
 d'autorisation, débit réel, comportement d'Android quand l'appli prend le
 lecteur (notification « carte non prise en charge » possible), lecteurs à
 plusieurs fentes, cartes à blocs de 4096 octets.

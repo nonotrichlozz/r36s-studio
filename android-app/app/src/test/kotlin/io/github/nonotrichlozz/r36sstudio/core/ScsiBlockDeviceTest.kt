@@ -15,7 +15,7 @@ class ScsiBlockDeviceTest {
     @Test
     fun initReadsNameAndCapacity() {
         val reader = FakeUsbReader(ByteArray(4 * 1024 * 1024))
-        val device = ScsiBlockDevice(reader)
+        val device = ScsiBlockDevice(reader, sleep = {})
         device.init()
         assertEquals(512, device.blockSize)
         assertEquals(8192L, device.blockCount)
@@ -29,7 +29,7 @@ class ScsiBlockDeviceTest {
     fun initWaitsThroughUnitAttention() {
         val reader = FakeUsbReader(ByteArray(1024 * 1024))
         reader.unitAttentionCount = 2
-        val device = ScsiBlockDevice(reader)
+        val device = ScsiBlockDevice(reader, sleep = {})
         device.init()
         assertEquals(2048L, device.blockCount)
     }
@@ -39,7 +39,7 @@ class ScsiBlockDeviceTest {
         val reader = FakeUsbReader(ByteArray(1024 * 1024))
         reader.mediumPresent = false
         try {
-            ScsiBlockDevice(reader).init()
+            ScsiBlockDevice(reader, sleep = {}).init()
             fail("NoMediumException attendue")
         } catch (e: NoMediumException) {
             // attendu
@@ -47,11 +47,30 @@ class ScsiBlockDeviceTest {
     }
 
     @Test
+    fun waitsWhenReaderFirstClaimsThereIsNoCard() {
+        val reader = FakeUsbReader(ByteArray(1024 * 1024))
+        reader.noMediumCount = 12
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        assertEquals(2048L, device.blockCount)
+        assertTrue(reader.commands.contains(0x1B)) // on lui a demandé de démarrer
+    }
+
+    @Test
+    fun acceptsReaderThatNeverSaysReadyButGivesCapacity() {
+        val reader = FakeUsbReader(ByteArray(1024 * 1024))
+        reader.neverReady = true
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        assertEquals(2048L, device.blockCount)
+    }
+
+    @Test
     fun readsAndWritesAcrossSeveralCommands() {
         val disk = patternBytes(4 * 1024 * 1024)
         val original = disk.copyOf()
         val reader = FakeUsbReader(disk)
-        val device = ScsiBlockDevice(reader)
+        val device = ScsiBlockDevice(reader, sleep = {})
         device.init()
 
         // 3 Mio : plus qu'une commande (512 Kio) et plus qu'un transfert USB (64 Kio).
@@ -69,7 +88,7 @@ class ScsiBlockDeviceTest {
     @Test
     fun refusesAccessBeyondTheCard() {
         val reader = FakeUsbReader(ByteArray(1024 * 1024))
-        val device = ScsiBlockDevice(reader)
+        val device = ScsiBlockDevice(reader, sleep = {})
         device.init()
         try {
             device.write(2047, ByteArray(1024), 2)
@@ -83,7 +102,7 @@ class ScsiBlockDeviceTest {
     @Test
     fun flushToleratesReadersWithoutCache() {
         val reader = FakeUsbReader(ByteArray(1024 * 1024))
-        val device = ScsiBlockDevice(reader)
+        val device = ScsiBlockDevice(reader, sleep = {})
         device.init()
         device.flush() // le faux lecteur répond ILLEGAL REQUEST : ne doit pas lever
     }

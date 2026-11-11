@@ -32,6 +32,8 @@ android {
         targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersion
+        // Affiché sous le titre : savoir quelle construction tourne pendant les essais.
+        buildConfigField("String", "BUILD_ID", "\"" + (System.getenv("GITHUB_SHA") ?: "local").take(7) + "\"")
     }
 
     buildTypes {

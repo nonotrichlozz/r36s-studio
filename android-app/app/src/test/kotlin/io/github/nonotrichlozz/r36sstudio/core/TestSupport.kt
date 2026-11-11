@@ -52,6 +52,12 @@ fun patternBytes(size: Int, seed: Int = 7): ByteArray {
 /** Faux lecteur de carte USB : répond au protocole Bulk-Only/SCSI sur un disque en mémoire. */
 class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTransport {
     var mediumPresent = true
+
+    /** Nombre de TEST UNIT READY qui répondent « pas de carte » avant que la carte apparaisse. */
+    var noMediumCount = 0
+
+    /** Lecteur qui répond toujours « pas prêt » mais lit et écrit quand même. */
+    var neverReady = false
     var unitAttentionCount = 0
     var resets = 0
     val commands = mutableListOf<Int>()
@@ -96,7 +102,11 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
                 csw = makeCsw(tag, 0)
             }
             0x00 -> {
-                if (!mediumPresent) {
+                if (!mediumPresent || neverReady) {
+                    sense = byteArrayOf(2, 0x3A, 0)
+                    csw = makeCsw(tag, 1)
+                } else if (noMediumCount > 0) {
+                    noMediumCount--
                     sense = byteArrayOf(2, 0x3A, 0)
                     csw = makeCsw(tag, 1)
                 } else if (unitAttentionCount > 0) {
@@ -116,7 +126,11 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
                 pendingIn = reply
                 csw = makeCsw(tag, 0)
             }
-            0x25 -> {
+            0x1B -> csw = makeCsw(tag, 0)
+            0x25 -> if (!mediumPresent) {
+                sense = byteArrayOf(2, 0x3A, 0)
+                csw = makeCsw(tag, 1)
+            } else {
                 val reply = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
                 reply.putInt(disk.size / blockSize - 1)
                 reply.putInt(blockSize)

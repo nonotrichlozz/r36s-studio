@@ -28,7 +28,8 @@ open class ScsiException(
 ) : IOException(message)
 
 /** Le lecteur est là, mais aucune carte n'est dedans. */
-class NoMediumException : ScsiException("Aucune carte dans le lecteur", 2, 0x3A, 0)
+class NoMediumException(attempts: Int = 1) :
+    ScsiException("Aucune carte dans le lecteur (sense 2/58/0, $attempts essais)", 2, 0x3A, 0)
 
 /**
  * Carte vue à travers un lecteur USB de stockage de masse (SCSI transparent
@@ -38,6 +39,7 @@ class NoMediumException : ScsiException("Aucune carte dans le lecteur", 2, 0x3A,
 class ScsiBlockDevice(
     private val transport: BulkTransport,
     private val lun: Int = 0,
+    private val sleep: (Long) -> Unit = { Thread.sleep(it) },
 ) : BlockDevice {
 
     override var blockSize: Int = 0
@@ -57,8 +59,18 @@ class ScsiBlockDevice(
     @Throws(IOException::class)
     fun init() {
         inquiry()
-        waitReady()
-        readCapacity()
+        val notReady = waitReady()
+        if (notReady == null) {
+            readCapacity()
+            return
+        }
+        // Certains lecteurs bon marché répondent « pas prêt » indéfiniment tout
+        // en donnant la capacité et les blocs : dernier essai avant d'abandonner.
+        try {
+            readCapacity()
+        } catch (e: IOException) {
+            throw notReady
+        }
     }
 
     private fun inquiry() {
@@ -71,22 +83,38 @@ class ScsiBlockDevice(
         product = String(data, 16, 16, Charsets.US_ASCII).trim { it <= ' ' }
     }
 
-    private fun waitReady() {
+    /**
+     * Attend que la carte soit prête. Renvoie `null` si elle l'est, sinon la
+     * dernière raison donnée par le lecteur.
+     *
+     * « Pas de carte » (sense 2/3A) n'est pas cru sur parole : juste après
+     * que l'appli a pris le lecteur à Android, beaucoup de lecteurs bon
+     * marché l'annoncent pendant quelques secondes alors que la carte est là
+     * (constaté le 2026-11-11, lecteur « USB 2.0 micro SD » + SanDisk 32 Go).
+     * On leur demande de démarrer (START STOP UNIT) et on réessaie.
+     */
+    private fun waitReady(): ScsiException? {
         var last: ScsiException? = null
         for (attempt in 0 until READY_ATTEMPTS) {
             val status = execute(byteArrayOf(0, 0, 0, 0, 0, 0), null, 0, 0, directionIn = false, exact = true)
-            if (status == 0) return
+            if (status == 0) return null
             val sense = senseException("TEST UNIT READY")
-            if (sense.senseKey == 2 && sense.asc == 0x3A) throw NoMediumException()
-            last = sense
+            last = if (sense.senseKey == 2 && sense.asc == 0x3A) NoMediumException(attempt + 1) else sense
+            if (sense.senseKey == 2 && attempt % 4 == 0) startUnit()
             try {
-                Thread.sleep(READY_DELAY_MS)
+                sleep(READY_DELAY_MS)
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
                 throw IOException("Interrompu")
             }
         }
-        throw last ?: ScsiException("La carte ne répond pas")
+        return last ?: ScsiException("La carte ne répond pas")
+    }
+
+    /** START STOP UNIT (démarrer) : au mieux, un refus est sans importance. */
+    private fun startUnit() {
+        val status = execute(byteArrayOf(0x1B, 0, 0, 0, 0x01, 0), null, 0, 0, directionIn = false, exact = true)
+        if (status != 0) senseException("START STOP UNIT")
     }
 
     private fun readCapacity() {
@@ -243,7 +271,8 @@ class ScsiBlockDevice(
         /** Octets par appel au tuyau USB (multiple de la taille de paquet). */
         const val MAX_BULK_CHUNK = 64 * 1024
 
-        private const val READY_ATTEMPTS = 20
+        // 40 x 250 ms : dix secondes de patience avant de déclarer la carte absente.
+        private const val READY_ATTEMPTS = 40
         private const val READY_DELAY_MS = 250L
     }
 }

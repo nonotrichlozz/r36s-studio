@@ -26,7 +26,9 @@ object Strings {
     const val CARD_PROBING = "Lecture de la carte…"
     const val CARD_READY_HINT = "Carte prête"
     const val CARD_PROBLEM = "Carte illisible"
-    const val CARD_NO_MEDIUM_HINT = "Le lecteur est branché, mais il n'y a pas de carte dedans."
+    const val CARD_NO_MEDIUM_HINT =
+        "Le lecteur est branché, mais il ne voit pas de carte. Enfonce bien la carte, rebranche le lecteur, puis appuie sur Rafraîchir."
+    val VERSION_LINE = "Version " + BuildConfig.VERSION_NAME + " (" + BuildConfig.BUILD_ID + ")"
     const val CARD_REJECTED_SIZE = "Impossible de connaître la taille de cette carte : elle est refusée par sécurité."
     const val CARD_REJECTED_LARGE = "Ce support est trop gros pour être une carte de console : il est refusé par sécurité."
     const val REFRESH = "Rafraîchir"

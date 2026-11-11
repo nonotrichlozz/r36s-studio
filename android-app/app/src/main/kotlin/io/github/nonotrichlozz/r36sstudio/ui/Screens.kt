@@ -107,6 +107,7 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
             ) {
                 Text(Strings.APP_TITLE, color = Palette.TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text(Strings.APP_SUBTITLE, color = Palette.TextSecondary, fontSize = 13.sp)
+                Text(Strings.VERSION_LINE, color = Palette.NotRelevantFg, fontSize = 11.sp)
 
                 CardBanner(
                     card = state.card,
@@ -178,6 +179,7 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
 private fun CardBanner(card: CardState, busy: Boolean, onRefresh: () -> Unit, onAllow: () -> Unit) {
     val title: String
     val hint: String
+    val detail = (card as? CardState.Problem)?.detail ?: ""
     when (card) {
         CardState.None -> {
             title = Strings.CARD_NONE
@@ -223,6 +225,9 @@ private fun CardBanner(card: CardState, busy: Boolean, onRefresh: () -> Unit, on
                         else -> Palette.TextSecondary
                     }
                     Text(hint, color = hintColor, fontSize = 13.sp)
+                }
+                if (detail.isNotEmpty()) {
+                    Text(Strings.logDetail(detail), color = Palette.TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
             }
             Spacer(Modifier.width(8.dp))

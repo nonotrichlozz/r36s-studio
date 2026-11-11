@@ -96,6 +96,15 @@ artefact « R36S-Studio-Android ». APK de débogage : signature propre à chaqu
 construction, donc désinstaller l'ancienne version avant d'installer la
 nouvelle. Pas encore d'APK signé pour diffusion.
 
+## Essais sur du vrai matériel
+
+- 2026-11-11, lecteur « USB 2.0 micro SD » premier prix sur adaptateur USB-C,
+  SanDisk Ultra 32 Go : lecteur détecté, autorisation accordée, INQUIRY
+  répondu, mais TEST UNIT READY renvoie « pas de carte » (sense 2/3A) alors
+  que la carte est en place. Correctif : dix secondes de patience, START STOP
+  UNIT, puis READ CAPACITY tenté malgré tout ; le bandeau affiche une ligne
+  `[détail]` (VID:PID, exception, sense). Résultat du correctif : à confirmer.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

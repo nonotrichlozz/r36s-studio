@@ -57,7 +57,7 @@ sealed interface CardState {
     data class NeedsPermission(val device: UsbDevice) : CardState
     data class Probing(val device: UsbDevice) : CardState
     data class Ready(val device: UsbDevice, val display: String, val sizeBytes: Long, val headHash: String) : CardState
-    data class Problem(val message: String) : CardState
+    data class Problem(val message: String, val detail: String = "") : CardState
 }
 
 enum class LogKind { INFO, SUCCESS, ERROR, DETAIL }
@@ -204,13 +204,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: NoMediumException) {
-                CardState.Problem(Strings.CARD_NO_MEDIUM_HINT)
+                CardState.Problem(Strings.CARD_NO_MEDIUM_HINT, probeDetail(device, e))
             } catch (e: Exception) {
-                CardState.Problem(Strings.ERROR_CARD_GONE)
+                CardState.Problem(Strings.ERROR_CARD_GONE, probeDetail(device, e))
             }
             if (generation == probeGeneration) _state.update { it.copy(card = result) }
         }
     }
+
+    /** Ligne brute pour le diagnostic : jamais dans le message principal. */
+    private fun probeDetail(device: UsbDevice, e: Exception): String =
+        String.format(
+            Locale.ROOT,
+            "USB %04x:%04x — %s : %s",
+            device.vendorId,
+            device.productId,
+            e.javaClass.simpleName,
+            e.message ?: "",
+        )
 
     // ------------------------------------------------------------------
     // Fenêtres

@@ -149,6 +149,15 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
   importance », probablement passée en lecture seule (fin de vie). Message
   dédié ajouté (`WriteProtectedException`). À confirmer avec une autre carte.
 
+- 2026-11-11, construction `c1d5226` : refus d'écriture confirmé avec des
+  commandes de 32 Kio, et MODE SENSE annonce la protection en écriture.
+  Arnaud précise : **même lecteur + même carte écrivent sans problème sur le
+  PC** (KNULLI flashé, puis carte remise à zéro). Le verrouillage est donc
+  propre au téléphone. Pistes : la remise à zéro du lecteur à l'ouverture
+  (essai croisé automatique ajouté à la détection, résultat affiché dans le
+  bandeau), l'alimentation par la prise du téléphone (adaptateur USB-C en
+  plus), ou la prise en main du lecteur par l'appli. Non tranché.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

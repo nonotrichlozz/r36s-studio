@@ -179,7 +179,11 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
 private fun CardBanner(card: CardState, busy: Boolean, onRefresh: () -> Unit, onAllow: () -> Unit) {
     val title: String
     val hint: String
-    val detail = (card as? CardState.Problem)?.detail ?: ""
+    val detail = when (card) {
+        is CardState.Problem -> card.detail
+        is CardState.Ready -> card.detail
+        else -> ""
+    }
     when (card) {
         CardState.None -> {
             title = Strings.CARD_NONE
@@ -199,7 +203,7 @@ private fun CardBanner(card: CardState, busy: Boolean, onRefresh: () -> Unit, on
         }
         is CardState.Ready -> {
             title = card.display + " — " + Strings.formatSize(card.sizeBytes)
-            hint = Strings.CARD_READY_HINT
+            hint = if (card.writeProtected) Strings.CARD_LOCKED_HINT else Strings.CARD_READY_HINT
         }
         is CardState.Problem -> {
             title = Strings.CARD_PROBLEM
@@ -220,7 +224,7 @@ private fun CardBanner(card: CardState, busy: Boolean, onRefresh: () -> Unit, on
                 Text(title, color = Palette.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 if (hint.isNotEmpty()) {
                     val hintColor = when (card) {
-                        is CardState.Ready -> Palette.AvailableFg
+                        is CardState.Ready -> if (card.writeProtected) Palette.WarningFg else Palette.AvailableFg
                         is CardState.Problem, CardState.Several -> Palette.WarningFg
                         else -> Palette.TextSecondary
                     }

@@ -102,7 +102,7 @@ object UsbCards {
      * lecteur à plusieurs fentes, prend la première qui contient une carte.
      */
     @Throws(IOException::class)
-    fun open(manager: UsbManager, device: UsbDevice): UsbCard {
+    fun open(manager: UsbManager, device: UsbDevice, reset: Boolean = true): UsbCard {
         val usbInterface = findInterface(device) ?: throw IOException("Ce n'est pas un lecteur de carte")
         var endpointIn: UsbEndpoint? = null
         var endpointOut: UsbEndpoint? = null
@@ -129,8 +129,13 @@ object UsbCards {
             // prend : une commande à lui peut être restée en plan. On remet le
             // lecteur à zéro avant de lui parler, sinon nos premières réponses
             // sont celles de sa commande à lui.
-            transport.resetRecovery()
-            Thread.sleep(SETTLE_MS)
+            // `reset = false` : essai de diagnostic (2026-11-11), au cas où ce
+            // serait cette remise à zéro qui fait croire au lecteur que la
+            // carte est verrouillée.
+            if (reset) {
+                transport.resetRecovery()
+                Thread.sleep(SETTLE_MS)
+            }
             val maxLun = transport.maxLun()
             var lastError: IOException? = null
             for (lun in 0..maxLun) {

@@ -25,6 +25,7 @@ object Strings {
     const val CARD_ALLOW = "Autoriser"
     const val CARD_PROBING = "Lecture de la carte…"
     const val CARD_READY_HINT = "Carte prête"
+    const val CARD_LOCKED_HINT = "Carte lisible, mais le lecteur la dit verrouillée : l'écriture risque d'être refusée."
     const val CARD_PROBLEM = "Carte illisible"
     const val CARD_NO_MEDIUM_HINT =
         "Le lecteur est branché, mais il ne voit pas de carte. Enfonce bien la carte, rebranche le lecteur, puis appuie sur Rafraîchir."

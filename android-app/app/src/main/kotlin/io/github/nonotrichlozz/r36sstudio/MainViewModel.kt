@@ -58,7 +58,14 @@ sealed interface CardState {
     data object Several : CardState
     data class NeedsPermission(val device: UsbDevice) : CardState
     data class Probing(val device: UsbDevice) : CardState
-    data class Ready(val device: UsbDevice, val display: String, val sizeBytes: Long, val headHash: String) : CardState
+    data class Ready(
+        val device: UsbDevice,
+        val display: String,
+        val sizeBytes: Long,
+        val headHash: String,
+        val writeProtected: Boolean = false,
+        val detail: String = "",
+    ) : CardState
     data class Problem(val message: String, val detail: String = "") : CardState
 }
 
@@ -115,6 +122,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val sessionLock = Any()
     private var session: UsbCard? = null
     private var sessionDeviceName: String? = null
+
+    /** Remettre le lecteur à zéro à l'ouverture ; coupé si l'essai sans remise à zéro lève le verrouillage. */
+    @Volatile
+    private var openWithReset = true
 
     @Volatile
     private var isCardOperation = false
@@ -285,7 +296,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         session?.close()
         session = null
         sessionDeviceName = null
-        val opened = UsbCards.open(usbManager, device)
+        val opened = UsbCards.open(usbManager, device, reset = openWithReset)
         session = opened
         sessionDeviceName = device.deviceName
         opened
@@ -305,7 +316,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             val head = ByteArray(minOf(Imaging.CHUNK_BYTES.toLong(), size).toInt())
                             card.block.read(0, head, head.size / card.block.blockSize)
                             val hash = Imaging.toHex(MessageDigest.getInstance("SHA-256").digest(head))
-                            CardState.Ready(device, card.display, size, hash)
+                            // Le lecteur croit-il la carte verrouillée, avant toute écriture ?
+                            var locked = card.block.reportedWriteProtect()
+                            var detail = ""
+                            if (locked == true) {
+                                // Essai croisé : on rend le lecteur à Android, on le
+                                // reprend SANS remise à zéro, et on repose la question.
+                                val first = if (openWithReset) "avec remise à zéro" else "sans remise à zéro"
+                                closeSession()
+                                Thread.sleep(2500)
+                                openWithReset = !openWithReset
+                                val second = try {
+                                    acquire(device).block.reportedWriteProtect()
+                                } catch (e: IOException) {
+                                    null
+                                }
+                                val secondLabel = if (openWithReset) "avec remise à zéro" else "sans remise à zéro"
+                                detail = "carte verrouillée selon le lecteur : oui $first, ${yesNo(second)} $secondLabel"
+                                if (second != false) openWithReset = !openWithReset // pas mieux : on revient au réglage d'origine
+                                locked = second ?: true
+                                acquire(device) // session valide quel que soit le résultat
+                            }
+                            CardState.Ready(device, card.display, size, hash, writeProtected = locked == true, detail = detail)
                         }
                     }
                 }
@@ -318,6 +350,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (generation == probeGeneration) _state.update { it.copy(card = result) }
         }
+    }
+
+    private fun yesNo(value: Boolean?): String = when (value) {
+        true -> "oui"
+        false -> "non"
+        null -> "pas de réponse"
     }
 
     /** Ligne brute pour le diagnostic : jamais dans le message principal. */

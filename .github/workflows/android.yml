@@ -15,6 +15,7 @@ on:
     paths:
       - "android-app/**"
       - ".github/workflows/android.yml"
+  # Un commit vide ne declenche rien (filtres paths) : relancer a la main ici.
   workflow_dispatch:
 
 # contents: write uniquement pour deposer l'APK sur la branche android-apk.

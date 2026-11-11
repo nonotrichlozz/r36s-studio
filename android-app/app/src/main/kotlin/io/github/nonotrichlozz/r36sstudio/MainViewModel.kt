@@ -163,7 +163,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             Updater.failure.collect { detail ->
                 if (detail != null) {
-                    log(Strings.ERROR_UPDATE, LogKind.ERROR)
+                    // Statut 3 : la demande d'Android a été refusée, fermée ou laissée sans réponse.
+                    val refused = detail.startsWith("statut 3")
+                    log(if (refused) Strings.ERROR_UPDATE_REFUSED else Strings.ERROR_UPDATE, LogKind.ERROR)
                     log(Strings.logDetail(detail), LogKind.DETAIL)
                 }
             }

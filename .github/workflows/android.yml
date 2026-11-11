@@ -17,8 +17,9 @@ on:
       - ".github/workflows/android.yml"
   workflow_dispatch:
 
+# contents: write uniquement pour deposer l'APK sur la branche apk-test.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apk:
@@ -49,3 +50,18 @@ jobs:
           name: R36S-Studio-Android
           path: android-app/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # Branche de depot (un seul commit, ecrase a chaque fois) : permet de
+      # recuperer l'APK par git, sans passer par la page des artefacts.
+      - name: Deposer l'APK sur la branche apk-test
+        if: github.ref == 'refs/heads/android-app'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir "$RUNNER_TEMP/apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/apk/R36S-Studio-Android.apk"
+          cd "$RUNNER_TEMP/apk"
+          git init -q -b apk-test
+          git add R36S-Studio-Android.apk
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "APK de test (${GITHUB_SHA::7})"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" apk-test

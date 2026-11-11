@@ -61,6 +61,32 @@ class ScsiBlockDevice(
 
     private var tag: Int = 1
 
+    private var commandBytes: Int = MAX_BYTES_PER_COMMAND
+
+    /** Vrai si l'appli a dû passer aux petites commandes pour ce lecteur (diagnostic). */
+    var reducedCommands: Boolean = false
+        private set
+
+    /**
+     * Ce que le lecteur annonce au repos (MODE SENSE) : `true` protégée,
+     * `false` non, `null` s'il ne répond pas à la question. Diagnostic
+     * seulement, appelé après un refus d'écriture.
+     */
+    fun reportedWriteProtect(): Boolean? {
+        return try {
+            val data = ByteArray(4)
+            val status = execute(byteArrayOf(0x1A, 0, 0x3F, 0, 4, 0), data, 0, data.size, directionIn = true, exact = false)
+            if (status != 0) {
+                senseException("MODE SENSE")
+                null
+            } else {
+                (data[2].toInt() and 0x80) != 0
+            }
+        } catch (e: IOException) {
+            null
+        }
+    }
+
     /** Nombre de commandes qu'il a fallu recommencer (diagnostic). */
     var retries: Int = 0
         private set
@@ -153,10 +179,9 @@ class ScsiBlockDevice(
         check(blockSize > 0) { "init() n'a pas été appelé" }
         require(blocks >= 0 && blocks.toLong() * blockSize <= buffer.size) { "Tampon trop petit" }
         if (lba < 0 || lba + blocks > blockCount) throw IOException("Accès hors de la carte (bloc $lba + $blocks)")
-        val maxBlocks = maxOf(1, MAX_BYTES_PER_COMMAND / blockSize)
         var done = 0
         while (done < blocks) {
-            val count = minOf(maxBlocks, blocks - done)
+            val count = minOf(maxOf(1, commandBytes / blockSize), blocks - done)
             val current = lba + done
             val cdb = ByteArray(10)
             cdb[0] = if (write) 0x2A else 0x28
@@ -166,7 +191,18 @@ class ScsiBlockDevice(
             cdb[5] = current.toByte()
             cdb[7] = (count ushr 8).toByte()
             cdb[8] = count.toByte()
-            executeBlocks(cdb, buffer, done * blockSize, count * blockSize, write, current)
+            try {
+                executeBlocks(cdb, buffer, done * blockSize, count * blockSize, write, current)
+            } catch (e: WriteProtectedException) {
+                // Carte neuve refusée en écriture (2026-11-11) : avant de croire
+                // le lecteur, on réessaie par petits morceaux -- certains
+                // lecteurs bon marché répondent n'importe quoi à une grosse
+                // commande. Si le refus persiste, il est vrai.
+                if (commandBytes <= SMALL_COMMAND_BYTES) throw e
+                commandBytes = SMALL_COMMAND_BYTES
+                reducedCommands = true
+                continue
+            }
             done += count
         }
     }
@@ -332,6 +368,9 @@ class ScsiBlockDevice(
 
         /** Octets par commande READ/WRITE(10). */
         const val MAX_BYTES_PER_COMMAND = 512 * 1024
+
+        /** Repli pour les lecteurs qui refusent les grosses commandes. */
+        const val SMALL_COMMAND_BYTES = 32 * 1024
 
         /** Octets par appel au tuyau USB (multiple de la taille de paquet). */
         const val MAX_BULK_CHUNK = 64 * 1024

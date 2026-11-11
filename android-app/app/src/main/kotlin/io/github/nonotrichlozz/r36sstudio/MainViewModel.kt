@@ -463,7 +463,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val open: () -> InputStream = {
                     if (source.file != null) FileInputStream(source.file) else openUri(source.uri!!)
                 }
-                val written = Imaging.flash(open, source.sizeBytes, source.format, usbCard.block, token, progressListener)
+                val written = try {
+                    Imaging.flash(open, source.sizeBytes, source.format, usbCard.block, token, progressListener)
+                } catch (e: WriteProtectedException) {
+                    val announced = when (usbCard.block.reportedWriteProtect()) {
+                        true -> "oui"
+                        false -> "non"
+                        null -> "pas de réponse"
+                    }
+                    log(Strings.logDetail("lecteur : protection en écriture annoncée = $announced ; petites commandes essayées = ${usbCard.block.reducedCommands}"), LogKind.DETAIL)
+                    throw e
+                }
+                if (usbCard.block.reducedCommands) log(Strings.logDetail("écriture par petites commandes (lecteur capricieux)"), LogKind.DETAIL)
                 usbCard.block.flush()
                 if (usbCard.block.retries > 0) log(Strings.logDetail("${usbCard.block.retries} commande(s) recommencée(s)"), LogKind.DETAIL)
                 log(Strings.logFlashDone(written), LogKind.SUCCESS)

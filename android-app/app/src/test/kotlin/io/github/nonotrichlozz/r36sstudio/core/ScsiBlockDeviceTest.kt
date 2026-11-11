@@ -128,6 +128,20 @@ class ScsiBlockDeviceTest {
             assertEquals(0, device.retries)
         }
         assertArrayEquals(disk, reader.disk) // rien n'a été écrit
+        assertEquals(true, device.reportedWriteProtect())
+    }
+
+    @Test
+    fun fallsBackToSmallCommandsWhenBigWritesAreRefused() {
+        val reader = FakeUsbReader(ByteArray(2 * 1024 * 1024))
+        reader.maxWriteBlocks = 64
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        val payload = patternBytes(1024 * 1024, seed = 5)
+        device.write(16, payload, payload.size / 512)
+        assertArrayEquals(payload, reader.disk.copyOfRange(16 * 512, 16 * 512 + payload.size))
+        assertTrue(device.reducedCommands)
+        assertEquals(false, device.reportedWriteProtect())
     }
 
     @Test

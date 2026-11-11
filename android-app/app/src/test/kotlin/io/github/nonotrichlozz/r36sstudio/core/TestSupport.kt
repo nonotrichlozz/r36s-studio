@@ -77,6 +77,9 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
     /** Carte verrouillée : toute écriture est refusée (sense 7/27). */
     var writeProtected = false
     private var discardRemaining = 0
+
+    /** Lecteur capricieux : refuse (7/27) toute écriture de plus de N blocs. 0 = pas de limite. */
+    var maxWriteBlocks = 0
     var clearHalts = 0
 
     override fun bulkOut(data: ByteArray, offset: Int, length: Int): Int {
@@ -142,6 +145,10 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
                 csw = makeCsw(tag, 0)
             }
             0x1B -> csw = makeCsw(tag, 0)
+            0x1A -> {
+                pendingIn = byteArrayOf(3, 0, if (writeProtected) 0x80.toByte() else 0, 0)
+                csw = makeCsw(tag, 0)
+            }
             0x25 -> if (!mediumPresent) {
                 // Comme un vrai lecteur : pas de données, tuyau bloqué, puis état « échec ».
                 sense = byteArrayOf(2, 0x3A, 0)
@@ -164,7 +171,7 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
                 } else if (op == 0x28) {
                     pendingIn = disk.copyOfRange(address * blockSize, (address + count) * blockSize)
                     csw = makeCsw(tag, 0)
-                } else if (writeProtected) {
+                } else if (writeProtected || (maxWriteBlocks > 0 && count > maxWriteBlocks)) {
                     sense = byteArrayOf(7, 0x27, 0)
                     discardRemaining = count * blockSize
                     writeTag = tag

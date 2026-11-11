@@ -129,6 +129,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         ContextCompat.registerReceiver(application, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         refreshCards()
+        viewModelScope.launch {
+            Updater.failure.collect { detail ->
+                if (detail != null) {
+                    log(Strings.ERROR_UPDATE, LogKind.ERROR)
+                    log(Strings.logDetail(detail), LogKind.DETAIL)
+                }
+            }
+        }
+        checkForUpdate()
+    }
+
+    // ------------------------------------------------------------------
+    // Mise à jour automatique, une fois par lancement
+    // ------------------------------------------------------------------
+
+    private fun checkForUpdate() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val info = Updater.check() ?: return@launch
+            // Jamais par-dessus une opération déjà lancée entre-temps.
+            if (busy) return@launch
+            startOperation(Strings.OP_UPDATE, Strings.PHASE_DOWNLOAD, cardOperation = false, networkOperation = true) { token ->
+                log(Strings.logUpdateFound(info.build))
+                val apk = try {
+                    Updater.download(app, info, token, ProgressMeter(progressListener))
+                } catch (e: OperationCancelled) {
+                    throw e
+                } catch (e: Exception) {
+                    log(Strings.ERROR_UPDATE_DOWNLOAD, LogKind.ERROR)
+                    log(Strings.logDetail("${e.javaClass.simpleName} : ${e.message}"), LogKind.DETAIL)
+                    return@startOperation
+                }
+                log(Strings.LOG_UPDATE_INSTALLING)
+                Updater.install(app, apk)
+                log(Strings.LOG_UPDATE_CONFIRM)
+            }
+        }
     }
 
     override fun onCleared() {
@@ -484,6 +520,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         phase: String,
         cardOperation: Boolean,
         destructive: Boolean = false,
+        @Suppress("UNUSED_PARAMETER") networkOperation: Boolean = false,
         onFailure: (Throwable) -> Unit = {},
         body: (CancelToken) -> Unit,
     ) {

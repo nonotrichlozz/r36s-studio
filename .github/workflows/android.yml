@@ -17,7 +17,7 @@ on:
       - ".github/workflows/android.yml"
   workflow_dispatch:
 
-# contents: write uniquement pour deposer l'APK sur la branche apk-test.
+# contents: write uniquement pour deposer l'APK sur la branche android-apk.
 permissions:
   contents: write
 
@@ -38,6 +38,20 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # Cle de signature stable : sans le secret, l'APK est signe avec une
+      # cle jetable et aucune mise a jour automatique n'est publiee.
+      - name: Preparer la signature
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | tr -d ' \n\r' | base64 -d > "$RUNNER_TEMP/android.p12"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/android.p12" >> "$GITHUB_ENV"
+            echo "Signature stable : oui"
+          else
+            echo "Signature stable : non (secret ANDROID_KEYSTORE_BASE64 absent)"
+          fi
+
       - name: Lancer les tests du coeur
         run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
 
@@ -51,17 +65,31 @@ jobs:
           path: android-app/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # Branche de depot (un seul commit, ecrase a chaque fois) : permet de
-      # recuperer l'APK par git, sans passer par la page des artefacts.
-      - name: Deposer l'APK sur la branche apk-test
-        if: github.ref == 'refs/heads/android-app'
+      # Branche de depot (un seul commit, ecrase a chaque fois) : l'APK, et
+      # version.json que l'appli consulte a chaque lancement (Updater.kt).
+      # version.json n'est publie que pour un APK signe avec la cle stable.
+      - name: Deposer l'APK sur la branche android-apk
+        if: github.ref == 'refs/heads/android-app' || github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir "$RUNNER_TEMP/apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/apk/R36S-Studio-Android.apk"
           cd "$RUNNER_TEMP/apk"
-          git init -q -b apk-test
-          git add R36S-Studio-Android.apk
-          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "APK de test (${GITHUB_SHA::7})"
-          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" apk-test
+          if [ -n "$ANDROID_KEYSTORE_FILE" ]; then
+            python3 - <<'PY'
+          import hashlib, json, os
+          data = open("R36S-Studio-Android.apk", "rb").read()
+          json.dump({
+              "versionCode": 100000 + int(os.environ["GITHUB_RUN_NUMBER"]),
+              "build": os.environ["GITHUB_SHA"][:7],
+              "sha256": hashlib.sha256(data).hexdigest(),
+              "size": len(data),
+          }, open("version.json", "w"))
+          PY
+            cat version.json
+          fi
+          git init -q -b android-apk
+          git add .
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "APK Android (${GITHUB_SHA::7})"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" android-apk

@@ -89,12 +89,28 @@ matériel réel.
   `stopService` (plantage si appelé juste après le démarrage) : le service
   s'arrête lui-même (`wanted`).
 
-## Construction
+## Construction, signature, mise à jour automatique
 
-`.github/workflows/android.yml` : tests du cœur puis `assembleDebug`, APK en
-artefact « R36S-Studio-Android ». APK de débogage : signature propre à chaque
-construction, donc désinstaller l'ancienne version avant d'installer la
-nouvelle. Pas encore d'APK signé pour diffusion.
+`.github/workflows/android.yml` : tests du cœur puis `assembleDebug`. L'APK
+est publié en artefact « R36S-Studio-Android » et déposé sur la branche
+`android-apk` (un seul commit, écrasé à chaque construction).
+
+- **Signature** : secret GitHub `ANDROID_KEYSTORE_BASE64` (fichier PKCS12
+  encodé, alias et mot de passe `r36sstudio` -- le mot de passe n'est pas le
+  secret, le fichier l'est ; jamais dans le dépôt). Sans le secret, clé
+  jetable : chaque APK doit être installé après désinstallation du précédent.
+  **Perdre ce fichier de clé = tous les utilisateurs doivent désinstaller.**
+- **Numéro de version** : `versionCode = 100000 + numéro du run` (croissant).
+- **Mise à jour automatique** (`Updater.kt`) : à chaque lancement, l'appli lit
+  `version.json` sur la branche `android-apk` (publié seulement pour un APK
+  signé avec la clé stable) ; si `versionCode` est plus grand, elle
+  télécharge l'APK, vérifie sa SHA-256 et le remet à Android
+  (`PackageInstaller`). Android demande une confirmation, au moins la
+  première fois ; ensuite elle peut disparaître (Android 12+, appli mise à
+  jour par elle-même). La réouverture après mise à jour est « au mieux »
+  (`RestartReceiver`). Hors ligne ou erreur : l'appli continue sans rien dire.
+- Toute poussée sur `android-app` (ou `main`) est donc **distribuée à tous
+  les téléphones** au lancement suivant : pas de canal de test séparé.
 
 ## Essais sur du vrai matériel
 

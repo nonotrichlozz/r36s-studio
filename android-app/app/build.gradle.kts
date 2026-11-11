@@ -22,21 +22,45 @@ val appVersionCode: Int = run {
     maxOf(1, major * 1_000_000 + minor * 1_000 + patch)
 }
 
+// Construit par GitHub Actions : numéro croissant à chaque construction, pour
+// que la mise à jour automatique sache laquelle est la plus récente.
+val buildVersionCode: Int = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.let { 100_000 + it } ?: appVersionCode
+
+// Clé de signature stable (secret GitHub ANDROID_KEYSTORE_BASE64, jamais dans
+// le dépôt) : sans elle, chaque construction est signée différemment et ne
+// peut pas remplacer la précédente. Le mot de passe n'est pas un secret :
+// c'est le fichier de clé qui l'est.
+val stableKeystore: String? = System.getenv("ANDROID_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "io.github.nonotrichlozz.r36sstudio"
     compileSdk = 35
+
+    signingConfigs {
+        if (stableKeystore != null) {
+            create("stable") {
+                storeFile = file(stableKeystore)
+                storePassword = "r36sstudio"
+                keyAlias = "r36sstudio"
+                keyPassword = "r36sstudio"
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "io.github.nonotrichlozz.r36sstudio"
         minSdk = 28
         targetSdk = 35
-        versionCode = appVersionCode
+        versionCode = buildVersionCode
         versionName = appVersion
         // Affiché sous le titre : savoir quelle construction tourne pendant les essais.
         buildConfigField("String", "BUILD_ID", "\"" + (System.getenv("GITHUB_SHA") ?: "local").take(7) + "\"")
     }
 
     buildTypes {
+        debug {
+            if (stableKeystore != null) signingConfig = signingConfigs.getByName("stable")
+        }
         release {
             isMinifyEnabled = false
         }

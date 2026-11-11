@@ -76,6 +76,8 @@ class UsbCard internal constructor(
 object UsbCards {
     private const val SUBCLASS_SCSI = 6
     private const val PROTOCOL_BULK_ONLY = 0x50
+    private const val OPEN_ATTEMPTS = 3
+    private const val SETTLE_MS = 200L
 
     /** Lecteurs de carte / clés branchés sur le téléphone (stockage de masse USB). */
     fun list(manager: UsbManager): List<UsbDevice> =
@@ -123,16 +125,32 @@ object UsbCards {
                 throw IOException("Le lecteur de carte est utilisé par une autre application")
             }
             val transport = AndroidBulkTransport(connection, usbInterface, endpointIn, endpointOut)
+            // Android utilisait peut-être le lecteur à l'instant où on le lui
+            // prend : une commande à lui peut être restée en plan. On remet le
+            // lecteur à zéro avant de lui parler, sinon nos premières réponses
+            // sont celles de sa commande à lui.
+            transport.resetRecovery()
+            Thread.sleep(SETTLE_MS)
             val maxLun = transport.maxLun()
             var lastError: IOException? = null
             for (lun in 0..maxLun) {
                 val block = ScsiBlockDevice(transport, lun)
-                try {
-                    block.init()
-                } catch (e: IOException) {
-                    lastError = e
-                    continue
+                var ready = false
+                for (attempt in 0 until OPEN_ATTEMPTS) {
+                    try {
+                        block.init()
+                        ready = true
+                        break
+                    } catch (e: NoMediumException) {
+                        lastError = e // déjà dix secondes de patience : inutile d'insister
+                        break
+                    } catch (e: IOException) {
+                        lastError = e
+                        transport.resetRecovery()
+                        Thread.sleep(SETTLE_MS)
+                    }
                 }
+                if (!ready) continue
                 val name = listOf(block.vendor, block.product).filter { it.isNotBlank() }.joinToString(" ")
                 val display = name.ifBlank { device.productName ?: "Carte SD" }
                 ok = true

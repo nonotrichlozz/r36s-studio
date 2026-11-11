@@ -35,6 +35,7 @@ import io.github.nonotrichlozz.r36sstudio.core.SourceUnstableException
 import io.github.nonotrichlozz.r36sstudio.core.UnsupportedImageException
 import io.github.nonotrichlozz.r36sstudio.core.VerifyFailedException
 import io.github.nonotrichlozz.r36sstudio.core.readFully
+import io.github.nonotrichlozz.r36sstudio.usb.UsbCard
 import io.github.nonotrichlozz.r36sstudio.usb.UsbCards
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -174,6 +175,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         cancelToken.cancelled = true
         OperationService.stop()
+        closeSession()
     }
 
     // ------------------------------------------------------------------
@@ -218,7 +220,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun setCard(card: CardState) {
         probeGeneration++
+        closeSession()
         _state.update { it.copy(card = card) }
+    }
+
+    // Le lecteur est gardé ouvert tant qu'il reste branché. Le relâcher entre
+    // deux opérations le rendrait à Android, qui se remet aussitôt à lire la
+    // carte ; le lui reprendre au milieu d'une de ses commandes laisse le
+    // lecteur dans un état incohérent (échec du 2026-11-11 : carte détectée,
+    // puis « ne répond plus » à l'opération suivante).
+    private val sessionLock = Any()
+    private var session: UsbCard? = null
+    private var sessionDeviceName: String? = null
+
+    private fun closeSession() {
+        synchronized(sessionLock) {
+            session?.close()
+            session = null
+            sessionDeviceName = null
+        }
+    }
+
+    /** Session sur ce lecteur ; la carte est relue (taille, présence) à chaque appel. */
+    private fun acquire(device: UsbDevice): UsbCard = synchronized(sessionLock) {
+        val current = session
+        if (current != null && sessionDeviceName == device.deviceName) {
+            try {
+                current.block.init()
+                return@synchronized current
+            } catch (e: IOException) {
+                // Session abîmée : on repart d'une ouverture complète.
+            }
+        }
+        session?.close()
+        session = null
+        sessionDeviceName = null
+        val opened = UsbCards.open(usbManager, device)
+        session = opened
+        sessionDeviceName = device.deviceName
+        opened
     }
 
     private fun probe(device: UsbDevice) {
@@ -226,7 +266,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(card = CardState.Probing(device)) }
         viewModelScope.launch(Dispatchers.IO) {
             val result: CardState = try {
-                UsbCards.open(usbManager, device).use { card ->
+                acquire(device).let { card ->
                     val size = card.block.sizeBytes
                     when (Safety.rejection(size)) {
                         Safety.Rejection.SIZE_UNKNOWN -> CardState.Problem(Strings.CARD_REJECTED_SIZE)
@@ -240,8 +280,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: NoMediumException) {
+                closeSession()
                 CardState.Problem(Strings.CARD_NO_MEDIUM_HINT, probeDetail(device, e))
             } catch (e: Exception) {
+                closeSession()
                 CardState.Problem(Strings.ERROR_CARD_GONE, probeDetail(device, e))
             }
             if (generation == probeGeneration) _state.update { it.copy(card = result) }
@@ -379,7 +421,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val source = dialog.source
         startOperation(Strings.OP_FLASH, Strings.PHASE_WRITE, cardOperation = true, destructive = true) { token ->
-            UsbCards.open(usbManager, card.device).use { usbCard ->
+            acquire(card.device).let { usbCard ->
                 // Le worker revérifie : la carte ouverte doit être celle qui a été confirmée.
                 if (Safety.rejection(usbCard.block.sizeBytes) != null || usbCard.block.sizeBytes != dialog.cardBytes) {
                     throw IOException("La carte a changé depuis la confirmation")
@@ -396,6 +438,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val written = Imaging.flash(open, source.sizeBytes, source.format, usbCard.block, token, progressListener)
                 usbCard.block.flush()
+                if (usbCard.block.retries > 0) log(Strings.logDetail("${usbCard.block.retries} commande(s) recommencée(s)"), LogKind.DETAIL)
                 log(Strings.logFlashDone(written), LogKind.SUCCESS)
                 log(Strings.LOG_CAN_REMOVE, LogKind.SUCCESS)
             }
@@ -432,7 +475,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (error is SourceUnstableException) markUnstable(destination) else deleteDocument(destination)
             },
         ) { token ->
-            UsbCards.open(usbManager, card.device).use { usbCard ->
+            acquire(card.device).let { usbCard ->
                 val block = usbCard.block
                 val used = try {
                     PartitionTable.usedArea(block)

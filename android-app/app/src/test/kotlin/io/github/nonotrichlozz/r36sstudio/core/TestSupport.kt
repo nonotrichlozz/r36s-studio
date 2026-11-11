@@ -70,6 +70,9 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
     private var writeTag = 0
     private var sense = byteArrayOf(0, 0, 0)
     private var stalledIn = false
+
+    /** Nombre de lectures de blocs dont les données ratent (sans erreur annoncée ensuite). */
+    var failDataReads = 0
     var clearHalts = 0
 
     override fun bulkOut(data: ByteArray, offset: Int, length: Int): Int {
@@ -144,7 +147,11 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
             0x28, 0x2A -> {
                 val address = ByteBuffer.wrap(cdb, 2, 4).order(ByteOrder.BIG_ENDIAN).int
                 val count = ((cdb[7].toInt() and 0xFF) shl 8) or (cdb[8].toInt() and 0xFF)
-                if (op == 0x28) {
+                if (op == 0x28 && failDataReads > 0) {
+                    failDataReads--
+                    stalledIn = true
+                    csw = makeCsw(tag, 0)
+                } else if (op == 0x28) {
                     pendingIn = disk.copyOfRange(address * blockSize, (address + count) * blockSize)
                     csw = makeCsw(tag, 0)
                 } else {
@@ -188,6 +195,9 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
 
     override fun resetRecovery() {
         resets++
+        stalledIn = false
+        csw = null
+        writeRemaining = 0
     }
 
     private fun makeCsw(tag: Int, status: Int): ByteArray {

@@ -58,6 +58,10 @@ class ScsiBlockDevice(
 
     private var tag: Int = 1
 
+    /** Nombre de commandes qu'il a fallu recommencer (diagnostic). */
+    var retries: Int = 0
+        private set
+
     /** INQUIRY, attente que la carte soit prête, puis lecture de sa capacité. */
     @Throws(IOException::class)
     fun init() {
@@ -159,9 +163,48 @@ class ScsiBlockDevice(
             cdb[5] = current.toByte()
             cdb[7] = (count ushr 8).toByte()
             cdb[8] = count.toByte()
-            val status = execute(cdb, buffer, done * blockSize, count * blockSize, directionIn = !write, exact = true)
-            if (status != 0) throw senseException(if (write) "WRITE(10) bloc $current" else "READ(10) bloc $current")
+            executeBlocks(cdb, buffer, done * blockSize, count * blockSize, write, current)
             done += count
+        }
+    }
+
+    /**
+     * Une commande de lecture/écriture de blocs, réessayée après une remise
+     * en état du lecteur : un lecteur bon marché rate parfois un transfert
+     * sans raison durable (constaté le 2026-11-11). Relire ou réécrire les
+     * mêmes blocs est sans effet de bord.
+     */
+    private fun executeBlocks(cdb: ByteArray, buffer: ByteArray, offset: Int, length: Int, write: Boolean, lba: Long) {
+        val what = if (write) "WRITE(10) bloc $lba" else "READ(10) bloc $lba"
+        var last: IOException? = null
+        for (attempt in 0 until TRANSFER_ATTEMPTS) {
+            if (attempt > 0) {
+                transport.resetRecovery()
+                pause(RETRY_DELAY_MS)
+                retries++
+            }
+            try {
+                val status = execute(cdb, buffer, offset, length, directionIn = !write, exact = true)
+                if (status == 0) return
+                val sense = senseException(what)
+                // « Le lecteur vient d'être réinitialisé » (unit attention) ou « pas encore prêt » : on réessaie.
+                if (sense.senseKey != 6 && sense.senseKey != 2) throw sense
+                last = sense
+            } catch (e: ScsiException) {
+                throw e
+            } catch (e: IOException) {
+                last = IOException("$what : ${e.message}")
+            }
+        }
+        throw last ?: IOException("$what a échoué")
+    }
+
+    private fun pause(milliseconds: Long) {
+        try {
+            sleep(milliseconds)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw IOException("Interrompu")
         }
     }
 
@@ -216,7 +259,7 @@ class ScsiBlockDevice(
         val cbwBytes = cbw.array()
         if (transport.bulkOut(cbwBytes, 0, CBW_SIZE) != CBW_SIZE) {
             transport.resetRecovery()
-            throw IOException("Le lecteur de carte ne répond plus (envoi de commande)")
+            throw IOException("Le lecteur de carte ne répond plus (envoi de la commande ${opName(cdb)})")
         }
 
         // Un lecteur qui refuse une commande avec données bloque le tuyau au
@@ -241,7 +284,7 @@ class ScsiBlockDevice(
                 if (n < chunk) {
                     if (exact) {
                         transport.resetRecovery()
-                        throw IOException("Transfert incomplet ($done sur $length octets)")
+                        throw IOException("Transfert incomplet ($done sur $length octets, commande ${opName(cdb)})")
                     }
                     break
                 }
@@ -257,7 +300,7 @@ class ScsiBlockDevice(
         }
         if (n != CSW_SIZE) {
             transport.resetRecovery()
-            throw IOException("Le lecteur de carte ne répond plus (état de commande)")
+            throw IOException("Le lecteur de carte ne répond plus (état de la commande ${opName(cdb)})")
         }
         val reply = ByteBuffer.wrap(csw).order(ByteOrder.LITTLE_ENDIAN)
         val signature = reply.int
@@ -266,14 +309,16 @@ class ScsiBlockDevice(
         val status = reply.get().toInt() and 0xFF
         if (signature != CSW_SIGNATURE || replyTag != currentTag || status > 1) {
             transport.resetRecovery()
-            throw IOException("Réponse inattendue du lecteur de carte (statut $status)")
+            throw IOException("Réponse inattendue du lecteur de carte (statut $status, commande ${opName(cdb)})")
         }
         if (stalled && status == 0) {
             transport.resetRecovery()
-            throw IOException("Le lecteur de carte ne répond plus (transfert de données)")
+            throw IOException("Le lecteur de carte ne répond plus (données de la commande ${opName(cdb)})")
         }
         return status
     }
+
+    private fun opName(cdb: ByteArray): String = String.format("0x%02X", cdb[0].toInt() and 0xFF)
 
     companion object {
         const val CBW_SIZE = 31
@@ -290,5 +335,7 @@ class ScsiBlockDevice(
         // 40 x 250 ms : dix secondes de patience avant de déclarer la carte absente.
         private const val READY_ATTEMPTS = 40
         private const val READY_DELAY_MS = 250L
+        private const val TRANSFER_ATTEMPTS = 4
+        private const val RETRY_DELAY_MS = 300L
     }
 }

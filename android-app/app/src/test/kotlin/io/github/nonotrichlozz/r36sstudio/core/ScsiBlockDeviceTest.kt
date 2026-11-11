@@ -88,6 +88,33 @@ class ScsiBlockDeviceTest {
     }
 
     @Test
+    fun retriesAReadWhoseDataFailed() {
+        val disk = patternBytes(1024 * 1024)
+        val reader = FakeUsbReader(disk.copyOf())
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        reader.failDataReads = 2
+        val buffer = ByteArray(64 * 1024)
+        device.read(8, buffer, buffer.size / 512)
+        assertArrayEquals(disk.copyOfRange(8 * 512, 8 * 512 + buffer.size), buffer)
+        assertEquals(2, device.retries)
+    }
+
+    @Test
+    fun givesUpWhenAReadKeepsFailing() {
+        val reader = FakeUsbReader(ByteArray(1024 * 1024))
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        reader.failDataReads = 50
+        try {
+            device.read(0, ByteArray(512), 1)
+            fail("IOException attendue")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("READ(10) bloc 0"))
+        }
+    }
+
+    @Test
     fun refusesAccessBeyondTheCard() {
         val reader = FakeUsbReader(ByteArray(1024 * 1024))
         val device = ScsiBlockDevice(reader, sleep = {})

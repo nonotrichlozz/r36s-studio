@@ -121,6 +121,17 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
   UNIT, puis READ CAPACITY tenté malgré tout ; le bandeau affiche une ligne
   `[détail]` (VID:PID, exception, sense). Résultat du correctif : à confirmer.
 
+- 2026-11-11 (suite, construction `dc36087`) : carte détectée (« MXT-USB
+  Storage Device — 29,7 Go », lecture du premier Mio réussie), téléchargement
+  d'un firmware réussi, puis échec dès le début de l'écriture : « ne répond
+  plus (transfert de données) » avant même la ligne de détail. Cause
+  supposée : le lecteur était relâché entre la détection et l'opération,
+  Android le reprenait et se remettait à lire la carte, et le lui reprendre
+  au milieu d'une commande laissait le lecteur désynchronisé. Correctif :
+  **une seule session gardée ouverte** tant que le lecteur est branché
+  (`MainViewModel.acquire`), remise à zéro du lecteur à l'ouverture, jusqu'à
+  quatre essais par commande de blocs. Résultat : à confirmer.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

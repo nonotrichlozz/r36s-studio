@@ -29,6 +29,11 @@ private class AndroidBulkTransport(
     override fun bulkIn(data: ByteArray, offset: Int, length: Int): Int =
         connection.bulkTransfer(endpointIn, data, offset, length, TIMEOUT_MS)
 
+    override fun clearHalt(directionIn: Boolean) {
+        val endpoint = if (directionIn) endpointIn else endpointOut
+        connection.controlTransfer(0x02, 0x01, 0, endpoint.address, null, 0, CONTROL_TIMEOUT_MS)
+    }
+
     override fun resetRecovery() {
         // Bulk-Only Mass Storage Reset, puis CLEAR_FEATURE(ENDPOINT_HALT) sur les deux tuyaux.
         connection.controlTransfer(0x21, 0xFF, 0, usbInterface.id, null, 0, CONTROL_TIMEOUT_MS)

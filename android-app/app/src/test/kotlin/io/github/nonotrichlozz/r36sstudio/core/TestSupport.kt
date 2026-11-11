@@ -69,6 +69,8 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
     private var writeRemaining = 0
     private var writeTag = 0
     private var sense = byteArrayOf(0, 0, 0)
+    private var stalledIn = false
+    var clearHalts = 0
 
     override fun bulkOut(data: ByteArray, offset: Int, length: Int): Int {
         if (writeRemaining > 0) {
@@ -128,7 +130,9 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
             }
             0x1B -> csw = makeCsw(tag, 0)
             0x25 -> if (!mediumPresent) {
+                // Comme un vrai lecteur : pas de données, tuyau bloqué, puis état « échec ».
                 sense = byteArrayOf(2, 0x3A, 0)
+                stalledIn = true
                 csw = makeCsw(tag, 1)
             } else {
                 val reply = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
@@ -163,6 +167,7 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
     }
 
     override fun bulkIn(data: ByteArray, offset: Int, length: Int): Int {
+        if (stalledIn) return -1
         val remaining = pendingIn.size - pendingInPos
         if (remaining > 0) {
             val n = minOf(length, remaining)
@@ -174,6 +179,11 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
         csw = null
         System.arraycopy(reply, 0, data, offset, reply.size)
         return reply.size
+    }
+
+    override fun clearHalt(directionIn: Boolean) {
+        clearHalts++
+        if (directionIn) stalledIn = false
     }
 
     override fun resetRecovery() {

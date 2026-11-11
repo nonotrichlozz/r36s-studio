@@ -16,6 +16,9 @@ interface BulkTransport {
     fun bulkOut(data: ByteArray, offset: Int, length: Int): Int
     fun bulkIn(data: ByteArray, offset: Int, length: Int): Int
 
+    /** Débloque un tuyau que le lecteur a bloqué (STALL) pour refuser une commande. */
+    fun clearHalt(directionIn: Boolean)
+
     /** Remise en état après une erreur de protocole (reset + clear halt). */
     fun resetRecovery()
 }
@@ -216,6 +219,10 @@ class ScsiBlockDevice(
             throw IOException("Le lecteur de carte ne répond plus (envoi de commande)")
         }
 
+        // Un lecteur qui refuse une commande avec données bloque le tuyau au
+        // lieu d'envoyer les données : on le débloque et on lit quand même
+        // l'état de la commande (qui dira « échec » -> REQUEST SENSE).
+        var stalled = false
         if (data != null && length > 0) {
             var done = 0
             while (done < length) {
@@ -226,8 +233,9 @@ class ScsiBlockDevice(
                     transport.bulkOut(data, offset + done, chunk)
                 }
                 if (n < 0) {
-                    transport.resetRecovery()
-                    throw IOException("Le lecteur de carte ne répond plus (transfert de données)")
+                    transport.clearHalt(directionIn)
+                    stalled = true
+                    break
                 }
                 done += n
                 if (n < chunk) {
@@ -242,7 +250,11 @@ class ScsiBlockDevice(
 
         val csw = ByteArray(CSW_SIZE)
         var n = transport.bulkIn(csw, 0, CSW_SIZE)
-        if (n < 0) n = transport.bulkIn(csw, 0, CSW_SIZE) // un second essai, comme le prévoit la norme
+        if (n < 0) {
+            // Un second essai après déblocage, comme le prévoit la norme.
+            transport.clearHalt(true)
+            n = transport.bulkIn(csw, 0, CSW_SIZE)
+        }
         if (n != CSW_SIZE) {
             transport.resetRecovery()
             throw IOException("Le lecteur de carte ne répond plus (état de commande)")
@@ -255,6 +267,10 @@ class ScsiBlockDevice(
         if (signature != CSW_SIGNATURE || replyTag != currentTag || status > 1) {
             transport.resetRecovery()
             throw IOException("Réponse inattendue du lecteur de carte (statut $status)")
+        }
+        if (stalled && status == 0) {
+            transport.resetRecovery()
+            throw IOException("Le lecteur de carte ne répond plus (transfert de données)")
         }
         return status
     }

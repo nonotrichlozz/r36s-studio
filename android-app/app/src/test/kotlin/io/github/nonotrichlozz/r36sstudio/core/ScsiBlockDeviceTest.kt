@@ -42,7 +42,9 @@ class ScsiBlockDeviceTest {
             ScsiBlockDevice(reader, sleep = {}).init()
             fail("NoMediumException attendue")
         } catch (e: NoMediumException) {
-            // attendu
+            // attendu, sans remise à zéro brutale du lecteur
+            assertTrue(reader.clearHalts >= 1)
+            assertEquals(0, reader.resets)
         }
     }
 

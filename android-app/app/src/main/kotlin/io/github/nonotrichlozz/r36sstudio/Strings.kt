@@ -117,6 +117,8 @@ object Strings {
     const val ERROR_VERIFY = "La carte ne contient pas exactement ce qui a été écrit. Elle est peut-être défaillante : essaie une autre carte."
     const val ERROR_SOURCE_UNSTABLE =
         "Ta carte ne renvoie pas deux fois le même contenu : elle est défaillante, cette sauvegarde n'est pas fiable. Le fichier a été gardé et marqué « instable »."
+    const val ERROR_WRITE_PROTECTED =
+        "Cette carte refuse qu'on écrive dessus : elle est verrouillée ou en fin de vie (une carte usée se bloque en lecture seule). Rien n'a été modifié. Essaie avec une autre carte."
     const val ERROR_CARD_GONE = "La carte ne répond plus. Vérifie qu'elle est bien branchée, puis recommence."
     const val ERROR_NO_CARD = "Aucune carte prête. Branche ta carte SD et autorise l'appli à l'utiliser."
     const val ERROR_SAME_CARD = "C'est la carte que tu viens de sauvegarder. Retire-la et branche la carte neuve."

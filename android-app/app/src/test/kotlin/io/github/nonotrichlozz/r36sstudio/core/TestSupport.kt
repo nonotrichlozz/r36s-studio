@@ -73,9 +73,19 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
 
     /** Nombre de lectures de blocs dont les données ratent (sans erreur annoncée ensuite). */
     var failDataReads = 0
+
+    /** Carte verrouillée : toute écriture est refusée (sense 7/27). */
+    var writeProtected = false
+    private var discardRemaining = 0
     var clearHalts = 0
 
     override fun bulkOut(data: ByteArray, offset: Int, length: Int): Int {
+        if (discardRemaining > 0) {
+            // Les données d'une écriture refusée sont avalées, puis l'état dit « échec ».
+            discardRemaining -= length
+            if (discardRemaining == 0) csw = makeCsw(writeTag, 1)
+            return length
+        }
         if (writeRemaining > 0) {
             System.arraycopy(data, offset, disk, writeOffset, length)
             writeOffset += length
@@ -154,6 +164,11 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
                 } else if (op == 0x28) {
                     pendingIn = disk.copyOfRange(address * blockSize, (address + count) * blockSize)
                     csw = makeCsw(tag, 0)
+                } else if (writeProtected) {
+                    sense = byteArrayOf(7, 0x27, 0)
+                    discardRemaining = count * blockSize
+                    writeTag = tag
+                    csw = null
                 } else {
                     writeOffset = address * blockSize
                     writeRemaining = count * blockSize

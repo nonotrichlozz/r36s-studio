@@ -30,6 +30,9 @@ open class ScsiException(
     val ascq: Int = -1,
 ) : IOException(message)
 
+/** La carte (ou le lecteur) refuse toute écriture : sense 7/27, « write protected ». */
+class WriteProtectedException(detail: String) : ScsiException(detail, 7, 0x27, 0)
+
 /** Le lecteur est là, mais aucune carte n'est dedans. */
 class NoMediumException(attempts: Int = 1) :
     ScsiException("Aucune carte dans le lecteur (sense 2/58/0, $attempts essais)", 2, 0x3A, 0)
@@ -188,6 +191,7 @@ class ScsiBlockDevice(
                 if (status == 0) return
                 val sense = senseException(what)
                 // « Le lecteur vient d'être réinitialisé » (unit attention) ou « pas encore prêt » : on réessaie.
+                if (sense.senseKey == 7) throw WriteProtectedException(sense.message ?: what)
                 if (sense.senseKey != 6 && sense.senseKey != 2) throw sense
                 last = sense
             } catch (e: ScsiException) {

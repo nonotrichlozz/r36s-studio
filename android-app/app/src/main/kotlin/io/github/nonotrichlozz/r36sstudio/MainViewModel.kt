@@ -34,6 +34,7 @@ import io.github.nonotrichlozz.r36sstudio.core.SevenZipArchiveException
 import io.github.nonotrichlozz.r36sstudio.core.SourceUnstableException
 import io.github.nonotrichlozz.r36sstudio.core.UnsupportedImageException
 import io.github.nonotrichlozz.r36sstudio.core.VerifyFailedException
+import io.github.nonotrichlozz.r36sstudio.core.WriteProtectedException
 import io.github.nonotrichlozz.r36sstudio.core.readFully
 import io.github.nonotrichlozz.r36sstudio.usb.UsbCard
 import io.github.nonotrichlozz.r36sstudio.usb.UsbCards
@@ -636,6 +637,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         is SevenZipArchiveException -> Strings.ERROR_SEVEN_ZIP
         is UnsupportedImageException -> Strings.ERROR_UNSUPPORTED
         is ImageTooLargeException -> Strings.errorTooLarge(e.cardBytes)
+        is WriteProtectedException -> Strings.ERROR_WRITE_PROTECTED
         is VerifyFailedException -> Strings.ERROR_VERIFY
         is SourceUnstableException -> Strings.ERROR_SOURCE_UNSTABLE
         is ChecksumMismatchException -> Strings.ERROR_CHECKSUM

@@ -142,6 +142,13 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
   **Leçon : rien ne vérifie que l'appli démarre avant de la diffuser** — il
   manque un test de lancement dans la CI (émulateur) ou un canal d'essai.
 
+- 2026-11-11, construction `96085ea` : démarrage OK, carte détectée, session
+  gardée ouverte, **lectures réussies** ; la première écriture est refusée
+  par la carte : `WRITE(10) bloc 0`, sense 7/27 (« write protected »). Ce
+  n'est pas un défaut de l'appli a priori : SanDisk Ultra 32 Go « sans
+  importance », probablement passée en lecture seule (fin de vie). Message
+  dédié ajouté (`WriteProtectedException`). À confirmer avec une autre carte.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

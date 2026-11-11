@@ -115,6 +115,22 @@ class ScsiBlockDeviceTest {
     }
 
     @Test
+    fun reportsALockedCardWithoutRetrying() {
+        val disk = patternBytes(1024 * 1024)
+        val reader = FakeUsbReader(disk.copyOf())
+        reader.writeProtected = true
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        try {
+            device.write(0, ByteArray(4096), 8)
+            fail("WriteProtectedException attendue")
+        } catch (e: WriteProtectedException) {
+            assertEquals(0, device.retries)
+        }
+        assertArrayEquals(disk, reader.disk) // rien n'a été écrit
+    }
+
+    @Test
     fun refusesAccessBeyondTheCard() {
         val reader = FakeUsbReader(ByteArray(1024 * 1024))
         val device = ScsiBlockDevice(reader, sleep = {})

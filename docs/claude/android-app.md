@@ -132,6 +132,16 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
   (`MainViewModel.acquire`), remise à zéro du lecteur à l'ouverture, jusqu'à
   quatre essais par commande de blocs. Résultat : à confirmer.
 
+- 2026-11-11, construction `6ec8da0` : **plantage au lancement**, diffusé par
+  la mise à jour automatique (qui, elle, a fonctionné du premier coup :
+  détection, téléchargement, installation). Cause : `sessionLock` déclaré
+  après le bloc `init` de `MainViewModel`, donc encore `null` quand `init`
+  appelait `refreshCards()`. Corrigé ; `refreshCards()` ne peut plus fermer
+  l'appli (erreur affichée dans le bandeau) et la recherche de mise à jour
+  part en premier, pour qu'une version cassée puisse se réparer seule.
+  **Leçon : rien ne vérifie que l'appli démarre avant de la diffuser** — il
+  manque un test de lancement dans la CI (émulateur) ou un canal d'essai.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

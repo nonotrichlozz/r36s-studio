@@ -107,6 +107,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state
 
+    // ATTENTION, ordre d'initialisation : tout champ utilisé par `refreshCards()`
+    // doit être déclaré AVANT le bloc `init` ci-dessous, qui l'appelle. Un champ
+    // déclaré plus bas vaut encore `null` à ce moment-là (plantage au lancement
+    // de la construction 6ec8da0, 2026-11-11 : `synchronized(sessionLock)`).
+    private val sessionLock = Any()
+    private var session: UsbCard? = null
+    private var sessionDeviceName: String? = null
+
+    @Volatile
+    private var isCardOperation = false
+
     private var job: Job? = null
     private var cancelToken = CancelToken()
     private var probeGeneration = 0
@@ -128,7 +139,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
-        ContextCompat.registerReceiver(application, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        // En premier, et à l'abri du reste : une version cassée doit toujours
+        // pouvoir se réparer toute seule par la mise à jour suivante.
+        checkForUpdate()
+        try {
+            ContextCompat.registerReceiver(application, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        } catch (e: Exception) {
+            reportInternalError(e)
+        }
         refreshCards()
         viewModelScope.launch {
             Updater.failure.collect { detail ->
@@ -138,7 +156,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        checkForUpdate()
     }
 
     // ------------------------------------------------------------------
@@ -147,6 +164,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun checkForUpdate() {
         viewModelScope.launch(Dispatchers.IO) {
+            // Lancé depuis `init` : laisser l'objet finir de se construire.
+            kotlinx.coroutines.delay(300)
             val info = Updater.check() ?: return@launch
             // Jamais par-dessus une opération déjà lancée entre-temps.
             if (busy) return@launch
@@ -188,6 +207,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * le lecteur, et Android ne prévient pas dans ce cas.
      */
     fun refreshCards(force: Boolean = false) {
+        try {
+            refreshCardsUnguarded(force)
+        } catch (e: Exception) {
+            reportInternalError(e)
+        }
+    }
+
+    /** Une erreur imprévue s'affiche dans le bandeau au lieu de fermer l'appli. */
+    private fun reportInternalError(e: Exception) {
+        val detail = e.javaClass.simpleName + " : " + (e.message ?: "") + " @ " + (e.stackTrace.firstOrNull()?.toString() ?: "?")
+        _state.update { it.copy(card = CardState.Problem(Strings.ERROR_GENERIC, detail)) }
+    }
+
+    private fun refreshCardsUnguarded(force: Boolean) {
         if (_state.value.op != null && job?.isActive == true && isCardOperation) return
         val devices = UsbCards.list(usbManager)
         when {
@@ -229,10 +262,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // carte ; le lui reprendre au milieu d'une de ses commandes laisse le
     // lecteur dans un état incohérent (échec du 2026-11-11 : carte détectée,
     // puis « ne répond plus » à l'opération suivante).
-    private val sessionLock = Any()
-    private var session: UsbCard? = null
-    private var sessionDeviceName: String? = null
-
     private fun closeSession() {
         synchronized(sessionLock) {
             session?.close()
@@ -319,9 +348,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private val busy: Boolean get() = _state.value.op != null
-
-    @Volatile
-    private var isCardOperation = false
 
     // ------------------------------------------------------------------
     // Choix d'un fichier image (installation ou restauration)

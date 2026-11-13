@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.Build
+import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
 import io.github.nonotrichlozz.r36sstudio.core.CancelToken
 import io.github.nonotrichlozz.r36sstudio.core.ProgressMeter
@@ -40,6 +41,30 @@ object Updater {
 
     /** Dernier échec d'installation rapporté par Android (détail brut), ou `null`. */
     val failure = MutableStateFlow<String?>(null)
+
+    /** Dernier APK remis à Android : sert au second essai par l'installateur du téléphone. */
+    @Volatile
+    var lastApk: File? = null
+        private set
+
+    /**
+     * Second essai, par l'installateur du téléphone lui-même (comme quand on
+     * ouvre un fichier APK à la main). Renvoie `false` si rien n'a pu être lancé.
+     */
+    fun installWithSystemInstaller(context: Context): Boolean {
+        val apk = lastApk ?: return false
+        return try {
+            if (!apk.isFile) return false
+            val uri = FileProvider.getUriForFile(context, context.packageName + ".files", apk)
+            val intent = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     /** `null` : rien de plus récent, ou impossible de le savoir. */
     fun check(): Info? {
@@ -78,12 +103,17 @@ object Updater {
     /** Remet l'APK à Android. Le résultat arrive dans `UpdateReceiver`. */
     fun install(context: Context, apk: File) {
         failure.value = null
+        lastApk = apk
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         params.setAppPackageName(context.packageName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Sans confirmation quand Android l'accepte (appli déjà mise à jour par elle-même).
-            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            // Toujours avec la fenêtre de confirmation d'Android. L'installation
+            // silencieuse (USER_ACTION_NOT_REQUIRED) a été retirée le 2026-11-13 :
+            // sur le téléphone d'Arnaud elle échouait à chaque fois, sans fenêtre
+            // (« INSTALL_FAILED_ABORTED: Permission denied »), dès que l'appli
+            // s'était déjà mise à jour elle-même une première fois.
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
         }
         val sessionId = installer.createSession(params)
         installer.openSession(sessionId).use { session ->

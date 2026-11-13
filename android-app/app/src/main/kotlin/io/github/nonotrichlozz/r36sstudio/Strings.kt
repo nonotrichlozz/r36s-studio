@@ -87,6 +87,7 @@ object Strings {
     const val LOG_UPDATE_INSTALLING = "Installation de la nouvelle version…"
     const val LOG_UPDATE_CONFIRM = "Si le téléphone le demande, accepte la mise à jour. L'appli va se fermer puis se rouvrir (rouvre-la si besoin)."
     const val ERROR_UPDATE = "La mise à jour n'a pas pu s'installer. Désinstalle R36S Studio, puis installe la dernière version à la main."
+    const val LOG_UPDATE_SECOND_TRY = "Deuxième essai : le téléphone ouvre son installateur. Appuie sur « Mettre à jour » ou « Installer »."
     const val ERROR_UPDATE_REFUSED =
         "La mise à jour n'a pas été acceptée. Ferme et rouvre R36S Studio, puis appuie sur « Mettre à jour » quand le téléphone le demande."
     const val ERROR_UPDATE_DOWNLOAD = "La mise à jour n'a pas pu être téléchargée. L'appli continue avec la version actuelle."

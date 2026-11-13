@@ -134,6 +134,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile
     private var isCardOperation = false
 
+    private var updateFallbackTried = false
+
     private var job: Job? = null
     private var cancelToken = CancelToken()
     private var probeGeneration = 0
@@ -169,8 +171,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (detail != null) {
                     // Statut 3 : la demande d'Android a été refusée, fermée ou laissée sans réponse.
                     val refused = detail.startsWith("statut 3")
-                    log(if (refused) Strings.ERROR_UPDATE_REFUSED else Strings.ERROR_UPDATE, LogKind.ERROR)
                     log(Strings.logDetail(detail), LogKind.DETAIL)
+                    // Un seul second essai par lancement, par l'installateur du téléphone.
+                    if (!updateFallbackTried) {
+                        updateFallbackTried = true
+                        if (Updater.installWithSystemInstaller(app)) {
+                            log(Strings.LOG_UPDATE_SECOND_TRY)
+                            return@collect
+                        }
+                    }
+                    log(if (refused) Strings.ERROR_UPDATE_REFUSED else Strings.ERROR_UPDATE, LogKind.ERROR)
                 }
             }
         }

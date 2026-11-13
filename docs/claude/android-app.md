@@ -168,6 +168,16 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
   (`MAX_BYTES_PER_COMMAND`), et repli sur 32 Kio si un transfert rate encore.
   Résultat : à confirmer.
 
+- 2026-11-13 : **la mise à jour automatique échoue « à chaque fois »** sur le
+  téléphone d'Arnaud (`statut 3 INSTALL_FAILED_ABORTED: Permission denied`,
+  une quinzaine de secondes après le dépôt), alors que les deux premières
+  étaient passées le 2026-11-11. Hypothèse : une fois que l'appli s'est mise
+  à jour elle-même, Android tente l'installation silencieuse
+  (`USER_ACTION_NOT_REQUIRED`) et le téléphone la refuse sans rien afficher.
+  Correctif : confirmation toujours demandée (`USER_ACTION_REQUIRED`), et en
+  cas d'échec un second essai par l'installateur du téléphone (`ACTION_VIEW`
+  + `FileProvider`). Résultat : à confirmer à la mise à jour suivante.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

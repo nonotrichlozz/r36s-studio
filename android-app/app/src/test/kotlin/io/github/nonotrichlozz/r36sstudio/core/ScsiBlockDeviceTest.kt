@@ -192,16 +192,33 @@ class ScsiBlockDeviceTest {
     }
 
     @Test
-    fun fallsBackToSmallCommandsWhenNormalReadsComeUpShort() {
+    fun completesReadsThatComeBackOneBlockShort() {
         val disk = patternBytes(1024 * 1024)
         val reader = FakeUsbReader(disk.copyOf())
-        reader.maxReadBlocks = 64
+        reader.maxReadBlocks = 2 // toute lecture de plus de 2 blocs rend un bloc de moins
         val device = ScsiBlockDevice(reader, sleep = {})
         device.init()
         val buffer = ByteArray(256 * 1024)
         device.read(8, buffer, buffer.size / 512)
         assertArrayEquals(disk.copyOfRange(8 * 512, 8 * 512 + buffer.size), buffer)
-        assertTrue(device.reducedCommands)
+        assertEquals(0, device.retries)
+        assertTrue(device.shortReads > 0)
+    }
+
+    @Test
+    fun completesShortReadsWhoseStatusIsGluedToTheData() {
+        // Cas réel du 2026-11-13 : « 32269 sur 32768 octets » = 63 blocs + 13 octets d'état.
+        val disk = patternBytes(1024 * 1024)
+        val reader = FakeUsbReader(disk.copyOf())
+        reader.maxReadBlocks = 2
+        reader.embedStatusInShortRead = true
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        val buffer = ByteArray(256 * 1024)
+        device.read(0, buffer, buffer.size / 512)
+        assertArrayEquals(disk.copyOf(buffer.size), buffer)
+        assertEquals(0, device.retries)
+        assertEquals(0, reader.resets)
     }
 
     @Test

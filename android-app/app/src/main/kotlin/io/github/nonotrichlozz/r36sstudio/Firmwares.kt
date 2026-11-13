@@ -199,6 +199,8 @@ object Firmwares {
             audience = Audience.ORIGINAL,
             status = FirmwareStatus.EXPERIMENTAL,
             pageUrl = "https://github.com/Turro75/MyMinUI/releases",
+            note = Strings.FW_MINUI_NOTE,
+            phoneReady = false,
         ),
         Firmware(
             id = "r36droid",

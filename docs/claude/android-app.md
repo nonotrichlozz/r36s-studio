@@ -197,6 +197,20 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
   cas d'échec un second essai par l'installateur du téléphone (`ACTION_VIEW`
   + `FileProvider`). Résultat : à confirmer à la mise à jour suivante.
 
+- 2026-11-13 soir, construction `80f0ffc` : la détection échoue encore à la
+  première lecture, cette fois `Transfert incomplet (32269 sur 32768)` : même
+  motif qu'à 512 Kio (un bloc de moins + 13 octets), y compris en petites
+  commandes. Ce n'est donc pas la taille : le lecteur rend parfois un bloc de
+  moins que demandé et colle son état de commande derrière les données. Entre
+  les deux, un flash complet avait réussi (construction `9408327`).
+  Correctif : une lecture courte n'est plus une erreur ; l'état de commande
+  collé est reconnu (signature + numéro), les blocs reçus sont gardés et la
+  suite est redemandée (`shortReads`). Si l'état dit « échec », la raison
+  donnée par la carte est affichée, avec le premier échec en plus du dernier.
+  Cause du comportement du lecteur : inconnue. Résultat : à confirmer.
+- MinUI (signalé par Arnaud) : la release est un `.zip` de fichiers à copier,
+  pas une image de carte -> `phoneReady = false`. Non vérifié de mon côté.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

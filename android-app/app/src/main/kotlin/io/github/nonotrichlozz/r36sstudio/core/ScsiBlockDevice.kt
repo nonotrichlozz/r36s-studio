@@ -63,6 +63,13 @@ class ScsiBlockDevice(
 
     private var commandBytes: Int = MAX_BYTES_PER_COMMAND
 
+    /** Octets de données reçus par la dernière commande (hors état de commande). */
+    private var lastDataBytes: Int = 0
+
+    /** Nombre de lectures rendues incomplètes par le lecteur, complétées ensuite (diagnostic). */
+    var shortReads: Int = 0
+        private set
+
     /** Vrai si l'appli a dû passer aux petites commandes pour ce lecteur (diagnostic). */
     var reducedCommands: Boolean = false
         private set
@@ -205,6 +212,7 @@ class ScsiBlockDevice(
         while (done < blocks) {
             val count = minOf(maxOf(1, commandBytes / blockSize), blocks - done)
             val current = lba + done
+            var transferred: Int
             val cdb = ByteArray(10)
             cdb[0] = if (write) 0x2A else 0x28
             cdb[2] = (current ushr 24).toByte()
@@ -214,7 +222,7 @@ class ScsiBlockDevice(
             cdb[7] = (count ushr 8).toByte()
             cdb[8] = count.toByte()
             try {
-                executeBlocks(cdb, buffer, done * blockSize, count * blockSize, write, current)
+                transferred = executeBlocks(cdb, buffer, done * blockSize, count * blockSize, write, current)
             } catch (e: WriteProtectedException) {
                 // Carte neuve refusée en écriture (2026-11-11) : avant de croire
                 // le lecteur, on réessaie par petits morceaux -- certains
@@ -236,7 +244,7 @@ class ScsiBlockDevice(
                 reducedCommands = true
                 continue
             }
-            done += count
+            done += transferred
         }
     }
 
@@ -245,10 +253,14 @@ class ScsiBlockDevice(
      * en état du lecteur : un lecteur bon marché rate parfois un transfert
      * sans raison durable (constaté le 2026-11-11). Relire ou réécrire les
      * mêmes blocs est sans effet de bord.
+     *
+     * Renvoie le nombre de blocs réellement transférés : une lecture peut
+     * légitimement rendre moins que demandé (l'appelant demande la suite).
      */
-    private fun executeBlocks(cdb: ByteArray, buffer: ByteArray, offset: Int, length: Int, write: Boolean, lba: Long) {
+    private fun executeBlocks(cdb: ByteArray, buffer: ByteArray, offset: Int, length: Int, write: Boolean, lba: Long): Int {
         val what = if (write) "WRITE(10) bloc $lba" else "READ(10) bloc $lba"
         var last: IOException? = null
+        var first: String? = null
         for (attempt in 0 until TRANSFER_ATTEMPTS) {
             if (attempt > 0) {
                 transport.resetRecovery()
@@ -257,8 +269,17 @@ class ScsiBlockDevice(
             }
             try {
                 val status = execute(cdb, buffer, offset, length, directionIn = !write, exact = true)
-                if (status == 0) return
-                val sense = senseException(what)
+                val got = lastDataBytes
+                if (status == 0) {
+                    if (write || got >= length) return length / blockSize
+                    val blocks = got / blockSize
+                    if (blocks >= 1) {
+                        shortReads++
+                        return blocks
+                    }
+                    throw IOException("Transfert incomplet ($got sur $length octets, commande ${opName(cdb)})")
+                }
+                val sense = senseException(if (write) what else "$what ($got octets reçus sur $length)")
                 // « Le lecteur vient d'être réinitialisé » (unit attention) ou « pas encore prêt » : on réessaie.
                 if (sense.senseKey == 7) throw WriteProtectedException(sense.message ?: what)
                 if (sense.senseKey != 6 && sense.senseKey != 2) throw sense
@@ -273,8 +294,11 @@ class ScsiBlockDevice(
             } catch (e: IOException) {
                 last = IOException("$what : ${e.message}")
             }
+            if (first == null) first = last?.message
         }
-        throw last ?: IOException("$what a échoué")
+        val message = last?.message ?: "$what a échoué"
+        // Le premier échec dit souvent plus que le dernier (après des remises en état).
+        throw IOException(if (first != null && first != message) "$message [1er essai : $first]" else message)
     }
 
     private fun pause(milliseconds: Long) {
@@ -344,6 +368,8 @@ class ScsiBlockDevice(
         // lieu d'envoyer les données : on le débloque et on lit quand même
         // l'état de la commande (qui dira « échec » -> REQUEST SENSE).
         var stalled = false
+        var embeddedStatus = -1
+        lastDataBytes = 0
         if (data != null && length > 0) {
             var done = 0
             while (done < length) {
@@ -360,14 +386,32 @@ class ScsiBlockDevice(
                 }
                 done += n
                 if (n < chunk) {
-                    if (exact) {
+                    if (exact && !directionIn) {
                         transport.resetRecovery()
                         throw IOException("Transfert incomplet ($done sur $length octets, commande ${opName(cdb)})")
                     }
+                    // Lecture plus courte que demandé. Le lecteur a pu enchaîner
+                    // son état de commande (13 octets) juste derrière les
+                    // données, dans la même réponse (lecteur Acer, 2026-11-13 :
+                    // « 32269 sur 32768 » = 63 blocs + 13) : on le reconnaît à
+                    // sa signature et à notre numéro de commande.
+                    val tail = offset + done - CSW_SIZE
+                    if (done >= CSW_SIZE) {
+                        val candidate = ByteBuffer.wrap(data, tail, CSW_SIZE).order(ByteOrder.LITTLE_ENDIAN)
+                        if (candidate.int == CSW_SIGNATURE && candidate.int == currentTag) {
+                            candidate.int // résidu
+                            embeddedStatus = candidate.get().toInt() and 0xFF
+                            done -= CSW_SIZE
+                        }
+                    }
+                    lastDataBytes = done
                     break
                 }
+                lastDataBytes = done
             }
         }
+
+        if (embeddedStatus in 0..1) return embeddedStatus
 
         val csw = ByteArray(CSW_SIZE)
         var n = transport.bulkIn(csw, 0, CSW_SIZE)

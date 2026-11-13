@@ -101,6 +101,7 @@ object Strings {
     const val FW_AMBERELEC_DESC = "Conçu pour la même famille de puce (RK3326) que la R36S. Compatibilité R36S non officiellement confirmée."
     const val FW_MINUI_TAGLINE = "Interface minimaliste"
     const val FW_MINUI_DESC = "Interface minimaliste. Portage communautaire pour R36S, distinct du projet officiel."
+    const val FW_MINUI_NOTE = "Le fichier publié est une archive .zip de fichiers à copier sur une carte déjà formatée, pas une image de carte : l'appli ne peut pas l'installer."
     const val FW_R36DROID_TAGLINE = "Android sur la R36S"
     const val FW_R36DROID_DESC = "Portage communautaire d'Android (LineageOS) pour R36S."
     const val FW_ANDR36OID_TAGLINE = "Un autre Android pour la R36S"

@@ -83,6 +83,9 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
 
     /** Lecteur qui rend un bloc de moins que demandé pour toute lecture de plus de N blocs. 0 = jamais. */
     var maxReadBlocks = 0
+
+    /** Comme le lecteur Acer : l'état de commande arrive collé derrière les données écourtées. */
+    var embedStatusInShortRead = false
     var clearHalts = 0
 
     /** Écritures qui échouent (état « échec ») -- puis le lecteur décroche le temps d'un REQUEST SENSE. */
@@ -180,8 +183,14 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
                     stalledIn = true
                     csw = makeCsw(tag, 0)
                 } else if (op == 0x28 && maxReadBlocks > 0 && count > maxReadBlocks) {
-                    pendingIn = disk.copyOfRange(address * blockSize, (address + count - 1) * blockSize)
-                    csw = makeCsw(tag, 0)
+                    val shortData = disk.copyOfRange(address * blockSize, (address + count - 1) * blockSize)
+                    if (embedStatusInShortRead) {
+                        pendingIn = shortData + makeCsw(tag, 0)
+                        csw = null
+                    } else {
+                        pendingIn = shortData
+                        csw = makeCsw(tag, 0)
+                    }
                 } else if (op == 0x28) {
                     pendingIn = disk.copyOfRange(address * blockSize, (address + count) * blockSize)
                     csw = makeCsw(tag, 0)

@@ -80,6 +80,9 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
 
     /** Lecteur capricieux : refuse (7/27) toute écriture de plus de N blocs. 0 = pas de limite. */
     var maxWriteBlocks = 0
+
+    /** Lecteur qui rend un bloc de moins que demandé pour toute lecture de plus de N blocs. 0 = jamais. */
+    var maxReadBlocks = 0
     var clearHalts = 0
 
     /** Écritures qui échouent (état « échec ») -- puis le lecteur décroche le temps d'un REQUEST SENSE. */
@@ -176,6 +179,9 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
                     failDataReads--
                     stalledIn = true
                     csw = makeCsw(tag, 0)
+                } else if (op == 0x28 && maxReadBlocks > 0 && count > maxReadBlocks) {
+                    pendingIn = disk.copyOfRange(address * blockSize, (address + count - 1) * blockSize)
+                    csw = makeCsw(tag, 0)
                 } else if (op == 0x28) {
                     pendingIn = disk.copyOfRange(address * blockSize, (address + count) * blockSize)
                     csw = makeCsw(tag, 0)
@@ -230,6 +236,8 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
 
     override fun resetRecovery() {
         resets++
+        pendingIn = ByteArray(0)
+        pendingInPos = 0
         stalledIn = false
         csw = null
         writeRemaining = 0

@@ -75,7 +75,7 @@ class ScsiBlockDeviceTest {
         val device = ScsiBlockDevice(reader, sleep = {})
         device.init()
 
-        // 3 Mio : plus qu'une commande (512 Kio) et plus qu'un transfert USB (64 Kio).
+        // 3 Mio : beaucoup plus qu'une commande (64 Kio).
         val buffer = ByteArray(3 * 1024 * 1024)
         device.read(16, buffer, buffer.size / 512)
         assertArrayEquals(original.copyOfRange(16 * 512, 16 * 512 + buffer.size), buffer)
@@ -174,6 +174,34 @@ class ScsiBlockDeviceTest {
         assertArrayEquals(payload, reader.disk.copyOfRange(16 * 512, 16 * 512 + payload.size))
         assertTrue(device.reducedCommands)
         assertEquals(false, device.reportedWriteProtect())
+    }
+
+    @Test
+    fun readsFromAReaderThatShortchangesBigCommands() {
+        // Lecteur Acer du 2026-11-13 : rend 1023 blocs sur 1024 demandés.
+        val disk = patternBytes(2 * 1024 * 1024)
+        val reader = FakeUsbReader(disk.copyOf())
+        reader.maxReadBlocks = 128
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        val buffer = ByteArray(1024 * 1024)
+        device.read(0, buffer, buffer.size / 512)
+        assertArrayEquals(disk.copyOf(buffer.size), buffer)
+        assertEquals(0, device.retries)
+        assertTrue(reader.commands.count { it == 0x28 } >= 16)
+    }
+
+    @Test
+    fun fallsBackToSmallCommandsWhenNormalReadsComeUpShort() {
+        val disk = patternBytes(1024 * 1024)
+        val reader = FakeUsbReader(disk.copyOf())
+        reader.maxReadBlocks = 64
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        val buffer = ByteArray(256 * 1024)
+        device.read(8, buffer, buffer.size / 512)
+        assertArrayEquals(disk.copyOfRange(8 * 512, 8 * 512 + buffer.size), buffer)
+        assertTrue(device.reducedCommands)
     }
 
     @Test

@@ -224,6 +224,17 @@ class ScsiBlockDevice(
                 commandBytes = SMALL_COMMAND_BYTES
                 reducedCommands = true
                 continue
+            } catch (e: ScsiException) {
+                throw e // la carte a donné une raison précise : inutile d'insister
+            } catch (e: IOException) {
+                // Transfert raté à chaque essai avec une commande de taille
+                // normale : dernier recours, les petites commandes.
+                if (commandBytes <= SMALL_COMMAND_BYTES) throw e
+                transport.resetRecovery()
+                pause(RETRY_DELAY_MS)
+                commandBytes = SMALL_COMMAND_BYTES
+                reducedCommands = true
+                continue
             }
             done += count
         }
@@ -393,8 +404,15 @@ class ScsiBlockDevice(
         const val CBW_SIGNATURE = 0x43425355
         const val CSW_SIGNATURE = 0x53425355
 
-        /** Octets par commande READ/WRITE(10). */
-        const val MAX_BYTES_PER_COMMAND = 512 * 1024
+        /**
+         * Octets par commande READ/WRITE(10). 64 Kio, comme Windows (Linux :
+         * 120 Kio par défaut en USB 2) : au-delà, des lecteurs du commerce
+         * rendent moins que demandé sans le dire. Constaté le 2026-11-13 sur
+         * un lecteur Acer USB-C : READ(10) de 512 Kio au bloc 0 -> 1023 blocs
+         * rendus sur 1024, à chaque essai (« Transfert incomplet (523789 sur
+         * 524288 octets) » : 1023 blocs + les 13 octets de l'état de commande).
+         */
+        const val MAX_BYTES_PER_COMMAND = 64 * 1024
 
         /** Repli pour les lecteurs qui refusent les grosses commandes. */
         const val SMALL_COMMAND_BYTES = 32 * 1024

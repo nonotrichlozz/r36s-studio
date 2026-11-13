@@ -158,6 +158,16 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
   bandeau), l'alimentation par la prise du téléphone (adaptateur USB-C en
   plus), ou la prise en main du lecteur par l'appli. Non tranché.
 
+- 2026-11-13, construction `8e86c3d`, **lecteur Acer USB-C** (prise directe,
+  sans adaptateur) + SanDisk Ultra 32 Go : la détection reste sur « Lecture
+  de la carte… » puis échoue : `READ(10) bloc 0 : Transfert incomplet (523789
+  sur 524288 octets)`. 523789 = 1023 blocs + 13 octets : le lecteur rend un
+  bloc de moins que les 1024 demandés, puis son état de commande, avalé comme
+  des données. Même résultat aux quatre essais, donc lié à la taille.
+  Correctif : commandes de **64 Kio** au lieu de 512 Kio
+  (`MAX_BYTES_PER_COMMAND`), et repli sur 32 Kio si un transfert rate encore.
+  Résultat : à confirmer.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

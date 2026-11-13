@@ -57,8 +57,56 @@ class ProgressMeter(
     }
 }
 
+/**
+ * Reprise après un décrochage du lecteur : reçoit l'erreur, rouvre la carte
+ * et la renvoie (ou `null` pour abandonner). Le morceau en cours est alors
+ * réécrit ou relu au même endroit -- sans effet de bord.
+ */
+typealias CardRecovery = (IOException) -> BlockDevice?
+
+/** Accès carte avec reprise : au plus `MAX_RECOVERIES` réouvertures par opération. */
+private class Recovering(var device: BlockDevice, private val recover: CardRecovery?) {
+    var recoveries = 0
+        private set
+
+    fun write(lba: Long, buffer: ByteArray, blocks: Int) = retry { device.write(lba, buffer, blocks) }
+
+    fun read(lba: Long, buffer: ByteArray, blocks: Int) = retry { device.read(lba, buffer, blocks) }
+
+    fun flush() = retry { device.flush() }
+
+    private inline fun retry(action: () -> Unit) {
+        while (true) {
+            try {
+                action()
+                return
+            } catch (e: IOException) {
+                // Refus réel de la carte, annulation : jamais de reprise.
+                if (recover == null || e is WriteProtectedException || e is OperationCancelled ||
+                    recoveries >= Imaging.MAX_RECOVERIES
+                ) {
+                    throw e
+                }
+                recoveries++
+                val reopened = recover.invoke(e) ?: throw e
+                if (reopened.blockSize != device.blockSize || reopened.blockCount != device.blockCount) {
+                    throw IOException("Ce n'est plus la même carte après la reprise")
+                }
+                device = reopened
+            }
+        }
+    }
+}
+
 object Imaging {
     const val CHUNK_BYTES = 1024 * 1024
+
+    /** Réouvertures du lecteur acceptées pendant une même opération. */
+    const val MAX_RECOVERIES = 3
+
+    /** Effacement : début de la carte (tables, démarrage) et fin (copie de la table GPT). */
+    const val ERASE_HEAD_BYTES = 32L * 1024 * 1024
+    const val ERASE_TAIL_BYTES = 4L * 1024 * 1024
 
     /**
      * Écrit l'image sur la carte puis la relit et la compare octet par octet.
@@ -78,7 +126,9 @@ object Imaging {
         device: BlockDevice,
         cancel: CancelToken,
         listener: ProgressListener,
+        recover: CardRecovery? = null,
     ): Long {
+        val card = Recovering(device, recover)
         val blockSize = device.blockSize
         require(CHUNK_BYTES % blockSize == 0) { "Taille de bloc non gérée : $blockSize" }
         val cardBytes = device.sizeBytes
@@ -98,7 +148,7 @@ object Imaging {
                     val padded = roundUp(n, blockSize)
                     if (padded > n) java.util.Arrays.fill(buffer, n, padded, 0.toByte())
                     if (written + padded > cardBytes) throw ImageTooLargeException(cardBytes)
-                    device.write(written / blockSize, buffer, padded / blockSize)
+                    card.write(written / blockSize, buffer, padded / blockSize)
                     written += padded
                     meter.update(counting.count, sourceBytes, padded.toLong())
                     if (n < buffer.size) break
@@ -107,7 +157,7 @@ object Imaging {
             }
         }
         if (written == 0L) throw UnsupportedImageException("Le fichier est vide")
-        device.flush()
+        card.flush()
 
         // --- Vérification : relecture de la carte, comparée à l'image ---
         listener.onPhase(Phase.VERIFY)
@@ -122,7 +172,7 @@ object Imaging {
                     if (n == 0) throw VerifyFailedException(verified)
                     val padded = roundUp(n, blockSize)
                     if (padded > n) java.util.Arrays.fill(buffer, n, padded, 0.toByte())
-                    device.read(verified / blockSize, readBack, padded / blockSize)
+                    card.read(verified / blockSize, readBack, padded / blockSize)
                     for (i in 0 until padded) {
                         if (buffer[i] != readBack[i]) throw VerifyFailedException(verified + i)
                     }
@@ -133,6 +183,70 @@ object Imaging {
             }
         }
         return written
+    }
+
+    /**
+     * Efface la carte : met à zéro son début (tables de partitions, démarrage,
+     * début des systèmes de fichiers) et sa fin (copie de secours de la table
+     * GPT), puis relit ces zones. La carte redevient « vierge » : le
+     * téléphone et l'ordinateur n'y voient plus aucun système. Renvoie le
+     * nombre d'octets effacés.
+     */
+    @Throws(IOException::class)
+    fun erase(
+        device: BlockDevice,
+        cancel: CancelToken,
+        listener: ProgressListener,
+        recover: CardRecovery? = null,
+    ): Long {
+        val card = Recovering(device, recover)
+        val blockSize = device.blockSize
+        require(CHUNK_BYTES % blockSize == 0) { "Taille de bloc non gérée : $blockSize" }
+        val size = device.sizeBytes
+        val head = minOf(ERASE_HEAD_BYTES, size) / blockSize * blockSize
+        val tailStart = maxOf(head, (size - ERASE_TAIL_BYTES) / blockSize * blockSize)
+        val ranges = listOf(0L to head, tailStart to size).filter { it.second > it.first }
+        val total = ranges.sumOf { it.second - it.first }
+        val meter = ProgressMeter(listener)
+        val zeros = ByteArray(CHUNK_BYTES)
+        val readBack = ByteArray(CHUNK_BYTES)
+
+        listener.onPhase(Phase.WRITE)
+        meter.reset()
+        var done = 0L
+        for ((start, end) in ranges) {
+            var offset = start
+            while (offset < end) {
+                if (cancel.cancelled) throw OperationCancelled()
+                val n = minOf(CHUNK_BYTES.toLong(), end - offset).toInt()
+                card.write(offset / blockSize, zeros, n / blockSize)
+                offset += n
+                done += n
+                meter.update(done, total, n.toLong())
+            }
+        }
+        meter.update(done, total, 0, force = true)
+        card.flush()
+
+        listener.onPhase(Phase.VERIFY)
+        meter.reset()
+        done = 0L
+        for ((start, end) in ranges) {
+            var offset = start
+            while (offset < end) {
+                if (cancel.cancelled) throw OperationCancelled()
+                val n = minOf(CHUNK_BYTES.toLong(), end - offset).toInt()
+                card.read(offset / blockSize, readBack, n / blockSize)
+                for (i in 0 until n) {
+                    if (readBack[i] != 0.toByte()) throw VerifyFailedException(offset + i)
+                }
+                offset += n
+                done += n
+                meter.update(done, total, n.toLong())
+            }
+        }
+        meter.update(done, total, 0, force = true)
+        return total
     }
 
     /**

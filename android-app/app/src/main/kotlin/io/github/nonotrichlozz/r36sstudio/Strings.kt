@@ -41,6 +41,8 @@ object Strings {
     const val TILE_BACKUP_DESC = "Copie toute ta carte dans un fichier sur le téléphone. Rien n'est modifié."
     const val TILE_RESTORE = "Restaurer une sauvegarde"
     const val TILE_RESTORE_DESC = "Remets une sauvegarde sur une carte, la même ou une neuve (clonage)."
+    const val TILE_ERASE = "Effacer la carte"
+    const val TILE_ERASE_DESC = "Rend la carte vierge, prête pour installer un autre système. Tout ce qu'elle contient est perdu."
     const val SECTION_SAFETY = "Par sécurité"
     const val BADGE_READY = "Prêt"
     const val BADGE_NO_CARD = "Branche une carte"
@@ -64,6 +66,8 @@ object Strings {
     fun confirmErase(display: String, sizeBytes: Long) =
         "Toutes les données de « $display » (${formatSize(sizeBytes)}) seront définitivement effacées."
     fun confirmSource(label: String) = "Fichier écrit sur la carte : $label"
+    const val CONFIRM_GO_ERASE = "Effacer la carte"
+    const val CONFIRM_ERASE_NOTE = "La carte sera vierge : il faudra ensuite y installer un système."
 
     // --- Journal de bord ---
     const val LOG_TITLE_ACTIVE = "OPÉRATION ACTIVE"
@@ -71,6 +75,12 @@ object Strings {
     const val LOG_EMPTY = "Le journal de bord s'affichera ici."
     const val OP_FLASH = "Installation du système"
     const val OP_BACKUP = "Sauvegarde de la carte"
+    const val OP_ERASE = "Effacement de la carte"
+    const val PHASE_ERASE = "Effacement de la carte"
+    const val LOG_ERASE_START = "Effacement de la carte…"
+    const val LOG_ERASE_DONE = "Carte effacée et vérifiée : elle est vierge. Tu peux y installer un système."
+    const val LOG_RECONNECTING = "Le lecteur de carte ne répond plus : nouvelle tentative, ne débranche rien…"
+    const val LOG_RECONNECTED = "Le lecteur répond de nouveau : l'écriture reprend là où elle s'était arrêtée, plus doucement."
     const val OP_DOWNLOAD = "Téléchargement"
     const val OP_UPDATE = "Mise à jour de R36S Studio"
     fun logUpdateFound(build: String) = "Nouvelle version trouvée ($build) : téléchargement…"
@@ -122,7 +132,8 @@ object Strings {
         "Ta carte ne renvoie pas deux fois le même contenu : elle est défaillante, cette sauvegarde n'est pas fiable. Le fichier a été gardé et marqué « instable »."
     const val ERROR_WRITE_PROTECTED =
         "Le lecteur dit que cette carte est protégée en écriture. Rien n'a été modifié. Enfonce bien la carte dans le lecteur et recommence ; si ça persiste, essaie un autre lecteur ou une autre carte."
-    const val ERROR_CARD_GONE = "La carte ne répond plus. Vérifie qu'elle est bien branchée, puis recommence."
+    const val ERROR_CARD_GONE =
+        "La carte ne répond plus. Vérifie qu'elle est bien branchée, puis recommence. Si ça se répète au même endroit, essaie un autre lecteur ou une autre carte."
     const val ERROR_NO_CARD = "Aucune carte prête. Branche ta carte SD et autorise l'appli à l'utiliser."
     const val ERROR_SAME_CARD = "C'est la carte que tu viens de sauvegarder. Retire-la et branche la carte neuve."
     const val ERROR_CHECKSUM = "Le fichier téléchargé est abîmé. Recommence le téléchargement."

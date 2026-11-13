@@ -87,6 +87,28 @@ class ScsiBlockDevice(
         }
     }
 
+    /**
+     * Passe aux petites commandes (32 Ko) : après un décrochage du lecteur,
+     * l'appli reprend plus doucement, une carte occupée avale mieux de
+     * petites écritures.
+     */
+    fun useSmallCommands() {
+        commandBytes = SMALL_COMMAND_BYTES
+        reducedCommands = true
+    }
+
+    /**
+     * Remet le lecteur en état sans le rendre à Android (qui se remettrait
+     * aussitôt à lire la carte) : remise à zéro du protocole, pause, puis
+     * même accueil qu'à l'ouverture. Lève une erreur si le lecteur reste muet.
+     */
+    @Throws(IOException::class)
+    fun revive(settleMs: Long) {
+        transport.resetRecovery()
+        pause(settleMs)
+        init()
+    }
+
     /** Nombre de commandes qu'il a fallu recommencer (diagnostic). */
     var retries: Int = 0
         private set
@@ -231,7 +253,12 @@ class ScsiBlockDevice(
                 if (sense.senseKey != 6 && sense.senseKey != 2) throw sense
                 last = sense
             } catch (e: ScsiException) {
-                throw e
+                // Raison illisible (REQUEST SENSE sans réponse) : c'est le lecteur
+                // qui a décroché, pas la carte qui refuse (2026-11-13, R36S
+                // Arch R réinstallée depuis le téléphone). On le remet en état
+                // et on recommence, comme pour un transfert raté.
+                if (e.senseKey >= 0) throw e
+                last = e
             } catch (e: IOException) {
                 last = IOException("$what : ${e.message}")
             }

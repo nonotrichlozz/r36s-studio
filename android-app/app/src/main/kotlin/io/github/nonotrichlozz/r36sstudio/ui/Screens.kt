@@ -145,6 +145,13 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
                     enabled = !busy,
                     onClick = { if (viewModel.canStartCardAction()) pickImage.launch(arrayOf("*/*")) },
                 )
+                Tile(
+                    title = Strings.TILE_ERASE,
+                    description = Strings.TILE_ERASE_DESC,
+                    ready = cardReady,
+                    enabled = !busy,
+                    onClick = viewModel::askErase,
+                )
             }
 
             Spacer(Modifier.height(10.dp))
@@ -161,10 +168,23 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
                     pickImage.launch(arrayOf("*/*"))
                 },
             )
-            is DialogState.ConfirmFlash -> ConfirmFlashDialog(
-                dialog = dialog,
+            is DialogState.ConfirmFlash -> ConfirmDestructiveDialog(
+                key = dialog,
+                cardDisplay = dialog.cardDisplay,
+                cardBytes = dialog.cardBytes,
+                note = Strings.confirmSource(dialog.source.label),
+                goLabel = Strings.CONFIRM_GO,
                 onCancel = viewModel::dismissDialog,
                 onConfirm = { viewModel.confirmFlash(dialog) },
+            )
+            is DialogState.ConfirmErase -> ConfirmDestructiveDialog(
+                key = dialog,
+                cardDisplay = dialog.cardDisplay,
+                cardBytes = dialog.cardBytes,
+                note = Strings.CONFIRM_ERASE_NOTE,
+                goLabel = Strings.CONFIRM_GO_ERASE,
+                onCancel = viewModel::dismissDialog,
+                onConfirm = { viewModel.confirmErase(dialog) },
             )
             is DialogState.Message -> MessageDialog(text = dialog.text, onDismiss = viewModel::dismissDialog)
         }
@@ -435,17 +455,25 @@ private fun ChoiceRow(title: String, description: String, onClick: () -> Unit) {
 
 /** Fond rouge, case obligatoire jamais pré-cochée : dernier rempart avant l'écriture. */
 @Composable
-private fun ConfirmFlashDialog(dialog: DialogState.ConfirmFlash, onCancel: () -> Unit, onConfirm: () -> Unit) {
-    var understood by remember(dialog) { mutableStateOf(false) }
+private fun ConfirmDestructiveDialog(
+    key: DialogState,
+    cardDisplay: String,
+    cardBytes: Long,
+    note: String,
+    goLabel: String,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    var understood by remember(key) { mutableStateOf(false) }
     DialogPanel(onDismiss = onCancel, background = Palette.DangerBg, borderColor = Palette.DangerBorder) {
         Text(Strings.CONFIRM_TITLE, color = Palette.DangerFg, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text(
-            Strings.confirmErase(dialog.cardDisplay, dialog.cardBytes),
+            Strings.confirmErase(cardDisplay, cardBytes),
             color = Palette.TextPrimary,
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
         )
-        Text(Strings.confirmSource(dialog.source.label), color = Palette.TextSecondary, fontSize = 13.sp)
+        Text(note, color = Palette.TextSecondary, fontSize = 13.sp)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -475,7 +503,7 @@ private fun ConfirmFlashDialog(dialog: DialogState.ConfirmFlash, onCancel: () ->
                     disabledContentColor = Palette.TextSecondary,
                 ),
             ) {
-                Text(Strings.CONFIRM_GO, fontWeight = FontWeight.Bold)
+                Text(goLabel, fontWeight = FontWeight.Bold)
             }
         }
     }

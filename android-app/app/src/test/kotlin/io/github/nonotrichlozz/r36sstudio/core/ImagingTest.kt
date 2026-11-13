@@ -236,4 +236,157 @@ class ImagingTest {
         assertEquals(Safety.Rejection.TOO_LARGE, Safety.rejection(Safety.DEFAULT_MAX_BYTES + 1))
         assertNull(Safety.rejection(64L * 1024 * 1024 * 1024))
     }
+
+    // --- Reprise quand le lecteur décroche (2026-11-13) ---
+
+    /** Carte qui « décroche » une fois arrivée à un bloc donné, comme le lecteur du 2026-11-13. */
+    private class DroppingDevice(data: ByteArray, private val failAtLba: Long) : MemoryBlockDevice(data) {
+        var dead = false
+
+        override fun write(lba: Long, buffer: ByteArray, blocks: Int) {
+            if (dead || lba >= failAtLba) {
+                dead = true
+                throw java.io.IOException("Le lecteur de carte ne répond plus (envoi de la commande 0x03)")
+            }
+            super.write(lba, buffer, blocks)
+        }
+    }
+
+    @Test
+    fun flashResumesAtTheFailedBlockAfterRecovery() {
+        val image = patternBytes(5 * Imaging.CHUNK_BYTES)
+        val disk = ByteArray(8 * Imaging.CHUNK_BYTES)
+        val dropping = DroppingDevice(disk, failAtLba = (3L * Imaging.CHUNK_BYTES) / 512)
+        var recoveries = 0
+        val written = Imaging.flash(
+            { ByteArrayInputStream(image) },
+            image.size.toLong(),
+            ImageFormat.RAW,
+            dropping,
+            CancelToken(),
+            RecordingListener(),
+        ) {
+            recoveries++
+            MemoryBlockDevice(disk) // même carte, lecteur rouvert
+        }
+        assertEquals(1, recoveries)
+        assertEquals(image.size.toLong(), written)
+        assertArrayEquals(image, disk.copyOf(image.size))
+    }
+
+    @Test
+    fun flashGivesUpWhenRecoveryFails() {
+        val image = patternBytes(2 * Imaging.CHUNK_BYTES)
+        val dropping = DroppingDevice(ByteArray(4 * Imaging.CHUNK_BYTES), failAtLba = 0)
+        var recoveries = 0
+        try {
+            Imaging.flash({ ByteArrayInputStream(image) }, image.size.toLong(), ImageFormat.RAW, dropping, CancelToken(), RecordingListener()) {
+                recoveries++
+                null
+            }
+            fail("IOException attendue")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("ne répond plus"))
+        }
+        assertEquals(1, recoveries)
+    }
+
+    @Test
+    fun flashStopsAfterTooManyRecoveries() {
+        val image = patternBytes(2 * Imaging.CHUNK_BYTES)
+        val disk = ByteArray(4 * Imaging.CHUNK_BYTES)
+        var recoveries = 0
+        try {
+            Imaging.flash({ ByteArrayInputStream(image) }, image.size.toLong(), ImageFormat.RAW, DroppingDevice(disk, 0), CancelToken(), RecordingListener()) {
+                recoveries++
+                DroppingDevice(disk, 0)
+            }
+            fail("IOException attendue")
+        } catch (e: java.io.IOException) {
+            // attendu
+        }
+        assertEquals(Imaging.MAX_RECOVERIES, recoveries)
+    }
+
+    @Test
+    fun recoveryOntoAnotherCardIsRefused() {
+        val image = patternBytes(2 * Imaging.CHUNK_BYTES)
+        try {
+            Imaging.flash(
+                { ByteArrayInputStream(image) },
+                image.size.toLong(),
+                ImageFormat.RAW,
+                DroppingDevice(ByteArray(4 * Imaging.CHUNK_BYTES), 0),
+                CancelToken(),
+                RecordingListener(),
+            ) { MemoryBlockDevice(ByteArray(8 * Imaging.CHUNK_BYTES)) }
+            fail("IOException attendue")
+        } catch (e: java.io.IOException) {
+            assertTrue(e.message!!.contains("même carte"))
+        }
+    }
+
+    @Test
+    fun writeProtectedIsNeverRecovered() {
+        val device = object : MemoryBlockDevice(ByteArray(4 * Imaging.CHUNK_BYTES)) {
+            override fun write(lba: Long, buffer: ByteArray, blocks: Int) {
+                throw WriteProtectedException("7/27")
+            }
+        }
+        var recoveries = 0
+        try {
+            Imaging.flash({ ByteArrayInputStream(ByteArray(1024)) }, 1024, ImageFormat.RAW, device, CancelToken(), RecordingListener()) {
+                recoveries++
+                device
+            }
+            fail("WriteProtectedException attendue")
+        } catch (e: WriteProtectedException) {
+            // attendu
+        }
+        assertEquals(0, recoveries)
+    }
+
+    // --- Effacement ---
+
+    @Test
+    fun eraseZeroesHeadAndTailOnly() {
+        val size = 64 * Imaging.CHUNK_BYTES
+        val disk = patternBytes(size)
+        val original = disk.copyOf()
+        val device = MemoryBlockDevice(disk)
+        val listener = RecordingListener()
+        val erased = Imaging.erase(device, CancelToken(), listener)
+        assertEquals(Imaging.ERASE_HEAD_BYTES + Imaging.ERASE_TAIL_BYTES, erased)
+        val head = Imaging.ERASE_HEAD_BYTES.toInt()
+        val tail = size - Imaging.ERASE_TAIL_BYTES.toInt()
+        assertTrue((0 until head).all { disk[it] == 0.toByte() })
+        assertTrue((tail until size).all { disk[it] == 0.toByte() })
+        assertArrayEquals(original.copyOfRange(head, tail), disk.copyOfRange(head, tail))
+        assertEquals(listOf(Phase.WRITE, Phase.VERIFY), listener.phases)
+        assertEquals(1, device.flushes)
+    }
+
+    @Test
+    fun eraseOfSmallCardCoversItOnce() {
+        val size = 8 * Imaging.CHUNK_BYTES
+        val disk = patternBytes(size)
+        val erased = Imaging.erase(MemoryBlockDevice(disk), CancelToken(), RecordingListener())
+        assertEquals(size.toLong(), erased)
+        assertTrue(disk.all { it == 0.toByte() })
+    }
+
+    @Test
+    fun eraseDetectsACardThatKeepsItsData() {
+        val device = object : MemoryBlockDevice(patternBytes(64 * Imaging.CHUNK_BYTES)) {
+            override fun write(lba: Long, buffer: ByteArray, blocks: Int) {
+                // Carte défaillante : accepte l'écriture sans rien changer.
+            }
+        }
+        try {
+            Imaging.erase(device, CancelToken(), RecordingListener())
+            fail("VerifyFailedException attendue")
+        } catch (e: VerifyFailedException) {
+            assertEquals(0L, e.offset)
+        }
+    }
 }

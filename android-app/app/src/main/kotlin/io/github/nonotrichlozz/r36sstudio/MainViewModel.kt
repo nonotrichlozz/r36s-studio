@@ -18,7 +18,9 @@ import android.provider.OpenableColumns
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.nonotrichlozz.r36sstudio.core.BlockDevice
 import io.github.nonotrichlozz.r36sstudio.core.CancelToken
+import io.github.nonotrichlozz.r36sstudio.core.CardRecovery
 import io.github.nonotrichlozz.r36sstudio.core.ImageFormat
 import io.github.nonotrichlozz.r36sstudio.core.ImageSource
 import io.github.nonotrichlozz.r36sstudio.core.ImageTooLargeException
@@ -30,6 +32,7 @@ import io.github.nonotrichlozz.r36sstudio.core.Phase
 import io.github.nonotrichlozz.r36sstudio.core.ProgressListener
 import io.github.nonotrichlozz.r36sstudio.core.ProgressMeter
 import io.github.nonotrichlozz.r36sstudio.core.Safety
+import io.github.nonotrichlozz.r36sstudio.core.ScsiBlockDevice
 import io.github.nonotrichlozz.r36sstudio.core.SevenZipArchiveException
 import io.github.nonotrichlozz.r36sstudio.core.SourceUnstableException
 import io.github.nonotrichlozz.r36sstudio.core.UnsupportedImageException
@@ -96,6 +99,7 @@ sealed interface DialogState {
     data object None : DialogState
     data object FirmwarePicker : DialogState
     data class ConfirmFlash(val source: FlashSource, val cardDisplay: String, val cardBytes: Long) : DialogState
+    data class ConfirmErase(val cardDisplay: String, val cardBytes: Long) : DialogState
     data class Message(val text: String) : DialogState
 }
 
@@ -503,8 +507,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val open: () -> InputStream = {
                     if (source.file != null) FileInputStream(source.file) else openUri(source.uri!!)
                 }
+                val recover: CardRecovery = { e -> reconnectCard(card.device, e) }
                 val written = try {
-                    Imaging.flash(open, source.sizeBytes, source.format, usbCard.block, token, progressListener)
+                    Imaging.flash(open, source.sizeBytes, source.format, usbCard.block, token, progressListener, recover)
                 } catch (e: WriteProtectedException) {
                     val announced = when (usbCard.block.reportedWriteProtect()) {
                         true -> "oui"
@@ -514,13 +519,116 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     log(Strings.logDetail("lecteur : protection en écriture annoncée = $announced ; petites commandes essayées = ${usbCard.block.reducedCommands}"), LogKind.DETAIL)
                     throw e
                 }
-                if (usbCard.block.reducedCommands) log(Strings.logDetail("écriture par petites commandes (lecteur capricieux)"), LogKind.DETAIL)
-                usbCard.block.flush()
-                if (usbCard.block.retries > 0) log(Strings.logDetail("${usbCard.block.retries} commande(s) recommencée(s)"), LogKind.DETAIL)
+                // Après une reprise, la session est peut-être un nouveau lecteur ouvert.
+                val block = currentBlock() ?: usbCard.block
+                if (block.reducedCommands) log(Strings.logDetail("écriture par petites commandes (lecteur capricieux)"), LogKind.DETAIL)
+                block.flush()
+                if (block.retries > 0) log(Strings.logDetail("${block.retries} commande(s) recommencée(s)"), LogKind.DETAIL)
                 log(Strings.logFlashDone(written), LogKind.SUCCESS)
                 log(Strings.LOG_CAN_REMOVE, LogKind.SUCCESS)
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Effacer la carte (après la fenêtre rouge uniquement)
+    // ------------------------------------------------------------------
+
+    fun askErase() {
+        if (!canStartCardAction()) return
+        val card = _state.value.card as? CardState.Ready ?: return
+        _state.update { it.copy(dialog = DialogState.ConfirmErase(card.display, card.sizeBytes)) }
+    }
+
+    fun confirmErase(dialog: DialogState.ConfirmErase) {
+        if (busy) return
+        val card = _state.value.card as? CardState.Ready
+        dismissDialog()
+        if (card == null) {
+            showMessage(Strings.ERROR_NO_CARD)
+            return
+        }
+        startOperation(Strings.OP_ERASE, Strings.PHASE_ERASE, cardOperation = true, destructive = true) { token ->
+            acquire(card.device).let { usbCard ->
+                // Même contrôle que pour l'installation : la carte ouverte est celle confirmée.
+                if (Safety.rejection(usbCard.block.sizeBytes) != null || usbCard.block.sizeBytes != dialog.cardBytes) {
+                    throw IOException("La carte a changé depuis la confirmation")
+                }
+                val head = ByteArray(minOf(Imaging.CHUNK_BYTES.toLong(), usbCard.block.sizeBytes).toInt())
+                usbCard.block.read(0, head, head.size / usbCard.block.blockSize)
+                if (Imaging.toHex(MessageDigest.getInstance("SHA-256").digest(head)) != card.headHash) {
+                    throw IOException("La carte a changé depuis la confirmation")
+                }
+                log(Strings.LOG_ERASE_START)
+                log(Strings.logDetail("${usbCard.display}, ${usbCard.block.blockCount} blocs de ${usbCard.block.blockSize} octets"), LogKind.DETAIL)
+                val erased = Imaging.erase(usbCard.block, token, progressListener) { e -> reconnectCard(card.device, e) }
+                log(Strings.logDetail("${Strings.formatSize(erased)} remis à zéro (début et fin de la carte)"), LogKind.DETAIL)
+                log(Strings.LOG_ERASE_DONE, LogKind.SUCCESS)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Reprise quand le lecteur décroche en pleine écriture
+    // ------------------------------------------------------------------
+
+    private fun currentBlock(): ScsiBlockDevice? = synchronized(sessionLock) { session?.block }
+
+    /**
+     * Le lecteur ne répond plus (2026-11-13 : « WRITE(10) bloc 2996224 a
+     * échoué », réinstallation d'Arch R depuis le téléphone). D'abord sans
+     * rendre le lecteur à Android : remise à zéro et nouvel accueil ; sinon
+     * réouverture complète. La reprise continue par petites commandes. La
+     * relecture finale reste la preuve que la carte est juste.
+     */
+    private fun reconnectCard(device: UsbDevice, cause: IOException): BlockDevice? {
+        log(Strings.LOG_RECONNECTING)
+        log(Strings.logDetail("${cause.javaClass.simpleName} : ${cause.message}"), LogKind.DETAIL)
+        val current = currentBlock()
+        if (current != null) {
+            try {
+                current.revive(RECONNECT_SETTLE_MS)
+                current.useSmallCommands()
+                log(Strings.LOG_RECONNECTED, LogKind.SUCCESS)
+                log(Strings.logDetail("lecteur remis en état sans le relâcher"), LogKind.DETAIL)
+                return current
+            } catch (e: IOException) {
+                log(Strings.logDetail("remise en état sans relâcher : ${e.message}"), LogKind.DETAIL)
+            }
+        }
+        for (attempt in 0 until RECONNECT_ATTEMPTS) {
+            closeSession()
+            try {
+                Thread.sleep(RECONNECT_DELAY_MS)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return null
+            }
+            // Le même lecteur, autorisé : s'il a été rebranché, Android lui a peut-être donné un autre nom.
+            val target = usbManager.deviceList.values.firstOrNull { it.deviceName == device.deviceName }
+                ?: UsbCards.list(usbManager).singleOrNull {
+                    it.vendorId == device.vendorId && it.productId == device.productId
+                }
+            if (target == null || !usbManager.hasPermission(target)) {
+                log(Strings.logDetail("lecteur introuvable ou non autorisé (essai ${attempt + 1})"), LogKind.DETAIL)
+                continue
+            }
+            try {
+                val opened = synchronized(sessionLock) {
+                    val card = UsbCards.open(usbManager, target, reset = true)
+                    session = card
+                    sessionDeviceName = target.deviceName
+                    card
+                }
+                opened.block.useSmallCommands()
+                log(Strings.LOG_RECONNECTED, LogKind.SUCCESS)
+                log(Strings.logDetail("lecteur rouvert (essai ${attempt + 1})"), LogKind.DETAIL)
+                return opened.block
+            } catch (e: IOException) {
+                log(Strings.logDetail("réouverture, essai ${attempt + 1} : ${e.message}"), LogKind.DETAIL)
+            }
+        }
+        return null
     }
 
     // ------------------------------------------------------------------
@@ -707,6 +815,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        private const val RECONNECT_SETTLE_MS = 2000L
+        private const val RECONNECT_DELAY_MS = 3000L
+        private const val RECONNECT_ATTEMPTS = 3
         private const val ACTION_USB_PERMISSION = "io.github.nonotrichlozz.r36sstudio.USB_PERMISSION"
     }
 }

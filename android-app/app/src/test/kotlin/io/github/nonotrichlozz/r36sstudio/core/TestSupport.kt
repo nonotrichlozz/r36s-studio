@@ -82,6 +82,10 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
     var maxWriteBlocks = 0
     var clearHalts = 0
 
+    /** Écritures qui échouent (état « échec ») -- puis le lecteur décroche le temps d'un REQUEST SENSE. */
+    var failWritesCount = 0
+    var dropSenseCount = 0
+
     override fun bulkOut(data: ByteArray, offset: Int, length: Int): Int {
         if (discardRemaining > 0) {
             // Les données d'une écriture refusée sont avalées, puis l'état dit « échec ».
@@ -108,6 +112,10 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
         cbw.get(cdb)
         val op = cdb[0].toInt() and 0xFF
         commands.add(op)
+        if (op == 0x03 && dropSenseCount > 0) {
+            dropSenseCount--
+            return -1
+        }
         pendingIn = ByteArray(0)
         pendingInPos = 0
         when (op) {
@@ -171,6 +179,11 @@ class FakeUsbReader(val disk: ByteArray, val blockSize: Int = 512) : BulkTranspo
                 } else if (op == 0x28) {
                     pendingIn = disk.copyOfRange(address * blockSize, (address + count) * blockSize)
                     csw = makeCsw(tag, 0)
+                } else if (failWritesCount > 0) {
+                    failWritesCount--
+                    discardRemaining = count * blockSize
+                    writeTag = tag
+                    csw = null
                 } else if (writeProtected || (maxWriteBlocks > 0 && count > maxWriteBlocks)) {
                     sense = byteArrayOf(7, 0x27, 0)
                     discardRemaining = count * blockSize

@@ -132,6 +132,38 @@ class ScsiBlockDeviceTest {
     }
 
     @Test
+    fun retriesAWriteWhenTheReaderDropsDuringTheSense() {
+        // 2026-11-13 : « WRITE(10) bloc 2996224 a échoué (Le lecteur de carte
+        // ne répond plus (envoi de la commande 0x03)) » -- abandon immédiat,
+        // sans aucun nouvel essai.
+        val reader = FakeUsbReader(ByteArray(2 * 1024 * 1024))
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        reader.failWritesCount = 1
+        reader.dropSenseCount = 1
+        val payload = patternBytes(256 * 1024, seed = 9)
+        device.write(64, payload, payload.size / 512)
+        assertArrayEquals(payload, reader.disk.copyOfRange(64 * 512, 64 * 512 + payload.size))
+        assertEquals(1, device.retries)
+    }
+
+    @Test
+    fun reviveGreetsTheReaderAgainAndKeepsTheCard() {
+        val reader = FakeUsbReader(ByteArray(2 * 1024 * 1024))
+        val device = ScsiBlockDevice(reader, sleep = {})
+        device.init()
+        val resetsBefore = reader.resets
+        device.revive(0)
+        device.useSmallCommands()
+        assertEquals(resetsBefore + 1, reader.resets)
+        assertEquals(4096L, device.blockCount)
+        assertTrue(device.reducedCommands)
+        val payload = patternBytes(128 * 1024, seed = 3)
+        device.write(0, payload, payload.size / 512)
+        assertArrayEquals(payload, reader.disk.copyOf(payload.size))
+    }
+
+    @Test
     fun fallsBackToSmallCommandsWhenBigWritesAreRefused() {
         val reader = FakeUsbReader(ByteArray(2 * 1024 * 1024))
         reader.maxWriteBlocks = 64

@@ -460,6 +460,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ------------------------------------------------------------------
 
     fun downloadFirmware(firmware: Firmware) {
+        val download = firmware.download ?: return
         if (busy) return
         val card = _state.value.card as? CardState.Ready
         if (card == null) {
@@ -469,7 +470,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dismissDialog()
         startOperation(Strings.OP_DOWNLOAD, Strings.PHASE_DOWNLOAD, cardOperation = false) { token ->
             log(Strings.LOG_RESOLVING)
-            val asset = Firmwares.resolve(firmware)
+            val asset = Firmwares.resolve(download)
             log(Strings.logDownloading(asset.name))
             val directory = File(app.getExternalFilesDir(null) ?: app.filesDir, "Firmwares")
             val file = Firmwares.download(asset, directory, token, ProgressMeter(progressListener))

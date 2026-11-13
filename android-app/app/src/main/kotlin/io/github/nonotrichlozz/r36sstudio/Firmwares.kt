@@ -16,23 +16,47 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 
+/** Pour quelle console le système est fait. */
+enum class Audience { ORIGINAL, CLONE, BOTH }
+
+/** État du projet, relevé dans le catalogue de la version ordinateur. */
+enum class FirmwareStatus { MAINTAINED, EXPERIMENTAL, ARCHIVED }
+
 /**
- * Firmwares téléchargeables directement (mêmes sources et mêmes sommes de
- * contrôle de repli que `r36s_studio/identify/firmware_catalog.py`). Seuls
- * ceux qui démarrent sans réglage après le flash figurent ici : ROCKNIX sur
- * R36S demande des fichiers à poser sur la carte après coup, ce que cette
- * version Android ne sait pas encore faire.
+ * Téléchargement direct depuis la dernière release GitHub, avec SHA-256
+ * (mêmes sources et mêmes sommes de repli que
+ * `r36s_studio/identify/firmware_catalog.py`).
  */
-data class Firmware(
-    val id: String,
-    val title: String,
-    val description: String,
+data class DirectDownload(
     val repo: String,
     val pattern: Regex,
     val fallbackName: String,
     val fallbackUrl: String,
     val fallbackSha256: String,
 )
+
+/**
+ * Un système du catalogue. `download` non nul : « Télécharger et installer »
+ * en un bouton. Sinon l'appli ouvre `pageUrl` dans le navigateur, et
+ * l'utilisateur revient choisir le fichier téléchargé. `phoneReady = false` :
+ * le fichier publié ne peut pas être installé depuis un téléphone (archive
+ * à assembler, réglage à faire ensuite sur la carte).
+ */
+data class Firmware(
+    val id: String,
+    val title: String,
+    val tagline: String,
+    val description: String,
+    val audience: Audience,
+    val status: FirmwareStatus,
+    val pageUrl: String,
+    val note: String = "",
+    val download: DirectDownload? = null,
+    val phoneReady: Boolean = true,
+) {
+    /** Deux lettres pour la vignette quand il n'y a pas de photo. */
+    val monogram: String get() = title.filter { it.isLetterOrDigit() }.take(2).uppercase()
+}
 
 data class ResolvedAsset(val name: String, val url: String, val sha256: String, val sizeBytes: Long)
 
@@ -44,36 +68,157 @@ object Firmwares {
     private const val ARCHR_RELEASES = "https://github.com/archr-linux/Arch-R/releases"
     private const val KNULLI_RELEASES = "https://github.com/knulli-cfw/knulli-linux/releases"
 
+    /** Dossier des photos, rempli par `android-app/photos/` (voir son LISEZMOI). */
+    private const val PHOTOS = "https://raw.githubusercontent.com/nonotrichlozz/r36s-studio/android-apk/photos/"
+
+    fun photoUrl(firmware: Firmware): String = PHOTOS + firmware.id + ".jpg"
+
+    /**
+     * Même liste que la version ordinateur (`identify/firmware_catalog.py`),
+     * plus ArkOS K36 (`identify/releases.py`, parcours « Ma console ne démarre
+     * plus »). Ordre : d'abord ce qui s'installe en un bouton.
+     */
     val ALL: List<Firmware> = listOf(
         Firmware(
             id = "archr",
-            title = "Arch R — R36S d'origine",
-            description = Strings.FIRMWARE_ARCHR_DESC,
-            repo = "archr-linux/Arch-R",
-            pattern = Regex("^ArchR-R36S\\.aarch64-\\d{8}-original\\.img\\.gz$"),
-            fallbackName = "ArchR-R36S.aarch64-20260709-original.img.gz",
-            fallbackUrl = "$ARCHR_RELEASES/download/v2.1.1/ArchR-R36S.aarch64-20260709-original.img.gz",
-            fallbackSha256 = "035b58c446e0ffc7f6e23d1c8ef574fd0970307af6c3a41817abe82239aaf577",
+            title = "Arch R",
+            tagline = Strings.FW_ARCHR_TAGLINE,
+            description = Strings.FW_ARCHR_DESC,
+            audience = Audience.ORIGINAL,
+            status = FirmwareStatus.EXPERIMENTAL,
+            pageUrl = ARCHR_RELEASES,
+            note = Strings.FW_ARCHR_NOTE,
+            download = DirectDownload(
+                repo = "archr-linux/Arch-R",
+                pattern = Regex("^ArchR-R36S\\.aarch64-\\d{8}-original\\.img\\.gz$"),
+                fallbackName = "ArchR-R36S.aarch64-20260709-original.img.gz",
+                fallbackUrl = "$ARCHR_RELEASES/download/v2.1.1/ArchR-R36S.aarch64-20260709-original.img.gz",
+                fallbackSha256 = "035b58c446e0ffc7f6e23d1c8ef574fd0970307af6c3a41817abe82239aaf577",
+            ),
         ),
         Firmware(
             id = "archr_clone",
-            title = "Arch R — clone de R36S",
-            description = Strings.FIRMWARE_ARCHR_CLONE_DESC,
-            repo = "archr-linux/Arch-R",
-            pattern = Regex("^ArchR-R36S\\.aarch64-\\d{8}-clone\\.img\\.gz$"),
-            fallbackName = "ArchR-R36S.aarch64-20260709-clone.img.gz",
-            fallbackUrl = "$ARCHR_RELEASES/download/v2.1.1/ArchR-R36S.aarch64-20260709-clone.img.gz",
-            fallbackSha256 = "3ea0b970595e0086bd7478e0d17acf71adf1368499b45f1bba21ef6ab63660e2",
+            title = "Arch R (clones)",
+            tagline = Strings.FW_ARCHR_CLONE_TAGLINE,
+            description = Strings.FW_ARCHR_CLONE_DESC,
+            audience = Audience.CLONE,
+            status = FirmwareStatus.EXPERIMENTAL,
+            pageUrl = ARCHR_RELEASES,
+            note = Strings.FW_ARCHR_CLONE_NOTE,
+            download = DirectDownload(
+                repo = "archr-linux/Arch-R",
+                pattern = Regex("^ArchR-R36S\\.aarch64-\\d{8}-clone\\.img\\.gz$"),
+                fallbackName = "ArchR-R36S.aarch64-20260709-clone.img.gz",
+                fallbackUrl = "$ARCHR_RELEASES/download/v2.1.1/ArchR-R36S.aarch64-20260709-clone.img.gz",
+                fallbackSha256 = "3ea0b970595e0086bd7478e0d17acf71adf1368499b45f1bba21ef6ab63660e2",
+            ),
         ),
         Firmware(
             id = "knulli",
-            title = "KNULLI — R36S",
-            description = Strings.FIRMWARE_KNULLI_DESC,
-            repo = "knulli-cfw/knulli-linux",
-            pattern = Regex("^knulli-rk3326-r36s-.*\\.img\\.gz$"),
-            fallbackName = "knulli-rk3326-r36s-scarab-20260510.img.gz",
-            fallbackUrl = "$KNULLI_RELEASES/download/20260511/knulli-rk3326-r36s-scarab-20260510.img.gz",
-            fallbackSha256 = "068f405b5edcb0414430ce5ed24119ea62a945fe1be088cf9ca0bf22aabda466",
+            title = "KNULLI",
+            tagline = Strings.FW_KNULLI_TAGLINE,
+            description = Strings.FW_KNULLI_DESC,
+            audience = Audience.ORIGINAL,
+            status = FirmwareStatus.EXPERIMENTAL,
+            pageUrl = KNULLI_RELEASES,
+            note = Strings.FW_KNULLI_NOTE,
+            download = DirectDownload(
+                repo = "knulli-cfw/knulli-linux",
+                pattern = Regex("^knulli-rk3326-r36s-.*\\.img\\.gz$"),
+                fallbackName = "knulli-rk3326-r36s-scarab-20260510.img.gz",
+                fallbackUrl = "$KNULLI_RELEASES/download/20260511/knulli-rk3326-r36s-scarab-20260510.img.gz",
+                fallbackSha256 = "068f405b5edcb0414430ce5ed24119ea62a945fe1be088cf9ca0bf22aabda466",
+            ),
+        ),
+        Firmware(
+            id = "arkos_k36",
+            title = "ArkOS K36",
+            tagline = Strings.FW_ARKOS_K36_TAGLINE,
+            description = Strings.FW_ARKOS_K36_DESC,
+            audience = Audience.CLONE,
+            status = FirmwareStatus.ARCHIVED,
+            pageUrl = "https://github.com/AeolusUX/ArkOS-K36/releases",
+            note = Strings.FW_ARKOS_K36_NOTE,
+        ),
+        Firmware(
+            id = "emuelec",
+            title = "EmuELEC",
+            tagline = Strings.FW_EMUELEC_TAGLINE,
+            description = Strings.FW_EMUELEC_DESC,
+            audience = Audience.CLONE,
+            status = FirmwareStatus.EXPERIMENTAL,
+            pageUrl = "https://github.com/EmuELEC/EmuELEC/releases",
+            note = Strings.FW_EMUELEC_NOTE,
+        ),
+        Firmware(
+            id = "arkos",
+            title = "ArkOS / dArkOS",
+            tagline = Strings.FW_ARKOS_TAGLINE,
+            description = Strings.FW_ARKOS_DESC,
+            audience = Audience.BOTH,
+            status = FirmwareStatus.MAINTAINED,
+            pageUrl = "https://github.com/southoz/dArkOSRE-R36/releases",
+            note = Strings.FW_ARKOS_NOTE,
+        ),
+        Firmware(
+            id = "darkosen",
+            title = "dArkOSen",
+            tagline = Strings.FW_DARKOSEN_TAGLINE,
+            description = Strings.FW_DARKOSEN_DESC,
+            audience = Audience.ORIGINAL,
+            status = FirmwareStatus.MAINTAINED,
+            pageUrl = "https://github.com/djparentx/dArkOSen-R36S/releases",
+            note = Strings.FW_DARKOSEN_NOTE,
+            phoneReady = false,
+        ),
+        Firmware(
+            id = "rocknix",
+            title = "ROCKNIX",
+            tagline = Strings.FW_ROCKNIX_TAGLINE,
+            description = Strings.FW_ROCKNIX_DESC,
+            audience = Audience.ORIGINAL,
+            status = FirmwareStatus.MAINTAINED,
+            pageUrl = "https://github.com/ROCKNIX/distribution/releases",
+            note = Strings.FW_ROCKNIX_NOTE,
+            phoneReady = false,
+        ),
+        Firmware(
+            id = "amberelec",
+            title = "AmberELEC",
+            tagline = Strings.FW_AMBERELEC_TAGLINE,
+            description = Strings.FW_AMBERELEC_DESC,
+            audience = Audience.ORIGINAL,
+            status = FirmwareStatus.EXPERIMENTAL,
+            pageUrl = "https://github.com/AmberELEC/AmberELEC/releases",
+        ),
+        Firmware(
+            id = "minui",
+            title = "MinUI",
+            tagline = Strings.FW_MINUI_TAGLINE,
+            description = Strings.FW_MINUI_DESC,
+            audience = Audience.ORIGINAL,
+            status = FirmwareStatus.EXPERIMENTAL,
+            pageUrl = "https://github.com/Turro75/MyMinUI/releases",
+        ),
+        Firmware(
+            id = "r36droid",
+            title = "R36Droid",
+            tagline = Strings.FW_R36DROID_TAGLINE,
+            description = Strings.FW_R36DROID_DESC,
+            audience = Audience.ORIGINAL,
+            status = FirmwareStatus.EXPERIMENTAL,
+            pageUrl = "https://github.com/creeperxyz86/R36Droid/releases",
+            note = Strings.FW_ANDROID_NOTE,
+        ),
+        Firmware(
+            id = "andr36oid",
+            title = "andr36oid",
+            tagline = Strings.FW_ANDR36OID_TAGLINE,
+            description = Strings.FW_ANDR36OID_DESC,
+            audience = Audience.ORIGINAL,
+            status = FirmwareStatus.EXPERIMENTAL,
+            pageUrl = "https://github.com/andr36oid/releases/releases",
+            note = Strings.FW_ANDROID_NOTE,
         ),
     )
 
@@ -82,7 +227,8 @@ object Firmwares {
      * Si GitHub ne répond pas ou ne donne pas de somme de contrôle, repli sur
      * la version connue : jamais de téléchargement sans SHA-256.
      */
-    fun resolve(firmware: Firmware): ResolvedAsset {
+    fun resolve(download: DirectDownload): ResolvedAsset {
+        val firmware = download
         try {
             val json = httpGetText("https://api.github.com/repos/${firmware.repo}/releases/latest")
             val assets = JSONObject(json).optJSONArray("assets")

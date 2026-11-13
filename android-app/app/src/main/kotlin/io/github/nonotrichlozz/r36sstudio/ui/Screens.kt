@@ -63,8 +63,8 @@ import io.github.nonotrichlozz.r36sstudio.MainViewModel
 import io.github.nonotrichlozz.r36sstudio.OpState
 import io.github.nonotrichlozz.r36sstudio.Strings
 
-private val PanelShape = RoundedCornerShape(10.dp)
-private val CapsuleShape = RoundedCornerShape(50)
+internal val PanelShape = RoundedCornerShape(10.dp)
+internal val CapsuleShape = RoundedCornerShape(50)
 
 private val AppColors = darkColorScheme(
     primary = Palette.Cyan,
@@ -162,7 +162,7 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
             DialogState.None -> Unit
             DialogState.FirmwarePicker -> FirmwarePickerDialog(
                 onDismiss = viewModel::dismissDialog,
-                onFirmware = viewModel::downloadFirmware,
+                onDownload = viewModel::downloadFirmware,
                 onPickFile = {
                     viewModel.dismissDialog()
                     pickImage.launch(arrayOf("*/*"))
@@ -295,7 +295,7 @@ private fun Tile(title: String, description: String, ready: Boolean, enabled: Bo
 }
 
 @Composable
-private fun Badge(text: String, background: Color, foreground: Color) {
+internal fun Badge(text: String, background: Color, foreground: Color) {
     Box(
         modifier = Modifier
             .clip(CapsuleShape)
@@ -417,42 +417,6 @@ private fun DialogPanel(
     }
 }
 
-@Composable
-private fun FirmwarePickerDialog(
-    onDismiss: () -> Unit,
-    onFirmware: (io.github.nonotrichlozz.r36sstudio.Firmware) -> Unit,
-    onPickFile: () -> Unit,
-) {
-    DialogPanel(onDismiss = onDismiss) {
-        Text(Strings.PICKER_TITLE, color = Palette.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Text(Strings.PICKER_DOWNLOAD, color = Palette.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        for (firmware in Firmwares.ALL) {
-            ChoiceRow(title = firmware.title, description = firmware.description, onClick = { onFirmware(firmware) })
-        }
-        Text(Strings.PICKER_FILE, color = Palette.Cyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        ChoiceRow(title = Strings.PICKER_FILE, description = Strings.PICKER_FILE_DESC, onClick = onPickFile)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            SecondaryButton(Strings.CANCEL, enabled = true, onClick = onDismiss)
-        }
-    }
-}
-
-@Composable
-private fun ChoiceRow(title: String, description: String, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(PanelShape)
-            .background(Palette.SurfaceRaised)
-            .border(1.dp, Palette.Border, PanelShape)
-            .clickable(onClick = onClick)
-            .padding(12.dp),
-    ) {
-        Text(title, color = Palette.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-        Text(description, color = Palette.TextSecondary, fontSize = 12.sp)
-    }
-}
-
 /** Fond rouge, case obligatoire jamais pré-cochée : dernier rempart avant l'écriture. */
 @Composable
 private fun ConfirmDestructiveDialog(
@@ -524,7 +488,7 @@ private fun MessageDialog(text: String, onDismiss: () -> Unit) {
 // ----------------------------------------------------------------------
 
 @Composable
-private fun PrimaryButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun PrimaryButton(text: String, enabled: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         enabled = enabled,
@@ -540,7 +504,7 @@ private fun PrimaryButton(text: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SecondaryButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun SecondaryButton(text: String, enabled: Boolean, onClick: () -> Unit) {
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,

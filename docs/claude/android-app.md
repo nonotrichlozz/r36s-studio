@@ -26,6 +26,25 @@ et l'appli prend le lecteur en accès brut. Conséquence : **ROCKNIX n'est pas
 proposé** (il lui faut `extlinux.conf.r36s` et un fichier d'écran posés sur
 la carte après le flash, `identify/rocknix_r36s.py`).
 
+## Catalogue des systèmes (2026-11-13)
+
+« Installer un système » ouvre une liste plein écran (`ui/FirmwareScreens.kt`)
+de tous les systèmes de la version ordinateur (`Firmwares.ALL`, recopié de
+`identify/firmware_catalog.py`, plus ArkOS K36). Une fiche par système :
+photo, pour quelle console, état, description, encadré « À savoir ».
+
+- **En un bouton** (`download` renseigné) : Arch R, Arch R clones, KNULLI.
+- **Par la page du projet** : l'appli ouvre le navigateur, l'utilisateur
+  télécharge puis revient choisir le fichier. `phoneReady = false` (dArkOSen
+  en 7-Zip découpé, ROCKNIX et son réglage après flash) : pas de bouton
+  « Choisir le fichier », renvoi vers la version ordinateur.
+- **Photos** : `android-app/photos/<id>.jpg`, voir son `LISEZMOI.md`.
+  Aucune pour l'instant (vignette à initiales). Jamais d'image récupérée
+  sur les sites des projets.
+- Arch R clones n'a **pas** démarré sur la console violette d'Arnaud (carte
+  G80CA), flashée depuis le téléphone le 2026-11-13 : noté dans sa fiche.
+- Toute modification du catalogue ordinateur est à reporter ici à la main.
+
 ## Architecture
 
 | Fichier | Rôle |

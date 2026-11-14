@@ -1164,7 +1164,7 @@ class UpdateControls(QWidget):
 
 
 class UpdateDialog(Dialog):
-    """Notes de la nouvelle version + bouton vers la boutique
+    """Notes de la nouvelle version + bouton vers la page de la Release
     (`update_check.STORE_URL`, ouvert par `MainWindow`, `download_requested`)."""
 
     download_requested = Signal()

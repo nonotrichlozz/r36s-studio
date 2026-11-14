@@ -1,22 +1,21 @@
 name: Release
 
-# Crée une Release BROUILLON à chaque tag vX.Y.Z (docs/claude/packaging.md),
-# avec R36S-Studio-Setup.exe -- WINDOWS UNIQUEMENT pour l'instant : la
-# publication n'attend que le job Windows. macOS et Linux sont toujours
+# Publie une Release à chaque nouvelle version (docs/claude/packaging.md),
+# avec R36S-Studio-Setup.exe, gratuit -- WINDOWS UNIQUEMENT pour l'instant :
+# la publication n'attend que le job Windows. macOS et Linux sont toujours
 # construits (retour de CI) mais ne bloquent pas et ne sont pas joints ;
 # ils rejoindront la Release quand leurs constructions passeront.
-# Ces installeurs sont vendus sur la boutique : scripts/publish_release.sh
-# les retire avant de publier la Release (code et notes seulement).
+# Publiée directement, jamais en brouillon (2026-11-14) : /releases/latest,
+# lu par la vérification des mises à jour de l'app, ignore les brouillons,
+# et 0.1.21, 0.1.24 et 0.1.25 y sont restées oubliées.
 # Aucun secret : seul GITHUB_TOKEN (fourni par GitHub) est utilisé.
-# La Release est créée en BROUILLON. Les artefacts Actions ne servent qu'à
-# passer les fichiers entre jobs (rétention 1 jour) : sur un dépôt public,
-# tout compte GitHub connecté peut les télécharger -- jamais un canal de
-# diffusion.
+# Les artefacts Actions ne servent qu'à passer les fichiers entre jobs
+# (rétention 1 jour) -- jamais un canal de diffusion.
 #
 # Deux déclencheurs : un tag v* poussé à la main, ou un push sur main qui
 # change APP_VERSION (r36s_studio/__init__.py) -- dans ce cas le tag
-# v<APP_VERSION> est créé à la publication du brouillon. Si ce tag ou une
-# Release (même brouillon) de ce nom existe déjà, rien n'est construit.
+# v<APP_VERSION> est créé à la publication. Si ce tag ou une Release
+# (même brouillon) de ce nom existe déjà, rien n'est construit.
 on:
   push:
     tags: ["v*"]
@@ -172,10 +171,10 @@ jobs:
           path: artifacts/windows
       - uses: softprops/action-gh-release@v2
         with:
-          # Brouillon : visible des seuls membres du dépôt. Publié par
-          # scripts/publish_release.sh, après retrait des fichiers ; la
-          # vérification des mises à jour de l'app ne voit que les publiées.
-          draft: true
+          # Publiée tout de suite et marquée « Latest » : la mise à jour
+          # automatique de l'app télécharge cet installeur (digest SHA-256).
+          draft: false
+          make_latest: true
           tag_name: v${{ needs.version.outputs.app_version }}
           target_commitish: ${{ github.sha }}
           name: R36S Studio v${{ needs.version.outputs.app_version }} (Windows)

@@ -1,8 +1,8 @@
 ; Installeur Windows de R36S Studio (Inno Setup 6, docs/claude/packaging.md).
 ; Construit par .github/workflows/release.yml après PyInstaller :
 ;   iscc /DAppVersion=0.1.0 packaging\windows_installer.iss
-; Sortie : dist\R36S-Studio-Setup.exe (nom sans numéro de version). Vendu sur
-; la boutique, jamais publié sur GitHub (scripts/publish_release.sh).
+; Sortie : dist\R36S-Studio-Setup.exe (nom sans numéro de version). Gratuit,
+; joint à la Release GitHub (mise à jour automatique de l'app).
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"

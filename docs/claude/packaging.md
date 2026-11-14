@@ -1,19 +1,15 @@
 # Packaging, CI et diffusion
 
-> ⚠️ **Publier UNIQUEMENT avec `scripts/publish_release.sh`, jamais
-> `gh release edit --draft=false`.** Ce dernier publie le brouillon avec
-> son installeur attaché, téléchargeable par tous depuis GitHub alors qu'il
-> est vendu en boutique. Incident du 2026-10-17 : v0.1.2 à v0.1.13 publiées
-> avec `R36S-Studio-Setup.exe` (7 téléchargements au total), retiré le
-> 2026-10-18.
-
 **Diffusion (à jour, prime sur les paragraphes historiques ci-dessous).**
-Modèle : code public, installeurs **vendus sur une boutique**, jamais
-téléchargeables depuis GitHub. `release.yml` (tag `v*` = `v` +
+Modèle (2026-11-14 : plus de vente, boutique abandonnée) : code public,
+installeur **gratuit, joint à la Release GitHub** -- la mise à jour
+automatique le télécharge de là. `release.yml` (tag `v*` = `v` +
 `APP_VERSION`, sinon échec ; **ou** simple push sur `main` qui change
-`APP_VERSION` -- le tag est alors créé à la publication du brouillon, et
-rien n'est construit si ce tag ou une Release de ce nom existe déjà) crée une Release **brouillon** (visible des
-seuls membres du dépôt) avec `R36S-Studio-Setup.exe` (Inno Setup,
+`APP_VERSION` -- le tag est alors créé à la publication, et rien n'est
+construit si ce tag ou une Release de ce nom existe déjà) **publie
+directement** la Release, marquée « Latest », jamais en brouillon (un
+brouillon est invisible pour `/releases/latest` : 0.1.21, 0.1.24, 0.1.25
+oubliées ainsi), avec `R36S-Studio-Setup.exe` (Inno Setup,
 `packaging/windows_installer.iss` : sans UAC, `{localappdata}\Programs`,
 `AppId` fixe — ne jamais le changer, sinon une mise à jour s'installe à
 côté de l'ancienne). **Windows uniquement pour l'instant** (2026-10-07) :
@@ -29,9 +25,8 @@ de `_internal` et de `python3XX.dll` (un exe sans son dossier donne
 « Failed to load Python DLL », signalé par un testeur), puis
 `R36S Studio.exe --version`. Artefacts Actions : passage entre jobs uniquement, rétention
 1 jour (sur un dépôt public, tout compte connecté peut les télécharger) ;
-`build.yml` n'en produit plus. `scripts/publish_release.sh <tag>` retire
-tous les fichiers du brouillon, refuse de continuer s'il en reste, puis
-publie (code + notes `packaging/RELEASE_NOTES.md`). Licence : PolyForm
+`build.yml` n'en produit plus. Notes de Release :
+`packaging/RELEASE_NOTES.md`. Licence : PolyForm
 Strict 1.0.0 (`LICENSE`, en-tête de deux lignes dans chaque `.py`).
 `THIRD_PARTY_NOTICES.txt` (textes officiels, jamais réécrits de mémoire)
 et `LICENSE.txt` sont livrés avec l'installeur, le `.dmg` et le `.tar.gz`.
@@ -59,11 +54,8 @@ Dernière
 version trouvée mémorisée (`latest_update_tag`/`latest_update_notes`) :
 badge aux lancements suivants sans réseau, jusqu'à ce qu'`APP_VERSION` la
 rattrape. Bouton « Obtenir la nouvelle version » → `update_check.
-STORE_URL` = page de la dernière Release GitHub (2026-10-12 : la boutique
-n'existe pas encore et les Releases 0.1.2+ sont publiées avec
-l'installeur ; `docs/site/` affichait « Bientôt disponible », sans
-téléchargement). À remplacer par l'adresse de la boutique quand elle
-existera. Badge
+STORE_URL` = page de la dernière Release GitHub (`docs/site/` y
+redirige aussi). Badge
 masqué tant qu'une opération est en cours, réévalué à chaque
 `_on_worker_finished`.
 

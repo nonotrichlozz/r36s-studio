@@ -6239,7 +6239,7 @@ def test_update_badge_persists_across_launches_until_app_catches_up(mock_list, m
 @patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
 @patch("r36s_studio.gui.main_window.list_devices", return_value=[])
 def test_update_dialog_button_opens_store(mock_list, mock_filter, mock_load, qapp):
-    """Les installeurs sont vendus sur la boutique, jamais sur GitHub."""
+    """Le bouton ouvre la page de la dernière Release (installeur gratuit)."""
     from r36s_studio import update_check
     from r36s_studio.gui.screens import UpdateDialog
 

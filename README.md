@@ -5,8 +5,9 @@ carte SD de console R36S — **sans jamais ouvrir de ligne de commande**.
 
 ## Obtenir R36S Studio
 
-Les installeurs Windows, Mac et Linux sont disponibles sur
-[la boutique R36S Studio](https://nonotrichlozz.github.io/r36s-studio/).
+L'installeur Windows est téléchargeable gratuitement sur
+[la dernière Release](https://github.com/nonotrichlozz/r36s-studio/releases/latest) (`R36S-Studio-Setup.exe`).
+Mac et Linux : pas encore d'installeur.
 
 Le code source est consultable ici, mais il n'est pas libre : voir la
 section [Licences](#licences) ci-dessous.
@@ -169,15 +170,14 @@ procédure de vérification sur du vrai matériel : voir
 
 - `.github/workflows/build.yml` — à chaque push sur `main` et chaque pull
   request : tests puis construction sur Windows, macOS et Linux.
-- `.github/workflows/release.yml` — sur un tag `v*` : vérifie que le tag
+- `.github/workflows/release.yml` — sur un tag `v*` ou un push sur `main`
+  qui change `APP_VERSION` : vérifie que le tag
   vaut `v` + `APP_VERSION` (`r36s_studio/__init__.py`), construit
   l'installeur Windows (Inno Setup, testé par une installation silencieuse
   puis `--version`), le `.dmg` macOS et le `.tar.gz` Linux (non bloquant),
-  puis crée une Release **brouillon** avec ces fichiers et
-  `packaging/RELEASE_NOTES.md`.
-- `scripts/publish_release.sh <tag>` — une fois les installeurs récupérés
-  et mis en vente : retire tous les fichiers du brouillon, vérifie qu'il
-  n'en reste aucun, puis publie la Release (code et notes seulement).
+  puis **publie** directement la Release avec l'installeur Windows et
+  `packaging/RELEASE_NOTES.md` (jamais de brouillon : la vérification des
+  mises à jour de l'app ne les voit pas).
 
 Publier une nouvelle version : mettre à jour `APP_VERSION`, committer, puis
 
@@ -191,7 +191,7 @@ git push origin v0.2.0
 Le code de R36S Studio est consultable librement, mais il n'est pas
 libre. Tu peux l'utiliser à titre personnel ; toute modification,
 redistribution ou utilisation commerciale est interdite sans mon accord.
-La version prête à installer est disponible sur [la boutique](https://nonotrichlozz.github.io/r36s-studio/).
+La version prête à installer est téléchargeable gratuitement sur [la dernière Release](https://github.com/nonotrichlozz/r36s-studio/releases/latest).
 Texte complet : voir [`LICENSE`](LICENSE) (PolyForm Strict 1.0.0).
 
 Dépendances tierces, chacune sous sa propre licence :

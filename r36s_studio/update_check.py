@@ -25,9 +25,8 @@ from r36s_studio import APP_VERSION
 _REPO = "nonotrichlozz/r36s-studio"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{_REPO}/releases/latest"
 # Destination du bouton « Obtenir la nouvelle version » : la page de la
-# dernière Release, où l'installeur est joint (depuis 0.1.2). Quand la
-# boutique sera en ligne, y mettre son adresse (ou docs/site/, qui y
-# redirigera) -- rien d'autre à changer.
+# dernière Release, où l'installeur est joint, gratuit (plus de boutique
+# depuis 2026-11-14).
 STORE_URL = f"https://github.com/{_REPO}/releases/latest"
 
 

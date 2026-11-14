@@ -81,7 +81,7 @@ object Strings {
     const val FW_ARCHR_CLONE_NOTE = "Les clones sont tous différents. Essai du 13/11/2026 : cette version n'a pas démarré sur un clone violet (carte G80CA). Si l'écran reste noir, essaie ArkOS K36, ou remets la sauvegarde de la carte d'origine."
     const val FW_KNULLI_TAGLINE = "Complet et simple"
     const val FW_KNULLI_DESC = "Système complet et récent, image faite pour la vraie R36S (pas pour les clones). Licence non commerciale : usage commercial interdit."
-    const val FW_KNULLI_NOTE = "Branche la console sur secteur pour le premier démarrage et laisse l'installation se terminer : elle peut prendre plusieurs minutes et redémarrer seule. Retire la deuxième carte (TF2) pour ce premier démarrage."
+    const val FW_KNULLI_NOTE = "Branche la console sur secteur pour le premier démarrage et laisse l'installation se terminer : elle peut prendre plusieurs minutes et redémarrer seule. Retire la deuxième carte (TF2) pour ce premier démarrage. Écran noir avec de la musique : l'écran de KNULLI n'est pas celui de ta console. Le téléphone ne peut pas le changer ; passe la carte dans R36S Studio sur ordinateur, « Choisir l'écran de la console ». Pour l'éviter, installe KNULLI depuis l'ordinateur, à partir de la carte d'origine de la console : son écran est gardé et reposé tout seul."
     const val FW_ARKOS_K36_TAGLINE = "ArkOS pour les clones"
     const val FW_ARKOS_K36_DESC = "Version d'ArkOS faite pour les consoles clones (K36 et semblables). Elle n'est plus mise à jour, mais elle a remis en route deux clones différents avec R36S Studio."
     const val FW_ARKOS_K36_NOTE = "Sur la page du projet, prends la variante « K36 and Similar Clones » (fichier .img.xz). Les fichiers sont hébergés hors de GitHub (Drive, Mediafire, MEGA)."

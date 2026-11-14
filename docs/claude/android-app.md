@@ -24,7 +24,11 @@ ADB de la version ordinateur, `docs/android-adb.md`).
 remise à zéro avec formatage). Sans root, Android ne monte ni ext4 ni NTFS,
 et l'appli prend le lecteur en accès brut. Conséquence : **ROCKNIX n'est pas
 proposé** (il lui faut `extlinux.conf.r36s` et un fichier d'écran posés sur
-la carte après le flash, `identify/rocknix_r36s.py`).
+la carte après le flash, `identify/rocknix_r36s.py`). **KNULLI R36S** :
+l'écran de la console n'est ni mis de côté ni greffé (version ordinateur,
+`partitions/dtb_graft.py`, 2026-11-14) -- écran noir probable sur une R36S
+dont la dalle diffère de celle de KNULLI ; la note de la fiche renvoie vers
+la version ordinateur.
 
 ## Catalogue des systèmes (2026-11-13)
 

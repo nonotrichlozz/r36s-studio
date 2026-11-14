@@ -435,6 +435,19 @@ d'initialisation, délais, fréquences, marges) sont remplacées par celles du
   `rk3326-r35s-linux.dtb` **et** `rk3326-rg351mp-linux.dtb` ; l'import le
   refusait (« ne choisit pas son écran avec ces fichiers »), son `boot.ini`
   charge le premier.
+- **Automatique après le flash (2026-11-14)** : quand le worker repose
+  l'écran d'origine sur une carte KNULLI R36S, il l'applique aussitôt
+  (`screen_backup.apply_knulli_screen_if_safe`) -- seulement si la greffe
+  est possible, jamais la copie du fichier entier.
+- **Carte déjà KNULLI avant le flash** (cas réel 2026-11-14 : KNULLI
+  réinstallé, rien de mis de côté, écran noir) : `save_original_screen`
+  ignorait l'écran (seul le .dtb d'u-boot de la racine était vu). Il garde
+  maintenant le .dtb de `ecran-d-origine/`, sinon le .dtb noyau s'il diffère
+  de la copie de KNULLI dans `r36s-studio/origine/`. KNULLI tel
+  qu'installé : rien à garder (son écran ne dit rien de la console).
+- **Limite** : sans carte d'origine (carte neuve, déjà reflashée ailleurs),
+  aucun écran n'est connu -- écran noir possible, « Choisir l'écran de la
+  console » avec un fichier importé reste la seule issue.
 - **Non vérifié** : la greffe sur un clone (carte mère différente, autre
   manette ou autres régulateurs que l'écran : la greffe ne les touche pas).
 

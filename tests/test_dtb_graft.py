@@ -193,3 +193,39 @@ def test_save_retries_a_rename_blocked_by_windows(tmp_path, monkeypatch):
     folder, created = screen_backup.save_original_screen(boot, tmp_path / "b", "12" * 32)
     assert created and folder.is_dir() and not folder.name.endswith(".partiel")
     assert len(failures) == 2
+
+
+def test_already_knulli_card_screen_is_saved_then_applied_after_reflash(tmp_path):
+    """Cas réel 2026-11-14 : KNULLI réinstallé sur une carte KNULLI dont
+    l'écran avait été réglé -- rien n'était mis de côté (seul le .dtb
+    d'u-boot de la racine était vu), écran noir après le flash."""
+    card = tmp_path / "card"
+    original = _knulli_card(card)
+    (card / "ecran-d-origine").mkdir()
+    factory = build_dtb(factory_like(b"\x39\xaa"))
+    (card / "ecran-d-origine" / "rk3326-rg351mp-linux.dtb").write_bytes(factory)
+    boot_sets.apply_set(card, "ecran-d-origine")
+
+    saved, created = screen_backup.save_original_screen(card, tmp_path / "b", "ab" * 32)
+    assert created
+    assert sorted(p.name for p in saved.iterdir()) == ["origine.json", "rk3326-rg351mp-linux.dtb"]
+
+    fresh = tmp_path / "fresh"  # la carte après le flash : KNULLI tel qu'installé
+    _knulli_card(fresh)
+    assert screen_backup.install_original_screen(saved, fresh) == {"rk3326-rg351mp-linux.dtb": "rk3326-rg351mp-linux.dtb"}
+    assert screen_backup.apply_knulli_screen_if_safe(fresh)
+    target = (fresh / "boot" / "rk3326-rg351mp-linux.dtb").read_bytes()
+    assert target == dtb_graft.graft_panel(original, factory)
+    boot_sets.restore_original(fresh)
+    assert (fresh / "boot" / "rk3326-rg351mp-linux.dtb").read_bytes() == original
+
+
+def test_untouched_knulli_card_saves_nothing_and_no_blind_copy(tmp_path):
+    card = tmp_path / "card"
+    original = _knulli_card(card)
+    assert screen_backup.save_original_screen(card, tmp_path / "b", "cd" * 32) is None
+    # écran d'origine illisible : jamais appliqué automatiquement (copie entière = plus de démarrage)
+    (card / "ecran-d-origine").mkdir()
+    (card / "ecran-d-origine" / "rk3326-rg351mp-linux.dtb").write_bytes(b"pas un dtb")
+    assert not screen_backup.apply_knulli_screen_if_safe(card)
+    assert (card / "boot" / "rk3326-rg351mp-linux.dtb").read_bytes() == original

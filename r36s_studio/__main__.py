@@ -596,8 +596,14 @@ def _install_original_screen_after_flash(device: Device, saved_dir: str, rocknix
         return
     try:
         partition = locate_mounted(device.path, BOOT_LABEL)
+        applied = False
         try:
             names = screen_backup.install_original_screen(saved_dir, partition.mountpoint)
+            if names is not None:
+                # KNULLI R36S : son propre écran laisse la plupart des R36S
+                # avec un écran noir -- celui de la console est appliqué
+                # tout de suite, par greffe seulement (`dtb_graft.py`).
+                applied = screen_backup.apply_knulli_screen_if_safe(partition.mountpoint)
         finally:
             unmount_forced(partition)
     except (OSError, PartitionNotFound, PartitionNotMounted, subprocess.CalledProcessError) as exc:
@@ -614,6 +620,8 @@ def _install_original_screen_after_flash(device: Device, saved_dir: str, rocknix
     emit_log("Écran d'origine reposé sur la carte : proposé en premier dans « Choisir l'écran de la console ».")
     for original, placed in names.items():
         emit_log(f"{original} -> {screen_backup.ORIGINAL_SCREEN_DIR}/{placed}")
+    if applied:
+        emit_log("Écran de ta console appliqué sur la carte KNULLI : l'image doit s'afficher dès le premier démarrage.")
 
 
 def cmd_flash(args: argparse.Namespace) -> int:

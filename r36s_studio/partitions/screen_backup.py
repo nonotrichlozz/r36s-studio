@@ -37,7 +37,16 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 from . import dtb_graft
-from .boot_sets import KNULLI_UBOOT_DTB, ORIGINAL_SCREEN_DIR, SCREEN_FILE_SUFFIX, is_kernel_screen_dtb, knulli_kernel_dtb
+from .boot_sets import (
+    KNULLI_UBOOT_DTB,
+    ORIGINAL_SCREEN_DIR,
+    ORIGINALS_DIR,
+    SCREEN_FILE_SUFFIX,
+    STATE_DIR,
+    apply_set,
+    is_kernel_screen_dtb,
+    knulli_kernel_dtb,
+)
 
 PathLike = Union[str, Path]
 
@@ -76,14 +85,24 @@ def save_original_screen(
     """(dossier de la sauvegarde, créée maintenant ?), `None` si le BOOT n'a
     aucun `.dtb` à sa racine. Lève `OSError` si le BOOT est illisible --
     à l'appelant de ne jamais bloquer le flash pour autant."""
-    dtbs = _screen_files(boot_root)
+    knulli = knulli_kernel_dtb(boot_root) is not None
+    knulli_screen = _knulli_card_screen(boot_root) if knulli else None
+    if knulli:
+        # Carte déjà KNULLI : le .dtb d'u-boot de sa racine ne dit rien de
+        # l'écran ; seul compte l'écran posé par l'app (cas réel 2026-11-14 :
+        # KNULLI réinstallé sur la R36S noire, rien de mis de côté, écran noir).
+        if knulli_screen is None:
+            return None
+        dtbs = [knulli_screen]
+    else:
+        dtbs = _screen_files(boot_root)
     if not dtbs:
         return None
     backups = Path(backups_dir)
     existing = _find_saved(backups, fingerprint)
-    if existing is not None:
+    if existing is not None and knulli_donor(existing) is not None:
         return existing, False
-    files = dtbs + [p for p in _root_files(boot_root) if p.name.lower() == BOOT_INI]
+    files = dtbs + ([] if knulli_screen is not None else [p for p in _root_files(boot_root) if p.name.lower() == BOOT_INI])
     stamp = (now or datetime.now()).strftime("%Y-%m-%d_%H-%M")
     dest = backups / f"{stamp}_{fingerprint[:12]}"
     tmp = dest.with_name(dest.name + ".partiel")
@@ -95,6 +114,29 @@ def save_original_screen(
     (tmp / INFO_FILE).write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
     _rename_with_retry(tmp, dest)  # jamais une sauvegarde à moitié copiée sous son vrai nom
     return dest, True
+
+
+def _knulli_card_screen(boot_root: PathLike) -> Optional[Path]:
+    """Carte KNULLI R36S : le .dtb qui porte l'écran de cette console --
+    celui de `ecran-d-origine/` (posé par l'app), sinon le .dtb noyau s'il a
+    été modifié depuis l'installation (copie de KNULLI dans
+    `r36s-studio/origine/`). `None` : KNULLI tel qu'installé, son écran à
+    lui ne dit rien de la console."""
+    root = Path(boot_root)
+    kernel = knulli_kernel_dtb(root)
+    if kernel is None:
+        return None
+    folder = root / ORIGINAL_SCREEN_DIR
+    if folder.is_dir():
+        placed = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == SCREEN_FILE_SUFFIX)
+        if len(placed) == 1 and dtb_graft.has_panel(placed[0].read_bytes()):
+            return placed[0]
+    current = root / kernel
+    original = root / STATE_DIR / ORIGINALS_DIR / kernel
+    if original.is_file() and current.is_file() and current.read_bytes() != original.read_bytes():
+        if dtb_graft.has_panel(current.read_bytes()):
+            return current
+    return None
 
 
 def _rename_with_retry(tmp: Path, dest: Path, attempts: int = 20, delay: float = 0.25) -> None:
@@ -219,7 +261,25 @@ def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optiona
     return names
 
 
+def apply_knulli_screen_if_safe(boot_root: PathLike) -> bool:
+    """Après le flash d'une carte KNULLI R36S : applique l'écran d'origine
+    reposé (`ecran-d-origine/`) **seulement** si la greffe est possible
+    (les deux .dtb décrivent un écran, `dtb_graft.py`). Jamais la copie du
+    fichier entier en automatique : elle empêchait la R36S noire de
+    démarrer (2026-10-20). `True` si l'écran a été appliqué."""
+    root = Path(boot_root)
+    kernel = knulli_kernel_dtb(root)
+    if kernel is None:
+        return False
+    donor = root / ORIGINAL_SCREEN_DIR / Path(kernel).name
+    if not donor.is_file() or dtb_graft.graft_panel((root / kernel).read_bytes(), donor.read_bytes()) is None:
+        return False
+    apply_set(root, ORIGINAL_SCREEN_DIR)
+    return True
+
+
 __all__ = [
+    "apply_knulli_screen_if_safe",
     "BACKUPS_DIR_NAME",
     "ORIGINAL_SCREEN_DIR",
     "has_screen_files",

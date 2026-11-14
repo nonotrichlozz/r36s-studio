@@ -296,8 +296,8 @@ Détail et bancs de test : `docs/claude/testing.md`.
   (`consoles_diverses/CLAUDE.md`).
 - KNULLI sur R36S : démarre avec l'image sur une R36S noire d'origine après
   greffe de l'écran d'usine (2026-10-20, fichier posé à la main, même résultat
-  que `dtb_graft.graft_panel`) ; parcours complet depuis l'app et clones
-  jamais essayés (`partitions.md`).
+  que `dtb_graft.graft_panel`) ; greffe automatique après le flash
+  (2026-11-14) et clones jamais essayés depuis l'app (`partitions.md`).
 - Installation guidée RG Rotate / GammaOS Next 1.4.1 (USB, mode Download
   Unisoc, `CmdDloader.exe`) : jamais lancée sur la console ; syntaxe de
   CmdDloader lue dans le programme ; VID:PID `1782:4d00` (mode Download) et

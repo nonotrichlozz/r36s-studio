@@ -31,11 +31,22 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from .boot_sets import ORIGINAL_SCREEN_DIR, SCREEN_FILE_SUFFIX, is_kernel_screen_dtb, knulli_kernel_dtb
+from . import dtb_graft
+from .boot_sets import (
+    KNULLI_UBOOT_DTB,
+    ORIGINAL_SCREEN_DIR,
+    ORIGINALS_DIR,
+    SCREEN_FILE_SUFFIX,
+    STATE_DIR,
+    apply_set,
+    is_kernel_screen_dtb,
+    knulli_kernel_dtb,
+)
 
 PathLike = Union[str, Path]
 
@@ -74,14 +85,24 @@ def save_original_screen(
     """(dossier de la sauvegarde, créée maintenant ?), `None` si le BOOT n'a
     aucun `.dtb` à sa racine. Lève `OSError` si le BOOT est illisible --
     à l'appelant de ne jamais bloquer le flash pour autant."""
-    dtbs = _screen_files(boot_root)
+    knulli = knulli_kernel_dtb(boot_root) is not None
+    knulli_screen = _knulli_card_screen(boot_root) if knulli else None
+    if knulli:
+        # Carte déjà KNULLI : le .dtb d'u-boot de sa racine ne dit rien de
+        # l'écran ; seul compte l'écran posé par l'app (cas réel 2026-11-14 :
+        # KNULLI réinstallé sur la R36S noire, rien de mis de côté, écran noir).
+        if knulli_screen is None:
+            return None
+        dtbs = [knulli_screen]
+    else:
+        dtbs = _screen_files(boot_root)
     if not dtbs:
         return None
     backups = Path(backups_dir)
     existing = _find_saved(backups, fingerprint)
-    if existing is not None:
+    if existing is not None and knulli_donor(existing) is not None:
         return existing, False
-    files = dtbs + [p for p in _root_files(boot_root) if p.name.lower() == BOOT_INI]
+    files = dtbs + ([] if knulli_screen is not None else [p for p in _root_files(boot_root) if p.name.lower() == BOOT_INI])
     stamp = (now or datetime.now()).strftime("%Y-%m-%d_%H-%M")
     dest = backups / f"{stamp}_{fingerprint[:12]}"
     tmp = dest.with_name(dest.name + ".partiel")
@@ -91,8 +112,46 @@ def save_original_screen(
         shutil.copyfile(path, tmp / path.name)
     info = {"fingerprint": fingerprint, "date": stamp, "files": [p.name for p in files]}
     (tmp / INFO_FILE).write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.rename(dest)  # jamais une sauvegarde à moitié copiée sous son vrai nom
+    _rename_with_retry(tmp, dest)  # jamais une sauvegarde à moitié copiée sous son vrai nom
     return dest, True
+
+
+def _knulli_card_screen(boot_root: PathLike) -> Optional[Path]:
+    """Carte KNULLI R36S : le .dtb qui porte l'écran de cette console --
+    celui de `ecran-d-origine/` (posé par l'app), sinon le .dtb noyau s'il a
+    été modifié depuis l'installation (copie de KNULLI dans
+    `r36s-studio/origine/`). `None` : KNULLI tel qu'installé, son écran à
+    lui ne dit rien de la console."""
+    root = Path(boot_root)
+    kernel = knulli_kernel_dtb(root)
+    if kernel is None:
+        return None
+    folder = root / ORIGINAL_SCREEN_DIR
+    if folder.is_dir():
+        placed = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == SCREEN_FILE_SUFFIX)
+        if len(placed) == 1 and dtb_graft.has_panel(placed[0].read_bytes()):
+            return placed[0]
+    current = root / kernel
+    original = root / STATE_DIR / ORIGINALS_DIR / kernel
+    if original.is_file() and current.is_file() and current.read_bytes() != original.read_bytes():
+        if dtb_graft.has_panel(current.read_bytes()):
+            return current
+    return None
+
+
+def _rename_with_retry(tmp: Path, dest: Path, attempts: int = 20, delay: float = 0.25) -> None:
+    """Windows : le renommage d'un dossier qu'on vient de remplir échoue
+    (`PermissionError`) tant que l'indexeur ou l'antivirus y garde un
+    fichier ouvert. Constaté le 2026-10-20 : trois sauvegardes sur quatre
+    restées en `.partiel`, donc jamais proposées après le flash."""
+    for attempt in range(attempts):
+        try:
+            tmp.rename(dest)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
 
 
 def _family(name: str) -> str:
@@ -142,6 +201,38 @@ def has_screen_files(folder: PathLike) -> bool:
         return False
 
 
+def _boot_ini_mentions(folder: Path, names: List[str]) -> List[str]:
+    """Noms parmi `names` que le `boot.ini` du dossier fait charger."""
+    ini = next((p for p in _root_files(folder) if p.name.lower() == BOOT_INI), None)
+    if ini is None:
+        return []
+    try:
+        text = ini.read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        return []
+    return [name for name in names if name.lower() in text]
+
+
+def knulli_donor(folder: PathLike) -> Optional[str]:
+    """Le .dtb du dossier dont l'écran sera greffé sur une carte KNULLI R36S
+    (`boot_sets._apply_knulli_screen`), `None` si on ne peut pas trancher.
+    1. les .dtb noyau (`rk3326-*-linux.dtb`) ; à défaut (clone : autres noms),
+       tout .dtb qui décrit un écran, sauf celui d'u-boot de KNULLI ;
+    2. à plusieurs, celui que charge le `boot.ini` du dossier (cas réel : un
+       BOOT ArkOS d'usine a `rk3326-r35s-linux.dtb` **et**
+       `rk3326-rg351mp-linux.dtb`, son `boot.ini` charge le premier)."""
+    root = Path(folder)
+    saved = [p.name for p in _screen_files(root)]
+    candidates = [name for name in saved if is_kernel_screen_dtb(name)]
+    if not candidates:
+        candidates = [
+            name for name in saved if name.lower() != KNULLI_UBOOT_DTB and dtb_graft.has_panel((root / name).read_bytes())
+        ]
+    if len(candidates) > 1:
+        candidates = _boot_ini_mentions(root, candidates)
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optional[Dict[str, str]]:
     """Pose les `.dtb` sauvegardés dans `ecran-d-origine/` du BOOT flashé.
     `None` si le firmware écrit n'a aucun `.dtb` à la racine de son BOOT
@@ -153,10 +244,10 @@ def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optiona
     if knulli is not None:
         # KNULLI R36S : seul le .dtb noyau d'origine est posé, sous le nom du
         # .dtb noyau de KNULLI (`boot_sets.py`) -- jamais celui d'u-boot.
-        kernels = [name for name in saved if is_kernel_screen_dtb(name)]
-        if len(kernels) != 1:
+        kernel = knulli_donor(saved_dir)
+        if kernel is None:
             return None
-        names = {kernels[0]: Path(knulli).name}
+        names = {kernel: Path(knulli).name}
     else:
         target = [p.name for p in _screen_files(boot_root)]
         if not target or not saved:
@@ -170,11 +261,30 @@ def install_original_screen(saved_dir: PathLike, boot_root: PathLike) -> Optiona
     return names
 
 
+def apply_knulli_screen_if_safe(boot_root: PathLike) -> bool:
+    """Après le flash d'une carte KNULLI R36S : applique l'écran d'origine
+    reposé (`ecran-d-origine/`) **seulement** si la greffe est possible
+    (les deux .dtb décrivent un écran, `dtb_graft.py`). Jamais la copie du
+    fichier entier en automatique : elle empêchait la R36S noire de
+    démarrer (2026-10-20). `True` si l'écran a été appliqué."""
+    root = Path(boot_root)
+    kernel = knulli_kernel_dtb(root)
+    if kernel is None:
+        return False
+    donor = root / ORIGINAL_SCREEN_DIR / Path(kernel).name
+    if not donor.is_file() or dtb_graft.graft_panel((root / kernel).read_bytes(), donor.read_bytes()) is None:
+        return False
+    apply_set(root, ORIGINAL_SCREEN_DIR)
+    return True
+
+
 __all__ = [
+    "apply_knulli_screen_if_safe",
     "BACKUPS_DIR_NAME",
     "ORIGINAL_SCREEN_DIR",
     "has_screen_files",
     "install_original_screen",
+    "knulli_donor",
     "save_original_screen",
     "target_names",
 ]

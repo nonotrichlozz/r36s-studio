@@ -3,8 +3,9 @@
 
 """Vérification des mises à jour (docs/claude/packaging.md) : interroge la
 dernière Release GitHub. Sans Qt -- appelée depuis un thread par
-`gui/partition_runner.py::UpdateCheckRunner`. Toute erreur réseau ou de
-format = `None`, jamais d'exception : l'app marche hors ligne (§1)."""
+`gui/partition_runner.py::UpdateCheckRunner`, qui rattrape toute erreur
+réseau ou de format et l'écrit au journal (l'app marche hors ligne, §1 ;
+2026-11-14 : un échec muet a masqué une vérification cassée un mois)."""
 
 from __future__ import annotations
 
@@ -89,20 +90,18 @@ def _installer_from_assets(assets) -> Tuple[str, int, str]:
     return "", 0, ""
 
 
-def fetch_latest_release(opener=urllib.request.urlopen, timeout: float = 5) -> Optional[LatestRelease]:
-    """Dernière Release (tag, notes, installeur Windows vérifiable), `None`
-    sur toute erreur -- même silence que `fetch_latest`."""
+def fetch_latest_release(opener=urllib.request.urlopen, timeout: float = 5) -> LatestRelease:
+    """Dernière Release *publiée* (tag, notes, installeur Windows
+    vérifiable) -- `/releases/latest` ignore les brouillons. Lève sur toute
+    erreur (réseau, quota API, JSON inattendu) : à l'appelant de la dire."""
     request = urllib.request.Request(
         LATEST_RELEASE_API,
         headers={"User-Agent": f"r36s-studio/{APP_VERSION}", "Accept": "application/vnd.github+json"},
     )
-    try:
-        with opener(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        url, size, sha = _installer_from_assets(data.get("assets"))
-        return LatestRelease(str(data["tag_name"]), str(data.get("body") or ""), url, size, sha)
-    except Exception:  # noqa: BLE001 -- silence total voulu (hors ligne, quota API, JSON inattendu)
-        return None
+    with opener(request, timeout=timeout) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    url, size, sha = _installer_from_assets(data.get("assets"))
+    return LatestRelease(str(data["tag_name"]), str(data.get("body") or ""), url, size, sha)
 
 
 def auto_install_supported() -> bool:
@@ -195,18 +194,4 @@ def launch_installer(path: Path, popen=None) -> None:
     if sys.platform == "win32":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
     (popen or subprocess.Popen)([str(path), *INSTALLER_ARGS], creationflags=flags, close_fds=True)
-
-
-def fetch_latest(opener=urllib.request.urlopen, timeout: float = 5) -> Optional[Tuple[str, str]]:
-    """`(tag_name, notes)` de la dernière Release, `None` sur toute erreur."""
-    request = urllib.request.Request(
-        LATEST_RELEASE_API,
-        headers={"User-Agent": f"r36s-studio/{APP_VERSION}", "Accept": "application/vnd.github+json"},
-    )
-    try:
-        with opener(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        return str(data["tag_name"]), str(data.get("body") or "")
-    except Exception:  # noqa: BLE001 -- silence total voulu (hors ligne, quota API, JSON inattendu)
-        return None
 

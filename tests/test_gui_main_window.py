@@ -6327,11 +6327,18 @@ def test_update_search_result_is_always_written_in_the_log(mock_list, mock_filte
     window = MainWindow()
     with patch.object(window._log_panel, "append_log") as log:
         window._on_update_checked("a_jour", f"v{APP_VERSION}")
-        window._on_update_checked("erreur", "")
+        window._on_update_checked("erreur", "OSError: hors ligne")
+        window._on_update_checked("nouvelle", "v99.0.0")
     lines = [call.args[0] for call in log.call_args_list]
     assert lines == [
         f"Tu as la dernière version ({APP_VERSION}).",
+        f"[diagnostic] mises à jour : installée {APP_VERSION}, en ligne v{APP_VERSION} "
+        "(dernière Release publiée), conclusion : à jour",
         "Impossible de vérifier les mises à jour (pas de connexion internet ?).",
+        f"[diagnostic] mises à jour : installée {APP_VERSION}, en ligne ? "
+        "(dernière Release publiée), conclusion : échec (OSError: hors ligne)",
+        f"[diagnostic] mises à jour : installée {APP_VERSION}, en ligne v99.0.0 "
+        "(dernière Release publiée), conclusion : nouvelle version",
     ]
 
 

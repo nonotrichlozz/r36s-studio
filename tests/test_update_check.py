@@ -6,22 +6,50 @@ from r36s_studio import update_check
 
 def test_is_newer_compares_numerically():
     assert update_check.is_newer("v0.10.0", "0.9.1")
+    # Comparaison de chaînes : "0.1.9" > "0.1.23" -- il faut des nombres.
+    assert update_check.is_newer("v0.1.25", "0.1.23")
+    assert not update_check.is_newer("v0.1.9", "0.1.23")
     assert not update_check.is_newer("v0.1.0", "0.1.0")
     assert not update_check.is_newer("v0.0.9", "0.1.0")
     assert not update_check.is_newer("nightly", "0.1.0")
 
 
-def test_fetch_latest_reads_tag_and_notes():
-    body = json.dumps({"tag_name": "v1.2.0", "body": "Notes"}).encode()
-    assert update_check.fetch_latest(opener=lambda req, timeout: io.BytesIO(body)) == ("v1.2.0", "Notes")
+def _run_check(fetch):
+    """`UpdateCheckRunner.run` appelé directement (pas de thread) avec
+    `fetch_latest_release` remplacé : (checked, update_available)."""
+    from unittest.mock import patch
+
+    from r36s_studio.gui.partition_runner import UpdateCheckRunner
+
+    runner = UpdateCheckRunner()
+    checked, available = [], []
+    runner.checked.connect(lambda *a: checked.append(a))
+    runner.update_available.connect(lambda *a: available.append(a))
+    with patch("r36s_studio.update_check.APP_VERSION", "0.1.23"), patch(
+        "r36s_studio.update_check.fetch_latest_release", side_effect=fetch
+    ):
+        runner.run()
+    return checked, available
 
 
-def test_fetch_latest_is_silent_on_network_error():
-    def offline(req, timeout):
+def test_runner_reports_a_newer_version(qapp):
+    """Le cas qui manquait : une version plus récente existe en ligne."""
+    checked, available = _run_check(lambda: update_check.LatestRelease("v0.1.25", "Notes"))
+    assert checked == [("nouvelle", "v0.1.25")]
+    assert available == [("v0.1.25", "Notes")]
+
+
+def test_runner_reports_up_to_date(qapp):
+    checked, available = _run_check(lambda: update_check.LatestRelease("v0.1.23", ""))
+    assert checked == [("a_jour", "v0.1.23")] and available == []
+
+
+def test_runner_reports_the_failure_reason(qapp):
+    def offline():
         raise OSError("hors ligne")
 
-    assert update_check.fetch_latest(opener=offline) is None
-
+    checked, available = _run_check(offline)
+    assert checked == [("erreur", "OSError: hors ligne")] and available == []
 
 # --- mise à jour automatique (installeur Windows vérifié) -------------------
 
@@ -72,11 +100,12 @@ def test_fetch_latest_release_refuses_an_untrustworthy_installer(overrides):
     assert not release.can_auto_install
 
 
-def test_fetch_latest_release_is_silent_on_network_error():
+def test_fetch_latest_release_raises_on_network_error():
     def offline(req, timeout):
         raise OSError("hors ligne")
 
-    assert update_check.fetch_latest_release(opener=offline) is None
+    with pytest.raises(OSError):
+        update_check.fetch_latest_release(opener=offline)
 
 
 def _release():

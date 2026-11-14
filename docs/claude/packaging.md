@@ -50,7 +50,12 @@ test), à chaque démarrage depuis 2026-11-08 (avant : une fois par jour) ;
 chaque recherche et son résultat sont écrits dans le journal (`update_log_*`,
 `UpdateCheckRunner.checked`, 2026-11-10 : une recherche sans rien de neuf
 passait pour absente),
-désactivable (`check_updates`). Toute erreur réseau = silence. Dernière
+désactivable (`check_updates`). Chaque recherche écrit une ligne
+`[diagnostic] mises à jour : installée X, en ligne Y, conclusion : …`
+(raison de l'échec comprise). Source : `/releases/latest`, qui **ignore
+les brouillons** -- une version restée en brouillon n'est jamais
+signalée (2026-11-14 : 0.1.21, 0.1.24, 0.1.25 oubliées en brouillon).
+Dernière
 version trouvée mémorisée (`latest_update_tag`/`latest_update_notes`) :
 badge aux lancements suivants sans réseau, jusqu'à ce qu'`APP_VERSION` la
 rattrape. Bouton « Obtenir la nouvelle version » → `update_check.

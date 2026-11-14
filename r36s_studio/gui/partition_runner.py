@@ -195,16 +195,18 @@ class UpdateCheckRunner(QThread):
     # (`update_check.LatestRelease`) -- pour la mise à jour automatique.
     release_available = Signal(object)
     # Résultat de chaque recherche, pour le journal (2026-11-10 : une
-    # recherche sans rien de neuf passait inaperçue, on croyait qu'elle
-    # n'avait pas lieu) : "a_jour" ou "erreur", avec la version vue.
+    # recherche sans rien de neuf passait inaperçue ; 2026-11-14 : un échec
+    # aussi) : ("nouvelle" | "a_jour", tag vu en ligne) ou ("erreur", raison).
     checked = Signal(str, str)
 
     def run(self) -> None:
-        latest = update_check.fetch_latest_release()
-        if latest is None:
-            self.checked.emit("erreur", "")
+        try:
+            latest = update_check.fetch_latest_release()
+        except Exception as exc:  # noqa: BLE001 -- hors ligne, quota API, JSON inattendu
+            self.checked.emit("erreur", f"{type(exc).__name__}: {exc}")
             return
         if update_check.is_newer(latest.tag):
+            self.checked.emit("nouvelle", latest.tag)
             self.update_available.emit(latest.tag, latest.notes)
             self.release_available.emit(latest)
         else:

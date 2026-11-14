@@ -3469,11 +3469,22 @@ class MainWindow(QMainWindow):
         self._update_runner.checked.connect(self._on_update_checked)
         self._update_runner.start()
 
-    def _on_update_checked(self, result: str, tag: str) -> None:
-        if result == "a_jour":
-            self._log_panel.append_log(tr("update_log_up_to_date", version=APP_VERSION))
-        else:
+    def _on_update_checked(self, result: str, detail: str) -> None:
+        """Une ligne de diagnostic à chaque recherche : version installée,
+        version vue en ligne (dernière Release *publiée*, un brouillon n'y
+        est pas), conclusion -- de quoi voir tout de suite une recherche qui
+        ne trouve rien ou qui échoue (2026-11-14)."""
+        if result == "erreur":
             self._log_panel.append_log(tr("update_log_failed"))
+            online, conclusion = "?", f"échec ({detail})"
+        else:
+            if result == "a_jour":
+                self._log_panel.append_log(tr("update_log_up_to_date", version=APP_VERSION))
+            online, conclusion = detail, "nouvelle version" if result == "nouvelle" else "à jour"
+        self._log_panel.append_log(
+            f"[diagnostic] mises à jour : installée {APP_VERSION}, en ligne {online} "
+            f"(dernière Release publiée), conclusion : {conclusion}"
+        )
 
     def _on_release_available(self, release) -> None:
         """Mise à jour automatique (Windows empaqueté) : télécharge et

@@ -14,9 +14,12 @@ Interface : "l'interface ne gèle jamais, délai maximal par commande")."""
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 from PySide6.QtCore import QThread, Signal
 
-from r36s_studio.android import adb, knulli, platform_tools
+from r36s_studio.android import adb, apk, knulli, platform_tools
 
 
 class AndroidDetectRunner(QThread):
@@ -85,6 +88,40 @@ class AndroidPlatformToolsDownloadRunner(QThread):
             self.finished_download.emit(False, "")
             return
         self.finished_download.emit(True, str(adb_path))
+
+
+class AndroidApkInstallRunner(QThread):
+    """Télécharge puis installe les applications d'une fiche sur la console
+    (`android/apk.py::run_plan`, étape 2) : progression réelle du
+    téléchargement, fichiers temporaires supprimés à la fin."""
+
+    step = Signal(str, str)  # étape (telechargement/installation/verification), nom du fichier
+    progress = Signal("qint64", "qint64")  # done, total (0 si inconnu)
+    finished_install = Signal(object)  # apk.InstallResult
+
+    def __init__(self, adb_path: str, serial: str, plan, parent=None):
+        super().__init__(parent)
+        self._adb_path, self._serial, self._plan = adb_path, serial, plan
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        try:
+            with tempfile.TemporaryDirectory(prefix="r36s-studio-apk-") as dossier:
+                result = apk.run_plan(
+                    self._adb_path,
+                    self._serial,
+                    self._plan,
+                    Path(dossier),
+                    sur_etape=self.step.emit,
+                    progression=self.progress.emit,
+                    annule=lambda: self._cancelled,
+                )
+        except OSError as exc:
+            result = apk.InstallResult(echec_code="adb", echec_detail=str(exc))
+        self.finished_install.emit(result)
 
 
 class KnulliSystemsRunner(QThread):
@@ -171,6 +208,7 @@ __all__ = [
     "AndroidDetectRunner",
     "AndroidPlatformToolsSizeRunner",
     "AndroidPlatformToolsDownloadRunner",
+    "AndroidApkInstallRunner",
     "KnulliPlanRunner",
     "KnulliSystemsRunner",
     "KnulliCopyRunner",

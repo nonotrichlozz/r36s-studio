@@ -64,6 +64,24 @@ Installation d'APK, copie de ROMs, sauvegardes, réglages système.
 Exception : copie de jeux sur une console KNULLI (Linux, pas Android)
 reconnue en ADB -- `docs/knulli-adb.md`.
 
+## Étape 2 : installer les applications d'une fiche (`android/apk.py`)
+- Une fiche du catalogue peut porter une procédure `mode: "adb"` dont les
+  téléchargements sont des APK (`nom` en `.apk`, `url` sur
+  `https://github.com/`, `paquet` = identifiant Android). Première
+  fiche : Retroid Pocket Flip 2, Recompa.
+- Fiche trouvée depuis l'écran Console Android : bouton « Installer sur
+  ma console », fenêtre d'accord (fichiers et adresses affichés), puis
+  téléchargement, `adb install -r` et contrôle par `pm path`.
+- Jamais `adb root`, aucune désinstallation, rien d'effacé. Une procédure
+  dont une étape est inconnue (`apk.ACTIONS_CONNUES`) n'est pas proposée.
+- APK sans `sha256` dans la fiche (lien « dernière version ») : accepté
+  depuis GitHub seulement, avec un avertissement à l'écran ; l'empreinte
+  du fichier installé est écrite dans le journal Console Android pour
+  pouvoir être reportée dans la fiche.
+- Dans « Consoles diverses », la même procédure est affichée désactivée
+  avec le renvoi vers Console Android (`motif_desactivation` : `adb`).
+- Jamais lancé sur une vraie console (2026-11-15).
+
 ## Tests
 adb absent, aucun appareil, appareil non autorisé, plusieurs
 appareils, getprop simulé pour les trois consoles de test, console

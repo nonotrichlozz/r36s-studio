@@ -60,6 +60,7 @@ from r36s_studio.android.emulators import (
     filter_by_category as android_filter_emulators_by_category,
     filter_for_device as android_filter_emulators_for_device,
 )
+from r36s_studio.android.apk import ApkInstallPlan, plan_from_fiche as android_apk_plan_from_fiche
 from r36s_studio.android.models import VALEUR_INCONNUE, AndroidDeviceInfo, DetectionResult
 # Réutilisation explicitement demandée par docs/android-adb.md (§ Identification
 # et propositions : "réutiliser le client de consoles_diverses") -- lecture
@@ -3730,10 +3731,15 @@ class AndroidScreen(Screen):
     # Console KNULLI reconnue (`DetectionResult.linux_console`) : ouvre
     # « Copier des jeux sur ma console (USB) » (`gui/knulli_screen.py`).
     knulli_copy_requested = Signal()
+    # Fiche trouvée avec des applications installables par USB (étape 2,
+    # `android/apk.py`) : porte l'`ApkInstallPlan` affiché.
+    apk_install_requested = Signal(object)
+    apk_install_cancel_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_model = ""
+        self._apk_plan: Optional[ApkInstallPlan] = None
         # Filtrage de la liste d'émulateurs par appareil détecté (signalé :
         # « la liste d'émulateurs est identique quelle que soit la console »)
         # -- catalogue complet mémorisé une fois (`set_emulator_catalog`),
@@ -3877,6 +3883,27 @@ class AndroidScreen(Screen):
         catalog_layout.addWidget(self._catalog_status_label)
         self._catalog_result_layout = QVBoxLayout()
         catalog_layout.addLayout(self._catalog_result_layout)
+        # Applications de la fiche installables par USB (étape 2) : widgets
+        # permanents, masqués tant qu'aucune fiche n'en propose.
+        self._apk_title_label = _android_plain_label("", role="rowTitle", wrap=True)
+        catalog_layout.addWidget(self._apk_title_label)
+        self._apk_files_label = _android_plain_label("", role="secondary", wrap=True)
+        catalog_layout.addWidget(self._apk_files_label)
+        self._apk_notice_label = _android_plain_label(tr("android_apk_no_hash_notice"), role="warning", wrap=True)
+        catalog_layout.addWidget(self._apk_notice_label)
+        self._apk_install_button = QPushButton(tr("android_apk_install_button"))
+        self._apk_install_button.setProperty("role", "primary")
+        self._apk_install_button.clicked.connect(self._on_apk_install_clicked)
+        catalog_layout.addWidget(self._apk_install_button, alignment=Qt.AlignLeft)
+        self._apk_status_label = _android_plain_label("", role="secondary", wrap=True)
+        catalog_layout.addWidget(self._apk_status_label)
+        self._apk_bar = QProgressBar()
+        self._apk_bar.setRange(0, 100)
+        catalog_layout.addWidget(self._apk_bar)
+        self._apk_cancel_button = QPushButton(tr("android_download_cancel_button"))
+        self._apk_cancel_button.clicked.connect(self.apk_install_cancel_requested.emit)
+        catalog_layout.addWidget(self._apk_cancel_button, alignment=Qt.AlignLeft)
+        self._hide_apk_section()
         content_layout.addWidget(self._catalog_frame)
 
         # --- Émulateurs recommandés (`android/data/emulateurs.json`) ---
@@ -4033,23 +4060,96 @@ class AndroidScreen(Screen):
         self._catalog_search_button.setEnabled(True)
         self._catalog_status_label.setVisible(False)
         _android_clear_layout(self._catalog_result_layout)
+        self._hide_apk_section()
+
+    # --- Applications de la fiche (étape 2, `android/apk.py`) -----------
+
+    def _hide_apk_section(self) -> None:
+        self._apk_plan = None
+        for widget in (
+            self._apk_title_label,
+            self._apk_files_label,
+            self._apk_notice_label,
+            self._apk_install_button,
+            self._apk_status_label,
+            self._apk_bar,
+            self._apk_cancel_button,
+        ):
+            widget.setVisible(False)
+
+    def _show_apk_plan(self, plan: ApkInstallPlan) -> None:
+        self._apk_plan = plan
+        self._apk_title_label.setText(plan.titre)
+        self._apk_title_label.setVisible(True)
+        self._apk_files_label.setText("\n".join(f"{fichier.nom} — {fichier.url}" for fichier in plan.fichiers))
+        self._apk_files_label.setVisible(True)
+        self._apk_notice_label.setVisible(bool(plan.sans_empreinte()))
+        self._apk_install_button.setEnabled(True)
+        self._apk_install_button.setVisible(True)
+        self._apk_status_label.setVisible(False)
+        self._apk_bar.setVisible(False)
+        self._apk_cancel_button.setVisible(False)
+
+    def _on_apk_install_clicked(self) -> None:
+        if self._apk_plan is not None:
+            self.apk_install_requested.emit(self._apk_plan)
+
+    def show_apk_install_running(self) -> None:
+        self._refresh_button.setEnabled(False)
+        self._catalog_search_button.setEnabled(False)
+        self._apk_install_button.setEnabled(False)
+        self._apk_status_label.setProperty("role", "secondary")
+        theme.repolish(self._apk_status_label)
+        self._apk_status_label.setText(tr("android_apk_step_telechargement", nom=""))
+        self._apk_status_label.setVisible(True)
+        self._apk_bar.setRange(0, 0)
+        self._apk_bar.setVisible(True)
+        self._apk_cancel_button.setEnabled(True)
+        self._apk_cancel_button.setVisible(True)
+
+    def show_apk_install_step(self, etape: str, nom: str) -> None:
+        self._apk_status_label.setText(tr(f"android_apk_step_{etape}", nom=nom))
+        self._apk_bar.setRange(0, 0)  # indéterminé hors téléchargement
+        # Une installation en cours ne s'interrompt pas proprement.
+        self._apk_cancel_button.setEnabled(etape == "telechargement")
+
+    def set_apk_install_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            self._apk_bar.setRange(0, 100)
+            self._apk_bar.setValue(int(done * 100 / total))
+        else:
+            self._apk_bar.setRange(0, 0)
+
+    def show_apk_install_result(self, message: str, ok: bool) -> None:
+        self._refresh_button.setEnabled(True)
+        self._catalog_search_button.setEnabled(True)
+        self._apk_install_button.setEnabled(True)
+        self._apk_bar.setVisible(False)
+        self._apk_cancel_button.setVisible(False)
+        self._apk_status_label.setProperty("role", "secondary" if ok else "warning")
+        theme.repolish(self._apk_status_label)
+        self._apk_status_label.setText(message)
+        self._apk_status_label.setVisible(True)
 
     def _on_search_catalog_clicked(self) -> None:
         self.search_catalog_requested.emit(self._current_model)
 
     def show_catalog_searching(self) -> None:
+        self._hide_apk_section()
         self._catalog_search_button.setEnabled(False)
         self._catalog_status_label.setText(tr("android_catalog_searching"))
         self._catalog_status_label.setVisible(True)
         _android_clear_layout(self._catalog_result_layout)
 
     def show_catalog_not_found(self) -> None:
+        self._hide_apk_section()
         self._catalog_search_button.setEnabled(True)
         self._catalog_status_label.setText(tr("android_catalog_not_found"))
         self._catalog_status_label.setVisible(True)
         _android_clear_layout(self._catalog_result_layout)
 
     def show_catalog_error(self, message: str) -> None:
+        self._hide_apk_section()
         self._catalog_search_button.setEnabled(True)
         self._catalog_status_label.setText(message)
         self._catalog_status_label.setVisible(True)
@@ -4069,6 +4169,11 @@ class AndroidScreen(Screen):
         )
         if details:
             self._catalog_result_layout.addWidget(_android_plain_label(details, role="secondary", wrap=True))
+        plan = android_apk_plan_from_fiche(fiche)
+        if plan is None:
+            self._hide_apk_section()
+        else:
+            self._show_apk_plan(plan)
 
     # --- Émulateurs recommandés ------------------------------------------
 

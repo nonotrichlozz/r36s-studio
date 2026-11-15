@@ -71,6 +71,9 @@ class Fichier:
     sha256: Optional[str] = None
     variante: Optional[str] = None
     description: str = ""
+    # Identifiant du paquet Android d'un APK (procédure en mode `adb`,
+    # `android/apk.py`) : sert à vérifier que l'application est installée.
+    paquet: Optional[str] = None
 
 
 @dataclass
@@ -134,6 +137,8 @@ def motif_desactivation(procedure: Procedure, systeme: str) -> Optional[str]:
     """Code de la raison pour laquelle la procédure ne peut pas être lancée
     ici (`strings.py`, `procedure_desactivee_<code>`), ou `None`.
     `systeme` : `windows`/`macos`/`linux`."""
+    if procedure.mode == "adb":
+        return "adb"  # applications : outil « Console Android » (`android/apk.py`)
     if procedure.mode != "usb_download":
         return "mode"
     if any(e.action not in ACTION_VERS_PHASE for e in procedure.etapes):
@@ -232,6 +237,7 @@ def _fichier(data: Any) -> Optional[Fichier]:
         sha256=sha if _SHA256.match(sha) else None,
         variante=_texte(data.get("variante")) or None,
         description=_texte(data.get("description")),
+        paquet=_texte(data.get("paquet")) or None,
     )
 
 

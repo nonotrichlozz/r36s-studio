@@ -580,3 +580,14 @@ def test_worker_pilotes_empreinte(monkeypatch, tmp_path):
     assert cli.main(["install-unisoc-drivers", "--zip", "x.zip", "--sha256", "a" * 64, "--worker",
                      "--progress-file", str(progression)]) == 1
     assert _evenements(progression)[0]["code"] == "DRIVERS_CHECKSUM"
+
+
+def test_adb_procedure_is_sent_to_the_android_tool_and_keeps_its_package():
+    data = dict(_fiche_json()["procedures"][0], mode="adb")
+    data["telechargements"] = [
+        {"nom": "appli.apk", "url": "https://github.com/exemple/projet/releases/latest/download/appli.apk", "paquet": "io.exemple.appli"}
+    ]
+    procedure = procedure_depuis_json(data)
+
+    assert motif_desactivation(procedure, "windows") == "adb"
+    assert procedure.telechargements[0].paquet == "io.exemple.appli"

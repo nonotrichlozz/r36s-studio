@@ -384,3 +384,106 @@ def test_search_error_shows_friendly_message(mock_list, mock_filter, mock_load, 
 
     assert window._android_screen._catalog_status_label.isVisible()
     assert window._android_screen._catalog_status_label.text()
+
+
+# --- Installation des applications d'une fiche (étape 2) ------------------
+
+
+def _apk_plan():
+    from r36s_studio.android.apk import ApkFile, ApkInstallPlan
+
+    return ApkInstallPlan(
+        procedure_id="appli-installation",
+        titre="Installer Appli",
+        source_url="https://github.com/exemple/projet",
+        fichiers=[
+            ApkFile(
+                nom="appli.apk",
+                url="https://github.com/exemple/projet/releases/latest/download/appli.apk",
+                paquet="io.exemple.appli",
+            )
+        ],
+    )
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_apk_install_requested_starts_runner_after_confirmation(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window._on_android_detect_finished(DetectionResult(state="ready", device=_device_info()))
+    runner_class = _mock_runner_class()
+    plan = _apk_plan()
+
+    with patch("r36s_studio.gui.main_window.android_adb.resolve_adb_path", return_value="adb"), patch(
+        "r36s_studio.gui.main_window._confirm_android_apk_install", return_value=True
+    ) as confirm, patch("r36s_studio.gui.main_window.AndroidApkInstallRunner", runner_class):
+        window._android_screen.apk_install_requested.emit(plan)
+
+    confirm.assert_called_once()
+    assert len(runner_class.instances) == 1
+    assert runner_class.instances[0].init_args[:3] == ("adb", "SER1", plan)
+    runner_class.instances[0].start.assert_called_once()
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_apk_install_refused_confirmation_installs_nothing(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window._on_android_detect_finished(DetectionResult(state="ready", device=_device_info()))
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.android_adb.resolve_adb_path", return_value="adb"), patch(
+        "r36s_studio.gui.main_window._confirm_android_apk_install", return_value=False
+    ), patch("r36s_studio.gui.main_window.AndroidApkInstallRunner", runner_class):
+        window._android_screen.apk_install_requested.emit(_apk_plan())
+
+    assert runner_class.instances == []
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_apk_install_without_ready_console_asks_nothing(mock_list, mock_filter, mock_load, mock_save, qapp):
+    window = MainWindow()
+    window._on_android_detect_finished(DetectionResult(state="no_device"))
+    runner_class = _mock_runner_class()
+
+    with patch("r36s_studio.gui.main_window.android_adb.resolve_adb_path", return_value="adb"), patch(
+        "r36s_studio.gui.main_window._confirm_android_apk_install"
+    ) as confirm, patch("r36s_studio.gui.main_window.AndroidApkInstallRunner", runner_class):
+        window._android_screen.apk_install_requested.emit(_apk_plan())
+
+    confirm.assert_not_called()
+    assert runner_class.instances == []
+
+
+@patch("r36s_studio.gui.main_window.app_config.save_config")
+@patch("r36s_studio.gui.main_window.app_config.load_config", return_value=_EXPERT_MODE_CONFIG)
+@patch("r36s_studio.gui.main_window.filter_devices", return_value=[])
+@patch("r36s_studio.gui.main_window.list_devices", return_value=[])
+def test_apk_install_finished_shows_result_and_logs_it(mock_list, mock_filter, mock_load, mock_save, qapp):
+    from r36s_studio.android.apk import InstalledApk, InstallResult
+
+    window = MainWindow()
+    window._on_android_detect_finished(DetectionResult(state="ready", device=_device_info()))
+    window._android_apk_runner = MagicMock()
+
+    with patch("r36s_studio.gui.main_window._journaliser_android_installation") as journal:
+        window._on_android_apk_install_finished(
+            InstallResult(installes=[InstalledApk(nom="appli.apk", paquet="io.exemple.appli", sha256="a" * 64)])
+        )
+        assert "appli.apk" in window._android_screen._apk_status_label.text()
+
+        window._on_android_apk_install_finished(
+            InstallResult(echec_nom="appli.apk", echec_code="refuse", echec_detail="Failure [X]")
+        )
+
+    assert journal.call_count == 2
+    assert window._android_apk_runner is None
+    assert "appli.apk" in window._android_screen._apk_status_label.text()
+    assert "Failure" not in window._android_screen._apk_status_label.text()  # détail brut : journal seulement

@@ -1157,6 +1157,36 @@ STRINGS = {
     "android_catalog_searching": "Recherche en cours…",
     "android_catalog_not_found": "Cette console n'a pas été trouvée dans le catalogue.",
     "android_catalog_found_title": "Fiche trouvée",
+    # Applications d'une fiche installables par USB (étape 2, android/apk.py)
+    "android_apk_install_button": "Installer sur ma console",
+    "android_apk_no_hash_notice": (
+        "La fiche n'a pas d'empreinte pour vérifier ce fichier : il est pris tel quel sur la page "
+        "du projet (dernière version)."
+    ),
+    "android_apk_confirm_title": "Installer sur la console",
+    "android_apk_confirm_text": (
+        "R36S Studio va télécharger puis installer sur ta console ({console}) :\n\n{fichiers}\n\n"
+        "Rien n'est effacé sur la console. Laisse-la branchée et allumée jusqu'à la fin."
+    ),
+    "android_apk_step_telechargement": "Téléchargement en cours… {nom}",
+    "android_apk_step_installation": "Installation sur la console… {nom}",
+    "android_apk_step_verification": "Vérification… {nom}",
+    "android_apk_done": "Installé sur la console : {noms}. Tu peux l'ouvrir depuis la liste des applications.",
+    "android_apk_error_url": "Installation impossible : l'adresse donnée par la fiche pour {nom} n'est pas acceptée.",
+    "android_apk_error_reseau": "Le téléchargement de {nom} a échoué. Vérifie ta connexion internet puis réessaie.",
+    "android_apk_error_trop_gros": "{nom} est trop gros pour être installé d'ici.",
+    "android_apk_error_pas_un_apk": "Le fichier reçu pour {nom} n'est pas une application Android. Rien n'a été installé.",
+    "android_apk_error_empreinte": (
+        "Le fichier reçu pour {nom} n'est pas celui attendu par la fiche. Rien n'a été installé."
+    ),
+    "android_apk_error_annule": "Installation annulée.",
+    "android_apk_error_adb": (
+        "La console ne répond plus. Vérifie qu'elle est branchée et allumée, clique sur Actualiser puis réessaie."
+    ),
+    "android_apk_error_refuse": (
+        "La console a refusé d'installer {nom}. Regarde son écran : elle demande peut-être une autorisation."
+    ),
+    "android_apk_error_absent": "{nom} a été envoyé mais n'apparaît pas sur la console. Réessaie.",
     "android_emulators_title": "Émulateurs recommandés",
     # Signalé : « la liste d'émulateurs est identique quelle que soit la
     # console » -- affiché quand aucun filtrage n'a pu être appliqué

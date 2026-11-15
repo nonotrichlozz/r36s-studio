@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 from r36s_studio import config as app_config
 from r36s_studio import APP_VERSION, update_check
 from r36s_studio.android import adb as android_adb
+from r36s_studio.android import apk as android_apk
 from r36s_studio.android import emulators as android_emulators
 from r36s_studio.android import platform_tools as android_platform_tools
 from r36s_studio.android.models import DetectionResult
@@ -100,7 +101,12 @@ from r36s_studio.safety.card_fingerprint import is_same_card, size_proves_differ
 
 from . import elevate
 from . import logs as gui_logs
-from .android_runner import AndroidDetectRunner, AndroidPlatformToolsDownloadRunner, AndroidPlatformToolsSizeRunner
+from .android_runner import (
+    AndroidApkInstallRunner,
+    AndroidDetectRunner,
+    AndroidPlatformToolsDownloadRunner,
+    AndroidPlatformToolsSizeRunner,
+)
 from .doublons_runner import DoublonsMoveRunner, DoublonsResumeRunner, DoublonsScanRunner, DoublonsUndoRunner
 from .partition_runner import (
     GamesDriveLetterRunner,
@@ -306,6 +312,14 @@ _ASSISTED_MIN_HEIGHT = _ASSISTED_GRID_TOTAL_HEIGHT + 96
 _OPENING_WIDTH, _OPENING_HEIGHT = 1440, 900
 
 
+# Un message par code d'`android.apk.ApkError` ; un code inconnu retombe sur
+# le message générique.
+_ANDROID_APK_ERROR_KEYS = frozenset(
+    f"android_apk_error_{code}"
+    for code in ("url", "reseau", "trop_gros", "pas_un_apk", "empreinte", "annule", "adb", "refuse", "absent")
+)
+
+
 def _android_catalog_search_url(server_url: str) -> str:
     """Même construction d'URL que `consoles_diverses/client.py::
     rechercher_console` (jamais réimportée : fonction privée de ce
@@ -416,6 +430,47 @@ def _assign_letter_with_windows_elevation(device_path: str, parent_hwnd: Optiona
 # Délai minimal entre deux vérifications (sans élévation) de la même carte :
 # le sondage du mode assisté liste les cartes toutes les 1,5 s.
 _DRIVE_LETTER_RECHECK_SECONDS = 20.0
+
+def _confirm_android_apk_install(parent, plan, console: str) -> bool:
+    """Accord explicite avant d'installer des applications sur la console
+    branchée (étape 2, `android/apk.py`) : ce qui sera installé et d'où ça
+    vient. Rien n'est effacé, donc pas de fenêtre rouge (§5)."""
+    lignes = "\n".join(f"• {fichier.nom}\n   {fichier.url}" for fichier in plan.fichiers)
+    texte = tr("android_apk_confirm_text", console=console, fichiers=lignes)
+    if plan.sans_empreinte():
+        texte += "\n\n" + tr("android_apk_no_hash_notice")
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Question)
+    box.setWindowTitle(tr("android_apk_confirm_title"))
+    box.setTextFormat(Qt.PlainText)
+    box.setText(texte)
+    bouton = box.addButton(tr("android_apk_install_button"), QMessageBox.AcceptRole)
+    box.addButton(QMessageBox.Cancel)
+    box.exec()
+    return box.clickedButton() is bouton
+
+
+def _journaliser_android_installation(serial_model: str, resultat) -> None:
+    """Empreinte de chaque application installée (à reporter dans la fiche
+    quand elle n'en publie pas) et détail brut d'un échec -- même journal
+    que la recherche, best-effort."""
+    try:
+        chemin = gui_logs.android_log_path()
+        horodatage = datetime.now().isoformat(timespec="seconds")
+        with open(chemin, "a", encoding="utf-8") as fichier:
+            for installe in resultat.installes:
+                fichier.write(
+                    f"{horodatage} installation : console={serial_model!r}, fichier={installe.nom!r}, "
+                    f"paquet={installe.paquet!r}, sha256={installe.sha256}\n"
+                )
+            if not resultat.ok:
+                fichier.write(
+                    f"{horodatage} installation échouée : console={serial_model!r}, fichier={resultat.echec_nom!r}, "
+                    f"code={resultat.echec_code!r}, detail={resultat.echec_detail!r}\n"
+                )
+    except OSError:
+        pass
+
 
 def _confirm_personal_use(parent, firmware: str) -> bool:
     """Fenêtre « Usage personnel uniquement » avant le téléchargement d'un
@@ -702,6 +757,7 @@ class MainWindow(QMainWindow):
         self._android_last_detection: Optional[DetectionResult] = None
         self._android_download_runner: Optional[AndroidPlatformToolsDownloadRunner] = None
         self._android_search_runner: Optional[ConsoleSearchRunner] = None
+        self._android_apk_runner: Optional[AndroidApkInstallRunner] = None
         # URL de la dernière recherche lancée depuis cet écran -- retenue
         # uniquement pour le diagnostic (`_journaliser_android_erreur_
         # recherche`, signal `error` du runner ne porte que code/message,
@@ -902,6 +958,8 @@ class MainWindow(QMainWindow):
         self._android_screen.cancel_download_requested.connect(self._on_android_cancel_download_requested)
         self._android_screen.search_catalog_requested.connect(self._on_android_search_catalog_requested)
         self._android_screen.knulli_copy_requested.connect(self._open_knulli_screen)
+        self._android_screen.apk_install_requested.connect(self._on_android_apk_install_requested)
+        self._android_screen.apk_install_cancel_requested.connect(self._on_android_apk_install_cancel_requested)
         self._knulli_screen.back_requested.connect(self._open_android_screen)
         self._knulli_screen.last_folder_changed.connect(self._on_last_games_folder_changed)
 
@@ -3779,6 +3837,47 @@ class MainWindow(QMainWindow):
             self._android_screen.show_catalog_not_found()
             return
         self._android_screen.show_catalog_found(resultat.console)
+
+    # --- Installation des applications d'une fiche (étape 2) -----------
+
+    def _on_android_apk_install_requested(self, plan) -> None:
+        """Bouton « Installer sur ma console » de la fiche trouvée : accord
+        explicite, puis téléchargement et `adb install` dans un thread."""
+        if self._android_apk_runner is not None:
+            return
+        result = self._android_last_detection
+        adb_path = android_adb.resolve_adb_path()
+        if result is None or result.state != "ready" or result.device is None or adb_path is None:
+            self._android_screen.show_apk_install_result(tr("android_apk_error_adb"), False)
+            return
+        if not _confirm_android_apk_install(self, plan, result.device.model):
+            return
+        self._android_screen.show_apk_install_running()
+        runner = AndroidApkInstallRunner(adb_path, result.device.serial, plan, self)
+        runner.step.connect(self._android_screen.show_apk_install_step)
+        runner.progress.connect(self._android_screen.set_apk_install_progress)
+        runner.finished_install.connect(self._on_android_apk_install_finished)
+        runner.finished.connect(runner.deleteLater)
+        self._android_apk_runner = runner
+        runner.start()
+
+    def _on_android_apk_install_cancel_requested(self) -> None:
+        if self._android_apk_runner is not None:
+            self._android_apk_runner.cancel()
+
+    def _on_android_apk_install_finished(self, resultat) -> None:
+        self._android_apk_runner = None
+        detection = self._android_last_detection
+        modele = detection.device.model if detection is not None and detection.device is not None else ""
+        _journaliser_android_installation(modele, resultat)
+        if resultat.ok:
+            noms = ", ".join(installe.nom for installe in resultat.installes)
+            self._android_screen.show_apk_install_result(tr("android_apk_done", noms=noms), True)
+            return
+        cle = f"android_apk_error_{resultat.echec_code}"
+        if cle not in _ANDROID_APK_ERROR_KEYS:
+            cle = "android_apk_error_adb"
+        self._android_screen.show_apk_install_result(tr(cle, nom=resultat.echec_nom), resultat.echec_code == "annule")
 
     def _on_android_search_error(self, code: str, message_serveur: str) -> None:
         self._android_search_runner = None

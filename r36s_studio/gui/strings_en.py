@@ -794,6 +794,35 @@ STRINGS_EN = {
     "android_catalog_searching": "Searching…",
     "android_catalog_not_found": "This console was not found in the catalog.",
     "android_catalog_found_title": "Entry found",
+    "android_apk_install_button": "Install on my console",
+    "android_apk_no_hash_notice": (
+        "The entry has no fingerprint to check this file: it is taken as is from the project page "
+        "(latest version)."
+    ),
+    "android_apk_confirm_title": "Install on the console",
+    "android_apk_confirm_text": (
+        "R36S Studio will download then install on your console ({console}):\n\n{fichiers}\n\n"
+        "Nothing is erased on the console. Keep it plugged in and switched on until the end."
+    ),
+    "android_apk_step_telechargement": "Downloading… {nom}",
+    "android_apk_step_installation": "Installing on the console… {nom}",
+    "android_apk_step_verification": "Checking… {nom}",
+    "android_apk_done": "Installed on the console: {noms}. You can open it from the list of apps.",
+    "android_apk_error_url": "Cannot install: the address given by the entry for {nom} is not accepted.",
+    "android_apk_error_reseau": "Downloading {nom} failed. Check your internet connection and try again.",
+    "android_apk_error_trop_gros": "{nom} is too large to be installed from here.",
+    "android_apk_error_pas_un_apk": "The file received for {nom} is not an Android app. Nothing was installed.",
+    "android_apk_error_empreinte": (
+        "The file received for {nom} is not the one the entry expects. Nothing was installed."
+    ),
+    "android_apk_error_annule": "Installation cancelled.",
+    "android_apk_error_adb": (
+        "The console no longer answers. Check that it is plugged in and switched on, click Refresh and try again."
+    ),
+    "android_apk_error_refuse": (
+        "The console refused to install {nom}. Look at its screen: it may be asking for a permission."
+    ),
+    "android_apk_error_absent": "{nom} was sent but does not show up on the console. Try again.",
     "android_emulators_title": "Recommended emulators",
     "android_emulators_generic_notice": (
         "Generic list: this list could not be adapted to your console (architecture or Android "

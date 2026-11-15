@@ -728,3 +728,92 @@ def test_consent_and_cancel_download_signals(qapp):
     screen._download_cancel_button.click()
 
     assert events == ["download", "cancel"]
+
+
+# --- Applications de la fiche installables par USB (étape 2) -------------
+
+
+def _fiche_with_app():
+    return fiche_depuis_json(
+        {
+            "id": "x",
+            "identite": {"nom": "Retroid Pocket Flip 2", "fabricant": "Retroid"},
+            "statut": "non_verifie",
+            "procedures": [
+                {
+                    "id": "appli-installation",
+                    "titre": "Installer Appli",
+                    "firmware": "Appli",
+                    "version": "dernière",
+                    "mode": "adb",
+                    "efface_donnees": False,
+                    "plateformes": ["windows"],
+                    "telechargements": [
+                        {
+                            "nom": "appli.apk",
+                            "url": "https://github.com/exemple/projet/releases/latest/download/appli.apk",
+                            "paquet": "io.exemple.appli",
+                        }
+                    ],
+                    "etapes": [{"ordre": 1, "action": "installer_apk", "automatisable": "oui", "detail": "…"}],
+                    "source_url": "https://github.com/exemple/projet",
+                }
+            ],
+        }
+    )
+
+
+def test_show_catalog_found_with_installable_app_offers_to_install_it(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.show_detection_result(DetectionResult(state="ready", device=_device_info()))
+    requested = []
+    screen.apk_install_requested.connect(requested.append)
+
+    screen.show_catalog_found(_fiche_with_app())
+
+    assert screen._apk_install_button.isVisible()
+    assert screen._apk_notice_label.isVisible()  # aucune empreinte publiée
+    assert "appli.apk" in screen._apk_files_label.text()
+    assert not screen._apk_bar.isVisible()
+
+    screen._apk_install_button.click()
+
+    assert len(requested) == 1
+    assert requested[0].fichiers[0].paquet == "io.exemple.appli"
+
+
+def test_show_catalog_found_without_installable_app_hides_the_install_button(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.show_detection_result(DetectionResult(state="ready", device=_device_info()))
+    screen.show_catalog_found(_fiche_with_app())
+
+    screen.show_catalog_found(_fiche())
+
+    assert not screen._apk_install_button.isVisible()
+    assert not screen._apk_title_label.isVisible()
+
+
+def test_apk_install_running_then_result_locks_and_releases_the_buttons(qapp):
+    screen = AndroidScreen()
+    screen.show()  # isVisible() ne reflète setVisible() qu'une fois affiché
+    screen.show_detection_result(DetectionResult(state="ready", device=_device_info()))
+    screen.show_catalog_found(_fiche_with_app())
+
+    screen.show_apk_install_running()
+    screen.show_apk_install_step("installation", "appli.apk")
+    screen.set_apk_install_progress(50, 100)
+
+    assert not screen._apk_install_button.isEnabled()
+    assert not screen._refresh_button.isEnabled()
+    assert screen._apk_bar.isVisible()
+    assert not screen._apk_cancel_button.isEnabled()  # plus d'annulation pendant l'installation
+    assert "appli.apk" in screen._apk_status_label.text()
+
+    screen.show_apk_install_result("Installé", True)
+
+    assert screen._apk_install_button.isEnabled()
+    assert screen._refresh_button.isEnabled()
+    assert not screen._apk_bar.isVisible()
+    assert screen._apk_status_label.text() == "Installé"

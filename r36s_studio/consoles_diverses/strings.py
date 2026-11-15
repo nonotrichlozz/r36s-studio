@@ -104,6 +104,7 @@ STRINGS = {
     "procedures_title": "Installations guidées",
     "procedure_button": "Installer pas à pas",
     "procedure_experimental": "Expérimental : cette installation n'a pas encore été vérifiée sur la console.",
+    "procedure_desactivee_adb": "Cette installation se lance depuis « Console Android », console allumée et branchée.",
     "procedure_desactivee_mode": "Pas encore possible depuis R36S Studio : cette installation ne passe pas par le câble USB.",
     "procedure_desactivee_etape": "Pas encore possible depuis R36S Studio : une étape n'est pas encore prise en charge sans risque pour les données de la console.",
     "procedure_desactivee_systeme": "Non disponible sur ce système : cette installation demande un ordinateur {systemes}.",

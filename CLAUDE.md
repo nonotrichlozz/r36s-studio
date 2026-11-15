@@ -311,6 +311,11 @@ Détail et bancs de test : `docs/claude/testing.md`.
   fichier d'écran téléchargé, empreintes fixées) et absence de partition de jeux
   sur carte ROCKNIX -- jamais lancés sur la console (`firmwares-flash.md`,
   `imaging.md`).
+- Console Android, « Installer sur ma console » (`android/apk.py`, applications
+  d'une fiche par `adb install -r`, 2026-11-15) : jamais lancé sur une console.
+  Fiche Retroid Pocket Flip 2 / Recompa : lien de téléchargement non ouvert,
+  aucune empreinte fixée, nom renvoyé par la console (`ro.product.model`)
+  supposé (`docs/android-adb.md`).
 
 ---
 

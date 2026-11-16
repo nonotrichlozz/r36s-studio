@@ -123,6 +123,11 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
   secret, le fichier l'est ; jamais dans le dépôt). Sans le secret, clé
   jetable : chaque APK doit être installé après désinstallation du précédent.
   **Perdre ce fichier de clé = tous les utilisateurs doivent désinstaller.**
+- **Page Releases** : le même APK est publié dans la Release `android`
+  (étiquette fixe, fichier remplacé à chaque construction), toujours en
+  pré-release pour que `/releases/latest` reste l'installeur Windows
+  (`update_check.py`, README). L'appli, elle, se met à jour depuis la branche
+  `android-apk`, pas depuis cette Release.
 - **Numéro de version** : `versionCode = 100000 + numéro du run` (croissant).
 - **Mise à jour automatique** (`Updater.kt`) : à chaque lancement, l'appli lit
   `version.json` sur la branche `android-apk` (publié seulement pour un APK

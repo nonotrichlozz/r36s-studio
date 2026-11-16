@@ -98,3 +98,22 @@ jobs:
           git add .
           git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "APK Android (${GITHUB_SHA::7})"
           git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" android-apk
+
+      # Meme APK dans la page Releases du depot, la ou on le cherche
+      # spontanement. Toujours en « pre-release » : /releases/latest (utilise
+      # par la version ordinateur pour ses mises a jour et par le README)
+      # ignore les pre-releases, donc l'installeur Windows reste « la derniere ».
+      - name: Publier l'APK dans les Releases (etiquette android)
+        if: (github.ref == 'refs/heads/android-app' || github.ref == 'refs/heads/main') && env.ANDROID_KEYSTORE_FILE != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="$RUNNER_TEMP/apk/R36S-Studio-Android.apk"
+          TITLE="R36S Studio Android (version d'essai) - ${GITHUB_SHA::7}"
+          NOTES="Application Android de R36S Studio : telecharge R36S-Studio-Android.apk ci-dessous et installe-le sur ton telephone. Version d'essai. Une fois installee, elle se met a jour elle-meme a l'ouverture. L'installeur Windows est dans la Release marquee « Latest »."
+          if gh release view android -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload android "$APK" --clobber -R "$GITHUB_REPOSITORY"
+            gh release edit android -R "$GITHUB_REPOSITORY" --title "$TITLE" --notes "$NOTES" --prerelease
+          else
+            gh release create android "$APK" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TITLE" --notes "$NOTES" --prerelease
+          fi

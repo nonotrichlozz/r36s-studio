@@ -9,6 +9,11 @@ L'installeur Windows est téléchargeable gratuitement sur
 [la dernière Release](https://github.com/nonotrichlozz/r36s-studio/releases/latest) (`R36S-Studio-Setup.exe`).
 Mac et Linux : pas encore d'installeur.
 
+**Version Android** (téléphone, carte SD branchée par un adaptateur USB) :
+[télécharger l'APK](https://github.com/nonotrichlozz/r36s-studio/raw/android-apk/R36S-Studio-Android.apk).
+Version d'essai : elle installe un système, sauvegarde et restaure une carte,
+et se met à jour elle-même à l'ouverture.
+
 Le code source est consultable ici, mais il n'est pas libre : voir la
 section [Licences](#licences) ci-dessous.
 

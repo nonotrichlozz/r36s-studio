@@ -348,6 +348,18 @@ l'ancien fichier toujours intact. Aucun `mkfs.exfat`/`fsck.exfat` n'existe dans
 l'environnement de travail : le vérificateur maison est le meilleur contrôle
 disponible, il ne remplace pas `chkdsk` sur une vraie carte.
 
+## Mes pages web (2026-11-17)
+
+Pendant de la tuile « Web » personnelle de la version ordinateur
+(`config.py::personal_web_url`, variable d'environnement, jamais chez un
+client). Sur Android, pas de variable d'environnement : les raccourcis sont
+réglés sur le téléphone même, par **appui long sur la ligne « Version »** de
+l'accueil (rien ne l'annonce), et rangés dans les préférences privées de
+l'appli (`WebShortcuts.kt`), jamais dans le code ni dans un fichier partagé.
+Section « Mes pages web » absente tant que la liste est vide. Adresses https
+seulement (« https:// » ajouté si l'adresse est tapée sans), 12 au plus.
+Ouverture dans le navigateur du téléphone (`LocalUriHandler`).
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par

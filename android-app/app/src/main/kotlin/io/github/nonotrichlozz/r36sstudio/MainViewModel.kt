@@ -148,6 +148,9 @@ data class BrowserState(
 
 data class UiState(
     val card: CardState = CardState.None,
+    val webShortcuts: List<WebShortcut> = emptyList(),
+    val webEditorOpen: Boolean = false,
+    val webEditorError: String? = null,
     val browser: BrowserState? = null,
     val op: OpState? = null,
     val log: List<LogLine> = emptyList(),
@@ -220,6 +223,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             reportInternalError(e)
         }
         refreshCards()
+        _state.update { it.copy(webShortcuts = WebShortcuts.load(app)) }
         viewModelScope.launch {
             Updater.failure.collect { detail ->
                 if (detail != null) {
@@ -719,6 +723,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { state ->
             state.copy(op = state.op?.copy(phase = label, done = 0, total = 0, speed = 0, phaseStartMs = System.currentTimeMillis()))
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Raccourcis web personnels (réglés par appui long sur la version)
+    // ------------------------------------------------------------------
+
+    fun openWebEditor() {
+        _state.update { it.copy(webEditorOpen = true, webEditorError = null) }
+    }
+
+    fun closeWebEditor() {
+        _state.update { it.copy(webEditorOpen = false, webEditorError = null) }
+    }
+
+    /** Renvoie vrai si le raccourci a été ajouté (le formulaire peut alors se vider). */
+    fun addWebShortcut(name: String, typedUrl: String): Boolean {
+        val url = WebShortcuts.normalize(typedUrl)
+        val current = _state.value.webShortcuts
+        val error = when {
+            !WebShortcuts.isSafeUrl(url) -> Strings.WEB_BAD_URL
+            current.size >= WebShortcuts.MAX -> Strings.WEB_FULL
+            else -> null
+        }
+        if (error != null) {
+            _state.update { it.copy(webEditorError = error) }
+            return false
+        }
+        val label = name.trim().ifBlank { java.net.URI(url).host }
+        val list = current + WebShortcut(label, url)
+        WebShortcuts.save(app, list)
+        _state.update { it.copy(webShortcuts = list, webEditorError = null) }
+        return true
+    }
+
+    fun removeWebShortcut(index: Int) {
+        val list = _state.value.webShortcuts.filterIndexed { i, _ -> i != index }
+        WebShortcuts.save(app, list)
+        _state.update { it.copy(webShortcuts = list) }
+    }
+
+    fun webOpenFailed() {
+        showMessage(Strings.WEB_OPEN_FAILED)
     }
 
     fun openFirmwarePicker() {

@@ -35,6 +35,13 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.input.KeyboardType
+import io.github.nonotrichlozz.r36sstudio.WebShortcut
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
@@ -95,6 +102,8 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
         if (uris.isNotEmpty()) viewModel.onRomsPicked(uris)
     }
 
+    val uriHandler = LocalUriHandler.current
+
     MaterialTheme(colorScheme = AppColors) {
         Column(
             modifier = Modifier
@@ -111,7 +120,13 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
             ) {
                 Text(Strings.APP_TITLE, color = Palette.TextPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text(Strings.APP_SUBTITLE, color = Palette.TextSecondary, fontSize = 13.sp)
-                Text(Strings.VERSION_LINE, color = Palette.NotRelevantFg, fontSize = 11.sp)
+                // Appui long (discret, rien ne l'annonce chez un client) : réglage des pages web personnelles.
+                Text(
+                    Strings.VERSION_LINE,
+                    color = Palette.NotRelevantFg,
+                    fontSize = 11.sp,
+                    modifier = Modifier.pointerInput(Unit) { detectTapGestures(onLongPress = { viewModel.openWebEditor() }) },
+                )
 
                 CardBanner(
                     card = state.card,
@@ -142,6 +157,25 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
                     enabled = !busy,
                     onClick = viewModel::openBrowser,
                 )
+
+                if (state.webShortcuts.isNotEmpty()) {
+                    Text(
+                        Strings.SECTION_WEB,
+                        color = Palette.TextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    for (shortcut in state.webShortcuts) {
+                        WebTile(shortcut) {
+                            try {
+                                uriHandler.openUri(shortcut.url)
+                            } catch (e: Exception) {
+                                viewModel.webOpenFailed()
+                            }
+                        }
+                    }
+                }
 
                 Text(
                     Strings.SECTION_SAFETY,
@@ -175,6 +209,16 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
 
             Spacer(Modifier.height(10.dp))
             LogPanel(op = state.op, log = state.log, onCancel = viewModel::cancel)
+        }
+
+        if (state.webEditorOpen) {
+            WebEditorDialog(
+                shortcuts = state.webShortcuts,
+                error = state.webEditorError,
+                onAdd = viewModel::addWebShortcut,
+                onRemove = viewModel::removeWebShortcut,
+                onClose = viewModel::closeWebEditor,
+            )
         }
 
         state.browser?.let { browser ->
@@ -509,6 +553,72 @@ private fun ConfirmDestructiveDialog(
             ) {
                 Text(goLabel, fontWeight = FontWeight.Bold)
             }
+        }
+    }
+}
+
+/** Un raccourci web : ouvre la page dans le navigateur du téléphone. */
+@Composable
+private fun WebTile(shortcut: WebShortcut, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(PanelShape)
+            .background(Palette.Surface)
+            .border(1.dp, Palette.Border, PanelShape)
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(shortcut.name, color = Palette.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(shortcut.url.removePrefix("https://"), color = Palette.TextSecondary, fontSize = 12.sp, maxLines = 1)
+        }
+        Text("↗", color = Palette.Cyan, fontSize = 20.sp)
+    }
+}
+
+/** Réglage des raccourcis web (ouvert par appui long sur la ligne « Version »). */
+@Composable
+private fun WebEditorDialog(
+    shortcuts: List<WebShortcut>,
+    error: String?,
+    onAdd: (String, String) -> Boolean,
+    onRemove: (Int) -> Unit,
+    onClose: () -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    DialogPanel(onDismiss = onClose) {
+        Text(Strings.WEB_EDIT_TITLE, color = Palette.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(Strings.WEB_EDIT_NOTE, color = Palette.TextSecondary, fontSize = 12.sp)
+        shortcuts.forEachIndexed { index, shortcut ->
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(shortcut.name, color = Palette.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(shortcut.url, color = Palette.TextSecondary, fontSize = 11.sp, maxLines = 1)
+                }
+                SecondaryButton(Strings.WEB_REMOVE, enabled = true, onClick = { onRemove(index) })
+            }
+        }
+        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(Strings.WEB_NAME) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            value = url,
+            onValueChange = { url = it },
+            label = { Text(Strings.WEB_URL) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (error != null) Text(error, color = Palette.DangerFg, fontSize = 13.sp)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+            SecondaryButton(Strings.WEB_CLOSE, enabled = true, onClick = onClose)
+            PrimaryButton(Strings.WEB_ADD, enabled = url.isNotBlank(), onClick = {
+                if (onAdd(name, url)) {
+                    name = ""
+                    url = ""
+                }
+            })
         }
     }
 }

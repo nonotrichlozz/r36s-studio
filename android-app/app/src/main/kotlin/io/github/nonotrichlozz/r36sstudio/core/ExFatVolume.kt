@@ -15,11 +15,21 @@ class ExFatVolume(private val reader: VolumeReader) : FsVolume() {
     override var label: String = ""
         private set
 
-    private val clusterSize: Int
-    private val clusterCount: Long
-    private val fatOffset: Long
-    private val heapOffset: Long
-    private val rootCluster: Long
+    internal val clusterSize: Int
+    internal val clusterCount: Long
+    internal val fatOffset: Long
+    internal val heapOffset: Long
+    internal val rootCluster: Long
+
+    // Fichiers système du volume, repérés dans la racine (utiles à l'écriture).
+    internal var bitmapCluster: Long = 0
+        private set
+    internal var bitmapLength: Long = 0
+        private set
+    internal var upcaseCluster: Long = 0
+        private set
+    internal var upcaseLength: Long = 0
+        private set
 
     init {
         val boot = reader.read(0, 512)
@@ -37,10 +47,19 @@ class ExFatVolume(private val reader: VolumeReader) : FsVolume() {
         if (heapOffset + clusterCount * clusterSize > reader.sizeBytes) throw FsException("volume plus grand que la partition")
         try {
             for (record in rawEntries(rootCluster, contiguous = false, size = null)) {
-                if ((record[0].toInt() and 0xFF) == 0x83) {
-                    val chars = minOf(record[1].toInt() and 0xFF, 11)
-                    label = String(record, 2, chars * 2, Charsets.UTF_16LE)
-                    break
+                when (record[0].toInt() and 0xFF) {
+                    0x83 -> if (label.isEmpty()) {
+                        val chars = minOf(record[1].toInt() and 0xFF, 11)
+                        label = String(record, 2, chars * 2, Charsets.UTF_16LE)
+                    }
+                    0x81 -> if (bitmapCluster == 0L) {
+                        bitmapCluster = u32(record, 20)
+                        bitmapLength = u64(record, 24)
+                    }
+                    0x82 -> if (upcaseCluster == 0L) {
+                        upcaseCluster = u32(record, 20)
+                        upcaseLength = u64(record, 24)
+                    }
                 }
             }
         } catch (e: IOException) {
@@ -54,6 +73,86 @@ class ExFatVolume(private val reader: VolumeReader) : FsVolume() {
         if (!dir.isDirectory) throw FsException("ce n'est pas un dossier")
         if (dir.dataLength == 0L) return emptyList()
         return entries(dir.cluster, dir.contiguous, dir.dataLength)
+    }
+
+    // --- ce que l'écrivain a besoin de connaître (lecture seule ici) ------------
+
+    /** Un dossier : premier cluster, contigu ou non, taille connue (`null` pour la racine). */
+    internal class DirRef(val cluster: Long, val contiguous: Boolean, val dataLength: Long?)
+
+    internal val rootRef: DirRef get() = DirRef(rootCluster, false, null)
+
+    internal fun refOf(entry: FsEntry): DirRef = DirRef(entry.cluster, entry.contiguous, entry.dataLength)
+
+    internal fun dirClusterList(ref: DirRef): List<Long> =
+        if (ref.dataLength == null) chainUntilEnd(ref.cluster) else clusters(ref.cluster, ref.contiguous, ref.dataLength)
+
+    internal fun readDirBytes(ref: DirRef): ByteArray {
+        val list = dirClusterList(ref)
+        return readClusters(list, ref.dataLength ?: (list.size.toLong() * clusterSize))
+    }
+
+    /** Position d'un cluster dans la partition, en octets. */
+    internal fun clusterOffset(cluster: Long): Long = heapOffset + (cluster - 2) * clusterSize
+
+    /** Clusters d'un fichier système (bitmap, table des majuscules) : chaîne FAT, sinon clusters contigus. */
+    internal fun systemFileClusters(first: Long, length: Long): List<Long> =
+        try {
+            clusters(first, false, length)
+        } catch (e: FsException) {
+            clusters(first, true, length)
+        }
+
+    internal fun readBitmap(): ByteArray {
+        if (bitmapCluster < 2 || bitmapLength <= 0) throw FsException("table d'allocation introuvable")
+        if (bitmapLength * 8 < clusterCount) throw FsException("table d'allocation trop courte")
+        if (bitmapLength > MAX_DIR_BYTES) throw FsException("table d'allocation démesurée")
+        return readClusters(systemFileClusters(bitmapCluster, bitmapLength), bitmapLength)
+    }
+
+    /** Table des majuscules du volume (nécessaire au calcul du hachage des noms), `null` si illisible. */
+    internal fun readUpcase(): CharArray? {
+        if (upcaseCluster < 2 || upcaseLength <= 0 || upcaseLength > 1024 * 1024) return null
+        val raw = try {
+            readClusters(systemFileClusters(upcaseCluster, upcaseLength), upcaseLength)
+        } catch (e: IOException) {
+            return null
+        }
+        val table = CharArray(65536) { it.toChar() }
+        var index = 0
+        var p = 0
+        while (p + 1 < raw.size) {
+            val v = (raw[p].toInt() and 0xFF) or ((raw[p + 1].toInt() and 0xFF) shl 8)
+            p += 2
+            if (v == 0xFFFF) {
+                if (p + 1 >= raw.size) break
+                index += (raw[p].toInt() and 0xFF) or ((raw[p + 1].toInt() and 0xFF) shl 8)
+                p += 2
+            } else {
+                if (index >= 65536) break
+                table[index++] = v.toChar()
+            }
+        }
+        return table
+    }
+
+    /** Liste des clusters d'un fichier (contigus ou en chaîne FAT). */
+    internal fun clustersOf(entry: FsEntry): List<Long> = clusters(entry.cluster, entry.contiguous, entry.sizeBytes)
+
+    /** Octets d'un fichier, dans l'ordre, par morceaux d'au plus `chunk` octets. */
+    internal fun forEachFileChunk(entry: FsEntry, chunk: Int, consumer: (ByteArray) -> Unit) {
+        val list = clusters(entry.cluster, entry.contiguous, entry.sizeBytes)
+        var remaining = entry.sizeBytes
+        var i = 0
+        val perChunk = maxOf(1, chunk / clusterSize)
+        while (i < list.size && remaining > 0) {
+            var j = i + 1
+            while (j < list.size && j - i < perChunk && list[j] == list[j - 1] + 1) j++
+            val n = minOf(remaining, (j - i).toLong() * clusterSize).toInt()
+            consumer(reader.read(clusterOffset(list[i]), n))
+            remaining -= n
+            i = j
+        }
     }
 
     // --- clusters -------------------------------------------------------------

@@ -249,8 +249,45 @@ outil `mkfs`/`fsck` n'est disponible ici pour vérifier un écrivain.
 - Tests : `FsReaderTest` (images FAT16, FAT32, exFAT fabriquées en mémoire,
   `FsImages.kt`). Une image exFAT fabriquée a aussi été relue avec le lecteur
   Python : mêmes noms, tailles, dates.
-- **Écriture (copier des ROMs) : pas faite.** À ne faire qu'une fois la lecture
-  confirmée sur la vraie carte, d'abord sur une carte de rechange.
+- Lecture confirmée sur la vraie carte d'Arnaud (2026-11-17 soir : EASYROMS
+  exFAT, dossiers et fichiers affichés, dates justes).
+
+### Copie de fichiers du téléphone vers la carte (exFAT, 2026-11-17)
+
+Demande d'Arnaud : copier des ROMs téléchargées dans « Téléchargements »
+vers la carte. Bouton « Copier un fichier du téléphone ici » dans un dossier
+d'un espace exFAT ; sélecteur de fichiers d'Android (plusieurs fichiers),
+fenêtre de confirmation (non rouge : rien n'est effacé), puis opération avec
+progression (`OP_COPY`), comme le flash. **Ajout seulement : jamais de
+suppression ni de remplacement** (un nom existant, même en autre casse, est
+ignoré). FAT/FAT32 : lecture seule pour l'instant (ROCKNIX).
+
+`core/ExFatWriter.kt`, écrit à la main :
+- tout est vérifié avant la première écriture (nom, dossier, table des
+  majuscules, place libre, place dans le dossier) ; au moindre doute, rien
+  n'est écrit (`NotEnoughSpaceOnCardException`, `DirectoryFullException`,
+  `AlreadyOnCardException`) ;
+- ordre : données dans des clusters libres -> chaîne FAT (si plusieurs
+  morceaux) -> table d'allocation -> entrée du dossier écrite inactive (0x05)
+  puis activée par un seul octet. Une coupure laisse au pire de la place
+  perdue ;
+- un seul morceau libre si possible (`NoFatChain`, rien dans la FAT), sinon
+  plusieurs morceaux et chaîne FAT ;
+- hachage du nom avec la table des majuscules du volume (compressée comme
+  celle du formateur) : un hachage faux rendrait le fichier introuvable sous
+  Linux ;
+- `verify` : volume neuf, somme de contrôle de l'entrée, clusters marqués
+  occupés, relecture complète comparée à l'original ;
+- refuse un dossier sans place (pas d'agrandissement de dossier : à faire si
+  le cas se présente en vrai).
+
+Vérification : `ExFatChecker` (tests), écrit à part sans rien reprendre du
+lecteur ni de l'écrivain (somme de contrôle, hachage, chaînes FAT, clusters
+partagés, bitmap, fuites). `interruptedAtAnyWriteNeverDamagesTheVolume` coupe
+la copie à CHAQUE écriture possible (contiguë et fragmentée) : jamais d'erreur,
+l'ancien fichier toujours intact. Aucun `mkfs.exfat`/`fsck.exfat` n'existe dans
+l'environnement de travail : le vérificateur maison est le meilleur contrôle
+disponible, il ne remplace pas `chkdsk` sur une vraie carte.
 
 ## Jamais vérifié sur du vrai matériel
 
@@ -264,3 +301,7 @@ plusieurs fentes, cartes à blocs de 4096 octets.
 Explorateur de la carte : jamais lancé sur une vraie carte (lecture des
 partitions, exFAT et FAT d'une vraie carte de console, carte de 256 Go, dossiers
 de plusieurs milliers de fichiers, débranchement pendant la lecture).
+Copie vers la carte : jamais lancée sur une vraie carte (écriture d'un fichier
+sur l'EASYROMS exFAT d'une carte de console, fichier de plusieurs Go, volume
+marqué « sale » par la console, carte de 256 Go à clusters de 128 Kio, relecture
+sous Windows avec `chkdsk` après coup). À essayer d'abord avec un petit fichier.

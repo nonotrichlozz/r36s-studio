@@ -51,6 +51,7 @@ fun BrowserDialog(
     state: BrowserState,
     onOpenSpace: (Int) -> Unit,
     onOpenFolder: (FsEntry) -> Unit,
+    onCopyHere: () -> Unit,
     onBack: () -> Unit,
 ) {
     val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE) }
@@ -76,7 +77,11 @@ fun BrowserDialog(
                 )
             }
             Spacer(Modifier.height(10.dp))
-            Text(Strings.BROWSER_READ_ONLY, color = Palette.AvailableFg, fontSize = 12.sp)
+            Text(
+                if (state.canCopy) Strings.BROWSER_ADD_ONLY else Strings.BROWSER_READ_ONLY,
+                color = Palette.AvailableFg,
+                fontSize = 12.sp,
+            )
             if (state.path.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
                 Text("/ " + state.path.joinToString(" / "), color = Palette.Cyan, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
@@ -109,9 +114,13 @@ fun BrowserDialog(
                 FolderList(state, dateFormat, onOpenFolder, Modifier.weight(1f))
             }
 
-            if (!state.loading) {
+            if (!state.loading && state.volumeTitle != null) {
                 Spacer(Modifier.height(8.dp))
-                Text(Strings.BROWSER_NO_COPY_YET, color = Palette.NotRelevantFg, fontSize = 11.sp)
+                if (state.canCopy) {
+                    PrimaryButton(Strings.BROWSER_COPY_HERE, enabled = true, onClick = onCopyHere)
+                } else {
+                    Text(Strings.BROWSER_COPY_ONLY_EXFAT, color = Palette.NotRelevantFg, fontSize = 11.sp)
+                }
             }
         }
     }

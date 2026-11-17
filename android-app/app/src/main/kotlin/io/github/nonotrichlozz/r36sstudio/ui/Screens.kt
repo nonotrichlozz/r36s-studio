@@ -91,6 +91,10 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
         if (uri != null) viewModel.startBackup(uri)
     }
 
+    val pickRoms = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) viewModel.onRomsPicked(uris)
+    }
+
     MaterialTheme(colorScheme = AppColors) {
         Column(
             modifier = Modifier
@@ -178,6 +182,7 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
                 state = browser,
                 onOpenSpace = viewModel::browseOpenSpace,
                 onOpenFolder = viewModel::browseOpenFolder,
+                onCopyHere = { pickRoms.launch(arrayOf("*/*")) },
                 onBack = viewModel::browseBack,
             )
         }
@@ -209,6 +214,11 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
                 goLabel = Strings.CONFIRM_GO_ERASE,
                 onCancel = viewModel::dismissDialog,
                 onConfirm = { viewModel.confirmErase(dialog) },
+            )
+            is DialogState.ConfirmCopy -> ConfirmCopyDialog(
+                dialog = dialog,
+                onCancel = viewModel::dismissDialog,
+                onConfirm = { viewModel.confirmCopy(dialog) },
             )
             is DialogState.Message -> MessageDialog(text = dialog.text, onDismiss = viewModel::dismissDialog)
         }
@@ -493,6 +503,23 @@ private fun ConfirmDestructiveDialog(
             ) {
                 Text(goLabel, fontWeight = FontWeight.Bold)
             }
+        }
+    }
+}
+
+/** Copier des fichiers sur la carte : explicite, mais sans la fenêtre rouge (rien n'est effacé). */
+@Composable
+private fun ConfirmCopyDialog(dialog: DialogState.ConfirmCopy, onCancel: () -> Unit, onConfirm: () -> Unit) {
+    DialogPanel(onDismiss = onCancel) {
+        Text(Strings.CONFIRM_COPY_TITLE, color = Palette.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        for (item in dialog.items) {
+            Text("${item.name} (${Strings.formatFileSize(item.sizeBytes)})", color = Palette.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(Strings.confirmCopyWhere(dialog.space, dialog.folder), color = Palette.Cyan, fontSize = 13.sp)
+        Text(Strings.CONFIRM_COPY_NOTE, color = Palette.TextSecondary, fontSize = 13.sp)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+            SecondaryButton(Strings.CANCEL, enabled = true, onClick = onCancel)
+            PrimaryButton(Strings.CONFIRM_COPY_GO, enabled = true, onClick = onConfirm)
         }
     }
 }

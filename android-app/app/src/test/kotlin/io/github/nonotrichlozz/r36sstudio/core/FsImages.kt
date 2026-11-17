@@ -126,12 +126,29 @@ class FatImage(val kind: Int, volumeLabel: String = "R36S") {
 }
 
 /** Fabrique d'image exFAT en mémoire (clusters de 512 octets). */
-class ExFatImage(label: String = "EASYROMS") {
+class ExFatImage(label: String = "EASYROMS", compressedUpcase: Boolean = false) {
     private val fatOffsetSectors = 24
     private val heapSectors = 32
     private val clusterCount = 400
     val bytes = ByteArray((heapSectors + clusterCount) * 512)
     private var nextCluster = 2
+    private val allocated = HashSet<Int>()
+    private var bitmapOffset = -1 // octet de la table d'allocation dans l'image, une fois posée
+
+    fun clusterOffset(cluster: Int) = heapSectors * 512 + (cluster - 2) * 512
+    val clusterSize = 512
+    val totalClusters = clusterCount
+
+    private fun mark(cluster: Int, used: Boolean) {
+        val bit = cluster - 2
+        val i = bitmapOffset + bit / 8
+        bytes[i] = if (used) (bytes[i].toInt() or (1 shl (bit % 8))).toByte() else (bytes[i].toInt() and (1 shl (bit % 8)).inv()).toByte()
+    }
+
+    /** Ne laisse libres que ces clusters ; tout ce qui est déjà alloué reste occupé. */
+    fun freeOnly(free: Set<Int>) {
+        for (c in 2 until clusterCount + 2) mark(c, c in allocated || c !in free)
+    }
 
     inner class Dir(val clusters: List<Int>, val contiguous: Boolean) {
         var count = 0
@@ -159,6 +176,8 @@ class ExFatImage(label: String = "EASYROMS") {
             nextCluster += if (spread) 2 else 1
         }
         if (chained) list.forEachIndexed { i, c -> setFat(c, if (i == list.size - 1) 0xFFFFFFFFL else list[i + 1].toLong()) }
+        allocated.addAll(list)
+        if (bitmapOffset >= 0) list.forEach { mark(it, true) }
         return list
     }
 
@@ -176,6 +195,47 @@ class ExFatImage(label: String = "EASYROMS") {
         l[0] = 0x83.toByte(); l[1] = label.length.toByte()
         label.toByteArray(Charsets.UTF_16LE).copyInto(l, 2)
         root.put(l)
+
+        // Table d'allocation (50 octets = 400 clusters) et table des majuscules (ASCII), reliées par la FAT.
+        val bitmapCluster = allocate(1, chained = true).single()
+        val upcaseCluster = allocate(1, chained = true).single()
+        bitmapOffset = clusterOffset(bitmapCluster)
+        for (c in allocated) mark(c, true)
+        val b = ByteArray(32)
+        b[0] = 0x81.toByte(); put32Into(b, 20, bitmapCluster.toLong()); put64Into(b, 24, 50)
+        root.put(b)
+        var upcaseBytes = 256L
+        if (compressedUpcase) {
+            // Comme le formateur exFAT : « les 0x61 premiers sont identiques », A..Z, « les 0x85 suivants sont identiques ».
+            val words = ArrayList<Int>()
+            words.add(0xFFFF); words.add(0x61)
+            for (ch in 'A'..'Z') words.add(ch.code)
+            words.add(0xFFFF); words.add(0x85)
+            words.forEachIndexed { i, w ->
+                bytes[clusterOffset(upcaseCluster) + 2 * i] = w.toByte()
+                bytes[clusterOffset(upcaseCluster) + 2 * i + 1] = (w shr 8).toByte()
+            }
+            upcaseBytes = words.size * 2L
+        } else {
+            for (i in 0 until 128) {
+                val up = if (i in 'a'.code..'z'.code) i - 32 else i
+                bytes[clusterOffset(upcaseCluster) + 2 * i] = up.toByte()
+            }
+        }
+        val u = ByteArray(32)
+        u[0] = 0x82.toByte(); put32Into(u, 20, upcaseCluster.toLong()); put64Into(u, 24, upcaseBytes)
+        root.put(u)
+    }
+
+    /** Fichier réellement présent : clusters réservés, contenu écrit, entrée posée. */
+    fun addFile(dir: Dir, name: String, content: ByteArray): List<Int> {
+        val count = (content.size + 511) / 512
+        val list = if (count == 0) emptyList() else allocate(count, chained = false)
+        list.forEachIndexed { i, c ->
+            System.arraycopy(content, i * 512, bytes, clusterOffset(c), minOf(512, content.size - i * 512))
+        }
+        add(dir, name, cluster = list.firstOrNull() ?: 0, size = content.size.toLong())
+        return list
     }
 
     fun mkdir(parent: Dir, name: String, capacityClusters: Int = 1): Dir {
@@ -206,6 +266,19 @@ class ExFatImage(label: String = "EASYROMS") {
             val chunk = units.copyOfRange(n * 30, minOf(units.size, (n + 1) * 30))
             chunk.copyInto(set, base + 2)
         }
+        // Hachage du nom (en majuscules ASCII, comme la table posée par le constructeur) puis somme de contrôle.
+        var hash = 0
+        for (ch in name) {
+            val up = if (ch in 'a'..'z') ch.code - 32 else ch.code
+            for (b in intArrayOf(up and 0xFF, up shr 8)) hash = ((((hash and 1) shl 15) or (hash shr 1)) + b) and 0xFFFF
+        }
+        set[32 + 4] = hash.toByte(); set[32 + 5] = (hash shr 8).toByte()
+        var sum = 0
+        for (k in set.indices) {
+            if (k == 2 || k == 3) continue
+            sum = ((((sum and 1) shl 15) or (sum shr 1)) + (set[k].toInt() and 0xFF)) and 0xFFFF
+        }
+        set[2] = sum.toByte(); set[3] = (sum shr 8).toByte()
         dir.put(set)
     }
 

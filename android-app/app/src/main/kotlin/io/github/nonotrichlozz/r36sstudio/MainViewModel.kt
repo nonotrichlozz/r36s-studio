@@ -21,7 +21,15 @@ import androidx.lifecycle.viewModelScope
 import io.github.nonotrichlozz.r36sstudio.core.BlockDevice
 import io.github.nonotrichlozz.r36sstudio.core.CancelToken
 import io.github.nonotrichlozz.r36sstudio.core.CardRecovery
+import io.github.nonotrichlozz.r36sstudio.core.AlreadyOnCardException
+import io.github.nonotrichlozz.r36sstudio.core.CopyProgress
+import io.github.nonotrichlozz.r36sstudio.core.CopyVerifyFailedException
+import io.github.nonotrichlozz.r36sstudio.core.DirectoryFullException
+import io.github.nonotrichlozz.r36sstudio.core.ExFatVolume
+import io.github.nonotrichlozz.r36sstudio.core.ExFatWriter
 import io.github.nonotrichlozz.r36sstudio.core.Filesystems
+import io.github.nonotrichlozz.r36sstudio.core.FsException
+import io.github.nonotrichlozz.r36sstudio.core.NotEnoughSpaceOnCardException
 import io.github.nonotrichlozz.r36sstudio.core.FsEntry
 import io.github.nonotrichlozz.r36sstudio.core.FsVolume
 import io.github.nonotrichlozz.r36sstudio.core.ImageFormat
@@ -108,7 +116,11 @@ sealed interface DialogState {
     data class ConfirmFlash(val source: FlashSource, val cardDisplay: String, val cardBytes: Long) : DialogState
     data class ConfirmErase(val cardDisplay: String, val cardBytes: Long) : DialogState
     data class Message(val text: String) : DialogState
+    data class ConfirmCopy(val items: List<CopyItem>, val space: String, val folder: String) : DialogState
 }
+
+/** Un fichier du téléphone à copier sur la carte. */
+data class CopyItem(val uri: Uri, val name: String, val sizeBytes: Long)
 
 /** Un espace de la carte, tel que l'explorateur le montre. */
 data class BrowserRow(val title: String, val info: String, val readable: Boolean)
@@ -123,6 +135,7 @@ data class BrowserState(
     val volumeTitle: String? = null,
     val path: List<String> = emptyList(),
     val items: List<FsEntry> = emptyList(),
+    val canCopy: Boolean = false,
     val error: String? = null,
     val errorDetail: String = "",
 )
@@ -167,6 +180,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var browserVolume: FsVolume? = null
     private val browserDirs = ArrayList<FsEntry>()
     private var browserJob: Job? = null
+    private var browserSpaceIndex = -1
 
     private var updateFallbackTried = false
 
@@ -485,6 +499,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val volume = Filesystems.open(VolumeReader(block, partition.startBytes, partition.sizeBytes))
                 val items = volume.listRoot()
                 browserVolume = volume
+                browserSpaceIndex = index
                 browserDirs.clear()
                 showFolder(row.title, items)
             } catch (e: Exception) {
@@ -553,7 +568,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val sorted = items.sortedWith(compareByDescending<FsEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
         val path = browserDirs.map { it.name }
         _state.update {
-            it.copy(browser = it.browser?.copy(loading = false, volumeTitle = volumeTitle, path = path, items = sorted, error = null))
+            it.copy(
+                browser = it.browser?.copy(
+                    loading = false, volumeTitle = volumeTitle, path = path, items = sorted,
+                    canCopy = browserVolume is ExFatVolume, error = null,
+                ),
+            )
         }
     }
 
@@ -565,6 +585,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 browser = (current ?: BrowserState()).copy(loading = false, error = Strings.ERROR_BROWSE, errorDetail = detail),
             )
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Copier des fichiers du téléphone sur la carte (exFAT seulement)
+    // ------------------------------------------------------------------
+
+    /** Fichiers choisis dans le téléphone : on vérifie, puis on demande confirmation avant la moindre écriture. */
+    fun onRomsPicked(uris: List<Uri>) {
+        val browser = _state.value.browser ?: return
+        if (busy || browserVolume !is ExFatVolume) return
+        val items = ArrayList<CopyItem>()
+        for (uri in uris) {
+            val (name, size) = queryNameAndSize(uri)
+            if (size < 0) {
+                showMessage(Strings.ERROR_COPY_NO_SIZE)
+                return
+            }
+            items.add(CopyItem(uri, name, size))
+        }
+        if (items.isEmpty()) return
+        val folder = if (browser.path.isEmpty()) "/" else "/" + browser.path.joinToString("/")
+        _state.update { it.copy(dialog = DialogState.ConfirmCopy(items, browser.volumeTitle ?: "", folder)) }
+    }
+
+    fun confirmCopy(dialog: DialogState.ConfirmCopy) {
+        dismissDialog()
+        if (busy) return
+        val ready = _state.value.card as? CardState.Ready ?: return
+        if (ready.writeProtected) {
+            showMessage(Strings.ERROR_WRITE_PROTECTED)
+            return
+        }
+        val spaceIndex = browserSpaceIndex
+        val dirPath = browserDirs.map { it.name }
+        // L'explorateur rend le lecteur : la copie est une opération comme les autres, avec sa progression.
+        closeBrowser()
+        startOperation(Strings.OP_COPY, Strings.PHASE_COPY, cardOperation = true) { token ->
+            val block = acquire(ready.device).block
+            val partition = PartitionList.read(block).getOrNull(spaceIndex) ?: throw FsException("espace introuvable")
+            val writer = ExFatWriter(block, partition.startBytes, partition.sizeBytes)
+            val meter = ProgressMeter(progressListener)
+            val progress = CopyProgress { done, total, work -> meter.update(done, total, work, force = done == total) }
+            var copied = 0
+            for ((index, item) in dialog.items.withIndex()) {
+                log(Strings.logCopyStart(index + 1, dialog.items.size, item.name))
+                setPhase(Strings.PHASE_COPY)
+                meter.reset()
+                try {
+                    val added = writer.copyFile(dirPath, item.name, item.sizeBytes, { openUri(item.uri) }, token, progress)
+                    setPhase(Strings.PHASE_VERIFY)
+                    meter.reset()
+                    writer.verify(added, { openUri(item.uri) }, token, progress)
+                    log(Strings.logCopyDone(added.name), LogKind.SUCCESS)
+                    copied++
+                } catch (e: AlreadyOnCardException) {
+                    log(Strings.logCopyExists(item.name), LogKind.ERROR)
+                }
+            }
+            if (copied > 0) log(Strings.logCopyAllDone(copied), LogKind.SUCCESS)
+        }
+    }
+
+    private fun setPhase(label: String) {
+        _state.update { state ->
+            state.copy(op = state.op?.copy(phase = label, done = 0, total = 0, speed = 0, phaseStartMs = System.currentTimeMillis()))
         }
     }
 
@@ -987,6 +1073,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         is UnsupportedImageException -> Strings.ERROR_UNSUPPORTED
         is ImageTooLargeException -> Strings.errorTooLarge(e.cardBytes)
         is WriteProtectedException -> Strings.ERROR_WRITE_PROTECTED
+        is NotEnoughSpaceOnCardException -> Strings.errorCardFull(e.neededBytes)
+        is DirectoryFullException -> Strings.ERROR_DIR_FULL
+        is CopyVerifyFailedException -> Strings.ERROR_COPY_VERIFY
+        is FsException -> Strings.ERROR_FS
         is VerifyFailedException -> Strings.ERROR_VERIFY
         is SourceUnstableException -> Strings.ERROR_SOURCE_UNSTABLE
         is ChecksumMismatchException -> Strings.ERROR_CHECKSUM

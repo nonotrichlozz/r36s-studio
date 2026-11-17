@@ -212,7 +212,7 @@ object Strings {
     // --- Explorateur de la carte (lecture seule) ---
     const val BROWSER_TITLE = "Contenu de la carte"
     const val BROWSER_READ_ONLY = "Lecture seule : rien n'est écrit sur ta carte."
-    const val BROWSER_ADD_ONLY = "Rien n'est jamais effacé ni remplacé : on ne peut qu'ajouter des fichiers."
+    const val BROWSER_ADD_ONLY = "Rien n'est effacé ni remplacé sans ta confirmation."
     const val BROWSER_LOADING = "Lecture de la carte…"
     const val BROWSER_BACK = "Retour"
     const val BROWSER_EMPTY_FOLDER = "Dossier vide"
@@ -235,6 +235,9 @@ object Strings {
     const val ERROR_DELETE_FOLDER = "Seuls les fichiers peuvent être supprimés, pas les dossiers."
     fun logCopyReplaced(name: String) = "« $name » remplacé et vérifié."
     fun browserDeleted(name: String) = "« $name » supprimé."
+    fun browserDeleting(name: String) = "Suppression de « $name »… ne débranche pas la carte."
+    fun logDeleteStart(name: String) = "Suppression de « $name »…"
+    fun logDeleteFailed(name: String) = "« $name » n'a pas été supprimé."
     const val OP_COPY = "Copie sur la carte"
     const val PHASE_COPY = "Copie sur la carte"
     const val ERROR_COPY_NO_SIZE = "Ce fichier n'a pas de taille connue. Choisis-le depuis le dossier Téléchargements."

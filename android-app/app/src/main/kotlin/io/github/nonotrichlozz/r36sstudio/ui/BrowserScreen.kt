@@ -112,7 +112,7 @@ fun BrowserDialog(
             }
 
             if (state.loading) {
-                Text(Strings.BROWSER_LOADING, color = Palette.TextSecondary, fontSize = 14.sp)
+                Text(state.loadingText ?: Strings.BROWSER_LOADING, color = Palette.TextSecondary, fontSize = 14.sp)
             } else if (state.volumeTitle == null) {
                 SpaceList(state, onOpenSpace, Modifier.weight(1f))
             } else {

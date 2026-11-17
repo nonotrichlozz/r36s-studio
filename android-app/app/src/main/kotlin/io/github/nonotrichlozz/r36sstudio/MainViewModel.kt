@@ -142,6 +142,7 @@ data class BrowserState(
     val items: List<FsEntry> = emptyList(),
     val canCopy: Boolean = false,
     val notice: String? = null,
+    val loadingText: String? = null,
     val error: String? = null,
     val errorDetail: String = "",
 )
@@ -190,6 +191,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val browserDirs = ArrayList<FsEntry>()
     private var browserJob: Job? = null
     private var browserSpaceIndex = -1
+
+    /** Une suppression écrit sur la carte : on ne ferme pas l'explorateur au milieu. */
+    @Volatile
+    private var browserWriting = false
 
     private var updateFallbackTried = false
 
@@ -536,6 +541,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Retour : dossier parent, puis liste des espaces, puis fermeture de l'explorateur. */
     fun browseBack() {
         val browser = _state.value.browser ?: return
+        if (browserWriting) return
         if (browser.loading && browserJob?.isActive == true) {
             // Lecture qui traîne (lecteur débranché ?) : ne jamais rester coincé, on ferme.
             closeBrowser()
@@ -581,7 +587,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 browser = it.browser?.copy(
                     loading = false, volumeTitle = volumeTitle, path = path, items = sorted,
-                    canCopy = browserVolume is ExFatVolume, error = null, notice = null,
+                    canCopy = browserVolume is ExFatVolume, error = null, notice = null, loadingText = null,
                 ),
             )
         }
@@ -686,7 +692,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (browserJob?.isActive == true || browserVolume !is ExFatVolume) return
         val dirs = ArrayList(browserDirs)
         val title = _state.value.browser?.volumeTitle
-        _state.update { it.copy(browser = it.browser?.copy(loading = true, error = null, notice = null)) }
+        _state.update { it.copy(browser = it.browser?.copy(loading = true, loadingText = Strings.browserDeleting(dialog.name), error = null, notice = null)) }
+        browserWriting = true
+        log(Strings.logDeleteStart(dialog.name))
         browserJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val block = acquire(ready.device).block
@@ -705,7 +713,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 browserDirs.addAll(fresh)
                 showFolder(title, items)
                 _state.update { it.copy(browser = it.browser?.copy(notice = Strings.browserDeleted(dialog.name))) }
+                log(Strings.browserDeleted(dialog.name), LogKind.SUCCESS)
             } catch (e: Exception) {
+                log(Strings.logDeleteFailed(dialog.name), LogKind.ERROR)
+                log(Strings.logDetail("${e.javaClass.simpleName} : ${e.message ?: ""}"), LogKind.DETAIL)
                 if (e is kotlinx.coroutines.CancellationException) return@launch
                 val message = if (e is IOException) {
                     friendlyError(e).let { if (it == Strings.ERROR_NETWORK) Strings.ERROR_CARD_GONE else it }
@@ -715,6 +726,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update {
                     it.copy(browser = it.browser?.copy(loading = false, error = message, errorDetail = "${e.javaClass.simpleName} : ${e.message ?: ""}"))
                 }
+            } finally {
+                browserWriting = false
             }
         }
     }

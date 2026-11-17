@@ -30,6 +30,13 @@ class UnstableCardReadException(detail: String) : IOException(detail)
 /** Copie arrêtée en route, avant l'ajout de l'entrée : fichier absent, carte intacte (au pire de la place perdue). */
 class CopyInterruptedException(cause: IOException) : IOException(cause.message, cause)
 
+/**
+ * Remplacement arrêté entre le retrait de l'ancien fichier et l'ajout du
+ * nouveau : aucun des deux n'apparaît, la carte n'est pas abîmée. Il suffit
+ * de recommencer la copie.
+ */
+class ReplaceInterruptedException(cause: IOException) : IOException(cause.message, cause)
+
 /** Le fichier est écrit, mais il n'a pas pu être relu jusqu'au bout. */
 class CopyNotVerifiedException(cause: IOException) : IOException(cause.message, cause)
 
@@ -58,6 +65,9 @@ class ExFatWriter(
 ) {
     private class Run(val start: Long, val length: Long)
 
+    /** Le fichier du même nom à remplacer : où est son entrée, quels clusters il occupe. */
+    private class Replaced(val setOffset: Int, val setLength: Int, val clusters: List<Long>)
+
     /** Tout ce que la copie a besoin de savoir, lu sur la carte avant d'écrire. */
     private class Plan(
         val volume: ExFatVolume,
@@ -69,6 +79,7 @@ class ExFatWriter(
         val bitmapClusters: List<Long>,
         val runs: List<Run>,
         val slot: Int,
+        val replaced: Replaced?,
     ) {
         /** `null` si les deux préparations sont identiques, sinon ce qui diffère (pour le journal). */
         fun differenceFrom(other: Plan): String? = when {
@@ -80,6 +91,8 @@ class ExFatWriter(
             bitmapClusters != other.bitmapClusters -> "clusters de la table d'allocation"
             runs.map { it.start to it.length } != other.runs.map { it.start to it.length } -> "place choisie"
             slot != other.slot -> "place dans le dossier"
+            replaced?.setOffset != other.replaced?.setOffset || replaced?.setLength != other.replaced?.setLength ||
+                replaced?.clusters != other.replaced?.clusters -> "fichier à remplacer"
             else -> null
         }
 
@@ -87,7 +100,8 @@ class ExFatWriter(
             val where = runs.joinToString(", ") { "${it.start}+${it.length}" }
             return "clusters de ${volume.clusterSize} octets, " +
                 (if (runs.isEmpty()) "fichier vide" else if (fragmented) "en ${runs.size} morceaux ($where)" else "d'un seul tenant ($where)") +
-                ", entrée à l'octet $slot du dossier"
+                ", entrée à l'octet $slot du dossier" +
+                (if (replaced != null) ", remplace l'entrée de l'octet ${replaced.setOffset} (${replaced.clusters.size} clusters libérés)" else "")
         }
     }
 
@@ -95,7 +109,7 @@ class ExFatWriter(
     var lastPlanDescription: String = ""
         private set
 
-    private fun plan(dirPath: List<String>, name: String, sizeBytes: Long): Plan {
+    private fun plan(dirPath: List<String>, name: String, sizeBytes: Long, replace: Boolean): Plan {
         val reader = VolumeReader(device, partitionStart, partitionSize)
         val volume = ExFatVolume(reader)
         if (volume.clusterSize % device.blockSize != 0 || (partitionStart + volume.heapOffset) % device.blockSize != 0L) {
@@ -111,7 +125,16 @@ class ExFatWriter(
         }
         val upcase = volume.readUpcase() ?: throw FsException("table des majuscules illisible")
         val wantedKey = upcased(name, upcase)
-        if (siblings.any { upcased(it.name, upcase) == wantedKey }) throw AlreadyOnCardException(name)
+        val dirClusters = volume.dirClusterList(dir)
+        val dirData = volume.readDirBytes(dir)
+        val existing = siblings.firstOrNull { upcased(it.name, upcase) == wantedKey }
+        var replaced: Replaced? = null
+        if (existing != null) {
+            // Un dossier du même nom n'est jamais remplacé, un fichier seulement si on l'a demandé.
+            if (!replace || existing.isDirectory) throw AlreadyOnCardException(name)
+            val (setOffset, setLength) = findSet(dirData, wantedKey, upcase) ?: throw FsException("entrée du fichier à remplacer introuvable")
+            replaced = Replaced(setOffset, setLength, if (existing.sizeBytes == 0L) emptyList() else volume.clustersOf(existing))
+        }
 
         val clusterSize = volume.clusterSize
         val neededClusters = (sizeBytes + clusterSize - 1) / clusterSize
@@ -120,8 +143,6 @@ class ExFatWriter(
             ?: throw NotEnoughSpaceOnCardException(neededClusters * clusterSize)
 
         val setBytes = 32 * (2 + (name.length + 14) / 15)
-        val dirClusters = volume.dirClusterList(dir)
-        val dirData = volume.readDirBytes(dir)
         val slot = findFreeSlot(dirData, setBytes) ?: throw DirectoryFullException()
         return Plan(
             volume = volume,
@@ -133,11 +154,12 @@ class ExFatWriter(
             bitmapClusters = volume.systemFileClusters(volume.bitmapCluster, volume.bitmapLength),
             runs = runs,
             slot = slot,
+            replaced = replaced,
         )
     }
 
     /** Ce qu'une copie a ajouté, pour la relecture. */
-    class Added(val dirPath: List<String>, val name: String, val sizeBytes: Long)
+    class Added(val dirPath: List<String>, val name: String, val sizeBytes: Long, val replaced: Boolean = false)
 
     @Throws(IOException::class)
     fun copyFile(
@@ -147,6 +169,7 @@ class ExFatWriter(
         openSource: () -> InputStream,
         cancel: CancelToken,
         progress: CopyProgress,
+        replace: Boolean = false,
     ): Added {
         if (sizeBytes < 0) throw IOException("Taille du fichier inconnue")
         val name = sanitizeName(wantedName)
@@ -155,8 +178,8 @@ class ExFatWriter(
         // Deux préparations complètes, chacune avec son propre cache de lecture :
         // un lecteur qui rend des octets faux (décalés, incomplets) donnerait
         // deux plans différents. Dans ce cas on s'arrête avant d'écrire quoi que ce soit.
-        val plan = plan(dirPath, name, sizeBytes)
-        val second = plan(dirPath, name, sizeBytes)
+        val plan = plan(dirPath, name, sizeBytes, replace)
+        val second = plan(dirPath, name, sizeBytes, replace)
         val difference = plan.differenceFrom(second)
         if (difference != null) throw UnstableCardReadException("deux lectures de la carte ne concordent pas ($difference)")
 
@@ -202,6 +225,22 @@ class ExFatWriter(
                 if (index > bitmapHi) bitmapHi = index
             }
         }
+        // Remplacement : l'ancienne entrée est retirée (octets de type sans le bit « en service »),
+        // puis ses clusters sont rendus à la table d'allocation, une fois le nouveau fichier en place.
+        val replaced = plan.replaced
+        val oldSet = replaced?.let { r -> dirData.copyOfRange(r.setOffset, r.setOffset + r.setLength) }
+        oldSet?.let { set -> for (k in set.indices step 32) set[k] = (set[k].toInt() and 0x7F).toByte() }
+        val freed = bitmap.copyOf()
+        var freeLo = Int.MAX_VALUE
+        var freeHi = -1
+        for (c in replaced?.clusters.orEmpty()) {
+            val bit = c - 2
+            val index = (bit shr 3).toInt()
+            freed[index] = (freed[index].toInt() and (1 shl (bit and 7L).toInt()).inv()).toByte()
+            if (index < freeLo) freeLo = index
+            if (index > freeHi) freeHi = index
+        }
+
         val inactive = entrySet.copyOf()
         inactive[0] = 0x05 // entrée « supprimée » le temps d'écrire le reste
         val tail = if (slot + setBytes + 32 <= dirData.size) ByteArray(32) else ByteArray(0)
@@ -214,10 +253,13 @@ class ExFatWriter(
         for ((offset, bytes) in fatPieces) pieces.add(Pair(offset, bytes.size))
         if (bitmapHi >= 0) pieces.addAll(mapToClusters(volume, bitmapClusters, bitmapLo.toLong(), bitmapHi - bitmapLo + 1))
         pieces.addAll(mapToClusters(volume, dirClusters, slot.toLong(), dirWrite.size))
+        if (replaced != null) pieces.addAll(mapToClusters(volume, dirClusters, replaced.setOffset.toLong(), replaced.setLength))
+        if (freeHi >= 0) pieces.addAll(mapToClusters(volume, bitmapClusters, freeLo.toLong(), freeHi - freeLo + 1))
         for ((offset, length) in pieces) snapshot(volume, shadow, offset, length)
         checkStable(shadow)
 
         var activated = false
+        var oldRemoved = false
         try {
             // ---- 2. Les données, dans des clusters libres (que rien ne référence) ---
             if (cancel.cancelled) throw OperationCancelled()
@@ -237,20 +279,144 @@ class ExFatWriter(
             // ---- 5. L'entrée du dossier, en dernier, activée d'un seul octet ---------
             writeMetaInClusters(volume, shadow, dirClusters, slot.toLong(), dirWrite)
             device.flush()
+            if (replaced != null && oldSet != null) {
+                // Retrait de l'ancien : d'abord son entrée principale (il disparaît d'un coup), puis le reste.
+                oldRemoved = true
+                writeMetaInClusters(volume, shadow, dirClusters, replaced.setOffset.toLong(), oldSet.copyOfRange(0, 1))
+                writeMetaInClusters(volume, shadow, dirClusters, replaced.setOffset + 32L, oldSet.copyOfRange(32, oldSet.size))
+                device.flush()
+            }
             activated = true
             writeMetaInClusters(volume, shadow, dirClusters, slot.toLong(), byteArrayOf(0x85.toByte()))
             device.flush()
         } catch (e: OperationCancelled) {
             throw e
-        } catch (e: UnstableCardReadException) {
-            if (activated) throw CopyNotVerifiedException(e)
-            throw e
         } catch (e: IOException) {
-            // Avant l'octet d'activation, le fichier n'existe pas pour la carte.
-            if (!activated) throw CopyInterruptedException(e)
-            throw CopyNotVerifiedException(e)
+            // Avant l'octet d'activation, le nouveau fichier n'existe pas pour la carte.
+            if (activated) throw CopyNotVerifiedException(e)
+            if (oldRemoved) throw ReplaceInterruptedException(e)
+            if (e is UnstableCardReadException) throw e
+            throw CopyInterruptedException(e)
         }
-        return Added(dirPath, name, sizeBytes)
+
+        // ---- 6. Remplacement : la place de l'ancien fichier redevient libre --------
+        // Le nouveau fichier est déjà en place : un échec ici ne laisse que de la place perdue.
+        if (freeHi >= 0) {
+            try {
+                // `freed` = table avec les bits du nouveau fichier, sans ceux de l'ancien.
+                writeMetaInClusters(volume, shadow, bitmapClusters, freeLo.toLong(), freed.copyOfRange(freeLo, freeHi + 1))
+                device.flush()
+            } catch (e: IOException) {
+                lastPlanDescription += " ; place de l'ancien fichier non libérée (${e.message})"
+            }
+        }
+        return Added(dirPath, name, sizeBytes, replaced = replaced != null)
+    }
+
+    // ------------------------------------------------------------------------
+    // Suppression d'un fichier (jamais d'un dossier)
+    // ------------------------------------------------------------------------
+
+    private class DeletePlan(
+        val volume: ExFatVolume,
+        val boot: ByteArray,
+        val dirClusters: List<Long>,
+        val dirData: ByteArray,
+        val bitmap: ByteArray,
+        val bitmapClusters: List<Long>,
+        val target: Replaced,
+    ) {
+        fun differenceFrom(other: DeletePlan): String? = when {
+            !boot.contentEquals(other.boot) -> "secteur de démarrage"
+            dirClusters != other.dirClusters -> "clusters du dossier"
+            !dirData.contentEquals(other.dirData) -> "contenu du dossier"
+            !bitmap.contentEquals(other.bitmap) -> "table d'allocation"
+            bitmapClusters != other.bitmapClusters -> "clusters de la table d'allocation"
+            target.setOffset != other.target.setOffset || target.setLength != other.target.setLength ||
+                target.clusters != other.target.clusters -> "fichier à supprimer"
+            else -> null
+        }
+    }
+
+    private fun deletePlan(dirPath: List<String>, name: String): DeletePlan {
+        val reader = VolumeReader(device, partitionStart, partitionSize)
+        val volume = ExFatVolume(reader)
+        if (volume.clusterSize % device.blockSize != 0 || (partitionStart + volume.heapOffset) % device.blockSize != 0L) {
+            throw FsException("clusters non alignés sur les secteurs de la carte")
+        }
+        var dir = volume.rootRef
+        var siblings = volume.listRoot()
+        for (part in dirPath) {
+            val next = siblings.firstOrNull { it.isDirectory && it.name.equals(part, ignoreCase = true) }
+                ?: throw FsException("dossier introuvable : $part")
+            dir = volume.refOf(next)
+            siblings = volume.list(next)
+        }
+        val upcase = volume.readUpcase() ?: throw FsException("table des majuscules illisible")
+        // Nom exact : on ne supprime que le fichier que l'on a montré.
+        val entry = siblings.firstOrNull { it.name == name } ?: throw FsException("fichier introuvable : $name")
+        if (entry.isDirectory) throw FsException("un dossier ne se supprime pas ici")
+        val dirData = volume.readDirBytes(dir)
+        val (setOffset, setLength) = findSet(dirData, upcased(name, upcase), upcase) ?: throw FsException("entrée introuvable")
+        return DeletePlan(
+            volume = volume,
+            boot = reader.read(0, 512),
+            dirClusters = volume.dirClusterList(dir),
+            dirData = dirData,
+            bitmap = volume.readBitmap(),
+            bitmapClusters = volume.systemFileClusters(volume.bitmapCluster, volume.bitmapLength),
+            target = Replaced(setOffset, setLength, if (entry.sizeBytes == 0L) emptyList() else volume.clustersOf(entry)),
+        )
+    }
+
+    /**
+     * Supprime un fichier : son entrée est retirée (d'abord l'entrée
+     * principale, il disparaît d'un coup), puis sa place est rendue. Une
+     * coupure entre les deux ne laisse que de la place perdue. Mêmes
+     * protections que la copie : deux préparations identiques, secteurs
+     * relus avant et après chaque écriture. Puis relecture : le fichier ne
+     * doit plus apparaître.
+     */
+    @Throws(IOException::class)
+    fun deleteFile(dirPath: List<String>, name: String) {
+        val plan = deletePlan(dirPath, name)
+        val difference = plan.differenceFrom(deletePlan(dirPath, name))
+        if (difference != null) throw UnstableCardReadException("deux lectures de la carte ne concordent pas ($difference)")
+
+        val volume = plan.volume
+        val target = plan.target
+        val oldSet = plan.dirData.copyOfRange(target.setOffset, target.setOffset + target.setLength)
+        for (k in oldSet.indices step 32) oldSet[k] = (oldSet[k].toInt() and 0x7F).toByte()
+        val freed = plan.bitmap.copyOf()
+        var lo = Int.MAX_VALUE
+        var hi = -1
+        for (c in target.clusters) {
+            val bit = c - 2
+            val index = (bit shr 3).toInt()
+            freed[index] = (freed[index].toInt() and (1 shl (bit and 7L).toInt()).inv()).toByte()
+            if (index < lo) lo = index
+            if (index > hi) hi = index
+        }
+
+        val shadow = HashMap<Long, ByteArray>()
+        val pieces = ArrayList<Pair<Long, Int>>()
+        pieces.addAll(mapToClusters(volume, plan.dirClusters, target.setOffset.toLong(), target.setLength))
+        if (hi >= 0) pieces.addAll(mapToClusters(volume, plan.bitmapClusters, lo.toLong(), hi - lo + 1))
+        for ((offset, length) in pieces) snapshot(volume, shadow, offset, length)
+        checkStable(shadow)
+
+        writeMetaInClusters(volume, shadow, plan.dirClusters, target.setOffset.toLong(), oldSet.copyOfRange(0, 1))
+        writeMetaInClusters(volume, shadow, plan.dirClusters, target.setOffset + 32L, oldSet.copyOfRange(32, oldSet.size))
+        device.flush()
+        if (hi >= 0) {
+            writeMetaInClusters(volume, shadow, plan.bitmapClusters, lo.toLong(), freed.copyOfRange(lo, hi + 1))
+            device.flush()
+        }
+
+        val after = ExFatVolume(VolumeReader(device, partitionStart, partitionSize))
+        var siblings = after.listRoot()
+        for (part in dirPath) siblings = after.list(siblings.first { it.isDirectory && it.name.equals(part, ignoreCase = true) })
+        if (siblings.any { it.name == name }) throw CopyVerifyFailedException("le fichier est toujours là après la suppression")
     }
 
     /**
@@ -524,6 +690,32 @@ class ExFatWriter(
             val kind = dirData[i].toInt() and 0xFF
             if (kind == 0x00) return if (i + setBytes <= dirData.size) i else null
             i += if (kind == 0x85) 32 * ((dirData[i + 1].toInt() and 0xFF) + 1) else 32
+        }
+        return null
+    }
+
+    /** Position et longueur de l'ensemble d'entrées portant ce nom (comparé en majuscules). */
+    private fun findSet(dirData: ByteArray, key: String, upcase: CharArray): Pair<Int, Int>? {
+        var i = 0
+        while (i + 32 <= dirData.size) {
+            val kind = dirData[i].toInt() and 0xFF
+            if (kind == 0x00) return null
+            if (kind != 0x85) {
+                i += 32
+                continue
+            }
+            val length = 32 * ((dirData[i + 1].toInt() and 0xFF) + 1)
+            if (i + length > dirData.size) return null
+            val units = dirData[i + 32 + 3].toInt() and 0xFF
+            val raw = java.io.ByteArrayOutputStream()
+            var k = i + 64
+            while (k + 32 <= i + length) {
+                if ((dirData[k].toInt() and 0xFF) == 0xC1) raw.write(dirData, k + 2, 30)
+                k += 32
+            }
+            val name = String(raw.toByteArray(), Charsets.UTF_16LE).take(units)
+            if (upcased(name, upcase) == key) return Pair(i, length)
+            i += length
         }
         return null
     }

@@ -313,6 +313,33 @@ Tests ajoutés : lecteur qui décale de 13 octets après la première écriture,
 et une mauvaise lecture à CHAQUE lecture possible (contigu et fragmenté) :
 jamais d'erreur au vérificateur, `old.bin` toujours intact.
 
+**Deuxième essai réel (98e938d), 2026-11-17 23:30** : copie réussie dans un
+autre dossier. Arnaud pensait que le premier échec venait d'un doublon ; non :
+un nom existant était ignoré avec un message, l'erreur venait d'une lecture.
+
+### Remplacer et supprimer (2026-11-17)
+
+Demandes d'Arnaud : « ROM déjà existante, voulez-vous la remplacer ? » et
+« glisser vers la gauche pour supprimer ».
+- Copie : la fenêtre de confirmation signale « déjà sur la carte » et propose
+  une case « Remplacer les fichiers déjà présents », jamais pré-cochée (sinon
+  ignorés, comme avant). Un dossier n'est jamais remplacé.
+- Remplacement (`copyFile(replace = true)`) : nouveau fichier écrit et son
+  entrée posée inactive, puis retrait de l'ancienne entrée (entrée principale
+  d'abord), activation de la nouvelle, enfin libération des clusters de
+  l'ancien. Coupure entre retrait et activation : aucun des deux n'apparaît
+  (`ReplaceInterruptedException`, « recommence la copie »), jamais deux
+  entrées du même nom, jamais un contenu mélangé.
+- Suppression (`deleteFile`, fichiers seulement) : glissement vers la gauche
+  sur une ligne -> fenêtre rouge de confirmation -> retrait de l'entrée puis
+  libération des clusters ; relecture : le fichier ne doit plus apparaître.
+  Faite dans l'explorateur (pas d'opération plein écran), la liste est relue
+  ensuite. Nom exact (celui affiché), jamais de correspondance approchée.
+- Mêmes protections que la copie (double préparation, photo des secteurs,
+  relecture avant/après chaque écriture). `ExFatChecker` signale maintenant
+  aussi deux entrées du même nom. Tests : remplacement et suppression coupés à
+  chaque écriture, et avec une mauvaise lecture à chaque lecture possible.
+
 Vérification : `ExFatChecker` (tests), écrit à part sans rien reprendre du
 lecteur ni de l'écrivain (somme de contrôle, hachage, chaînes FAT, clusters
 partagés, bitmap, fuites). `interruptedAtAnyWriteNeverDamagesTheVolume` coupe

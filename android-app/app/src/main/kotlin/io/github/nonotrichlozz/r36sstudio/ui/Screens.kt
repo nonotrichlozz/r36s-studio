@@ -183,6 +183,7 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
                 onOpenSpace = viewModel::browseOpenSpace,
                 onOpenFolder = viewModel::browseOpenFolder,
                 onCopyHere = { pickRoms.launch(arrayOf("*/*")) },
+                onDelete = viewModel::askDelete,
                 onBack = viewModel::browseBack,
             )
         }
@@ -218,7 +219,12 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
             is DialogState.ConfirmCopy -> ConfirmCopyDialog(
                 dialog = dialog,
                 onCancel = viewModel::dismissDialog,
-                onConfirm = { viewModel.confirmCopy(dialog) },
+                onConfirm = { replace -> viewModel.confirmCopy(dialog, replace) },
+            )
+            is DialogState.ConfirmDelete -> ConfirmDeleteDialog(
+                dialog = dialog,
+                onCancel = viewModel::dismissDialog,
+                onConfirm = { viewModel.confirmDelete(dialog) },
             )
             is DialogState.Message -> MessageDialog(text = dialog.text, onDismiss = viewModel::dismissDialog)
         }
@@ -509,17 +515,55 @@ private fun ConfirmDestructiveDialog(
 
 /** Copier des fichiers sur la carte : explicite, mais sans la fenêtre rouge (rien n'est effacé). */
 @Composable
-private fun ConfirmCopyDialog(dialog: DialogState.ConfirmCopy, onCancel: () -> Unit, onConfirm: () -> Unit) {
+private fun ConfirmCopyDialog(dialog: DialogState.ConfirmCopy, onCancel: () -> Unit, onConfirm: (Boolean) -> Unit) {
+    var replace by remember(dialog) { mutableStateOf(false) }
     DialogPanel(onDismiss = onCancel) {
         Text(Strings.CONFIRM_COPY_TITLE, color = Palette.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         for (item in dialog.items) {
             Text("${item.name} (${Strings.formatFileSize(item.sizeBytes)})", color = Palette.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            if (item.alreadyOnCard) Text(Strings.CONFIRM_COPY_EXISTS, color = Palette.WarningFg, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        if (dialog.items.any { it.alreadyOnCard }) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { replace = !replace },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Jamais pré-cochée : remplacer efface l'ancien fichier.
+                Checkbox(
+                    checked = replace,
+                    onCheckedChange = { replace = it },
+                    colors = CheckboxDefaults.colors(checkedColor = Palette.WarningFg, uncheckedColor = Palette.WarningFg),
+                )
+                Text(Strings.CONFIRM_COPY_REPLACE, color = Palette.TextPrimary, fontSize = 13.sp)
+            }
         }
         Text(Strings.confirmCopyWhere(dialog.space, dialog.folder), color = Palette.Cyan, fontSize = 13.sp)
         Text(Strings.CONFIRM_COPY_NOTE, color = Palette.TextSecondary, fontSize = 13.sp)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
             SecondaryButton(Strings.CANCEL, enabled = true, onClick = onCancel)
-            PrimaryButton(Strings.CONFIRM_COPY_GO, enabled = true, onClick = onConfirm)
+            PrimaryButton(Strings.CONFIRM_COPY_GO, enabled = true, onClick = { onConfirm(replace) })
+        }
+    }
+}
+
+/** Supprimer un fichier : fenêtre rouge, comme toute action qui efface. */
+@Composable
+private fun ConfirmDeleteDialog(dialog: DialogState.ConfirmDelete, onCancel: () -> Unit, onConfirm: () -> Unit) {
+    DialogPanel(onDismiss = onCancel, background = Palette.DangerBg, borderColor = Palette.DangerBorder) {
+        Text(Strings.CONFIRM_DELETE_TITLE, color = Palette.DangerFg, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("${dialog.name} (${Strings.formatFileSize(dialog.sizeBytes)})", color = Palette.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(Strings.confirmCopyWhere(dialog.space, dialog.folder), color = Palette.TextSecondary, fontSize = 13.sp)
+        Text(Strings.CONFIRM_DELETE_NOTE, color = Palette.TextSecondary, fontSize = 13.sp)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+            SecondaryButton(Strings.CANCEL, enabled = true, onClick = onCancel)
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = Palette.DangerFg, contentColor = Palette.DangerBg),
+            ) {
+                Text(Strings.CONFIRM_DELETE_GO, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

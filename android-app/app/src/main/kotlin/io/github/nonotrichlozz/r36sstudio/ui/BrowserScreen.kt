@@ -20,7 +20,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -52,6 +56,7 @@ fun BrowserDialog(
     onOpenSpace: (Int) -> Unit,
     onOpenFolder: (FsEntry) -> Unit,
     onCopyHere: () -> Unit,
+    onDelete: (FsEntry) -> Unit,
     onBack: () -> Unit,
 ) {
     val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRANCE) }
@@ -111,7 +116,15 @@ fun BrowserDialog(
             } else if (state.volumeTitle == null) {
                 SpaceList(state, onOpenSpace, Modifier.weight(1f))
             } else {
-                FolderList(state, dateFormat, onOpenFolder, Modifier.weight(1f))
+                if (state.notice != null) {
+                    Text(state.notice, color = Palette.AvailableFg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                }
+                if (state.canCopy && state.items.any { !it.isDirectory }) {
+                    Text(Strings.BROWSER_SWIPE_HINT, color = Palette.TextSecondary, fontSize = 11.sp)
+                    Spacer(Modifier.height(6.dp))
+                }
+                FolderList(state, dateFormat, onOpenFolder, if (state.canCopy) onDelete else null, Modifier.weight(1f))
             }
 
             if (!state.loading && state.volumeTitle != null) {
@@ -153,13 +166,66 @@ private fun SpaceList(state: BrowserState, onOpenSpace: (Int) -> Unit, modifier:
 }
 
 @Composable
-private fun FolderList(state: BrowserState, dateFormat: SimpleDateFormat, onOpenFolder: (FsEntry) -> Unit, modifier: Modifier) {
+private fun FolderList(
+    state: BrowserState,
+    dateFormat: SimpleDateFormat,
+    onOpenFolder: (FsEntry) -> Unit,
+    onDelete: ((FsEntry) -> Unit)?,
+    modifier: Modifier,
+) {
     if (state.items.isEmpty()) {
         Text(Strings.BROWSER_EMPTY_FOLDER, color = Palette.TextSecondary, fontSize = 14.sp, modifier = modifier)
         return
     }
     LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        itemsIndexed(state.items) { _, entry ->
+        itemsIndexed(state.items, key = { _, entry -> entry.name }) { _, entry ->
+            if (onDelete != null && !entry.isDirectory) {
+                SwipeToDelete(onDelete = { onDelete(entry) }) { EntryRow(entry, dateFormat, onOpenFolder) }
+            } else {
+                EntryRow(entry, dateFormat, onOpenFolder)
+            }
+        }
+    }
+}
+
+/**
+ * Glissement vers la gauche : un fond rouge « Supprimer » apparaît, la ligne
+ * revient en place et la fenêtre de confirmation s'ouvre (rien n'est effacé
+ * sans elle).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToDelete(onDelete: () -> Unit, content: @Composable () -> Unit) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) onDelete()
+            false // la ligne reste : c'est la confirmation qui décide
+        },
+    )
+    SwipeToDismissBox(
+        state = state,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(PanelShape)
+                    .background(Palette.DangerBg)
+                    .border(1.dp, Palette.DangerBorder, PanelShape)
+                    .padding(horizontal = 18.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(Strings.BROWSER_SWIPE_DELETE, color = Palette.DangerFg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun EntryRow(entry: FsEntry, dateFormat: SimpleDateFormat, onOpenFolder: (FsEntry) -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -189,6 +255,4 @@ private fun FolderList(state: BrowserState, dateFormat: SimpleDateFormat, onOpen
                 }
                 if (entry.isDirectory) Text("›", color = Palette.Cyan, fontSize = 20.sp)
             }
-        }
-    }
 }

@@ -27,6 +27,7 @@ import io.github.nonotrichlozz.r36sstudio.core.CopyInterruptedException
 import io.github.nonotrichlozz.r36sstudio.core.CopyNotVerifiedException
 import io.github.nonotrichlozz.r36sstudio.core.CopyVerifyFailedException
 import io.github.nonotrichlozz.r36sstudio.core.UnstableCardReadException
+import io.github.nonotrichlozz.r36sstudio.core.ReplaceInterruptedException
 import io.github.nonotrichlozz.r36sstudio.core.DirectoryFullException
 import io.github.nonotrichlozz.r36sstudio.core.ExFatVolume
 import io.github.nonotrichlozz.r36sstudio.core.ExFatWriter
@@ -120,10 +121,11 @@ sealed interface DialogState {
     data class ConfirmErase(val cardDisplay: String, val cardBytes: Long) : DialogState
     data class Message(val text: String) : DialogState
     data class ConfirmCopy(val items: List<CopyItem>, val space: String, val folder: String) : DialogState
+    data class ConfirmDelete(val name: String, val sizeBytes: Long, val space: String, val folder: String) : DialogState
 }
 
 /** Un fichier du téléphone à copier sur la carte. */
-data class CopyItem(val uri: Uri, val name: String, val sizeBytes: Long)
+data class CopyItem(val uri: Uri, val name: String, val sizeBytes: Long, val alreadyOnCard: Boolean = false)
 
 /** Un espace de la carte, tel que l'explorateur le montre. */
 data class BrowserRow(val title: String, val info: String, val readable: Boolean)
@@ -139,6 +141,7 @@ data class BrowserState(
     val path: List<String> = emptyList(),
     val items: List<FsEntry> = emptyList(),
     val canCopy: Boolean = false,
+    val notice: String? = null,
     val error: String? = null,
     val errorDetail: String = "",
 )
@@ -574,7 +577,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 browser = it.browser?.copy(
                     loading = false, volumeTitle = volumeTitle, path = path, items = sorted,
-                    canCopy = browserVolume is ExFatVolume, error = null,
+                    canCopy = browserVolume is ExFatVolume, error = null, notice = null,
                 ),
             )
         }
@@ -606,14 +609,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 showMessage(Strings.ERROR_COPY_NO_SIZE)
                 return
             }
-            items.add(CopyItem(uri, name, size))
+            val onCard = browser.items.any { !it.isDirectory && it.name.equals(ExFatWriter.sanitizeName(name), ignoreCase = true) }
+            items.add(CopyItem(uri, name, size, alreadyOnCard = onCard))
         }
         if (items.isEmpty()) return
         val folder = if (browser.path.isEmpty()) "/" else "/" + browser.path.joinToString("/")
         _state.update { it.copy(dialog = DialogState.ConfirmCopy(items, browser.volumeTitle ?: "", folder)) }
     }
 
-    fun confirmCopy(dialog: DialogState.ConfirmCopy) {
+    fun confirmCopy(dialog: DialogState.ConfirmCopy, replace: Boolean) {
         dismissDialog()
         if (busy) return
         val ready = _state.value.card as? CardState.Ready ?: return
@@ -639,19 +643,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 meter.reset()
                 try {
                     log(Strings.LOG_COPY_WRITE)
-                    val added = writer.copyFile(dirPath, item.name, item.sizeBytes, { openUri(item.uri) }, token, progress)
+                    val added = writer.copyFile(dirPath, item.name, item.sizeBytes, { openUri(item.uri) }, token, progress, replace = replace)
                     log(Strings.logDetail(writer.lastPlanDescription), LogKind.DETAIL)
                     log(Strings.LOG_COPY_VERIFY)
                     setPhase(Strings.PHASE_VERIFY)
                     meter.reset()
                     writer.verify(added, { openUri(item.uri) }, token, progress)
-                    log(Strings.logCopyDone(added.name), LogKind.SUCCESS)
+                    log(if (added.replaced) Strings.logCopyReplaced(added.name) else Strings.logCopyDone(added.name), LogKind.SUCCESS)
                     copied++
                 } catch (e: AlreadyOnCardException) {
                     log(Strings.logCopyExists(item.name), LogKind.ERROR)
                 }
             }
             if (copied > 0) log(Strings.logCopyAllDone(copied), LogKind.SUCCESS)
+        }
+    }
+
+    /** Glissement vers la gauche sur un fichier : on demande d'abord confirmation. */
+    fun askDelete(entry: FsEntry) {
+        val browser = _state.value.browser ?: return
+        if (busy || browser.loading || browserVolume !is ExFatVolume) return
+        if (entry.isDirectory) {
+            showMessage(Strings.ERROR_DELETE_FOLDER)
+            return
+        }
+        val folder = if (browser.path.isEmpty()) "/" else "/" + browser.path.joinToString("/")
+        _state.update { it.copy(dialog = DialogState.ConfirmDelete(entry.name, entry.sizeBytes, browser.volumeTitle ?: "", folder)) }
+    }
+
+    fun confirmDelete(dialog: DialogState.ConfirmDelete) {
+        dismissDialog()
+        val ready = _state.value.card as? CardState.Ready ?: return
+        if (ready.writeProtected) {
+            showMessage(Strings.ERROR_WRITE_PROTECTED)
+            return
+        }
+        val partition = browserPartitions.getOrNull(browserSpaceIndex) ?: return
+        if (browserJob?.isActive == true || browserVolume !is ExFatVolume) return
+        val dirs = ArrayList(browserDirs)
+        val title = _state.value.browser?.volumeTitle
+        _state.update { it.copy(browser = it.browser?.copy(loading = true, error = null, notice = null)) }
+        browserJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val block = acquire(ready.device).block
+                ExFatWriter(block, partition.startBytes, partition.sizeBytes).deleteFile(dirs.map { it.name }, dialog.name)
+                // Liste relue après coup, avec un volume neuf.
+                val volume = Filesystems.open(VolumeReader(ReadOnlyBlockDevice(block), partition.startBytes, partition.sizeBytes))
+                var items = volume.listRoot()
+                val fresh = ArrayList<FsEntry>()
+                for (dir in dirs) {
+                    val next = items.first { it.isDirectory && it.name == dir.name }
+                    fresh.add(next)
+                    items = volume.list(next)
+                }
+                browserVolume = volume
+                browserDirs.clear()
+                browserDirs.addAll(fresh)
+                showFolder(title, items)
+                _state.update { it.copy(browser = it.browser?.copy(notice = Strings.browserDeleted(dialog.name))) }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) return@launch
+                val message = if (e is IOException) {
+                    friendlyError(e).let { if (it == Strings.ERROR_NETWORK) Strings.ERROR_CARD_GONE else it }
+                } else {
+                    Strings.ERROR_GENERIC
+                }
+                _state.update {
+                    it.copy(browser = it.browser?.copy(loading = false, error = message, errorDetail = "${e.javaClass.simpleName} : ${e.message ?: ""}"))
+                }
+            }
         }
     }
 
@@ -1085,6 +1145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         is CopyVerifyFailedException -> Strings.ERROR_COPY_VERIFY
         is UnstableCardReadException -> Strings.ERROR_READER_UNSTABLE
         is CopyInterruptedException -> Strings.ERROR_COPY_INTERRUPTED
+        is ReplaceInterruptedException -> Strings.ERROR_REPLACE_INTERRUPTED
         is CopyNotVerifiedException -> Strings.ERROR_COPY_UNVERIFIED
         is FsException -> Strings.ERROR_FS
         is VerifyFailedException -> Strings.ERROR_VERIFY

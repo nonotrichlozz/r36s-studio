@@ -226,7 +226,8 @@ class FsWriterTest {
         try {
             writer(device, device.data.size).copyFile(
                 listOf("roms"), "x.bin", 5000, { ByteArrayInputStream(patternBytes(5000)) }, token,
-            ) { _, _, _ -> token.cancelled = true }
+                progress = { _, _, _ -> token.cancelled = true },
+            )
             fail("annulé")
         } catch (e: OperationCancelled) {
             // attendu
@@ -400,6 +401,158 @@ class FsWriterTest {
                 }
                 assertCardSafe(d.data, s.oldContent, "mauvaise lecture n°$k, fragmenté=$fragmentedCase")
             }
+        }
+    }
+
+    // --- Remplacement ---------------------------------------------------------
+
+    private fun read(bytes: ByteArray, name: String): ByteArray? {
+        val volume = ExFatVolume(VolumeReader(MemoryBlockDevice(bytes), 0, bytes.size.toLong()))
+        val entry = volume.list(volume.listRoot().first { it.name == "roms" }).firstOrNull { it.name == name } ?: return null
+        val out = java.io.ByteArrayOutputStream()
+        volume.forEachFileChunk(entry, 4096) { out.write(it) }
+        return out.toByteArray()
+    }
+
+    @Test
+    fun replacingAFileLeavesOnlyTheNewOneAndFreesTheOldSpace() {
+        for (fragmentedCase in listOf(false, true)) {
+            val s = scene()
+            if (fragmentedCase) s.img.freeOnly((100..118 step 2).toSet())
+            val leaksBefore = check(s.img.bytes).leaks
+            val device = MemoryBlockDevice(s.img.bytes.copyOf())
+            val data = patternBytes(4000, seed = 21)
+            val w = writer(device, device.data.size)
+            val added = w.copyFile(listOf("roms"), "OLD.BIN", data.size.toLong(), { ByteArrayInputStream(data) }, CancelToken(), noProgress, replace = true)
+            assertTrue(added.replaced)
+            w.verify(added, { ByteArrayInputStream(data) }, CancelToken(), noProgress)
+            val c = check(device.data)
+            assertEquals(emptyList<String>(), c.errors)
+            assertEquals(leaksBefore, c.leaks) // les clusters de l'ancien fichier sont rendus
+            val volume = ExFatVolume(VolumeReader(device, 0, device.data.size.toLong()))
+            assertEquals(listOf("OLD.BIN"), volume.list(volume.listRoot().first { it.name == "roms" }).map { it.name })
+            assertTrue(data.contentEquals(read(device.data, "OLD.BIN")))
+        }
+    }
+
+    @Test
+    fun aFolderIsNeverReplaced() {
+        val s = scene()
+        val device = MemoryBlockDevice(s.img.bytes.copyOf())
+        val before = device.data.copyOf()
+        try {
+            writer(device, device.data.size).copyFile(emptyList(), "ROMS", 10, { ByteArrayInputStream(patternBytes(10)) }, CancelToken(), noProgress, replace = true)
+            fail("un dossier ne se remplace pas")
+        } catch (e: AlreadyOnCardException) {
+            // attendu
+        }
+        assertTrue(before.contentEquals(device.data))
+    }
+
+    @Test
+    fun replacementInterruptedAtAnyWriteNeverDamagesTheCard() {
+        val s = scene()
+        val image = s.img.bytes
+        val data = patternBytes(4000, seed = 21)
+        val counter = FailingDevice(image.copyOf(), Int.MAX_VALUE)
+        writer(counter, image.size).copyFile(listOf("roms"), "old.bin", 4000, { ByteArrayInputStream(data) }, CancelToken(), noProgress, replace = true)
+        for (failAt in 0 until counter.writes) {
+            val d = FailingDevice(image.copyOf(), failAt)
+            try {
+                writer(d, image.size).copyFile(listOf("roms"), "old.bin", 4000, { ByteArrayInputStream(data) }, CancelToken(), noProgress, replace = true)
+            } catch (e: IOException) {
+                // attendu
+            }
+            val c = check(d.data)
+            assertEquals("panne à l'écriture $failAt : ${c.errors}", emptyList<String>(), c.errors)
+            // Ancien contenu, nouveau contenu, ou fichier absent (entre le retrait et l'ajout) : jamais un mélange.
+            val content = read(d.data, "old.bin")
+            assertTrue("panne à $failAt : contenu mélangé", content == null || content.contentEquals(s.oldContent) || content.contentEquals(data))
+        }
+    }
+
+    @Test
+    fun replacementWithASingleBadReadAnywhereNeverDamagesTheCard() {
+        val s = scene()
+        val image = s.img.bytes
+        val data = patternBytes(4000, seed = 21)
+        val clean = GlitchyDevice(image.copyOf(), emptySet())
+        val w0 = writer(clean, image.size)
+        w0.verify(w0.copyFile(listOf("roms"), "old.bin", 4000, { ByteArrayInputStream(data) }, CancelToken(), noProgress, replace = true), { ByteArrayInputStream(data) }, CancelToken(), noProgress)
+        for (k in 0 until clean.reads) {
+            val d = GlitchyDevice(image.copyOf(), setOf(k))
+            val w = writer(d, image.size)
+            try {
+                val added = w.copyFile(listOf("roms"), "old.bin", 4000, { ByteArrayInputStream(data) }, CancelToken(), noProgress, replace = true)
+                w.verify(added, { ByteArrayInputStream(data) }, CancelToken(), noProgress)
+            } catch (e: IOException) {
+                // un arrêt est permis
+            }
+            val c = check(d.data)
+            assertEquals("mauvaise lecture n°$k : ${c.errors}", emptyList<String>(), c.errors)
+            val content = read(d.data, "old.bin")
+            assertTrue("mauvaise lecture n°$k : contenu mélangé", content == null || content.contentEquals(s.oldContent) || content.contentEquals(data))
+        }
+    }
+
+    // --- Suppression ----------------------------------------------------------
+
+    @Test
+    fun deletingAFileRemovesItAndFreesItsSpace() {
+        val s = scene()
+        val device = MemoryBlockDevice(s.img.bytes.copyOf())
+        writer(device, device.data.size).deleteFile(listOf("roms"), "old.bin")
+        val c = check(device.data)
+        assertEquals(emptyList<String>(), c.errors)
+        assertEquals(emptyList<Long>(), c.leaks)
+        assertEquals(null, read(device.data, "old.bin"))
+    }
+
+    @Test
+    fun deletingAFolderOrAMissingFileWritesNothing() {
+        val s = scene()
+        val device = MemoryBlockDevice(s.img.bytes.copyOf())
+        val before = device.data.copyOf()
+        for ((path, name) in listOf(emptyList<String>() to "roms", listOf("roms") to "absent.bin", listOf("roms") to "OLD.BIN")) {
+            try {
+                writer(device, device.data.size).deleteFile(path, name)
+                fail("$name ne doit pas être supprimé")
+            } catch (e: FsException) {
+                // attendu
+            }
+        }
+        assertTrue(before.contentEquals(device.data))
+    }
+
+    @Test
+    fun deletionInterruptedOrBadReadNeverDamagesTheCard() {
+        val s = scene()
+        val image = s.img.bytes
+        val counter = FailingDevice(image.copyOf(), Int.MAX_VALUE)
+        writer(counter, image.size).deleteFile(listOf("roms"), "old.bin")
+        for (failAt in 0 until counter.writes) {
+            val d = FailingDevice(image.copyOf(), failAt)
+            try {
+                writer(d, image.size).deleteFile(listOf("roms"), "old.bin")
+            } catch (e: IOException) {
+                // attendu
+            }
+            assertEquals("panne à $failAt", emptyList<String>(), check(d.data).errors)
+            val content = read(d.data, "old.bin")
+            assertTrue("panne à $failAt", content == null || content.contentEquals(s.oldContent))
+        }
+        val clean = GlitchyDevice(image.copyOf(), emptySet())
+        writer(clean, image.size).deleteFile(listOf("roms"), "old.bin")
+        for (k in 0 until clean.reads) {
+            val d = GlitchyDevice(image.copyOf(), setOf(k))
+            try {
+                writer(d, image.size).deleteFile(listOf("roms"), "old.bin")
+            } catch (e: IOException) {
+                // un arrêt est permis
+            }
+            assertEquals("mauvaise lecture n°$k", emptyList<String>(), check(d.data).errors)
+            val content = read(d.data, "old.bin")
+            assertTrue("mauvaise lecture n°$k", content == null || content.contentEquals(s.oldContent))
         }
     }
 }

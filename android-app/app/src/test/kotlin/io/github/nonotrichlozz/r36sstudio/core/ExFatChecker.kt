@@ -134,6 +134,7 @@ class ExFatChecker(private val img: ByteArray) {
     }
 
     private fun walk(data: ByteArray, path: String) {
+        val seenNames = HashSet<String>()
         var i = 0
         while (i + 32 <= data.size) {
             val kind = data[i].toInt() and 0xFF
@@ -174,6 +175,8 @@ class ExFatChecker(private val img: ByteArray) {
             }
             val storedHash = (set[36].toInt() and 0xFF) or ((set[37].toInt() and 0xFF) shl 8)
             if (storedHash != hash) errors.add("$full : hachage du nom faux")
+            val key = name.map { upcase[it.code] }.joinToString("")
+            if (!seenNames.add(key)) errors.add("$full : deux entrées portent ce nom")
 
             val flags = set[33].toInt() and 0xFF
             val noFatChain = flags and 0x02 != 0

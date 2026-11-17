@@ -218,6 +218,14 @@ object Strings {
     const val ERROR_DIR_FULL = "Ce dossier ne peut plus recevoir de fichier. Rien n'a été écrit : copie dans un autre dossier."
     const val ERROR_COPY_VERIFY = "La copie ne correspond pas à l'original. Rien d'autre n'est touché, mais ce fichier est à supprimer de la carte avec un ordinateur."
     const val ERROR_FS = "L'appli ne peut pas écrire sur cette carte sans risque. Rien n'a été écrit."
+    const val ERROR_READER_UNSTABLE =
+        "Ton lecteur de carte a renvoyé des données qui ne concordent pas : la copie a été arrêtée par sécurité, avant de toucher au contenu de la carte. Le fichier n'a pas été ajouté. Débranche et rebranche le lecteur, puis réessaie."
+    const val ERROR_COPY_INTERRUPTED =
+        "La copie s'est arrêtée en route : le fichier n'a pas été ajouté et ta carte n'est pas abîmée (au pire un peu de place perdue)."
+    const val ERROR_COPY_UNVERIFIED =
+        "Le fichier a été ajouté, mais il n'a pas pu être relu jusqu'au bout. Vérifie-le sur un ordinateur avant de t'en servir."
+    const val LOG_COPY_WRITE = "Écriture sur la carte…"
+    const val LOG_COPY_VERIFY = "Relecture et comparaison avec l'original…"
     fun confirmCopyWhere(space: String, folder: String) = "Dans : $space$folder"
     fun errorCardFull(needed: Long) = "Il n'y a pas assez de place sur la carte (${formatSize(needed)} nécessaires). Rien n'a été écrit."
     fun logCopyStart(index: Int, count: Int, name: String) = "Copie de $name ($index/$count)"

@@ -297,18 +297,109 @@ class FsWriterTest {
     }
 
     @Test
-    fun partitionOffsetAndLargeBlocksWork() {
-        // Même scénario avec la partition décalée dans la carte et des blocs de 4096 octets.
+    fun partitionFurtherInTheCardWorks() {
         val s = scene()
         val partition = s.img.bytes
-        val offset = 8 * 4096
-        val disk = ByteArray(offset + partition.size + 4096 * 3)
+        val offset = 2048 * 512
+        val disk = ByteArray(offset + partition.size + 512 * 8)
         partition.copyInto(disk, offset)
-        val device = MemoryBlockDevice(disk, blockSize = 4096)
+        val device = MemoryBlockDevice(disk)
         val data = patternBytes(7000, seed = 4)
         val w = ExFatWriter(device, offset.toLong(), partition.size.toLong())
         val added = w.copyFile(listOf("roms"), "jeu.bin", data.size.toLong(), { ByteArrayInputStream(data) }, CancelToken(), noProgress)
         w.verify(added, { ByteArrayInputStream(data) }, CancelToken(), noProgress)
         assertEquals(emptyList<String>(), check(disk.copyOfRange(offset, offset + partition.size)).errors)
+        assertTrue(disk.copyOfRange(0, offset).all { it.toInt() == 0 }) // rien d'écrit avant la partition
+    }
+
+    @Test
+    fun clustersSmallerThanTheCardSectorAreRefusedWithoutWriting() {
+        val s = scene()
+        val device = MemoryBlockDevice(s.img.bytes.copyOf(), blockSize = 4096)
+        val before = device.data.copyOf()
+        try {
+            copy(device, device.data.size, listOf("roms"), "jeu.bin", patternBytes(100))
+            fail("clusters de 512 octets sur des secteurs de 4096 : refus")
+        } catch (e: FsException) {
+            // attendu
+        }
+        assertTrue(before.contentEquals(device.data))
+    }
+
+    /**
+     * Lecteur qui, à certaines lectures, rend les octets décalés de 13 (comme
+     * le lecteur Acer d'Arnaud : un état de commande collé devant les données).
+     */
+    private class GlitchyDevice(bytes: ByteArray, val glitchAt: Set<Int>, val shiftAfterFirstWrite: Boolean = false) :
+        MemoryBlockDevice(bytes) {
+        var reads = 0
+        var wrote = false
+        override fun read(lba: Long, buffer: ByteArray, blocks: Int) {
+            super.read(lba, buffer, blocks)
+            val glitch = (reads++ in glitchAt) || (shiftAfterFirstWrite && wrote)
+            if (glitch) {
+                val length = blocks * blockSize
+                System.arraycopy(buffer, 0, buffer, 13, length - 13)
+                for (i in 0 until 13) buffer[i] = 0x55
+            }
+        }
+        override fun write(lba: Long, buffer: ByteArray, blocks: Int) {
+            wrote = true
+            super.write(lba, buffer, blocks)
+        }
+    }
+
+    private fun assertCardSafe(bytes: ByteArray, oldContent: ByteArray, context: String) {
+        val c = check(bytes)
+        assertEquals("$context : ${c.errors}", emptyList<String>(), c.errors)
+        val volume = ExFatVolume(VolumeReader(MemoryBlockDevice(bytes), 0, bytes.size.toLong()))
+        val files = volume.list(volume.listRoot().first { it.name == "roms" })
+        val old = files.firstOrNull { it.name == "old.bin" } ?: throw AssertionError("$context : old.bin a disparu")
+        val out = java.io.ByteArrayOutputStream()
+        volume.forEachFileChunk(old, 4096) { out.write(it) }
+        assertTrue("$context : old.bin abîmé", oldContent.contentEquals(out.toByteArray()))
+    }
+
+    @Test
+    fun aReaderThatShiftsBytesAfterWritingNeverDamagesTheCard() {
+        for (fragmentedCase in listOf(false, true)) {
+            val s = scene()
+            if (fragmentedCase) s.img.freeOnly((100..118 step 2).toSet())
+            val leaksBefore = check(s.img.bytes).leaks
+            val device = GlitchyDevice(s.img.bytes.copyOf(), emptySet(), shiftAfterFirstWrite = true)
+            try {
+                copy(device, device.data.size, listOf("roms"), "jeu.bin", patternBytes(5000, seed = 9))
+                fail("le lecteur décale tout après la première écriture : la copie doit s'arrêter")
+            } catch (e: UnstableCardReadException) {
+                // attendu : arrêté avant de toucher aux tables du volume
+            }
+            assertCardSafe(device.data, s.oldContent, "décalage permanent, fragmenté=$fragmentedCase")
+            assertEquals(leaksBefore, check(device.data).leaks) // la table d'allocation n'a pas été touchée
+        }
+    }
+
+    @Test
+    fun aSingleBadReadAnywhereNeverDamagesTheCard() {
+        for (fragmentedCase in listOf(false, true)) {
+            val s = scene()
+            if (fragmentedCase) s.img.freeOnly((100..118 step 2).toSet())
+            val image = s.img.bytes
+            val data = patternBytes(5000, seed = 9)
+            val clean = GlitchyDevice(image.copyOf(), emptySet())
+            val w0 = writer(clean, image.size)
+            w0.verify(w0.copyFile(listOf("roms"), "jeu.bin", 5000, { ByteArrayInputStream(data) }, CancelToken(), noProgress), { ByteArrayInputStream(data) }, CancelToken(), noProgress)
+            val totalReads = clean.reads
+            for (k in 0 until totalReads) {
+                val d = GlitchyDevice(image.copyOf(), setOf(k))
+                val w = writer(d, image.size)
+                try {
+                    val added = w.copyFile(listOf("roms"), "jeu.bin", 5000, { ByteArrayInputStream(data) }, CancelToken(), noProgress)
+                    w.verify(added, { ByteArrayInputStream(data) }, CancelToken(), noProgress)
+                } catch (e: IOException) {
+                    // un arrêt est permis ; abîmer la carte, jamais
+                }
+                assertCardSafe(d.data, s.oldContent, "mauvaise lecture n°$k, fragmenté=$fragmentedCase")
+            }
+        }
     }
 }

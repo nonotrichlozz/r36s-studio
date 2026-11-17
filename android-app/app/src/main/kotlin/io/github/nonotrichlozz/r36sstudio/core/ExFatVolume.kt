@@ -33,7 +33,10 @@ class ExFatVolume(private val reader: VolumeReader) : FsVolume() {
 
     init {
         val boot = reader.read(0, 512)
-        if (String(boot, 3, 8, Charsets.ISO_8859_1) != "EXFAT   ") throw FsException("la partition n'est pas en exFAT")
+        if (String(boot, 3, 8, Charsets.ISO_8859_1) != "EXFAT   ") {
+            val head = boot.take(16).joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+            throw FsException("la partition n'est pas en exFAT (début lu : $head)")
+        }
         val sectorShift = boot[108].toInt() and 0xFF
         val clusterShift = boot[109].toInt() and 0xFF
         if (sectorShift !in 9..12 || sectorShift + clusterShift > 25) throw FsException("taille de cluster invraisemblable")
@@ -135,6 +138,9 @@ class ExFatVolume(private val reader: VolumeReader) : FsVolume() {
         }
         return table
     }
+
+    /** Octets bruts de la partition (lus par le même cache que le reste). */
+    internal fun readRaw(offset: Long, length: Int): ByteArray = reader.read(offset, length)
 
     /** Liste des clusters d'un fichier (contigus ou en chaîne FAT). */
     internal fun clustersOf(entry: FsEntry): List<Long> = clusters(entry.cluster, entry.contiguous, entry.sizeBytes)

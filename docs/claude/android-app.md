@@ -281,6 +281,38 @@ ignoré). FAT/FAT32 : lecture seule pour l'instant (ROCKNIX).
 - refuse un dossier sans place (pas d'agrandissement de dossier : à faire si
   le cas se présente en vrai).
 
+**Premier essai réel, 2026-11-17 23:16 (construction `b3e2a37`)** : copie de
+« Metroid II - Return of Samus (World).zip » sur la carte de 256 Go, lecteur
+« Generic MassStorageClass ». Échec au bout de 69 s : `FsException : la
+partition n'est pas en exFAT` -- le début de l'EASYROMS, relu pendant la
+copie, n'était plus celui lu par l'explorateur juste avant. Le message disait
+« Rien n'a été écrit », ce qui n'était sûr que si l'erreur venait du début de
+la copie, pas de la relecture finale : on ne sait pas lequel des deux. Cause
+probable : le lecteur (même famille que les « transferts incomplets » du
+2026-11-13) rend parfois des données décalées. Danger de cette construction :
+la table d'allocation et le secteur du dossier étaient relus puis réécrits
+(lecture-modification-écriture) ; une lecture décalée à ce moment aurait été
+réécrite telle quelle. À vérifier sur la carte (dossier de destination,
+`chkdsk` en lecture seule sous Windows).
+
+Corrigé dans la construction suivante :
+- deux préparations complètes, chacune avec son cache, doivent être
+  identiques (secteur de démarrage, dossier, table d'allocation, table des
+  majuscules, place choisie), sinon `UnstableCardReadException`, rien d'écrit ;
+- photo des secteurs à modifier, relue directement avant d'écrire les
+  données ; avant chaque écriture dans les tables, le secteur relu doit être
+  exactement la photo ; relecture après écriture ;
+- données : écritures alignées seulement (jamais de lecture-modification-
+  écriture), clusters plus petits qu'un secteur refusés ;
+- messages honnêtes : `CopyInterruptedException` (fichier non ajouté),
+  `CopyNotVerifiedException` (ajouté mais pas relu), `ERROR_READER_UNSTABLE` ;
+  la relecture finale est refaite une fois avant de conclure à une différence ;
+- journal : début de l'espace, taille des secteurs, place choisie, étapes ;
+  octets lus en cas de « pas en exFAT ».
+Tests ajoutés : lecteur qui décale de 13 octets après la première écriture,
+et une mauvaise lecture à CHAQUE lecture possible (contigu et fragmenté) :
+jamais d'erreur au vérificateur, `old.bin` toujours intact.
+
 Vérification : `ExFatChecker` (tests), écrit à part sans rien reprendre du
 lecteur ni de l'écrivain (somme de contrôle, hachage, chaînes FAT, clusters
 partagés, bitmap, fuites). `interruptedAtAnyWriteNeverDamagesTheVolume` coupe

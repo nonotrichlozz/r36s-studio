@@ -20,6 +20,19 @@ class AlreadyOnCardException(val name: String) : IOException("« $name » existe
 /** La copie est écrite, mais sa relecture ne donne pas la même chose que l'original. */
 class CopyVerifyFailedException(detail: String) : IOException(detail)
 
+/**
+ * La carte ne se relit pas pareil d'une fois sur l'autre (lecteur USB qui
+ * décroche ou décale les octets). On arrête avant de toucher aux tables du
+ * volume : le fichier n'est pas ajouté, la carte n'est pas abîmée.
+ */
+class UnstableCardReadException(detail: String) : IOException(detail)
+
+/** Copie arrêtée en route, avant l'ajout de l'entrée : fichier absent, carte intacte (au pire de la place perdue). */
+class CopyInterruptedException(cause: IOException) : IOException(cause.message, cause)
+
+/** Le fichier est écrit, mais il n'a pas pu être relu jusqu'au bout. */
+class CopyNotVerifiedException(cause: IOException) : IOException(cause.message, cause)
+
 /** Où en est la copie : octets déjà traités sur le total. */
 fun interface CopyProgress {
     fun onProgress(done: Long, total: Long, workBytes: Long)
@@ -45,23 +58,49 @@ class ExFatWriter(
 ) {
     private class Run(val start: Long, val length: Long)
 
-    /** Ce qu'une copie a ajouté, pour la relecture. */
-    class Added(val dirPath: List<String>, val name: String, val sizeBytes: Long)
+    /** Tout ce que la copie a besoin de savoir, lu sur la carte avant d'écrire. */
+    private class Plan(
+        val volume: ExFatVolume,
+        val boot: ByteArray,
+        val dirClusters: List<Long>,
+        val dirData: ByteArray,
+        val upcase: CharArray,
+        val bitmap: ByteArray,
+        val bitmapClusters: List<Long>,
+        val runs: List<Run>,
+        val slot: Int,
+    ) {
+        /** `null` si les deux préparations sont identiques, sinon ce qui diffère (pour le journal). */
+        fun differenceFrom(other: Plan): String? = when {
+            !boot.contentEquals(other.boot) -> "secteur de démarrage"
+            dirClusters != other.dirClusters -> "clusters du dossier"
+            !dirData.contentEquals(other.dirData) -> "contenu du dossier"
+            !upcase.contentEquals(other.upcase) -> "table des majuscules"
+            !bitmap.contentEquals(other.bitmap) -> "table d'allocation"
+            bitmapClusters != other.bitmapClusters -> "clusters de la table d'allocation"
+            runs.map { it.start to it.length } != other.runs.map { it.start to it.length } -> "place choisie"
+            slot != other.slot -> "place dans le dossier"
+            else -> null
+        }
 
-    @Throws(IOException::class)
-    fun copyFile(
-        dirPath: List<String>,
-        wantedName: String,
-        sizeBytes: Long,
-        openSource: () -> InputStream,
-        cancel: CancelToken,
-        progress: CopyProgress,
-    ): Added {
-        if (sizeBytes < 0) throw IOException("Taille du fichier inconnue")
-        val name = sanitizeName(wantedName)
+        fun describe(fragmented: Boolean): String {
+            val where = runs.joinToString(", ") { "${it.start}+${it.length}" }
+            return "clusters de ${volume.clusterSize} octets, " +
+                (if (runs.isEmpty()) "fichier vide" else if (fragmented) "en ${runs.size} morceaux ($where)" else "d'un seul tenant ($where)") +
+                ", entrée à l'octet $slot du dossier"
+        }
+    }
 
-        // ---- 1. Tout vérifier, sans rien écrire -------------------------------
-        val volume = ExFatVolume(VolumeReader(device, partitionStart, partitionSize))
+    /** Résumé de la dernière copie préparée (pour le journal de l'appli). */
+    var lastPlanDescription: String = ""
+        private set
+
+    private fun plan(dirPath: List<String>, name: String, sizeBytes: Long): Plan {
+        val reader = VolumeReader(device, partitionStart, partitionSize)
+        val volume = ExFatVolume(reader)
+        if (volume.clusterSize % device.blockSize != 0 || (partitionStart + volume.heapOffset) % device.blockSize != 0L) {
+            throw FsException("clusters non alignés sur les secteurs de la carte")
+        }
         var dir = volume.rootRef
         var siblings = volume.listRoot()
         for (part in dirPath) {
@@ -80,60 +119,137 @@ class ExFatWriter(
         val runs = if (neededClusters == 0L) emptyList() else planRuns(bitmap, volume.clusterCount, neededClusters)
             ?: throw NotEnoughSpaceOnCardException(neededClusters * clusterSize)
 
-        val nameEntries = (name.length + 14) / 15
-        val setBytes = 32 * (2 + nameEntries)
+        val setBytes = 32 * (2 + (name.length + 14) / 15)
         val dirClusters = volume.dirClusterList(dir)
         val dirData = volume.readDirBytes(dir)
         val slot = findFreeSlot(dirData, setBytes) ?: throw DirectoryFullException()
+        return Plan(
+            volume = volume,
+            boot = reader.read(0, 512),
+            dirClusters = dirClusters,
+            dirData = dirData,
+            upcase = upcase,
+            bitmap = bitmap,
+            bitmapClusters = volume.systemFileClusters(volume.bitmapCluster, volume.bitmapLength),
+            runs = runs,
+            slot = slot,
+        )
+    }
 
+    /** Ce qu'une copie a ajouté, pour la relecture. */
+    class Added(val dirPath: List<String>, val name: String, val sizeBytes: Long)
+
+    @Throws(IOException::class)
+    fun copyFile(
+        dirPath: List<String>,
+        wantedName: String,
+        sizeBytes: Long,
+        openSource: () -> InputStream,
+        cancel: CancelToken,
+        progress: CopyProgress,
+    ): Added {
+        if (sizeBytes < 0) throw IOException("Taille du fichier inconnue")
+        val name = sanitizeName(wantedName)
+
+        // ---- 1. Tout vérifier, sans rien écrire -------------------------------
+        // Deux préparations complètes, chacune avec son propre cache de lecture :
+        // un lecteur qui rend des octets faux (décalés, incomplets) donnerait
+        // deux plans différents. Dans ce cas on s'arrête avant d'écrire quoi que ce soit.
+        val plan = plan(dirPath, name, sizeBytes)
+        val second = plan(dirPath, name, sizeBytes)
+        val difference = plan.differenceFrom(second)
+        if (difference != null) throw UnstableCardReadException("deux lectures de la carte ne concordent pas ($difference)")
+
+        val volume = plan.volume
+        val bitmap = plan.bitmap.copyOf()
+        val runs = plan.runs
+        val slot = plan.slot
+        val dirClusters = plan.dirClusters
+        val dirData = plan.dirData
+        val nameEntries = (name.length + 14) / 15
+        val setBytes = 32 * (2 + nameEntries)
         val firstCluster = runs.firstOrNull()?.start ?: 0L
         val fragmented = runs.size > 1
-        val entrySet = buildEntrySet(name, upcase, nameEntries, sizeBytes, firstCluster, contiguous = !fragmented)
+        val entrySet = buildEntrySet(name, plan.upcase, nameEntries, sizeBytes, firstCluster, contiguous = !fragmented)
+        lastPlanDescription = plan.describe(fragmented)
 
-        // ---- 2. Les données, dans des clusters libres ---------------------------
-        if (cancel.cancelled) throw OperationCancelled()
-        writeData(volume, runs, sizeBytes, openSource, cancel, progress)
-
-        // Dernier point d'annulation : jusqu'ici, seule de la place libre a reçu des octets.
-        if (cancel.cancelled) throw OperationCancelled()
-
-        // ---- 3. La chaîne FAT (seulement si le fichier est en plusieurs morceaux) -
+        // Toutes les écritures dans les tables du volume, préparées d'avance.
+        val bitmapClusters = plan.bitmapClusters
+        val fatPieces = ArrayList<Pair<Long, ByteArray>>()
         if (fragmented) {
             for ((index, run) in runs.withIndex()) {
                 val bytes = ByteArray((run.length * 4).toInt())
                 for (k in 0 until run.length.toInt()) {
-                    val last = index == runs.size - 1 && k == run.length.toInt() - 1
-                    val next = if (last) 0xFFFFFFFFL else if (k == run.length.toInt() - 1) runs[index + 1].start else run.start + k + 1
+                    val lastOfRun = k == run.length.toInt() - 1
+                    val next = when {
+                        lastOfRun && index == runs.size - 1 -> 0xFFFFFFFFL
+                        lastOfRun -> runs[index + 1].start
+                        else -> run.start + k + 1
+                    }
                     putU32(bytes, k * 4, next)
                 }
-                writeAt(volume.fatOffset + run.start * 4, bytes, 0, bytes.size)
+                fatPieces.add(Pair(volume.fatOffset + run.start * 4, bytes))
             }
         }
-
-        // ---- 4. La table d'allocation : les clusters deviennent « occupés » ------
-        if (runs.isNotEmpty()) {
-            var lo = Int.MAX_VALUE
-            var hi = -1
-            for (run in runs) {
-                for (c in run.start until run.start + run.length) {
-                    val bit = (c - 2)
-                    val index = (bit shr 3).toInt()
-                    bitmap[index] = (bitmap[index].toInt() or (1 shl (bit and 7L).toInt())).toByte()
-                    if (index < lo) lo = index
-                    if (index > hi) hi = index
-                }
+        var bitmapLo = Int.MAX_VALUE
+        var bitmapHi = -1
+        for (run in runs) {
+            for (c in run.start until run.start + run.length) {
+                val bit = c - 2
+                val index = (bit shr 3).toInt()
+                bitmap[index] = (bitmap[index].toInt() or (1 shl (bit and 7L).toInt())).toByte()
+                if (index < bitmapLo) bitmapLo = index
+                if (index > bitmapHi) bitmapHi = index
             }
-            writeInClusters(volume, volume.systemFileClusters(volume.bitmapCluster, volume.bitmapLength), lo.toLong(), bitmap.copyOfRange(lo, hi + 1))
         }
-
-        // ---- 5. L'entrée du dossier, en dernier, activée d'un seul octet ---------
         val inactive = entrySet.copyOf()
         inactive[0] = 0x05 // entrée « supprimée » le temps d'écrire le reste
         val tail = if (slot + setBytes + 32 <= dirData.size) ByteArray(32) else ByteArray(0)
-        writeInClusters(volume, dirClusters, slot.toLong(), inactive + tail)
-        device.flush()
-        writeInClusters(volume, dirClusters, slot.toLong(), byteArrayOf(0x85.toByte()))
-        device.flush()
+        val dirWrite = inactive + tail
+
+        // Photo, AVANT toute écriture, des secteurs qui seront modifiés ; puis
+        // relecture directe : si la carte ne se relit pas pareil, on s'arrête là.
+        val shadow = HashMap<Long, ByteArray>()
+        val pieces = ArrayList<Pair<Long, Int>>()
+        for ((offset, bytes) in fatPieces) pieces.add(Pair(offset, bytes.size))
+        if (bitmapHi >= 0) pieces.addAll(mapToClusters(volume, bitmapClusters, bitmapLo.toLong(), bitmapHi - bitmapLo + 1))
+        pieces.addAll(mapToClusters(volume, dirClusters, slot.toLong(), dirWrite.size))
+        for ((offset, length) in pieces) snapshot(volume, shadow, offset, length)
+        checkStable(shadow)
+
+        var activated = false
+        try {
+            // ---- 2. Les données, dans des clusters libres (que rien ne référence) ---
+            if (cancel.cancelled) throw OperationCancelled()
+            writeData(volume, runs, sizeBytes, openSource, cancel, progress)
+
+            // Dernier point d'annulation : jusqu'ici, seule de la place libre a reçu des octets.
+            if (cancel.cancelled) throw OperationCancelled()
+
+            // ---- 3. La chaîne FAT (seulement si le fichier est en plusieurs morceaux) -
+            for ((offset, bytes) in fatPieces) writeMeta(shadow, offset, bytes, 0, bytes.size)
+
+            // ---- 4. La table d'allocation : les clusters deviennent « occupés » ------
+            if (bitmapHi >= 0) {
+                writeMetaInClusters(volume, shadow, bitmapClusters, bitmapLo.toLong(), bitmap.copyOfRange(bitmapLo, bitmapHi + 1))
+            }
+
+            // ---- 5. L'entrée du dossier, en dernier, activée d'un seul octet ---------
+            writeMetaInClusters(volume, shadow, dirClusters, slot.toLong(), dirWrite)
+            device.flush()
+            activated = true
+            writeMetaInClusters(volume, shadow, dirClusters, slot.toLong(), byteArrayOf(0x85.toByte()))
+            device.flush()
+        } catch (e: OperationCancelled) {
+            throw e
+        } catch (e: UnstableCardReadException) {
+            if (activated) throw CopyNotVerifiedException(e)
+            throw e
+        } catch (e: IOException) {
+            // Avant l'octet d'activation, le fichier n'existe pas pour la carte.
+            if (!activated) throw CopyInterruptedException(e)
+            throw CopyNotVerifiedException(e)
+        }
         return Added(dirPath, name, sizeBytes)
     }
 
@@ -144,6 +260,24 @@ class ExFatWriter(
      */
     @Throws(IOException::class)
     fun verify(added: Added, openSource: () -> InputStream, cancel: CancelToken, progress: CopyProgress) {
+        try {
+            try {
+                verifyUnguarded(added, openSource, cancel, progress)
+            } catch (e: CopyVerifyFailedException) {
+                // Une différence peut venir d'une mauvaise lecture du lecteur USB, pas de la carte :
+                // une seconde relecture complète, avec un cache neuf, tranche.
+                verifyUnguarded(added, openSource, cancel, progress)
+            }
+        } catch (e: CopyVerifyFailedException) {
+            throw e
+        } catch (e: OperationCancelled) {
+            throw e
+        } catch (e: IOException) {
+            throw CopyNotVerifiedException(e)
+        }
+    }
+
+    private fun verifyUnguarded(added: Added, openSource: () -> InputStream, cancel: CancelToken, progress: CopyProgress) {
         val volume = ExFatVolume(VolumeReader(device, partitionStart, partitionSize))
         var dir = volume.rootRef
         var siblings = volume.listRoot()
@@ -243,35 +377,103 @@ class ExFatWriter(
         }
     }
 
-    /** Écrit `data` à `offset` octets du début de la liste de clusters (en coupant aux limites de clusters). */
-    private fun writeInClusters(volume: ExFatVolume, clusters: List<Long>, offset: Long, data: ByteArray) {
+    /** Morceaux (position dans la partition, longueur) d'une plage d'octets d'une liste de clusters. */
+    private fun mapToClusters(volume: ExFatVolume, clusters: List<Long>, offset: Long, length: Int): List<Pair<Long, Int>> {
         val clusterSize = volume.clusterSize
-        var written = 0
-        while (written < data.size) {
-            val position = offset + written
+        val out = ArrayList<Pair<Long, Int>>()
+        var done = 0
+        while (done < length) {
+            val position = offset + done
             val index = (position / clusterSize).toInt()
             val inCluster = (position % clusterSize).toInt()
             if (index >= clusters.size) throw FsException("écriture au-delà de la liste de clusters")
-            val n = minOf(data.size - written, clusterSize - inCluster)
-            writeAt(volume.clusterOffset(clusters[index]) + inCluster, data, written, n)
-            written += n
+            val n = minOf(length - done, clusterSize - inCluster)
+            out.add(Pair(volume.clusterOffset(clusters[index]) + inCluster, n))
+            done += n
+        }
+        return out
+    }
+
+    private fun writeMetaInClusters(volume: ExFatVolume, shadow: MutableMap<Long, ByteArray>, clusters: List<Long>, offset: Long, data: ByteArray) {
+        var from = 0
+        for ((position, length) in mapToClusters(volume, clusters, offset, data.size)) {
+            writeMeta(shadow, position, data, from, length)
+            from += length
         }
     }
 
-    /** Écriture d'octets quelconques ; les secteurs partiels sont relus avant d'être réécrits. */
-    private fun writeAt(offset: Long, data: ByteArray, from: Int, length: Int) {
+    /** Photo des secteurs couvrant cette plage, lus au moment de préparer la copie. */
+    private fun snapshot(volume: ExFatVolume, shadow: MutableMap<Long, ByteArray>, offset: Long, length: Int) {
+        val bs = device.blockSize
+        val first = (partitionStart + offset) / bs
+        val last = (partitionStart + offset + length - 1) / bs
+        for (lba in first..last) {
+            if (shadow.containsKey(lba)) continue
+            shadow[lba] = volume.readRaw(lba * bs - partitionStart, bs)
+        }
+    }
+
+    /** Relit directement chaque secteur photographié : il doit être identique, sinon le lecteur n'est pas fiable. */
+    private fun checkStable(shadow: Map<Long, ByteArray>) {
+        val bs = device.blockSize
+        val buffer = ByteArray(bs)
+        for ((lba, expected) in shadow) {
+            device.read(lba, buffer, 1)
+            if (!buffer.contentEquals(expected)) {
+                throw UnstableCardReadException("secteur $lba relu différemment (${describeShift(expected, buffer)})")
+            }
+        }
+    }
+
+    /**
+     * Écrit dans une table du volume : on relit le secteur, il doit être
+     * exactement celui de la photo ; on ne change que nos octets ; on relit
+     * après écriture pour s'assurer que la carte a gardé ce qu'on a écrit.
+     */
+    private fun writeMeta(shadow: MutableMap<Long, ByteArray>, offset: Long, data: ByteArray, from: Int, length: Int) {
         if (offset < 0 || offset + length > partitionSize) throw FsException("écriture hors de la partition")
         val bs = device.blockSize
         val absolute = partitionStart + offset
         val firstBlock = absolute / bs
-        val lastBlock = (absolute + length - 1) / bs
-        val blocks = (lastBlock - firstBlock + 1).toInt()
+        val blocks = ((absolute + length - 1) / bs - firstBlock + 1).toInt()
         val buffer = ByteArray(blocks * bs)
-        val head = (absolute - firstBlock * bs).toInt()
-        val aligned = head == 0 && length % bs == 0
-        if (!aligned) device.read(firstBlock, buffer, blocks) // relire avant de réécrire : on ne touche que nos octets
-        System.arraycopy(data, from, buffer, head, length)
+        device.read(firstBlock, buffer, blocks)
+        for (k in 0 until blocks) {
+            val expected = shadow[firstBlock + k] ?: throw FsException("secteur ${firstBlock + k} non préparé")
+            if (!expected.contentEquals(buffer.copyOfRange(k * bs, (k + 1) * bs))) {
+                throw UnstableCardReadException("secteur ${firstBlock + k} différent de la photo (${describeShift(expected, buffer.copyOfRange(k * bs, (k + 1) * bs))})")
+            }
+        }
+        System.arraycopy(data, from, buffer, (absolute - firstBlock * bs).toInt(), length)
         device.write(firstBlock, buffer, blocks)
+        val check = ByteArray(blocks * bs)
+        device.read(firstBlock, check, blocks)
+        if (!check.contentEquals(buffer)) throw UnstableCardReadException("secteur $firstBlock relu différent après écriture")
+        for (k in 0 until blocks) shadow[firstBlock + k] = buffer.copyOfRange(k * bs, (k + 1) * bs)
+    }
+
+    /** Pour le journal : premier octet différent, et si le contenu semble simplement décalé. */
+    private fun describeShift(expected: ByteArray, got: ByteArray): String {
+        val first = expected.indices.firstOrNull { expected[it] != got[it] } ?: return "identique"
+        for (shift in 1..64) {
+            if (shift >= got.size) break
+            var same = true
+            for (i in 0 until minOf(64, got.size - shift)) {
+                if (got[i + shift] != expected[i]) { same = false; break }
+            }
+            if (same) return "1er écart à l'octet $first, contenu décalé de $shift octets"
+        }
+        return "1er écart à l'octet $first"
+    }
+
+    /** Données : écriture alignée sur les secteurs, dans des clusters libres. */
+    private fun writeAt(offset: Long, data: ByteArray, from: Int, length: Int) {
+        if (offset < 0 || offset + length > partitionSize) throw FsException("écriture hors de la partition")
+        val bs = device.blockSize
+        val absolute = partitionStart + offset
+        if (absolute % bs != 0L || length % bs != 0) throw FsException("écriture de données non alignée")
+        val buffer = if (from == 0 && data.size == length) data else data.copyOfRange(from, from + length)
+        device.write(absolute / bs, buffer, length / bs)
     }
 
     // ------------------------------------------------------------------------

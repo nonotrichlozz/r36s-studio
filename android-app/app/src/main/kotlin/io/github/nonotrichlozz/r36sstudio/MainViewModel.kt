@@ -23,7 +23,10 @@ import io.github.nonotrichlozz.r36sstudio.core.CancelToken
 import io.github.nonotrichlozz.r36sstudio.core.CardRecovery
 import io.github.nonotrichlozz.r36sstudio.core.AlreadyOnCardException
 import io.github.nonotrichlozz.r36sstudio.core.CopyProgress
+import io.github.nonotrichlozz.r36sstudio.core.CopyInterruptedException
+import io.github.nonotrichlozz.r36sstudio.core.CopyNotVerifiedException
 import io.github.nonotrichlozz.r36sstudio.core.CopyVerifyFailedException
+import io.github.nonotrichlozz.r36sstudio.core.UnstableCardReadException
 import io.github.nonotrichlozz.r36sstudio.core.DirectoryFullException
 import io.github.nonotrichlozz.r36sstudio.core.ExFatVolume
 import io.github.nonotrichlozz.r36sstudio.core.ExFatWriter
@@ -625,6 +628,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         startOperation(Strings.OP_COPY, Strings.PHASE_COPY, cardOperation = true) { token ->
             val block = acquire(ready.device).block
             val partition = PartitionList.read(block).getOrNull(spaceIndex) ?: throw FsException("espace introuvable")
+            log(Strings.logDetail("espace ${spaceIndex + 1} : début à l'octet ${partition.startBytes}, ${partition.sizeBytes} octets, secteurs de ${block.blockSize} octets"), LogKind.DETAIL)
             val writer = ExFatWriter(block, partition.startBytes, partition.sizeBytes)
             val meter = ProgressMeter(progressListener)
             val progress = CopyProgress { done, total, work -> meter.update(done, total, work, force = done == total) }
@@ -634,7 +638,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 setPhase(Strings.PHASE_COPY)
                 meter.reset()
                 try {
+                    log(Strings.LOG_COPY_WRITE)
                     val added = writer.copyFile(dirPath, item.name, item.sizeBytes, { openUri(item.uri) }, token, progress)
+                    log(Strings.logDetail(writer.lastPlanDescription), LogKind.DETAIL)
+                    log(Strings.LOG_COPY_VERIFY)
                     setPhase(Strings.PHASE_VERIFY)
                     meter.reset()
                     writer.verify(added, { openUri(item.uri) }, token, progress)
@@ -1076,6 +1083,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         is NotEnoughSpaceOnCardException -> Strings.errorCardFull(e.neededBytes)
         is DirectoryFullException -> Strings.ERROR_DIR_FULL
         is CopyVerifyFailedException -> Strings.ERROR_COPY_VERIFY
+        is UnstableCardReadException -> Strings.ERROR_READER_UNSTABLE
+        is CopyInterruptedException -> Strings.ERROR_COPY_INTERRUPTED
+        is CopyNotVerifiedException -> Strings.ERROR_COPY_UNVERIFIED
         is FsException -> Strings.ERROR_FS
         is VerifyFailedException -> Strings.ERROR_VERIFY
         is SourceUnstableException -> Strings.ERROR_SOURCE_UNSTABLE

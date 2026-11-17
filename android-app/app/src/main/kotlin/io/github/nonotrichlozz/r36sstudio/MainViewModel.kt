@@ -21,7 +21,14 @@ import androidx.lifecycle.viewModelScope
 import io.github.nonotrichlozz.r36sstudio.core.BlockDevice
 import io.github.nonotrichlozz.r36sstudio.core.CancelToken
 import io.github.nonotrichlozz.r36sstudio.core.CardRecovery
+import io.github.nonotrichlozz.r36sstudio.core.Filesystems
+import io.github.nonotrichlozz.r36sstudio.core.FsEntry
+import io.github.nonotrichlozz.r36sstudio.core.FsVolume
 import io.github.nonotrichlozz.r36sstudio.core.ImageFormat
+import io.github.nonotrichlozz.r36sstudio.core.PartitionInfo
+import io.github.nonotrichlozz.r36sstudio.core.PartitionList
+import io.github.nonotrichlozz.r36sstudio.core.ReadOnlyBlockDevice
+import io.github.nonotrichlozz.r36sstudio.core.VolumeReader
 import io.github.nonotrichlozz.r36sstudio.core.ImageSource
 import io.github.nonotrichlozz.r36sstudio.core.ImageTooLargeException
 import io.github.nonotrichlozz.r36sstudio.core.Imaging
@@ -103,8 +110,26 @@ sealed interface DialogState {
     data class Message(val text: String) : DialogState
 }
 
+/** Un espace de la carte, tel que l'explorateur le montre. */
+data class BrowserRow(val title: String, val info: String, val readable: Boolean)
+
+/**
+ * L'explorateur (lecture seule) : d'abord la liste des espaces de la carte,
+ * puis le contenu d'un dossier de l'espace choisi.
+ */
+data class BrowserState(
+    val loading: Boolean = true,
+    val rows: List<BrowserRow>? = null,
+    val volumeTitle: String? = null,
+    val path: List<String> = emptyList(),
+    val items: List<FsEntry> = emptyList(),
+    val error: String? = null,
+    val errorDetail: String = "",
+)
+
 data class UiState(
     val card: CardState = CardState.None,
+    val browser: BrowserState? = null,
     val op: OpState? = null,
     val log: List<LogLine> = emptyList(),
     val dialog: DialogState = DialogState.None,
@@ -133,6 +158,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     @Volatile
     private var isCardOperation = false
+
+    // Explorateur de la carte (lecture seule). Déclarés avant `init`, comme le reste.
+    @Volatile
+    private var browsing = false
+    private var browserBlock: BlockDevice? = null
+    private var browserPartitions: List<PartitionInfo> = emptyList()
+    private var browserVolume: FsVolume? = null
+    private val browserDirs = ArrayList<FsEntry>()
+    private var browserJob: Job? = null
 
     private var updateFallbackTried = false
 
@@ -250,6 +284,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun refreshCardsUnguarded(force: Boolean) {
         if (_state.value.op != null && job?.isActive == true && isCardOperation) return
+        if (browsing) {
+            // Le lecteur sert à l'explorateur : on n'y touche pas, sauf s'il a été débranché.
+            if (UsbCards.list(usbManager).isEmpty()) {
+                closeBrowser()
+                setCard(CardState.None)
+            }
+            return
+        }
         val devices = UsbCards.list(usbManager)
         when {
             devices.isEmpty() -> setCard(CardState.None)
@@ -388,6 +430,143 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ------------------------------------------------------------------
     // Fenêtres
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // Explorateur de la carte : lecture seule, aucune écriture ne passe
+    // ------------------------------------------------------------------
+
+    fun openBrowser() {
+        if (!canStartCardAction()) return
+        val ready = _state.value.card as? CardState.Ready ?: return
+        browsing = true
+        browserVolume = null
+        browserDirs.clear()
+        _state.update { it.copy(browser = BrowserState(loading = true)) }
+        browserJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Habillage lecture seule : toute commande d'écriture est refusée avant d'atteindre la carte.
+                val block: BlockDevice = ReadOnlyBlockDevice(acquire(ready.device).block)
+                val partitions = PartitionList.read(block)
+                val rows = partitions.map { p ->
+                    val reader = VolumeReader(block, p.startBytes, p.sizeBytes)
+                    val probe = Filesystems.probe(reader)
+                    var label = probe.label
+                    if (probe.readable) {
+                        label = try {
+                            Filesystems.open(reader).label
+                        } catch (e: IOException) {
+                            ""
+                        }
+                    }
+                    if (label.isBlank()) label = p.tableName
+                    BrowserRow(
+                        title = Strings.browserSpaceTitle(p.number, label),
+                        info = if (probe.readable) Strings.browserSpaceInfo(p.sizeBytes, probe.fsName) else Strings.BROWSER_UNREADABLE,
+                        readable = probe.readable,
+                    )
+                }
+                browserBlock = block
+                browserPartitions = partitions
+                _state.update { it.copy(browser = BrowserState(loading = false, rows = rows)) }
+            } catch (e: Exception) {
+                browseFailed(e)
+            }
+        }
+    }
+
+    fun browseOpenSpace(index: Int) {
+        val block = browserBlock ?: return
+        val partition = browserPartitions.getOrNull(index) ?: return
+        val row = _state.value.browser?.rows?.getOrNull(index) ?: return
+        if (!row.readable || browserJob?.isActive == true) return
+        _state.update { it.copy(browser = it.browser?.copy(loading = true, error = null)) }
+        browserJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val volume = Filesystems.open(VolumeReader(block, partition.startBytes, partition.sizeBytes))
+                val items = volume.listRoot()
+                browserVolume = volume
+                browserDirs.clear()
+                showFolder(row.title, items)
+            } catch (e: Exception) {
+                browseFailed(e)
+            }
+        }
+    }
+
+    fun browseOpenFolder(entry: FsEntry) {
+        val volume = browserVolume ?: return
+        if (!entry.isDirectory || browserJob?.isActive == true) return
+        _state.update { it.copy(browser = it.browser?.copy(loading = true, error = null)) }
+        browserJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val items = volume.list(entry)
+                browserDirs.add(entry)
+                showFolder(_state.value.browser?.volumeTitle, items)
+            } catch (e: Exception) {
+                browseFailed(e)
+            }
+        }
+    }
+
+    /** Retour : dossier parent, puis liste des espaces, puis fermeture de l'explorateur. */
+    fun browseBack() {
+        val browser = _state.value.browser ?: return
+        if (browser.loading && browserJob?.isActive == true) {
+            // Lecture qui traîne (lecteur débranché ?) : ne jamais rester coincé, on ferme.
+            closeBrowser()
+            return
+        }
+        val volume = browserVolume
+        when {
+            volume != null && browserDirs.isNotEmpty() -> {
+                browserDirs.removeAt(browserDirs.lastIndex)
+                val parent = browserDirs.lastOrNull()
+                _state.update { it.copy(browser = it.browser?.copy(loading = true, error = null)) }
+                browserJob = viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        showFolder(browser.volumeTitle, if (parent == null) volume.listRoot() else volume.list(parent))
+                    } catch (e: Exception) {
+                        browseFailed(e)
+                    }
+                }
+            }
+            volume != null -> {
+                browserVolume = null
+                _state.update { it.copy(browser = it.browser?.copy(loading = false, volumeTitle = null, path = emptyList(), items = emptyList(), error = null)) }
+            }
+            else -> closeBrowser()
+        }
+    }
+
+    fun closeBrowser() {
+        browserJob?.cancel()
+        browserJob = null
+        browserVolume = null
+        browserBlock = null
+        browserPartitions = emptyList()
+        browserDirs.clear()
+        browsing = false
+        _state.update { it.copy(browser = null) }
+    }
+
+    private fun showFolder(volumeTitle: String?, items: List<FsEntry>) {
+        val sorted = items.sortedWith(compareByDescending<FsEntry> { it.isDirectory }.thenBy { it.name.lowercase() })
+        val path = browserDirs.map { it.name }
+        _state.update {
+            it.copy(browser = it.browser?.copy(loading = false, volumeTitle = volumeTitle, path = path, items = sorted, error = null))
+        }
+    }
+
+    private fun browseFailed(e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) return
+        val detail = "${e.javaClass.simpleName} : ${e.message ?: ""}"
+        _state.update {
+            val current = it.browser
+            it.copy(
+                browser = (current ?: BrowserState()).copy(loading = false, error = Strings.ERROR_BROWSE, errorDetail = detail),
+            )
+        }
+    }
 
     fun openFirmwarePicker() {
         if (busy) return

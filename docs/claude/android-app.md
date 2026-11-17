@@ -220,6 +220,38 @@ est publié en artefact « R36S-Studio-Android » et déposé sur la branche
 - MinUI (signalé par Arnaud) : la release est un `.zip` de fichiers à copier,
   pas une image de carte -> `phoneReady = false`. Non vérifié de mon côté.
 
+## Explorateur de la carte (2026-11-17, lecture seule)
+
+Demande d'Arnaud : Solid Explorer ne voit pas la carte branchée par
+l'adaptateur (l'appli prend le lecteur pour elle, `claimInterface(force)`), il
+voulait donc pouvoir copier ses ROMs depuis l'appli. Première étape, **lecture
+seule** : sa carte de 256 Go contient toute sa collection, une erreur
+d'écriture dans un système de fichiers écrit à la main la détruirait, et aucun
+outil `mkfs`/`fsck` n'est disponible ici pour vérifier un écrivain.
+
+- Tuile « Voir ce qu'il y a sur la carte » -> plein écran : liste des espaces
+  (partitions MBR, MBR étendu, GPT, ou carte sans table), puis dossiers.
+- `core/ReadOnlyBlockDevice.kt` : tout l'explorateur passe par cet habillage,
+  `write` lève `ReadOnlyViolation`, `flush` ne fait rien. `VolumeReader` le
+  remet de lui-même si on lui passe un appareil nu. Test : un faux appareil qui
+  compte les écritures en voit zéro, octets de l'image inchangés.
+- `core/ExFatVolume.kt` : port de `imaging/exfat_reader.py` (vérifié sur de
+  vraies cartes). `core/FatVolume.kt` : FAT12/16/32 avec noms longs.
+  `core/PartitionList.kt` : table de partitions. `core/VolumeReader.kt` : pages
+  de 64 Kio en cache. Toute incohérence lève `FsException` (jamais de dossier
+  tronqué affiché comme complet) ; chaînes qui bouclent détectées ; dossier
+  limité à 32 Mio.
+- **Pas lisibles ici** : ext4 (racine ArkOS, SHARE de KNULLI, STORAGE d'EmuELEC)
+  et NTFS. Affichés, grisés, « Réservé à la console ».
+- Pendant l'exploration, `refreshCards` ne touche plus au lecteur (`browsing`),
+  sinon deux lecteurs de commandes se mélangeraient ; un débranchement ferme
+  l'explorateur.
+- Tests : `FsReaderTest` (images FAT16, FAT32, exFAT fabriquées en mémoire,
+  `FsImages.kt`). Une image exFAT fabriquée a aussi été relue avec le lecteur
+  Python : mêmes noms, tailles, dates.
+- **Écriture (copier des ROMs) : pas faite.** À ne faire qu'une fois la lecture
+  confirmée sur la vraie carte, d'abord sur une carte de rechange.
+
 ## Jamais vérifié sur du vrai matériel
 
 Tout ce qui touche au téléphone : `OperationService` (accepté ou non par
@@ -228,3 +260,7 @@ détection du lecteur, demande
 d'autorisation, débit réel, comportement d'Android quand l'appli prend le
 lecteur (notification « carte non prise en charge » possible), lecteurs à
 plusieurs fentes, cartes à blocs de 4096 octets.
+
+Explorateur de la carte : jamais lancé sur une vraie carte (lecture des
+partitions, exFAT et FAT d'une vraie carte de console, carte de 256 Go, dossiers
+de plusieurs milliers de fichiers, débranchement pendant la lecture).

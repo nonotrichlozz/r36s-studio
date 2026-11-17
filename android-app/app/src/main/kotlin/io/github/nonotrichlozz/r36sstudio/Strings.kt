@@ -44,6 +44,9 @@ object Strings {
     const val TILE_ERASE = "Effacer la carte"
     const val TILE_ERASE_DESC = "Rend la carte vierge, prête pour installer un autre système. Tout ce qu'elle contient est perdu."
     const val SECTION_SAFETY = "Par sécurité"
+    const val SECTION_CARD = "Ta carte"
+    const val TILE_BROWSE = "Voir ce qu'il y a sur la carte"
+    const val TILE_BROWSE_DESC = "Parcours les dossiers et les jeux de ta carte. Lecture seule : rien n'est modifié ni effacé."
     const val BADGE_READY = "Prêt"
     const val BADGE_NO_CARD = "Branche une carte"
 
@@ -194,6 +197,30 @@ object Strings {
     fun errorNoSpace(needed: Long) = "Il n'y a pas assez de place sur le téléphone (${formatSize(needed)} nécessaires)."
     const val ERROR_BACKUP_WRITE = "Impossible d'écrire la sauvegarde sur le téléphone. Vérifie la place disponible."
     const val ERROR_GENERIC = "Une erreur est survenue."
+
+    // --- Explorateur de la carte (lecture seule) ---
+    const val BROWSER_TITLE = "Contenu de la carte"
+    const val BROWSER_READ_ONLY = "Lecture seule : rien n'est écrit sur ta carte."
+    const val BROWSER_LOADING = "Lecture de la carte…"
+    const val BROWSER_BACK = "Retour"
+    const val BROWSER_EMPTY_FOLDER = "Dossier vide"
+    const val BROWSER_NO_SPACE = "Aucun espace lisible n'a été trouvé sur cette carte."
+    const val BROWSER_UNREADABLE = "Réservé à la console : non lisible sur le téléphone"
+    const val BROWSER_NO_COPY_YET = "Copier des jeux sur la carte depuis le téléphone n'est pas encore possible."
+    const val ERROR_BROWSE = "Impossible de lire cette partie de la carte."
+    const val ERROR_BROWSE_HINT = "Rien n'a été modifié. Reviens en arrière ou rebranche le lecteur."
+
+    fun browserSpaceTitle(number: Int, label: String) = if (label.isBlank()) "Espace $number" else "Espace $number : $label"
+    fun browserSpaceInfo(sizeBytes: Long, fsName: String) = "${formatSize(sizeBytes)} · $fsName"
+    fun browserFileInfo(sizeBytes: Long, date: String?) =
+        if (date == null) formatFileSize(sizeBytes) else "${formatFileSize(sizeBytes)} · $date"
+
+    fun formatFileSize(bytes: Long): String = when {
+        bytes >= 1024L * 1024 * 1024 -> formatSize(bytes)
+        bytes >= 1024L * 1024 -> String.format(Locale.FRANCE, "%.1f Mo", bytes / (1024.0 * 1024))
+        bytes >= 1024 -> String.format(Locale.FRANCE, "%.0f Ko", bytes / 1024.0)
+        else -> "$bytes o"
+    }
 
     /** Tailles en base 1024 partout, comme la version ordinateur. */
     fun formatSize(bytes: Long): String {

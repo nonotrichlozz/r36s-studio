@@ -125,6 +125,21 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
                 )
 
                 Text(
+                    Strings.SECTION_CARD,
+                    color = Palette.TextSecondary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Tile(
+                    title = Strings.TILE_BROWSE,
+                    description = Strings.TILE_BROWSE_DESC,
+                    ready = cardReady,
+                    enabled = !busy,
+                    onClick = viewModel::openBrowser,
+                )
+
+                Text(
                     Strings.SECTION_SAFETY,
                     color = Palette.TextSecondary,
                     fontSize = 13.sp,
@@ -156,6 +171,15 @@ fun MainScreen(viewModel: MainViewModel, keepScreenOn: (Boolean) -> Unit) {
 
             Spacer(Modifier.height(10.dp))
             LogPanel(op = state.op, log = state.log, onCancel = viewModel::cancel)
+        }
+
+        state.browser?.let { browser ->
+            BrowserDialog(
+                state = browser,
+                onOpenSpace = viewModel::browseOpenSpace,
+                onOpenFolder = viewModel::browseOpenFolder,
+                onBack = viewModel::browseBack,
+            )
         }
 
         when (val dialog = state.dialog) {

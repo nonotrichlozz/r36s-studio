@@ -1,1 +1,13 @@
-{"BioShock":{"category":"PortMaster","prerequisites":"fichiers de données du jeu PC original"}}
+﻿{
+  "ports": [
+    {
+      "id": "bioshock",
+      "nom": "BioShock",
+      "categorie": "PortMaster",
+      "image": "data/port_images/bioshock.jpg",
+      "lien_telechargement": "",
+      "prerequis": "Fichiers de données du jeu PC original",
+      "notes": "Portage compatible R36S / ArkOS / ROCKNIX"
+    }
+  ]
+}
